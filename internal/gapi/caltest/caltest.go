@@ -348,19 +348,29 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 
 	var items []gcal.Event
 	for _, e := range s.Events[calID] {
-		// §2.13: cancelled events are hidden unless asked for.
-		if e.Status == gcal.StatusCancelled && !showDeleted {
-			continue
-		}
 		// §2.9: singleEvents decides which of the two shapes comes back.
 		// Without it, parents; with it, instances.
 		isInstance := e.RecurringEventID != ""
 		isParent := len(e.Recurrence) > 0
-		if single && isParent {
-			continue
-		}
-		if !single && isInstance {
-			continue
+		// A cancelled instance is the exception to both rules below,
+		// and this fake used to hide it where Google does not. The
+		// discovery document: "Cancelled instances of recurring events
+		// (but not the underlying recurring event) will still be
+		// included if showDeleted and singleEvents are both False."
+		//
+		// Google sends it bare: an id, a status, the series it belongs
+		// to and the date it was, with no start and no summary. That is
+		// why the server rendered one as a row with no date and no
+		// title. The shape is not modelled here; that it arrives at all
+		// is what the server has to handle.
+		keptCancelledInstance := !single && isInstance && e.Status == gcal.StatusCancelled
+		switch {
+		case keptCancelledInstance:
+			// Returned regardless of showDeleted, which is the point.
+		case e.Status == gcal.StatusCancelled && !showDeleted:
+			continue // §2.13
+		case single && isParent, !single && isInstance:
+			continue // §2.9: one shape or the other, never both
 		}
 		if search != "" && !strings.Contains(strings.ToLower(e.Summary), search) &&
 			!strings.Contains(strings.ToLower(e.Description), search) {
@@ -394,19 +404,32 @@ func (s *Server) listInstances(w http.ResponseWriter, r *http.Request, calID, ev
 		writeErr(w, http.StatusNotFound, "notFound", "no event with that id on that calendar")
 		return
 	}
+	q := r.URL.Query()
+	showDeleted := q.Get("showDeleted") == "true"
+
+	// An occurrence's own id is not refused: the live driver probed this
+	// and Google answered 200, expanding the occurrence the id names
+	// (§18). A CANCELLED occurrence expands to nothing, so the answer is
+	// an empty list and a success — which is why the server has to
+	// recognise the id itself rather than wait to be told.
+	if parent.RecurringEventID != "" {
+		items := []gcal.Event{}
+		if parent.Status != gcal.StatusCancelled || showDeleted {
+			items = append(items, *parent)
+		}
+		writeJSON(w, gcal.EventList{Items: items})
+		return
+	}
 	if len(parent.Recurrence) == 0 {
-		// What Google does here is NOT documented: the reference says
-		// only "Recurring event identifier". This fake picks 400, and
-		// the live driver probes the real answer rather than letting
-		// this choice stand in for evidence (§18). The server's own
-		// behaviour does not depend on which it is — it explains the
-		// mistake for both 400 and 404.
+		// Still a guess, and still unprobed: what Google does for a
+		// plain non-recurring event is not documented, and the live
+		// driver has not asked. The server's own behaviour does not
+		// depend on which it is — it explains the mistake for both 400
+		// and 404.
 		writeErr(w, http.StatusBadRequest, "invalid", "the requested event is not a recurring event")
 		return
 	}
 
-	q := r.URL.Query()
-	showDeleted := q.Get("showDeleted") == "true"
 	var items []gcal.Event
 	for _, e := range s.Events[calID] {
 		if e.RecurringEventID != eventID {

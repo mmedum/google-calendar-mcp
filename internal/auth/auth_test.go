@@ -291,3 +291,30 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// TestInspectDoesNotLeakTheTokenOnATransportError.
+//
+// The access token is a query parameter on the tokeninfo URL, and a
+// transport failure stringifies the whole URL. `doctor` prints that
+// error, and `doctor` output is what a user pastes into a bug report.
+func TestInspectDoesNotLeakTheTokenOnATransportError(t *testing.T) {
+	const token = "ya29.a-secret-access-token"
+	// A client that always fails the way a dead network does.
+	client := &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp 127.0.0.1:1: connect: connection refused")
+	})}
+	_, err := auth.Inspect(context.Background(), client, token)
+	if err == nil {
+		t.Fatal("a dead transport produced no error")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("the access token is in the error text: %v", err)
+	}
+	if strings.Contains(err.Error(), "access_token") {
+		t.Fatalf("the token-bearing URL is in the error text: %v", err)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

@@ -106,7 +106,11 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	}
 	defer sess.close()
 
-	r := &results{out: out}
+	r := &results{out: out, invented: map[string]bool{
+		scratch:            true,
+		noSuchCalendar:     true,
+		unknownCalendarRef: true,
+	}}
 	for _, st := range steps(scratch, state) {
 		r.run(ctx, sess, st)
 	}
@@ -152,19 +156,77 @@ var showFilter string
 
 // results tallies and prints, through the redactor only.
 type results struct {
-	out                         *redact.Printer
+	out *redact.Printer
+	// invented is every calendar id this driver made up, the scratch
+	// calendar it created included. It is what §9.1's promise means in
+	// practice, and what decides whether a body may be printed.
+	invented                    map[string]bool
 	total, failed, undetermined int
 }
 
 // show prints a step's whole result when asked, so the transcript can
 // be read rather than counted.
-func (r *results) show(name string, res callResult) {
-	if showFilter == "" || !strings.Contains(name, showFilter) {
+func (r *results) show(st step, res callResult) {
+	if showFilter == "" || !strings.Contains(st.name, showFilter) {
+		return
+	}
+	if r.withheld(st) {
 		return
 	}
 	for _, line := range strings.Split(strings.TrimRight(res.text, "\n"), "\n") {
 		r.out.Printf("      | %s\n", line)
 	}
+}
+
+// withheld reports whether §9.1 forbids printing this step's body, and
+// prints the notice when it does.
+//
+// The first live run printed a dozen of the account's real calendar
+// titles, because `list_calendars` is account-wide and the redactor is
+// anchored on shapes — an address, an id, a URL — while a display name
+// has none. No pattern could have caught them.
+//
+// So the rule is derived from the step's own arguments rather than set
+// by hand on each step. A flag would be a matter of care, and §9.1's two
+// protections are required to be structural: the first draft of this
+// carried a flag, and missed `get_settings` on the same day it was
+// written. A step names the calendars it reads, and if every one of them
+// is a calendar this driver invented then the answer can only hold
+// content this driver invented. A step that names none is account-wide
+// by construction. It fails closed, so an argument shape this does not
+// understand is withheld rather than printed.
+func (r *results) withheld(st step) bool {
+	if st.readsOnlyInvented(r.invented) {
+		return false
+	}
+	r.out.Printf("      (body withheld: this step reads past the calendar the driver created, §9.1)\n")
+	return true
+}
+
+// readsOnlyInvented is the allow-list §9.1 asks for, anchored on ids
+// this driver generated rather than on a shape a real id cannot take.
+func (st step) readsOnlyInvented(invented map[string]bool) bool {
+	named := 0
+	for _, key := range []string{"calendar", "calendars"} {
+		switch v := st.args[key].(type) {
+		case nil:
+		case string:
+			named++
+			if !invented[v] {
+				return false
+			}
+		case []string:
+			for _, id := range v {
+				named++
+				if !invented[id] {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return named > 0
 }
 
 func (r *results) run(ctx context.Context, s *session, st step) {
@@ -179,7 +241,7 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 	switch verdict {
 	case pass:
 		r.out.Printf("ok    %-28s %s\n", st.name, note)
-		r.show(st.name, res)
+		r.show(st, res)
 	case undetermined:
 		r.undetermined++
 		r.out.Printf("?     %-28s %s\n", st.name, note)
@@ -187,8 +249,10 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 		r.failed++
 		r.out.Printf("FAIL  %-28s %s\n", st.name, note)
 		// The body, redacted, so a failure can be diagnosed without a
-		// second run.
-		r.out.Printf("      %s\n", truncate(res.text, 400))
+		// second run — unless the step reads past the scratch calendar.
+		if !r.withheld(st) {
+			r.out.Printf("      %s\n", truncate(res.text, 400))
+		}
 	}
 }
 
@@ -255,7 +319,10 @@ func steps(scratch string, state seedState) []step {
 				if !strings.Contains(r.text, scratchTitle) {
 					return fail, "the scratch calendar is missing from the list"
 				}
-				return pass, "the scratch calendar is listed with its zone"
+				if !strings.Contains(r.text, scratchZone) {
+					return fail, "the scratch calendar is listed without its time zone"
+				}
+				return pass, "the scratch calendar is listed with its zone, " + scratchZone
 			},
 		},
 		{
@@ -313,7 +380,19 @@ func steps(scratch string, state seedState) []step {
 				if !strings.Contains(r.text, "series") {
 					return fail, "the result does not say it returned series"
 				}
-				return pass, "series with its rule returned"
+				// showDeleted=false does not filter a cancelled INSTANCE
+				// when singleEvents is false — the discovery document
+				// says so and the first live run proved it. Google sends
+				// it with no start and no summary, so it rendered as a
+				// row with neither, and was counted.
+				if strings.Contains(r.text, "(no title)") || strings.Contains(r.text, "(no start)") {
+					return fail, "a cancelled instance leaked into the series view as a contentless row"
+				}
+				if strings.Contains(r.text, state.cancelledOccurrence) {
+					return fail, "the cancelled occurrence on " + state.cancelledOccurrence +
+						" appeared without show_cancelled"
+				}
+				return pass, "series with its rule returned, no cancelled instance among them"
 			},
 		},
 		{
@@ -553,6 +632,13 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
+			// The id names the CANCELLED occurrence deliberately. Google
+			// does not refuse an occurrence id — it expands whatever
+			// that occurrence is, and a cancelled one expands to
+			// nothing, so the call succeeds with an empty list. The
+			// first live run got "No occurrences" for a series with
+			// three, which is why the server now reads the id's shape
+			// instead of waiting to be told.
 			name: "list_instances rejects an occurrence id",
 			tool: "list_instances",
 			args: map[string]any{"calendar": scratch, "event_id": weeklyID + "_20260324t130000z"},
@@ -637,7 +723,7 @@ func steps(scratch string, state seedState) []step {
 		{
 			name: "unknown calendar refused",
 			tool: "get_calendar",
-			args: map[string]any{"calendar": "no-such-calendar-here"},
+			args: map[string]any{"calendar": unknownCalendarRef},
 			check: func(r callResult) (verdict, string) {
 				if !r.isError {
 					return fail, "an unknown calendar resolved to something"

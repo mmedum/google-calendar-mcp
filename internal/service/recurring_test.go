@@ -134,20 +134,44 @@ func TestInstancesRefusesWithoutAnEventID(t *testing.T) {
 	}
 }
 
-// TestInstancesExplainsAnInstanceIDMistake is the error path a model
-// will actually hit: it has an occurrence's id from list_events and
-// passes that. Google answers "not found", which sends the caller
-// looking for a deleted event.
-func TestInstancesExplainsAnInstanceIDMistake(t *testing.T) {
-	svc, _ := seeded(t)
-	_, err := svc.Instances(context.Background(), service.InstanceOptions{
-		Calendar: "primary", EventID: "ev-weekly_20260324T130000Z",
-	})
-	if err == nil {
-		t.Fatal("an occurrence id was accepted as a series id")
-	}
-	if !strings.Contains(err.Error(), "series_id") {
-		t.Fatalf("the refusal does not explain the mistake: %v", err)
+// TestInstancesRefusesAnOccurrenceID is the error path a model will
+// actually hit: it has an occurrence's id from list_events and passes
+// that.
+//
+// The live run settled what Google does with one, and it is not a
+// refusal — it answers 200 and expands the occurrence the id names. A
+// CANCELLED occurrence expands to nothing, so the call succeeded with
+// an empty list and the tool reported "No occurrences" for a series
+// that has three. The server reads the id's shape now, so all three of
+// these are refused before a request is built.
+func TestInstancesRefusesAnOccurrenceID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   string
+	}{
+		{"a live occurrence, which Google expands", "ev-weekly_20260324T130000Z"},
+		{"a cancelled one, which expands to nothing", "ev-weekly_20260407T120000Z"},
+		{"lowercased, the same mistake", "ev-weekly_20260407t120000z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := seeded(t)
+			_, err := svc.Instances(context.Background(), service.InstanceOptions{
+				Calendar: "primary", EventID: tc.id,
+			})
+			if err == nil {
+				t.Fatal("an occurrence id was accepted as a series id")
+			}
+			// [invalid] rather than [not_found] is what distinguishes
+			// the shape rule from Google merely failing to find the id.
+			if !strings.Contains(err.Error(), "[invalid]") {
+				t.Fatalf("the id shape was not recognised: %v", err)
+			}
+			for _, want := range []string{"series_id", "ev-weekly"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("the refusal does not name %q: %v", want, err)
+				}
+			}
+		})
 	}
 }
 

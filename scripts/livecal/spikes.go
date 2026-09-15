@@ -5,9 +5,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
+	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/redact"
 )
 
@@ -86,33 +86,88 @@ func wallClock(dateTime string) string {
 // true because this server treats a missing calendar as unknown rather
 // than as free, and this spike is what tells us the case is real.
 func spikeI(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
-	// The scratch calendar repeated: the driver reads only what it
-	// created (§9.1), and the question is about the count rather than
-	// about which calendars they are.
-	ids := func(n int) []string { return slices.Repeat([]string{scratch}, n) }
+	// Two rules this spike got wrong once each, both of them the same
+	// mistake: answering a question it did not ask.
+	//
+	// DISTINCT ids. The first run sent the scratch calendar's id 51
+	// times. Google keys the response by calendar id, so 51 copies came
+	// back as one entry, and the branch reading "fewer than asked for"
+	// called that a silent truncation. It was deduplication.
+	//
+	// NO calendarExpansionMax. The second run sent 51 ids and asked
+	// Google to expand at most 50 — so a response carrying 50 would
+	// have been this driver's own cap reported as Google's ceiling.
+	// The server sets the cap in production (§4.6); the spike must not,
+	// because the cap is the thing being measured.
+	//
+	// The filler ids are invented and belong to nobody, so this still
+	// reads only the one calendar the driver created (§9.1). An id that
+	// cannot be resolved comes back as an entry carrying an error, which
+	// is what makes the count meaningful: a calendar dropped for
+	// exceeding a ceiling is ABSENT, where an unreadable one is present
+	// and errored.
+	ids := make([]string, 0, 51)
+	ids = append(ids, scratch)
+	for i := 1; i < 51; i++ {
+		ids = append(ids, fmt.Sprintf("livecal-ceiling-%02d@example.test", i))
+	}
 
-	atFifty, err := api.freeBusy(ctx, ids(50), 50)
+	atFifty, err := api.freeBusy(ctx, ids[:50], 0)
 	if err != nil {
 		return undetermined, "50 calendars failed outright: " + redact.String(err.Error())
 	}
-	out.Printf("      50 calendars: %d answered\n", len(atFifty))
+	out.Printf("      50 distinct calendars, no expansion cap: %d answered, %d errored\n",
+		len(atFifty), errored(atFifty))
+	if len(atFifty) != 50 {
+		return undetermined, fmt.Sprintf("50 distinct calendars answered for %d, so the response is "+
+			"not one entry per requested id and the count at 51 would mean nothing", len(atFifty))
+	}
 
-	atFiftyOne, err := api.freeBusy(ctx, ids(51), 50)
-	switch {
-	case err != nil:
+	atFiftyOne, err := api.freeBusy(ctx, ids, 0)
+	if err != nil {
 		return pass, "CONFIRMS §2.10: 51 calendars in one query is refused (" +
 			redact.String(firstLine(err.Error())) + "). The batching at 50 is correctness, not politeness"
-	case len(atFiftyOne) < 51 && len(atFiftyOne) > 0:
-		return pass, fmt.Sprintf("51 calendars answered for %d: Google TRUNCATES silently rather than "+
-			"refusing, so a calendar can be missing from the response entirely — which is why a missing "+
-			"calendar is reported unknown and never free (§4.6)", len(atFiftyOne))
-	default:
-		// Note the request deduplicates: the same id 51 times may be one
-		// calendar as far as expansion is concerned, which would make
-		// the count meaningless rather than reassuring.
-		return undetermined, fmt.Sprintf("51 calendars answered for %d; the repeated id may have been "+
-			"deduplicated before expansion, so this run does not settle the ceiling", len(atFiftyOne))
 	}
+	out.Printf("      51 distinct calendars, no expansion cap: %d answered, %d errored\n",
+		len(atFiftyOne), errored(atFiftyOne))
+
+	// What this can and cannot settle, stated before the verdict.
+	//
+	// Fifty of the fifty-one ids are invented, so Google answers them
+	// with an error rather than with free/busy. If the ceiling counts
+	// only the calendars it actually EXPANDS, an errored entry costs
+	// nothing against it and 51 readable calendars could still behave
+	// differently. Settling that would mean creating 51 real calendars,
+	// which this driver is not going to do to somebody's account.
+	const caveat = " Fifty of the ids were unreadable, so this does not settle 51 READABLE calendars: " +
+		"the ceiling may count only the calendars it expands"
+
+	switch {
+	case len(atFiftyOne) == 51:
+		return pass, "51 distinct ids came back as 51 entries with no expansion cap set, so Google " +
+			"neither refuses nor trims the request at the documented maximum of 50." + caveat
+	case len(atFiftyOne) > 0:
+		return pass, fmt.Sprintf("51 distinct ids came back as %d entries: Google DROPS the excess "+
+			"silently rather than refusing, so a calendar can be missing from the response entirely — "+
+			"which is why a missing calendar is reported unknown and never free (§4.6).%s",
+			len(atFiftyOne), caveat)
+	default:
+		return undetermined, "51 calendars answered for none, which is neither a refusal nor a truncation"
+	}
+}
+
+// errored counts the calendars Google answered with an error rather than
+// with free/busy. The distinction is the whole point of the count: an
+// unreadable calendar is PRESENT and errored, where one dropped for
+// exceeding the ceiling is absent.
+func errored(calendars map[string]gcal.FreeBusyCalendar) int {
+	n := 0
+	for _, c := range calendars {
+		if len(c.Errors) > 0 {
+			n++
+		}
+	}
+	return n
 }
 
 func firstLine(s string) string {

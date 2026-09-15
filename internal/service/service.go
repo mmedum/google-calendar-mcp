@@ -10,6 +10,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -412,7 +413,7 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		opts.OrderBy = "startTime"
 	}
 
-	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, opts,
+	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, o.ShowCancelled, opts,
 		func(ctx context.Context, opts gapi.EventsListOptions) (*gcal.EventList, error) {
 			return s.API.ListEvents(ctx, c.ID, opts)
 		})
@@ -426,8 +427,15 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 // back the token so the caller can say how to continue. The two read
 // paths had a copy each and had already drifted on what "truncated"
 // means.
+// showCancelled is the caller's promise, passed in rather than read off
+// opts.ShowDeleted. The two are not the same knob: ShowDeleted is what
+// this server asked Google for, and the defect being fixed here is
+// exactly that the server treated the request field as if it were the
+// promise. Phase 2 needs to ask for cancelled occurrences without
+// putting them in a result — a cancelled instance is an exception, and
+// §4.2's `this_and_following` has to see them.
 func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, budget int,
-	opts gapi.EventsListOptions,
+	showCancelled bool, opts gapi.EventsListOptions,
 	fetch func(context.Context, gapi.EventsListOptions) (*gcal.EventList, error),
 ) (events []model.Event, requests int, nextToken string, err error) {
 	// Never ask for more than the budget will keep.
@@ -441,20 +449,44 @@ func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, 
 	if budget > 0 && (opts.MaxResults == 0 || opts.MaxResults > budget) {
 		opts.MaxResults = budget
 	}
+	// The budget bounds what the read DRAINS, not what survives the
+	// filter below. Counting kept events let every dropped row buy
+	// another page: a window whose first twenty rows were cancelled cost
+	// twenty-one requests to return one event, which is §4.7 failing
+	// where the result cannot show it. A page that is mostly cancelled
+	// now comes back short, truncated and resumable — §4.5's bargain.
+	drained := 0
 	for {
 		page, ferr := fetch(ctx, opts)
 		requests++
 		if ferr != nil {
 			return nil, requests, "", ferr
 		}
+		drained += len(page.Items)
 		for _, raw := range page.Items {
+			// Asked before the conversion, on the wire value: a
+			// cancelled row is discarded, so parsing its three times
+			// and building a model.Event is work spent on nothing — and
+			// Google sends these bare, so a conversion error on one
+			// would fail a read over an event nobody asked for.
+			//
+			// showDeleted=false does not mean Google filtered them. The
+			// discovery document: "Cancelled instances of recurring
+			// events (but not the underlying recurring event) will
+			// still be included if showDeleted and singleEvents are
+			// both False." One arrives with no start and no summary, so
+			// a series read rendered a row with no date and no title
+			// and counted it among the results (§18).
+			if !showCancelled && raw.Status == gcal.StatusCancelled {
+				continue
+			}
 			e, cerr := model.FromEvent(calendarID, raw, &zone)
 			if cerr != nil {
 				return nil, requests, "", cerr
 			}
 			events = append(events, e)
 		}
-		if page.NextPageToken == "" || len(events) >= budget {
+		if page.NextPageToken == "" || drained >= budget || len(events) >= budget {
 			return events, requests, page.NextPageToken, nil
 		}
 		opts.PageToken = page.NextPageToken
@@ -682,6 +714,12 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 			"event_id is required: it is the id of the repeating event, which list_events reports as "+
 				"series_id on each occurrence")
 	}
+	if series, start, ok := seriesOf(o.EventID); ok {
+		return render.Instances{}, gapi.Errf(gapi.ClassInvalid,
+			"%s names the occurrence starting %s, not the series. Pass %s — the series_id list_events "+
+				"reports on each occurrence — and list_instances expands the whole series",
+			o.EventID, start, series)
+	}
 	c, err := s.ResolveCalendar(ctx, o.Calendar)
 	if err != nil {
 		return render.Instances{}, err
@@ -720,7 +758,7 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 		budget = s.Cfg.MaxEvents
 	}
 
-	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, opts,
+	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, o.ShowCancelled, opts,
 		func(ctx context.Context, opts gapi.EventsListOptions) (*gcal.EventList, error) {
 			return s.API.ListInstances(ctx, c.ID, o.EventID, opts)
 		})
@@ -746,21 +784,46 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	return out, nil
 }
 
-// instancesError explains the mistake this call invites.
+// occurrenceSuffix is the start time Google appends to a series id to
+// name one occurrence: `20260324T130000Z`, or a bare date for an all-day
+// series. Matched case-insensitively, because a model that lowercased
+// the id is making the same mistake.
+var occurrenceSuffix = regexp.MustCompile(`^[0-9]{8}([Tt][0-9]{6}[Zz])?$`)
+
+// seriesOf reports whether an id names one occurrence, and of what.
 //
-// events.instances wants the SERIES id, and the id a model has in hand
-// is usually an occurrence's — it is what list_events returns with
-// expand=true. Google answers that with a bare "not found", which sends
-// the caller looking for a deleted event.
+// The split is safe because an event id is base32hex — lowercase a-v and
+// the digits — so an underscore cannot appear in one (§18).
+//
+// Refusing here rather than on Google's answer is the point. An
+// occurrence id is not invalid to events.instances: Google expands it to
+// whatever that occurrence is, and a cancelled one expands to nothing.
+// So the call returned 200 and an empty list, and the tool reported "No
+// occurrences" for a series that had three — a wrong answer where a
+// refusal was owed (§18).
+func seriesOf(id string) (series, start string, ok bool) {
+	i := strings.LastIndex(id, "_")
+	if i <= 0 || !occurrenceSuffix.MatchString(id[i+1:]) {
+		return "", "", false
+	}
+	return id[:i], id[i+1:], true
+}
+
+// instancesError says where the id should have come from.
+//
+// It no longer claims the id names an occurrence: seriesOf catches every
+// occurrence-shaped id before the request is built, so anything reaching
+// here is by construction NOT one, and the old wording could only
+// misdirect. What is left is the part that stays true — this call wants
+// the series id, and the result that carries it.
 func instancesError(err error, id string) error {
 	cls, ok := gapi.ClassOf(err)
 	if !ok || (cls != gapi.ClassNotFound && cls != gapi.ClassInvalid) {
 		return err
 	}
 	return gapi.Wrap(cls, err,
-		"no repeating event with id %s on that calendar. If that id came from list_events with the "+
-			"occurrences expanded, it names one occurrence rather than the series: use the series_id "+
-			"from that occurrence instead", id)
+		"no repeating event with id %s on that calendar. list_events reports the id this call wants "+
+			"as series_id on each occurrence", id)
 }
 
 // --------------------------------------------------------- availability

@@ -15,6 +15,7 @@ import (
 
 	"github.com/mmedum/google-calendar-mcp/internal/auth"
 	"github.com/mmedum/google-calendar-mcp/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/userconfig"
 )
 
@@ -282,6 +283,11 @@ const (
 	// looks real is indistinguishable, to every later reader and every
 	// scanner, from one that is.
 	noSuchCalendar = "livecal-no-such-calendar@example.test"
+
+	// unknownCalendarRef is the reference the "unknown calendar refused"
+	// step passes. It is not an id at all, which is the point: the
+	// server must refuse it rather than resolve it to something.
+	unknownCalendarRef = "no-such-calendar-here"
 )
 
 // instanceRow is one occurrence as Google returns it.
@@ -331,7 +337,7 @@ func (a *liveAPI) createUnzonedSeries(ctx context.Context, cal string) error {
 // freeBusy asks about a list of calendars directly, which is how spike I
 // can send 51: the server batches at 50 and would never produce the
 // request the spike is about.
-func (a *liveAPI) freeBusy(ctx context.Context, ids []string, expansionMax int) (map[string]any, error) {
+func (a *liveAPI) freeBusy(ctx context.Context, ids []string, expansionMax int) (map[string]gcal.FreeBusyCalendar, error) {
 	items := make([]map[string]any, 0, len(ids))
 	for _, id := range ids {
 		items = append(items, map[string]any{"id": id})
@@ -343,9 +349,7 @@ func (a *liveAPI) freeBusy(ctx context.Context, ids []string, expansionMax int) 
 	if expansionMax > 0 {
 		body["calendarExpansionMax"] = expansionMax
 	}
-	var out struct {
-		Calendars map[string]any `json:"calendars"`
-	}
+	var out gcal.FreeBusyResponse
 	err := a.do(ctx, http.MethodPost, "/freeBusy", body, &out)
 	return out.Calendars, err
 }

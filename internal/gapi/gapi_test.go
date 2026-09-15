@@ -437,3 +437,51 @@ func TestErrorWithNoBodyStillClassifies(t *testing.T) {
 		t.Fatalf("an empty error body produced no message: %q", err)
 	}
 }
+
+// TestListInstancesOfAnOccurrenceID records what the live driver found,
+// at the layer that talks to Google.
+//
+// events.instances does not refuse an occurrence's own id: it answers
+// 200 and expands the occurrence that id names. A cancelled occurrence
+// expands to nothing, so the call succeeds with an empty list — which is
+// why internal/service refuses the id shape rather than waiting to be
+// told. The refusal means nothing here reaches this method in
+// production, so this is the only place the fake's behaviour is held to
+// the probe that established it (§18 row 31).
+func TestListInstancesOfAnOccurrenceID(t *testing.T) {
+	fake := caltest.Seed()
+	c := client(fake.Start())
+	defer fake.Close()
+	ctx := context.Background()
+
+	live, err := c.ListInstances(ctx, "primary", "ev-weekly_20260324T130000Z",
+		gapi.EventsListOptions{})
+	if err != nil {
+		t.Fatalf("an occurrence id was refused: %v", err)
+	}
+	if len(live.Items) != 1 || live.Items[0].ID != "ev-weekly_20260324T130000Z" {
+		t.Fatalf("expanding a live occurrence returned %d items, want the occurrence itself",
+			len(live.Items))
+	}
+
+	// The cancelled one, which is the case that produced the defect.
+	gone, err := c.ListInstances(ctx, "primary", "ev-weekly_20260407T120000Z",
+		gapi.EventsListOptions{})
+	if err != nil {
+		t.Fatalf("a cancelled occurrence id was refused rather than expanded: %v", err)
+	}
+	if len(gone.Items) != 0 {
+		t.Fatalf("a cancelled occurrence expanded to %d items, want an empty list", len(gone.Items))
+	}
+
+	// And it is reachable when asked for, so the emptiness is the
+	// filter's doing rather than the id being unknown.
+	shown, err := c.ListInstances(ctx, "primary", "ev-weekly_20260407T120000Z",
+		gapi.EventsListOptions{ShowDeleted: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shown.Items) != 1 {
+		t.Fatalf("showDeleted returned %d items, want the cancelled occurrence", len(shown.Items))
+	}
+}

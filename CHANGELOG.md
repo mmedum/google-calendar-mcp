@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `list_instances` refuses an occurrence id instead of answering with an
+  empty series. It used to explain the mistake only when Google returned
+  an error; Google returns 200 and expands whatever occurrence the id
+  names, and a cancelled one expands to nothing — so the tool reported
+  "No occurrences" for a series that has three. An event id is base32hex
+  and cannot contain an underscore, so the occurrence shape is
+  recognised before the call and refused with the series id to use.
+- A cancelled occurrence no longer appears in a series listing. Google
+  documents that `showDeleted=false` does not filter cancelled instances
+  when recurrences are not expanded, and it sends them with no start and
+  no summary — so `list_events` with `no_expand` showed a row with no
+  date and no title, and counted it. Cancelled events are filtered by
+  the server now rather than by the parameter.
+- `doctor` could print an access token. The tokeninfo URL carries the
+  token as a query parameter, and a transport failure stringifies the
+  whole URL into the error `doctor` reports — which is the output a user
+  pastes into a bug report. The URL no longer survives the error.
+- The live driver never prints the body of a result that reaches past
+  the calendar it created. `list_calendars` is account-wide, and the
+  redactor matches shapes — an address, an id, a URL — while a calendar's
+  display name has none, so a dozen real ones reached the transcript.
+  Which steps are safe is derived from each step's own arguments against
+  the ids the driver invented, not set by hand: the first draft carried
+  a per-step flag and missed `get_settings` the same day it was written.
+- Spike I stated a verdict it had not established, twice. It sent one
+  calendar id 51 times, and Google deduplicated the response to one
+  entry, which the spike called a silent truncation at the ceiling. Its
+  second draft sent 51 distinct ids but also set `calendarExpansionMax`
+  to 50 — so a trimmed response would have been the driver's own cap
+  reported as Google's. It now sends distinct ids with no cap, and says
+  what it cannot settle.
+- The in-memory Calendar reproduces Google where it had been guessing:
+  `events.instances` on an occurrence id answers 200 with that
+  occurrence rather than 400, and a cancelled instance survives a
+  non-expanded list. Both are why the two defects above had no test.
+
 - `check_availability` spent an HTTP request per calendar reference
   before it asked anything. The calendar list is cached once, hidden
   calendars included, and an address is used as the id it already is —

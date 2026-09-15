@@ -3,9 +3,12 @@
 /google-calendar-mcp.exe
 /.gates
 /.gates.exe
-# `go build ./scripts/gates` with no -o lands here.
+# `go build ./scripts/gates` with no -o lands here, and `go build ./...`
+# leaves the live driver beside it.
 /gates
 /gates.exe
+/livecal
+/livecal.exe
 /dist/
 
 # Test and gate artefacts

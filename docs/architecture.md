@@ -1,14 +1,14 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 1 built, not yet run live (2026-09-15).** Phase 0 —
-the scaffolding, the gates, the time model and the six read tools — is
-built, verified live and committed. Phase 1 adds `internal/recur`,
+**Status: phase 1 built and run live (2026-09-15).** Phase 0 — the
+scaffolding, the gates, the time model and the six read tools — is built,
+verified live and committed. Phase 1 adds `internal/recur`,
 `list_instances` and `check_availability`, taking the read surface to
-eight tools; `make check` is green across nineteen targets. **Nothing in
-phase 1 counts until the driver runs against a real account and its
-transcript is read** (§13), and three spikes are built and waiting for
-exactly that: C (a recurrence written with no zone), H (free/busy on a
-calendar nobody can read) and I (the 50-calendar ceiling at 51). Still
+eight tools; `make check` is green across nineteen targets. The driver
+has now run three times against a real account: 29 steps, and the first
+run failed one and was quietly wrong about two more that passed (§16).
+Spikes C, H and I are answered (§15) — including spike I, which on its
+first run reported a verdict about a ceiling it had never reached. Still
 owed from phase 0: **spike G's negative half**, which needs a profile
 logged in with `GCAL_SHARING=off`, and CI has never run on macOS or
 Windows.
@@ -1009,12 +1009,12 @@ states its question and its verdict separately.
   If it reproduces, §4.3 may need to refuse `none` on insert outright.
 - **Spike C — daylight saving.** A weekly recurrence at 09:00 local,
   spanning a transition, written with a zone and written without one.
-  Confirm the drift and confirm its absence. *The zoned half is
-  confirmed (§18 row 23). Built in phase 1: the driver now writes the
-  same series with no `timeZone` and reads its occurrences back, so the
-  unzoned half answers on the next live run — including the outcome
-  where Google refuses it outright, which would put §2.2's "required"
-  behind the API rather than behind the reference page.*
+  Confirm the drift and confirm its absence. **Both halves answered,
+  2026-09-15.** The zoned half holds its wall clock (§18 row 23). The
+  unzoned half never drifts, because Google **refuses it**: HTTP 400,
+  "Missing time zone definition for start time". §2.2's "required" is
+  the API's rule and not the reference page's, so the drift this spike
+  was built to reproduce is unreachable through a recurrence.
 - **Spike D — all-day events west of UTC.** Create one from a
   negative-offset zone and read it back from a positive-offset one.
   This is §3's first row and the most common defect in the category.
@@ -1030,18 +1030,28 @@ states its question and its verdict separately.
   later if wrong.
 - **Spike H — free/busy on an unreadable calendar.** Query a calendar the
   user cannot read and confirm the per-calendar error shape §4.6 depends
-  on. *Built in phase 1 as a `check_availability` step: the query must
-  succeed, the calendar must come back UNKNOWN rather than free, and the
-  free gaps must say they were computed from fewer calendars than were
-  asked about.*
+  on. **Confirmed, 2026-09-15.** The query succeeds; the unreadable
+  calendar comes back as its own entry carrying an error, which the
+  server reports UNKNOWN with "Do not treat this as free"; and the free
+  gaps say they were computed from 1 of 2 calendars. §4.6 stands on the
+  shape the API actually returns.
 - **Spike I — the 50-calendar ceiling.** Confirm `calendarExpansionMax`
-  behaves as documented at 50 and at 51. *Built in phase 1, and it goes
-  through the driver's own API rather than the tool, because the server
-  batches at 50 and would never produce the request the spike is about.
-  The answer that matters is whether 51 is refused or silently
-  truncated: a truncation arrives as a calendar missing from the
-  response, which §4.6 reports as unknown — and that is the case the
-  code now has and nobody had seen.*
+  behaves as documented at 50 and at 51. It goes through the driver's own
+  API rather than the tool, because the server batches at 50 and would
+  never produce the request the spike is about. **Answered 2026-09-15,
+  on the second attempt — and the first attempt is the lesson.** It sent
+  one calendar id 51 times. Google keys the response by calendar id, so
+  51 copies came back as one entry, and the spike read "fewer than asked
+  for" as a silent truncation and reported it as its verdict. It was
+  deduplication. That is precisely the failure this section opens by
+  naming, committed by a spike written to avoid it, and no gate can
+  catch it — only reading the transcript did. The second draft made the
+  same mistake one level down: it sent 51 distinct ids and also set
+  `calendarExpansionMax` to 50, so a response carrying 50 would have
+  been the driver's own cap read as Google's ceiling. With distinct ids
+  and no cap, all 51 come back, neither refused nor trimmed. Fifty of them were
+  unreadable, so it does not settle 51 readable calendars, and the spike
+  now says so in its own verdict (§18 row 12).
 
 ## 16. Delivery phases
 
@@ -1074,8 +1084,8 @@ rather than later because it costs an afternoon and is the difference
 between a vocabulary and a habit. Spikes D and G. A live run whose
 transcript is read.
 
-**Phase 1 — recurrence and availability (v0.1.0). Built 2026-09-15,
-NOT yet run live.** `internal/recur`: RFC 5545 rules parsed once for the
+**Phase 1 — recurrence and availability (v0.1.0). Built and run live
+2026-09-15.** `internal/recur`: RFC 5545 rules parsed once for the
 whole server, expansion that walks dates and carries the wall clock
 (§2.2), EXDATE and RDATE, and the three scopes of §4.2 with the
 `this_and_following` arithmetic phase 2 will call. `list_instances` and
@@ -1092,8 +1102,60 @@ having a step in the live driver — it caught both new tools immediately.
 files now. Outstanding: **the `mcpb` bundle gate**, which belongs with
 the bundle in phase 4, and **spike G's negative half** from phase 0.
 
-Spikes C, H and I are built and wait for a live run. Nothing in this
-phase counts until that run happens and its transcript is read.
+Spikes C, H and I have run and are answered in §15. Spike G's negative
+half is still owed, and still needs a profile granted without the ACL
+scopes; §18 row 24 argues why the cost of leaving it is contained.
+
+**What the live run found, which is the argument for having it.** Three
+runs against a real account: 29 steps, and the first run failed one and
+was wrong about two more that passed.
+
+The failure was `list_instances` accepting an **occurrence** id as a
+series id. The refusal was reactive — it explained the mistake when
+Google answered 404 or 400 — and §18 row 31 had recorded, honestly, that
+nobody knew what Google actually did. What it does is answer **200 and
+expand that occurrence**; a *cancelled* occurrence expands to nothing,
+so the call succeeded with an empty list and the tool reported "No
+occurrences" for a series that has three. A wrong answer, confidently
+phrased, from the reactive design. The server reads the id's shape now:
+an event id is base32hex, so an `_` cannot occur in one, and an
+occurrence id is refused up front naming the series to use instead.
+
+The second defect passed its step. `list_events` with `no_expand` showed
+a row reading `(undated) (no start) (no title)`, and counted it.
+`showDeleted=false` does not filter a cancelled **instance** when
+`singleEvents` is false — the discovery document says so in the
+parameter's own description — and Google sends such an instance bare,
+with no start and no summary. The server had passed the parameter and
+trusted it. It filters cancelled events itself now. `caltest` had been
+hiding them, which is why no test could have caught it, and it
+reproduces Google's behaviour now instead.
+
+The third was in a spike, and it is the one worth remembering. **Spike I
+reported a verdict it had not established**: it sent one calendar id 51
+times, Google deduplicated to a single entry, and the branch reading
+"fewer came back than were asked for" announced a silent truncation.
+§15's opening paragraph names that exact failure mode, and the spike
+written under that warning committed it. Distinct ids give the real
+answer, and the spike now states what it cannot settle as well as what
+it can.
+
+And a fourth, which is neither a defect in the server nor in a test:
+**the transcript printed a dozen of the account's real calendar names.**
+§9.1 promises the driver reads only a calendar it created, but
+`list_calendars` is account-wide by nature, and the redactor is anchored
+on shapes — an address, an id, a URL — while a display name has none. No
+pattern could have caught them (§18 row 34).
+
+The first fix for it was a flag on the step, and **it was wrong in the
+way §9.1 forbids**: a flag is a matter of care, and the review found the
+proof in the same commit — `get_settings` is account-wide too and had
+not been marked. What ships instead derives the answer from the step's
+own arguments. A step names the calendars it reads; if every one of them
+is an id this driver invented, the body can only hold what the driver
+wrote, and a step naming none is account-wide by construction. It fails
+closed, and on the next run it withheld `get_settings` without anybody
+marking it.
 
 **What the phase 1 review found, and what was left.** Thirteen defects,
 none of which the test suite caught — every gate was green when the review
@@ -1186,6 +1248,44 @@ work and the one where the transcript matters most.
 §13 with the three tasks named there; a second MCP client; the `.mcpb`
 bundle exercised from a real install; and whatever §17 is still holding.
 
+### 16a. Found by review, not yet fixed
+
+Five defects the phase 1 review turned up in code phases 0 and 1 had
+already committed. None is in this session's own changes, none is
+blocking, and each is written down here rather than fixed in a session
+that was verifying something else — CLAUDE.md's definition of done
+allows a finding to be resolved *or written down*, and widening a
+verification session into a repair session is how a phase stops being
+one session.
+
+1. **Multi-calendar paging hands one calendar's token to every
+   calendar.** `ListEvents` fans out and passes the same `page_token`
+   into each calendar's read, then keeps only the last non-empty token.
+   A Google page token is scoped to one calendar and one query, so
+   continuing a truncated two-calendar read either fails on the others
+   or resumes them from an unrelated offset — and the tokens for the
+   rest are discarded while the result still says "Pass page_token to
+   continue." **The honest fix is a token per calendar**, which changes
+   the result shape, so it belongs with a phase that can carry it.
+2. **`search_events` advertises a `page_token` it does not accept.** Its
+   input has no such field, but it returns the schedule result, which
+   renders the sentence and carries the token. Either thread the token
+   through (subject to 1) or suppress both for this tool.
+3. **An invalid time zone is classified `[unavailable]`, which is
+   retryable.** `Service.Zone` returns `internal/when`'s error
+   unwrapped, so it never becomes a `gapi.Error` and falls through to
+   the default class. A caller passing a zone that does not exist is
+   told to retry a request that cannot succeed. `s.window` already wraps
+   the same package's errors as `[invalid]`; `Zone` should.
+4. **`sortKey` mixes UTC and local.** Timed events sort by their UTC
+   instant and all-day events by their local date, while the renderer
+   groups by local date. East of UTC the two disagree, so an all-day row
+   can land in the middle of its own day instead of at the front, which
+   is what its doc comment promises. The golden fixture is
+   Europe/Copenhagen with the all-day event alone on its day, so it does
+   not catch it.
+5. **The event-id rule lives in two places.** §18 row 35.
+
 ## 17. Open decisions
 
 1. **Incremental sync.** `syncToken` is designed for a client with a
@@ -1256,7 +1356,7 @@ what §15 exists to settle, and they are marked.
 | 9 | An all-day event can be modelled as midnight UTC | The surveyed servers, and an issue reproducing it | **Refuted.** It renders a day early for every user west of UTC. §4.1 keeps dates as dates; spike D confirms live |
 | 10 | A client may supply an event id, making insert idempotent | Discovery document, `Event.id` | **Confirmed, with a caveat that changes the design.** Ids are allowed, but "we cannot guarantee that ID collisions will be detected at event creation time". Nearly idempotent only — hence `ambiguous_outcome` in §6.5 and spike F |
 | 11 | `singleEvents` is a display preference | Discovery document and the events reference | **Refuted.** It changes what the method returns — parents or instances — and `orderBy: startTime` requires it. §7.2 makes the caller choose |
-| 12 | `freebusy.query` handles any number of calendars | Discovery document, `calendarExpansionMax` | **Confirmed with a limit.** Maximum 50. §4.6 batches; spike I confirms the boundary |
+| 12 | `freebusy.query` handles any number of calendars | Discovery document, `calendarExpansionMax`; **spike I live, 2026-09-15** | **Confirmed with a limit, and the limit does not do what the batching assumed.** Maximum documented value 50, and §4.6 batches there. Live, 51 *distinct* ids with **no expansion cap set** came back as **51 entries** — neither refused nor trimmed. The cap is deliberately omitted: a spike that sets the ceiling it is measuring reports its own parameter as Google's behaviour. Fifty were unreadable, so this does not settle 51 *readable* calendars: the ceiling may count only the calendars it expands, and proving that would mean creating 51 calendars on somebody's account. The batching stays, and §4.6's rule that a calendar missing from the response is **unknown** is what the design actually rests on |
 | 13 | Availability can be computed from an event list | The surveyed servers | **Rejected.** A list misses events whose details the caller cannot read, and ignores `transparency`. §4.6 |
 | 14 | `calendars.transferOwnership` is a normal calendar operation | Discovery document | **Rejected for use.** Requires Workspace admin privilege and `useAdminAccess: true`, which this server never requests. §8a |
 | 15 | Push notifications could give live updates | Discovery document, the four `watch` methods | **Rejected.** They POST to a public HTTPS endpoint; a stdio server has none. §1 |
@@ -1274,9 +1374,12 @@ what §15 exists to settle, and they are marked.
 | 28 | The `Event` resource has 44 published properties, and the four resources this server models have 81 between them | Discovery document, revision 20260826, fetched 2026-09-15 | **Confirmed, and now held by a gate.** `api-diff` records the field list beside the methods and `api-fields` holds one verdict per field: 56 modelled, 25 written off. The count in §8b is no longer a number somebody typed |
 | 29 | `colorId` is how an event's colour is set | Discovery document, `Event.eventLabelId` | **Superseded, and worth knowing before phase 2 writes a colour.** `eventLabelId` "supersedes the index-based colorId property" and refers to a label defined on the calendar (`Calendar.labelProperties`). Both are written off for now; §8b's row says so rather than leaving the newer field unmentioned |
 | 30 | A daylight-saving transition is an hour | tzdata, through `internal/recur`'s table tests | **Refuted.** Australia/Lord_Howe shifts by 30 minutes, so the week containing its transition is 168h30m. The expansion walks dates and carries the wall clock, so the size of the shift never enters the arithmetic — the test asserts the gap to prove the transition was really there |
-| 31 | `events.instances` takes any event id | Discovery document, `events.instances` | **Unverified, and deliberately not guessed. Tier 3.** The parameter is documented only as "Recurring event identifier". What Google returns for an id that exists but is not a series — 404, 400, or the instance itself — is not stated, so `caltest` picks 400 with a comment saying it is a choice, the server explains the mistake for both, and the live driver records the real answer. The part that is this server's to get right is the message: a bare "not found" sends a caller looking for a deleted event when they passed an occurrence's id |
+| 31 | `events.instances` takes any event id | Discovery document; **live, 2026-09-15** | **Answered, and it is none of the three guesses.** Google returns **200 and expands the occurrence the id names**. A cancelled occurrence expands to nothing, so the call succeeds with an *empty list* — and `list_instances` reported "No occurrences" for a series that has three. A refusal was owed and the API never gives one, so the server reads the id's shape instead: an event id is base32hex (row 21), so an `_` cannot occur in one, and `{id}_{yyyymmdd}[T{hhmmss}Z]` is refused up front with `[invalid]` naming the series. `caltest` reproduces the 200 rather than the 400 it used to guess. What Google does for a plain non-recurring event is still unprobed and still a choice in the fake |
 | 32 | `EXDATE` and `RDATE` carry a `TZID` parameter, or a `VALUE=DATE` form on an all-day series | RFC 5545 §3.8.5, and the shape Google returns in `recurrence` | **Asserted from the specification, not probed live. Tier 3.** `internal/recur` parses both and resolves a bare local time in the series' own zone. An all-day point stays a date and yields no instant, which is §4.1 again. A series carrying anything this package cannot expand — `EXRULE`, a second `RRULE`, a frequency below DAILY — is refused rather than expanded, because a count that is quietly too large is the number a caller would put in front of a user |
 | 26 | Redirecting the config directory and the environment isolates a test | Live, the hard way, 2026-09-15 | **Refuted, having been written down here first.** The OS keyring cannot be redirected by either, so `go test ./cmd/...` found the maintainer's real refresh token under the default profile, revoked the grant at Google and deleted it. `TestMain` now substitutes the keyring for the whole package, with a decoy test that fails if that is ever dropped. The sibling servers carry the same warning; having it in the source did not prevent it |
+| 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
+| 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. **Owed next:** the grammar and `validEventID` are one rule in two places, the driver's copy in `scripts/livecal/api.go` and the server's in `internal/service`. §2.11 lets a client supply an event id on insert, so phase 2 brings the rule into `internal/` and both should land in one owner then |
+| 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |
 
 ### Deviations from the shared Go MCP server standard
 

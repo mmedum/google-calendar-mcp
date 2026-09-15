@@ -366,6 +366,19 @@ type TokenInfo struct {
 	Audience  string
 }
 
+// withoutURL keeps a transport error's cause and drops the URL it was
+// reaching, because that URL carries the access token.
+func withoutURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) && ue.Err != nil {
+		return ue.Err
+	}
+	// Not a *url.Error, so the URL is not known to be in it — and not
+	// known to be out of it either. Fail closed: a credential is worth
+	// more than the text of one diagnostic.
+	return errors.New("the request could not be sent")
+}
+
 // Inspect calls the tokeninfo endpoint for an access token.
 func Inspect(ctx context.Context, client *http.Client, accessToken string) (*TokenInfo, error) {
 	if client == nil {
@@ -378,7 +391,14 @@ func Inspect(ctx context.Context, client *http.Client, accessToken string) (*Tok
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("auth: tokeninfo: %w", err)
+		// The access token is a query parameter on this URL, and a
+		// transport failure stringifies the whole URL: client.Do returns
+		// a *url.Error whose Error() is `Get "https://…?access_token=ya29.…":
+		// dial tcp …`. That reaches `doctor`, which is the output a user
+		// pastes into a bug report — so the URL never survives the error
+		// (§9). internal/gapi strips its own for the same reason, on
+		// search terms rather than on credentials.
+		return nil, fmt.Errorf("auth: tokeninfo: %w", withoutURL(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
@@ -395,7 +415,7 @@ func Inspect(ctx context.Context, client *http.Client, accessToken string) (*Tok
 		Aud       string `json:"aud"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("auth: tokeninfo: %w", err)
+		return nil, fmt.Errorf("auth: tokeninfo: %w", withoutURL(err))
 	}
 	info := &TokenInfo{Email: raw.Email, Audience: raw.Aud}
 	if raw.Scope != "" {

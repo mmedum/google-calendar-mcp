@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -634,5 +635,114 @@ func TestHiddenCalendarStillResolvesByTitle(t *testing.T) {
 		if c.ID == got.ID {
 			t.Fatal("the hidden calendar appeared in the visible list")
 		}
+	}
+}
+
+// TestCancelledInstancesAreHiddenInSeriesMode is the live run's second
+// defect, as the reproduction that found it.
+//
+// The server passed showDeleted=false and trusted Google to filter.
+// The discovery document says otherwise: "Cancelled instances of
+// recurring events (but not the underlying recurring event) will still
+// be included if showDeleted and singleEvents are both False." One came
+// back with no start and no summary, so a series listing rendered a row
+// with no date and no title, and counted it among the results.
+func TestCancelledInstancesAreHiddenInSeriesMode(t *testing.T) {
+	fake := caltest.Seed()
+	// The shape Google actually sends, which is the half a populated
+	// fixture cannot show: an id, a status, the series it belongs to and
+	// the date it was — no start, no end, no summary. This is what
+	// rendered as a row with no date and no title. Built here rather
+	// than in Seed() because an event with no start falls outside no
+	// window, so it would land in every other test's counts.
+	fake.AddEvent("primary", &gcal.Event{
+		ID:                "ev-weekly_20260414T120000Z",
+		Status:            gcal.StatusCancelled,
+		RecurringEventID:  "ev-weekly",
+		OriginalStartTime: &gcal.EventDateTime{DateTime: "2026-04-14T14:00:00+02:00"},
+	})
+	svc := newService(t, fake)
+	ctx := context.Background()
+	opts := service.ListOptions{From: "2026-03-15", To: "2026-04-30"}
+
+	got, err := svc.ListEvents(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range got.Events {
+		if e.Cancelled() {
+			t.Fatalf("a cancelled instance survived a series read without show_cancelled: %q", e.ID)
+		}
+	}
+	if got.Matched != len(got.Events) {
+		t.Fatalf("matched %d but returned %d: a filtered event was still counted",
+			got.Matched, len(got.Events))
+	}
+
+	// And it is still reachable when asked for, from the same read.
+	opts.ShowCancelled = true
+	shown, err := svc.ListEvents(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, bare := false, false
+	for _, e := range shown.Events {
+		if e.Cancelled() && e.SeriesID != "" {
+			found = true
+		}
+		if e.ID == "ev-weekly_20260414T120000Z" {
+			bare = true
+		}
+	}
+	if !found {
+		t.Fatal("show_cancelled did not reveal the cancelled occurrence")
+	}
+	// The bare row survives conversion and rendering when it is asked
+	// for. A start-less event must not fail the whole read.
+	if !bare {
+		t.Fatal("the bare cancelled instance did not survive show_cancelled")
+	}
+	// Rendering it must not panic on the missing start either.
+	if txt := shown.Text(); txt == "" {
+		t.Fatal("the schedule rendered empty")
+	}
+}
+
+// TestFilteringCancelledDoesNotBuyExtraPages.
+//
+// The budget is a bound on what the read SPENDS, not on what survives a
+// filter. Counting kept events made every filtered row leave the budget
+// one short, so the loop fetched another page: a window whose first
+// twenty rows are cancelled cost twenty-one requests to return one
+// event. That is §4.7 failing in the direction the result cannot show,
+// and it is the second time in this phase — check_availability spent 168
+// requests to report 2.
+func TestFilteringCancelledDoesNotBuyExtraPages(t *testing.T) {
+	fake := caltest.Seed()
+	tz := "Europe/Copenhagen"
+	// Twenty cancelled occurrences, all sorting before anything the
+	// caller wants. Google returns these in a series read whatever
+	// showDeleted says, so the server is the one that drops them.
+	for i := range 20 {
+		day := fmt.Sprintf("2026-05-%02d", i+1)
+		inst := caltest.Instance(
+			fmt.Sprintf("ev-noise_2026050%02dT080000Z", i+1), "ev-noise", "Noise",
+			day+"T10:00:00+02:00", day+"T11:00:00+02:00", tz, day+"T10:00:00+02:00")
+		inst.Status = gcal.StatusCancelled
+		fake.AddEvent("primary", inst)
+	}
+	fake.AddEvent("primary", caltest.Timed("ev-real", "The one event",
+		"2026-05-25T10:00:00+02:00", "2026-05-25T11:00:00+02:00", tz))
+
+	svc := newService(t, fake)
+	got, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-05-01", To: "2026-05-31", MaxEvents: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Requests > 2 {
+		t.Fatalf("spent %d requests to read one event past twenty cancelled rows; "+
+			"the budget bounds what is drained, not what survives (§4.7)", got.Requests)
 	}
 }
