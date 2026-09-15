@@ -1,0 +1,226 @@
+// Package model is the server's view of a calendar and an event: the
+// wire types of internal/gcal turned into values that carry resolved
+// time (internal/when) and nothing ambiguous.
+//
+// The conversion happens here and nowhere else, so there is one place
+// where a gcal.EventDateTime becomes either a Date or a Zoned, and one
+// place to look when a time is wrong.
+package model
+
+import (
+	"time"
+
+	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/internal/when"
+)
+
+// Calendar is a calendar as this server presents it.
+type Calendar struct {
+	ID          string
+	Title       string
+	Original    string // the calendar's own title, when this user renamed it
+	TimeZone    string
+	Role        string
+	Primary     bool
+	Selected    bool
+	Hidden      bool
+	ColorID     string
+	Description string
+	ETag        string
+}
+
+// FromCalendarList converts one subscription entry.
+func FromCalendarList(e gcal.CalendarListEntry) Calendar {
+	c := Calendar{
+		ID: e.ID, Title: e.Summary, TimeZone: e.TimeZone, Role: e.AccessRole,
+		Primary: e.Primary, Selected: e.Selected, Hidden: e.Hidden,
+		ColorID: e.ColorID, Description: e.Description, ETag: e.ETag,
+	}
+	// A rename is this user's alone: the same calendar has a different
+	// name for a colleague, so both are carried and the renderer says so.
+	if e.SummaryOverride != "" {
+		c.Title = e.SummaryOverride
+		c.Original = e.Summary
+	}
+	return c
+}
+
+// CanWrite reports whether this user may change events here.
+func (c Calendar) CanWrite() bool {
+	return gcal.AtLeast(c.Role, gcal.RoleWriterWithoutPrivateData)
+}
+
+// When is an event's start or end: a Date or a Zoned, never both, never
+// neither. It is the type that makes §4.1 structural rather than a
+// convention.
+type When struct {
+	// AllDay says which half is set.
+	AllDay bool
+	Date   when.Date
+	At     when.Zoned
+}
+
+// ParseWhen converts a wire EventDateTime, rendering any instant in loc.
+//
+// loc affects only how a timed event READS; it never touches an all-day
+// date, because there is nothing there to convert.
+func ParseWhen(e *gcal.EventDateTime, loc *when.Zone) (When, error) {
+	if e == nil {
+		return When{}, nil
+	}
+	if e.Date != "" {
+		d, err := when.ParseDate(e.Date)
+		if err != nil {
+			return When{}, err
+		}
+		return When{AllDay: true, Date: d}, nil
+	}
+	if e.DateTime == "" {
+		return When{}, nil
+	}
+	// A nil zone means "render in whatever offset the wire carried",
+	// which is only correct when the caller has no zone to impose. Every
+	// tool path resolves one first (§4.1); this branch exists for the
+	// renderer's own round-trip tests.
+	var target *time.Location
+	if loc != nil {
+		target = loc.Loc
+	}
+	z, err := when.ParseZoned(e.DateTime, target)
+	if err != nil {
+		return When{}, err
+	}
+	return When{At: z}, nil
+}
+
+// Event is an event as this server presents it.
+type Event struct {
+	ID          string
+	CalendarID  string
+	Title       string
+	Description string
+	Location    string
+	Status      string
+	Type        string
+	Link        string
+	ETag        string
+
+	Start When
+	End   When
+	// EndInvented is Google's endTimeUnspecified: the end is not one
+	// anybody set, and a duration computed from it is fiction.
+	EndInvented bool
+
+	// Recurrence is the series' RRULE lines, set on a parent.
+	Recurrence []string
+	// SeriesID is set on an instance and names its parent.
+	SeriesID string
+	// OriginalStart identifies an instance even after it is moved.
+	OriginalStart When
+
+	Transparent bool
+	Attendees   []Attendee
+	// AttendeesTruncated is Google's attendeesOmitted.
+	AttendeesTruncated bool
+	Organizer          string
+	OrganizerSelf      bool
+}
+
+// IsSeries reports whether this is a recurring parent.
+func (e Event) IsSeries() bool { return len(e.Recurrence) > 0 }
+
+// IsInstance reports whether this is one occurrence of a series.
+func (e Event) IsInstance() bool { return e.SeriesID != "" }
+
+// IsRecurring reports whether a write here needs a scope (§4.2).
+func (e Event) IsRecurring() bool { return e.IsSeries() || e.IsInstance() }
+
+// Cancelled reports whether the event is cancelled (§2.13).
+func (e Event) Cancelled() bool { return e.Status == gcal.StatusCancelled }
+
+// ReachesPeople reports whether a write to this event can email
+// somebody, which is what makes `notify` required (§4.3.2). An event
+// with no guests but the organiser has no notification decision to make.
+func (e Event) ReachesPeople() bool {
+	for _, a := range e.Attendees {
+		if !a.Self && !a.Resource {
+			return true
+		}
+	}
+	return false
+}
+
+// GuestCount is how many people would be reached. The count goes in a
+// refusal; the addresses never do (§9).
+func (e Event) GuestCount() int {
+	n := 0
+	for _, a := range e.Attendees {
+		if !a.Self && !a.Resource {
+			n++
+		}
+	}
+	return n
+}
+
+// Attendee is one guest.
+type Attendee struct {
+	Email     string
+	Name      string
+	Response  string
+	Optional  bool
+	Resource  bool
+	Self      bool
+	Organizer bool
+}
+
+// FromEvent converts a wire event, reading times in zone.
+func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) {
+	out := Event{
+		ID: e.ID, CalendarID: calendarID, Title: e.Summary,
+		Description: e.Description, Location: e.Location,
+		Status: e.Status, Type: e.EventType, Link: e.HTMLLink, ETag: e.ETag,
+		Recurrence: e.Recurrence, SeriesID: e.RecurringEventID,
+		EndInvented:        e.EndTimeUnspecified,
+		Transparent:        e.Transparency == gcal.TransparencyTransparent,
+		AttendeesTruncated: e.AttendeesOmitted,
+	}
+	var err error
+	if out.Start, err = ParseWhen(e.Start, zone); err != nil {
+		return Event{}, err
+	}
+	if out.End, err = ParseWhen(e.End, zone); err != nil {
+		return Event{}, err
+	}
+	if out.OriginalStart, err = ParseWhen(e.OriginalStartTime, zone); err != nil {
+		return Event{}, err
+	}
+	if e.Organizer != nil {
+		out.Organizer = e.Organizer.Email
+		out.OrganizerSelf = e.Organizer.Self
+	}
+	for _, a := range e.Attendees {
+		out.Attendees = append(out.Attendees, Attendee{
+			Email: a.Email, Name: a.DisplayName, Response: a.ResponseStatus,
+			Optional: a.Optional, Resource: a.Resource, Self: a.Self, Organizer: a.Organizer,
+		})
+	}
+	return out, nil
+}
+
+// Busy is one interval somebody is not free.
+type Busy struct {
+	Start when.Zoned
+	End   when.Zoned
+}
+
+// Availability is one calendar's answer to a free/busy query.
+//
+// Unknown is the field that matters: §4.6 refuses to fold a calendar
+// that could not be read into "free", because a model that cannot tell
+// those apart will book over somebody.
+type Availability struct {
+	CalendarID string
+	Busy       []Busy
+	Unknown    bool
+	Reason     string
+}

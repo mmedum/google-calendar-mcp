@@ -1,0 +1,17 @@
+title = "google-calendar-mcp"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic fixtures and reserved example domains"
+paths = [
+  # The in-memory Calendar generates everything it returns; nothing in
+  # it was recorded from a real account (§9.1).
+  '''internal/gapi/caltest/.*''',
+  '''testdata/.*''',
+]
+regexes = [
+  # RFC 2606 reserves these; they can never resolve.
+  '''[A-Za-z0-9._%+\-]+@([A-Za-z0-9.\-]+\.)?(example|test|invalid)(\.[A-Za-z]{2,})?''',
+]

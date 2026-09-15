@@ -1,0 +1,22 @@
+# Build output
+/google-calendar-mcp
+/google-calendar-mcp.exe
+/.gates
+/.gates.exe
+/dist/
+
+# Test and gate artefacts
+cov.out
+schemas.json
+
+# Never: the deployer's own OAuth client and tokens
+client_secret*.json
+token.json
+
+# Editor and tool scratch files. Listed before the first `git add -A`,
+# because an editor's temp file and a stray build output both reach a
+# public repository that way and neither is visible at commit time.
+*.swp
+*~
+.DS_Store
+/.claude/

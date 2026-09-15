@@ -1,0 +1,204 @@
+{
+  "fetched": "2026-09-15",
+  "note": "Written by `gates api-diff`; nobody edits this. One verdict per method lives in testdata/api-coverage.tsv.",
+  "apis": [
+    {
+      "api": "calendar",
+      "version": "v3",
+      "revision": "20260826",
+      "url": "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"
+    }
+  ],
+  "methods": [
+    {
+      "name": "acl.delete",
+      "verb": "DELETE",
+      "path": "calendars/{calendarId}/acl/{ruleId}"
+    },
+    {
+      "name": "acl.get",
+      "verb": "GET",
+      "path": "calendars/{calendarId}/acl/{ruleId}"
+    },
+    {
+      "name": "acl.insert",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/acl"
+    },
+    {
+      "name": "acl.list",
+      "verb": "GET",
+      "path": "calendars/{calendarId}/acl"
+    },
+    {
+      "name": "acl.patch",
+      "verb": "PATCH",
+      "path": "calendars/{calendarId}/acl/{ruleId}"
+    },
+    {
+      "name": "acl.update",
+      "verb": "PUT",
+      "path": "calendars/{calendarId}/acl/{ruleId}"
+    },
+    {
+      "name": "acl.watch",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/acl/watch"
+    },
+    {
+      "name": "calendarList.delete",
+      "verb": "DELETE",
+      "path": "users/me/calendarList/{calendarId}"
+    },
+    {
+      "name": "calendarList.get",
+      "verb": "GET",
+      "path": "users/me/calendarList/{calendarId}"
+    },
+    {
+      "name": "calendarList.insert",
+      "verb": "POST",
+      "path": "users/me/calendarList"
+    },
+    {
+      "name": "calendarList.list",
+      "verb": "GET",
+      "path": "users/me/calendarList"
+    },
+    {
+      "name": "calendarList.patch",
+      "verb": "PATCH",
+      "path": "users/me/calendarList/{calendarId}"
+    },
+    {
+      "name": "calendarList.update",
+      "verb": "PUT",
+      "path": "users/me/calendarList/{calendarId}"
+    },
+    {
+      "name": "calendarList.watch",
+      "verb": "POST",
+      "path": "users/me/calendarList/watch"
+    },
+    {
+      "name": "calendars.clear",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/clear"
+    },
+    {
+      "name": "calendars.delete",
+      "verb": "DELETE",
+      "path": "calendars/{calendarId}"
+    },
+    {
+      "name": "calendars.get",
+      "verb": "GET",
+      "path": "calendars/{calendarId}"
+    },
+    {
+      "name": "calendars.insert",
+      "verb": "POST",
+      "path": "calendars"
+    },
+    {
+      "name": "calendars.patch",
+      "verb": "PATCH",
+      "path": "calendars/{calendarId}"
+    },
+    {
+      "name": "calendars.transferOwnership",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/transferOwnership"
+    },
+    {
+      "name": "calendars.update",
+      "verb": "PUT",
+      "path": "calendars/{calendarId}"
+    },
+    {
+      "name": "channels.stop",
+      "verb": "POST",
+      "path": "channels/stop"
+    },
+    {
+      "name": "colors.get",
+      "verb": "GET",
+      "path": "colors"
+    },
+    {
+      "name": "events.delete",
+      "verb": "DELETE",
+      "path": "calendars/{calendarId}/events/{eventId}"
+    },
+    {
+      "name": "events.get",
+      "verb": "GET",
+      "path": "calendars/{calendarId}/events/{eventId}"
+    },
+    {
+      "name": "events.import",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/events/import"
+    },
+    {
+      "name": "events.insert",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/events"
+    },
+    {
+      "name": "events.instances",
+      "verb": "GET",
+      "path": "calendars/{calendarId}/events/{eventId}/instances"
+    },
+    {
+      "name": "events.list",
+      "verb": "GET",
+      "path": "calendars/{calendarId}/events"
+    },
+    {
+      "name": "events.move",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/events/{eventId}/move"
+    },
+    {
+      "name": "events.patch",
+      "verb": "PATCH",
+      "path": "calendars/{calendarId}/events/{eventId}"
+    },
+    {
+      "name": "events.quickAdd",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/events/quickAdd"
+    },
+    {
+      "name": "events.update",
+      "verb": "PUT",
+      "path": "calendars/{calendarId}/events/{eventId}"
+    },
+    {
+      "name": "events.watch",
+      "verb": "POST",
+      "path": "calendars/{calendarId}/events/watch"
+    },
+    {
+      "name": "freebusy.query",
+      "verb": "POST",
+      "path": "freeBusy"
+    },
+    {
+      "name": "settings.get",
+      "verb": "GET",
+      "path": "users/me/settings/{setting}"
+    },
+    {
+      "name": "settings.list",
+      "verb": "GET",
+      "path": "users/me/settings"
+    },
+    {
+      "name": "settings.watch",
+      "verb": "POST",
+      "path": "users/me/settings/watch"
+    }
+  ]
+}

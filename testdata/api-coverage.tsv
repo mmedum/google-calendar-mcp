@@ -1,0 +1,53 @@
+# One verdict per published API method. `gates api-coverage` holds this,
+# testdata/api-surface.json and the code to each other, and runs in
+# make check with no network.
+#
+# `used` names the client method that implements it. `out` says why this
+# server does not call it. Every one of the 38 methods Calendar v3
+# publishes has a row: a published method with no verdict fails the
+# gate, a client call with no row fails, and a verdict for a method that
+# no longer exists fails.
+#
+# Phase 0 implements the reads. A row marked `used` whose client method
+# does not exist yet names the phase that builds it, and the gate treats
+# that as a promise rather than a lie — see planned= below.
+#
+# api	method	verdict	reason
+calendar	acl.delete	used	planned=3 unshare_calendar
+calendar	acl.get	out	acl.list returns every rule in one request; a single-rule read has no caller
+calendar	acl.insert	used	planned=3 share_calendar, new rule
+calendar	acl.list	used	gapi.ListACL, behind list_sharing and get_calendar's exposure
+calendar	acl.patch	used	planned=3 share_calendar, role change
+calendar	acl.update	out	PUT: replaces the rule whole. §4.4 patches always
+calendar	acl.watch	out	needs a public HTTPS webhook; a stdio server has nowhere to put one (§1)
+calendar	calendarList.delete	used	planned=3 manage_calendar unsubscribe
+calendar	calendarList.get	used	gapi.GetCalendarListEntry, behind get_calendar and calendar resolution
+calendar	calendarList.insert	used	planned=3 manage_calendar subscribe
+calendar	calendarList.list	used	gapi.ListCalendars, behind list_calendars
+calendar	calendarList.patch	used	planned=3 manage_calendar, colour and visibility
+calendar	calendarList.update	out	PUT: replaces the entry whole. §4.4
+calendar	calendarList.watch	out	needs a public HTTPS webhook (§1)
+calendar	calendars.clear	used	planned=3 clear_calendar, behind GCAL_ENABLE_DESTRUCTIVE and confirm
+calendar	calendars.delete	used	planned=3 delete_calendar, behind GCAL_ENABLE_DESTRUCTIVE and confirm
+calendar	calendars.get	used	gapi.GetCalendar, behind get_calendar for a calendar not in the list
+calendar	calendars.insert	used	planned=3 create_calendar
+calendar	calendars.patch	used	planned=3 manage_calendar, title and time zone
+calendar	calendars.transferOwnership	out	requires a Workspace admin privilege and useAdminAccess=true; this server authenticates as one ordinary user and never requests admin access (§1)
+calendar	calendars.update	out	PUT: replaces the calendar whole. §4.4
+calendar	channels.stop	out	stops a push channel; there are none, because watch is out (§1)
+calendar	colors.get	used	gapi.GetColors, behind get_settings
+calendar	events.delete	used	planned=2 cancel_event, whole event
+calendar	events.get	used	gapi.GetEvent, behind get_event
+calendar	events.import	out	carries a private copy of an event between systems, preserving iCalUID and organiser: a migration tool, not a scheduling one, with different failure modes (§1)
+calendar	events.insert	used	planned=2 create_event, with a client-generated id (§2.11)
+calendar	events.instances	used	planned=1 list_instances
+calendar	events.list	used	gapi.ListEvents, behind list_events and search_events
+calendar	events.move	used	planned=2 move_event
+calendar	events.patch	used	planned=2 every event write; §4.4 patches always
+calendar	events.quickAdd	out	parses a natural-language string, but gives no control over the time zone and does not report which fields it set; the model calling this server is a better parser (§17.4)
+calendar	events.update	out	PUT: drops attendees, RSVPs and recurrence when they are omitted. §4.4, and this is the method that rule exists for
+calendar	events.watch	out	needs a public HTTPS webhook (§1)
+calendar	freebusy.query	used	planned=1 check_availability
+calendar	settings.get	out	settings.list returns every setting in one request
+calendar	settings.list	used	gapi.ListSettings, behind get_settings and §4.1's zone resolution
+calendar	settings.watch	out	needs a public HTTPS webhook (§1)

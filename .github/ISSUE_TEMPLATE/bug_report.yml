@@ -1,0 +1,65 @@
+name: Bug report
+description: Something the server does wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you paste anything:** this server works with your calendar,
+        and a calendar carries other people's email addresses. Please do not
+        paste event titles, descriptions, locations, guest lists, calendar ids
+        or your OAuth client JSON. The `doctor` output below is designed to be
+        safe to paste; a debug log is too, by construction — it carries no
+        payload.
+  - type: textarea
+    id: doctor
+    attributes:
+      label: doctor output
+      description: "`google-calendar-mcp doctor`"
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`google-calendar-mcp --version`"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Release archive
+        - go install
+        - Claude Desktop bundle (.mcpb)
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client
+      placeholder: "Claude Desktop 1.2.3, Claude Code, ..."
+    validations:
+      required: true
+  - type: textarea
+    id: flags
+    attributes:
+      label: Feature flags in effect
+      description: "GCAL_READONLY, GCAL_SHARING, GCAL_ENABLE_DESTRUCTIVE, and any other GCAL_* you set"
+      render: text
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you asked for, what the tool returned, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Debug log
+      description: "Run with GCAL_LOG_LEVEL=debug and paste stderr. It carries no event content."
+      render: text

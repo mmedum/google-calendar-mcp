@@ -1,0 +1,60 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - forbidigo
+    - gosec
+    - misspell
+    - nilerr
+    - revive
+    - unconvert
+    - unparam
+
+  settings:
+    forbidigo:
+      # Stdout carries only MCP JSON-RPC frames. This is the protocol,
+      # not a house preference: one stray print corrupts the stream and
+      # the client silently stops working.
+      #
+      # Check the MESSAGE TEXT when verifying this works — a settings
+      # block that fails to load leaves forbidigo on its defaults,
+      # firing, looking like it works.
+      forbid:
+        - pattern: '^fmt\.Print.*$'
+          msg: "stdout carries only JSON-RPC frames; write to an io.Writer the caller passed in, or use slog to stderr"
+        - pattern: '^os\.Stdout$'
+          msg: "only main names the process's streams; take an io.Writer instead"
+      analyze-types: true
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+    gosec:
+      excludes:
+        # G104 duplicates errcheck.
+        - G104
+
+  exclusions:
+    rules:
+      # main is the one place that names the process's streams, and
+      # scripts/ is maintainer tooling rather than the server.
+      - path: 'cmd/google-calendar-mcp/'
+        linters: [forbidigo]
+      - path: 'scripts/'
+        linters: [forbidigo, gosec, revive, unparam]
+      - path: '_test\.go$'
+        linters: [gosec, unparam, revive]
+      # The in-memory Calendar is test scaffolding.
+      - path: 'internal/gapi/caltest/'
+        linters: [revive, gosec, errcheck]
+
+formatters:
+  enable:
+    - gofmt
