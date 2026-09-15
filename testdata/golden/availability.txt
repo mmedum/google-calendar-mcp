@@ -1,0 +1,16 @@
+2026-03-16T09:00:00+01:00 to 2026-03-16T17:00:00+01:00 (Europe/Copenhagen)
+times are in Europe/Copenhagen, the calendar's own time zone
+
+primary
+  busy 2026-03-16 09:00-09:15
+  busy 2026-03-16 13:00-14:00
+team@group.calendar.example.test
+  busy 2026-03-16 13:30-15:00
+nobody@example.test
+  UNKNOWN — this calendar could not be read (no such calendar, or this account cannot see it). Do not treat this as free.
+
+Free, 30m or longer:
+  2026-03-16 09:15-13:00 (3h45m)
+  2026-03-16 15:00-17:00 (2h)
+
+These gaps come from 2 of 3 calendars: 1 could not be read, so somebody may be busy in them.

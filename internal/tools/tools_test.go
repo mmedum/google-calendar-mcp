@@ -62,11 +62,12 @@ func names(ts []*mcp.Tool) map[string]*mcp.Tool {
 	return out
 }
 
-func TestPhaseZeroRegistersTheReadSurface(t *testing.T) {
+func TestReadSurfaceIsTheEightReadTools(t *testing.T) {
 	got := names(listTools(t, baseConfig()))
 	want := []string{
 		"list_calendars", "get_calendar", "list_events",
-		"search_events", "get_event", "get_settings",
+		"search_events", "get_event", "list_instances",
+		"check_availability", "get_settings",
 	}
 	for _, n := range want {
 		if _, ok := got[n]; !ok {
@@ -88,7 +89,7 @@ func TestReadOnlyKeepsEveryReadTool(t *testing.T) {
 
 	for name := range full {
 		if _, ok := readOnly[name]; !ok {
-			t.Fatalf("read-only mode dropped %q, which is a read tool in phase 0", name)
+			t.Fatalf("read-only mode dropped %q, which is a read tool", name)
 		}
 	}
 }
@@ -160,6 +161,9 @@ func TestOverlappingToolsPointAtEachOther(t *testing.T) {
 		{"search_events", "list_events"},
 		{"list_calendars", "get_calendar"},
 		{"get_calendar", "list_calendars"},
+		{"list_instances", "list_events"},
+		{"list_events", "check_availability"},
+		{"check_availability", "free"},
 	}
 	for _, p := range pairs {
 		tool, ok := got[p[0]]
@@ -423,6 +427,20 @@ func TestEveryToolAnswers(t *testing.T) {
 		}, "Morning sync"},
 		{"get_event", map[string]any{"calendar": "primary", "event_id": "ev-standup"}, "Morning sync"},
 		{"get_event", map[string]any{"calendar": "primary", "event_id": "ev-holiday"}, "all day"},
+		{"list_instances", map[string]any{
+			"calendar": "primary", "event_id": "ev-weekly",
+		}, "occurrence"},
+		{"list_instances", map[string]any{
+			"calendar": "primary", "event_id": "ev-weekly", "show_cancelled": true,
+		}, "CANCELLED"},
+		{"list_instances", map[string]any{
+			"calendar": "primary", "event_id": "ev-weekly",
+			"from": "2026-03-20", "to": "2026-03-26",
+		}, "2026-03-24"},
+		{"check_availability", map[string]any{"from": "2026-03-16", "to": "2026-03-16"}, "Free"},
+		{"check_availability", map[string]any{
+			"from": "2026-03-16", "to": "2026-03-16", "min_minutes": 30,
+		}, "30m or longer"},
 	}
 	for _, c := range calls {
 		t.Run(c.name+"/"+c.want, func(t *testing.T) {
@@ -483,6 +501,9 @@ func TestToolErrorsAreClassified(t *testing.T) {
 		{"get_calendar", map[string]any{"calendar": "No Such Thing"}, "[not_found]"},
 		{"list_events", map[string]any{"from": "tomorrow", "to": "2026-03-17"}, "[invalid]"},
 		{"get_event", map[string]any{"calendar": "primary", "event_id": "nope"}, "[not_found]"},
+		{"list_instances", map[string]any{
+			"calendar": "primary", "event_id": "ev-weekly", "from": "2026-03-20",
+		}, "[invalid]"},
 	}
 	for _, c := range cases {
 		t.Run(c.name+c.class, func(t *testing.T) {
@@ -562,4 +583,57 @@ func text(t *testing.T, res *mcp.CallToolResult) string {
 		t.Fatalf("content is %T", res.Content[0])
 	}
 	return tc.Text
+}
+
+// TestCheckAvailabilityExplainsWhyItIsNotAnEventList is §4.6 at the
+// boundary a model reads: a list of events answers a different question,
+// and an unreadable calendar is not free.
+func TestCheckAvailabilityExplainsWhyItIsNotAnEventList(t *testing.T) {
+	tool := names(listTools(t, baseConfig()))["check_availability"]
+	lower := strings.ToLower(tool.Description)
+	for _, want := range []string{"cannot read", "unknown", "never as free"} {
+		if !strings.Contains(lower, want) {
+			t.Fatalf("check_availability does not warn about %q:\n%s", want, tool.Description)
+		}
+	}
+}
+
+// TestListInstancesExplainsAnOccurrenceID.
+//
+// It asserts the explanation and not the class: Google does not document
+// what events.instances returns for an id that exists but is not a
+// series, so the class here is whatever Google chose. The live driver
+// probes it and §18 will carry the answer; this holds the part that is
+// this server's to get right.
+func TestListInstancesExplainsAnOccurrenceID(t *testing.T) {
+	cs, cleanup := session(t, baseConfig())
+	defer cleanup()
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "list_instances",
+		Arguments: map[string]any{
+			"calendar": "primary", "event_id": "ev-weekly_20260324T130000Z",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("an occurrence id was accepted as a series id")
+	}
+	got := text(t, res)
+	if !strings.Contains(got, "series_id") {
+		t.Fatalf("the refusal does not explain the mistake: %s", got)
+	}
+}
+
+// TestListInstancesWarnsAboutTheIDItNeeds: the id a model has in hand is
+// usually an occurrence's, and passing it gets a bare "not found".
+func TestListInstancesWarnsAboutTheIDItNeeds(t *testing.T) {
+	tool := names(listTools(t, baseConfig()))["list_instances"]
+	for _, want := range []string{"series_id", "SERIES"} {
+		if !strings.Contains(tool.Description, want) {
+			t.Fatalf("list_instances does not say which id it wants (%q):\n%s", want, tool.Description)
+		}
+	}
 }

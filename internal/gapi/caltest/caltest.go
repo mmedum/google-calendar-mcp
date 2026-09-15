@@ -42,6 +42,10 @@ type Server struct {
 	// FreeBusyErrors makes a calendar answer with an error instead of a
 	// busy list, which is what §4.6 must distinguish from "free".
 	FreeBusyErrors map[string]string
+	// FreeBusyOmit leaves a calendar out of the response altogether,
+	// which is what a query truncated by calendarExpansionMax looks
+	// like: no busy list, no error, no row. It must not read as "free".
+	FreeBusyOmit map[string]bool
 	// Settings the user has.
 	Settings []gcal.Setting
 
@@ -79,6 +83,7 @@ func New() *Server {
 		ACL:            map[string][]gcal.AclRule{},
 		Busy:           map[string][]gcal.TimePeriod{},
 		FreeBusyErrors: map[string]string{},
+		FreeBusyOmit:   map[string]bool{},
 		Fail:           map[string]int{},
 	}
 }
@@ -183,6 +188,18 @@ func Seed() *Server {
 		"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10"))
 	s.AddEvent("primary", Instance("ev-weekly_20260324T130000Z", "ev-weekly", "Weekly review",
 		"2026-03-24T14:00:00+01:00", "2026-03-24T15:00:00+01:00", tz, "2026-03-24T14:00:00+01:00"))
+
+	// One occurrence moved an hour later, and one cancelled: the two
+	// exceptions a series picks up, and the two things list_instances
+	// exists to show. A cancelled instance is how a single date is
+	// removed, so it is hidden by default like any other cancelled
+	// event (§2.13) and the result says it is hiding them.
+	s.AddEvent("primary", Instance("ev-weekly_20260331T130000Z", "ev-weekly", "Weekly review",
+		"2026-03-31T15:00:00+02:00", "2026-03-31T16:00:00+02:00", tz, "2026-03-31T14:00:00+02:00"))
+	dropped := Instance("ev-weekly_20260407T120000Z", "ev-weekly", "Weekly review",
+		"2026-04-07T14:00:00+02:00", "2026-04-07T15:00:00+02:00", tz, "2026-04-07T14:00:00+02:00")
+	dropped.Status = gcal.StatusCancelled
+	s.AddEvent("primary", dropped)
 
 	// Cancelled: hidden unless showDeleted (§2.13).
 	cancelled := Timed("ev-cancelled", "Cancelled thing",
@@ -297,7 +314,7 @@ func (s *Server) listCalendars(w http.ResponseWriter, r *http.Request) {
 		items = append(items, *e)
 	}
 
-	page, next := s.paginate(len(items), r.URL.Query().Get("pageToken"))
+	page, next := s.paginate(len(items), r.URL.Query().Get("pageToken"), r.URL.Query().Get("maxResults"))
 	writeJSON(w, gcal.CalendarList{Items: items[page[0]:page[1]], NextPageToken: next})
 }
 
@@ -359,7 +376,7 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 	}
 	sort.Slice(items, func(i, j int) bool { return startKey(items[i]) < startKey(items[j]) })
 
-	page, next := s.paginate(len(items), q.Get("pageToken"))
+	page, next := s.paginate(len(items), q.Get("pageToken"), q.Get("maxResults"))
 	cal := s.Calendars[calID]
 	writeJSON(w, gcal.EventList{
 		Summary: cal.Summary, TimeZone: cal.TimeZone,
@@ -369,14 +386,45 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 }
 
 func (s *Server) listInstances(w http.ResponseWriter, r *http.Request, calID, eventID string) {
+	// events.instances wants the SERIES id. A parent with no instances
+	// is an empty list; an id that is not a parent at all is not found,
+	// which is what a caller passing an occurrence's own id gets.
+	parent, ok := s.Events[calID][eventID]
+	if !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no event with that id on that calendar")
+		return
+	}
+	if len(parent.Recurrence) == 0 {
+		// What Google does here is NOT documented: the reference says
+		// only "Recurring event identifier". This fake picks 400, and
+		// the live driver probes the real answer rather than letting
+		// this choice stand in for evidence (§18). The server's own
+		// behaviour does not depend on which it is — it explains the
+		// mistake for both 400 and 404.
+		writeErr(w, http.StatusBadRequest, "invalid", "the requested event is not a recurring event")
+		return
+	}
+
+	q := r.URL.Query()
+	showDeleted := q.Get("showDeleted") == "true"
 	var items []gcal.Event
 	for _, e := range s.Events[calID] {
-		if e.RecurringEventID == eventID {
-			items = append(items, *e)
+		if e.RecurringEventID != eventID {
+			continue
 		}
+		if e.Status == gcal.StatusCancelled && !showDeleted {
+			continue
+		}
+		if tm := q.Get("timeMin"); tm != "" && endsBefore(e, tm) {
+			continue
+		}
+		if tx := q.Get("timeMax"); tx != "" && startsAfter(e, tx) {
+			continue
+		}
+		items = append(items, *e)
 	}
 	sort.Slice(items, func(i, j int) bool { return startKey(items[i]) < startKey(items[j]) })
-	page, next := s.paginate(len(items), r.URL.Query().Get("pageToken"))
+	page, next := s.paginate(len(items), q.Get("pageToken"), q.Get("maxResults"))
 	writeJSON(w, gcal.EventList{Items: items[page[0]:page[1]], NextPageToken: next})
 }
 
@@ -416,6 +464,9 @@ func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
 		Calendars: map[string]gcal.FreeBusyCalendar{},
 	}
 	for _, it := range req.Items {
+		if s.FreeBusyOmit[it.ID] {
+			continue
+		}
 		if reason, bad := s.FreeBusyErrors[it.ID]; bad {
 			out.Calendars[it.ID] = gcal.FreeBusyCalendar{
 				Errors: []gcal.FreeBusyError{{Domain: "calendar", Reason: reason}},
@@ -428,8 +479,18 @@ func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
 }
 
 // paginate returns [lo,hi) and the next token.
-func (s *Server) paginate(n int, token string) ([2]int, string) {
-	if s.PageSize <= 0 || n == 0 {
+//
+// The page is the smaller of PageSize and the caller's maxResults.
+// Honouring maxResults is what the real API does, and a fake that
+// ignores it hides a whole class of defect: a server that asks for 250
+// and keeps 10 loses the 240 in between, because the token it gets back
+// points past the page rather than past what it kept.
+func (s *Server) paginate(n int, token, maxResults string) ([2]int, string) {
+	size := s.PageSize
+	if v, err := strconv.Atoi(maxResults); err == nil && v > 0 && (size <= 0 || v < size) {
+		size = v
+	}
+	if size <= 0 || n == 0 {
 		return [2]int{0, n}, ""
 	}
 	lo := 0
@@ -441,7 +502,7 @@ func (s *Server) paginate(n int, token string) ([2]int, string) {
 	if lo > n {
 		lo = n
 	}
-	hi := lo + s.PageSize
+	hi := lo + size
 	if hi >= n {
 		return [2]int{lo, n}, ""
 	}

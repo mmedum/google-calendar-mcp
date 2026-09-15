@@ -84,6 +84,10 @@ classes: gates ## The error vocabulary, held closed from both sides
 api-coverage: gates ## Every published API method is used or written off
 	@$(GATES) api-coverage
 
+.PHONY: api-fields
+api-fields: gates ## Every published field is modelled or written off
+	@$(GATES) api-fields
+
 .PHONY: api-diff
 api-diff: gates ## Refetch the discovery document and rewrite the snapshot (network; manual)
 	@$(GATES) api-diff
@@ -124,12 +128,16 @@ staleness: build gates ## The docs must match the code
 transcript: gates ## The live driver prints only through its redactor
 	@$(GATES) transcript
 
+.PHONY: live-cover
+live-cover: build gates ## Every published tool has a step in the live driver
+	@$(GATES) live-cover $(BIN)
+
 .PHONY: live
 live: build ## Drive the built binary against a real account (see docs/development.md)
 	$(GO) run -tags=live ./scripts/livecal -bin $(BIN)
 
 .PHONY: check
-check: fmt vet tidy lint cover vuln licenses secrets api-coverage classes leaks transcript parity pins schema-diff smoke staleness ## Everything CI runs
+check: fmt vet tidy lint cover vuln licenses secrets api-coverage api-fields classes leaks transcript live-cover parity pins schema-diff smoke staleness ## Everything CI runs
 
 .PHONY: clean
 clean:

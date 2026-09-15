@@ -262,3 +262,123 @@ func (a *liveAPI) liveScopes(ctx context.Context) ([]string, error) {
 func (a *liveAPI) listACL(ctx context.Context, cal string) error {
 	return a.do(ctx, http.MethodGet, "/calendars/"+cal+"/acl", nil, nil)
 }
+
+// ---------------------------------------------------- phase 1 additions
+
+// Ids for the probes phase 1 adds. base32hex again: a-v and the digits,
+// never w, x, y or z (§2.11).
+const (
+	// unzonedID is spike C's negative half: a weekly series written with
+	// no timeZone alongside its dateTime.
+	unzonedID = "livecalnozoneprobe0000000000001"
+	// unzonedTitle is what it is called, so a step can find it.
+	unzonedTitle = "Livecal unzoned probe"
+	// noSuchCalendar is spike H's target: a calendar that cannot exist.
+	//
+	// The domain is .test, which RFC 2606 reserves and which can never
+	// resolve — not a google.com address shaped like a real secondary
+	// calendar. The leak gate refused the first version of this line for
+	// exactly that reason, and it was right to: an invented id that
+	// looks real is indistinguishable, to every later reader and every
+	// scanner, from one that is.
+	noSuchCalendar = "livecal-no-such-calendar@example.test"
+)
+
+// instanceRow is one occurrence as Google returns it.
+type instanceRow struct {
+	ID    string `json:"id"`
+	Start struct {
+		DateTime string `json:"dateTime"`
+		TimeZone string `json:"timeZone"`
+	} `json:"start"`
+	Status string `json:"status"`
+}
+
+// listInstances reads a series' occurrences directly, for the setup that
+// needs a real instance id rather than one composed from a convention.
+//
+// The id format is not documented, so composing one would be adopting a
+// convention on a reference page's silence — which §18 says not to do.
+func (a *liveAPI) listInstances(ctx context.Context, cal, event string) ([]instanceRow, error) {
+	var out struct {
+		Items []instanceRow `json:"items"`
+	}
+	err := a.do(ctx, http.MethodGet,
+		"/calendars/"+cal+"/events/"+event+"/instances?maxResults=10", nil, &out)
+	return out.Items, err
+}
+
+// cancelInstance removes one occurrence from a series, which is what a
+// cancelled instance is.
+func (a *liveAPI) cancelInstance(ctx context.Context, cal, instance string) error {
+	return a.do(ctx, http.MethodDelete,
+		"/calendars/"+cal+"/events/"+instance+"?sendUpdates=none", nil, nil)
+}
+
+// createUnzonedSeries writes a recurring event whose start carries a
+// dateTime and NO timeZone. §2.2 says the zone is required on a
+// recurring event; whether Google refuses it, or accepts it and lets the
+// series drift across a transition, is spike C's question.
+func (a *liveAPI) createUnzonedSeries(ctx context.Context, cal string) error {
+	return a.do(ctx, http.MethodPost, "/calendars/"+cal+"/events?sendUpdates=none", map[string]any{
+		"id": unzonedID, "summary": unzonedTitle,
+		"start":      map[string]any{"dateTime": "2026-03-17T14:00:00+01:00"},
+		"end":        map[string]any{"dateTime": "2026-03-17T15:00:00+01:00"},
+		"recurrence": []string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"},
+	}, nil)
+}
+
+// freeBusy asks about a list of calendars directly, which is how spike I
+// can send 51: the server batches at 50 and would never produce the
+// request the spike is about.
+func (a *liveAPI) freeBusy(ctx context.Context, ids []string, expansionMax int) (map[string]any, error) {
+	items := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, map[string]any{"id": id})
+	}
+	body := map[string]any{
+		"timeMin": "2026-03-16T00:00:00Z", "timeMax": "2026-03-17T00:00:00Z",
+		"items": items,
+	}
+	if expansionMax > 0 {
+		body["calendarExpansionMax"] = expansionMax
+	}
+	var out struct {
+		Calendars map[string]any `json:"calendars"`
+	}
+	err := a.do(ctx, http.MethodPost, "/freeBusy", body, &out)
+	return out.Calendars, err
+}
+
+// seedState is what filling the scratch calendar learned. The steps
+// assert against facts only the setup can know — an instance id is
+// Google's to invent, so a step cannot hardcode one.
+type seedState struct {
+	// cancelledOccurrence is the date of the occurrence removed from the
+	// weekly series, as Google returned it.
+	cancelledOccurrence string
+}
+
+// removeOneOccurrence cancels the second occurrence of the weekly
+// series, which is how a single date leaves a series.
+//
+// It reads the instances first rather than composing an instance id from
+// the series id and a timestamp: that format is not documented, and §18
+// says a convention gets verified before it is adopted.
+func (a *liveAPI) removeOneOccurrence(ctx context.Context, cal string) (string, error) {
+	rows, err := a.listInstances(ctx, cal, weeklyID)
+	if err != nil {
+		return "", err
+	}
+	if len(rows) < 2 {
+		return "", fmt.Errorf("the weekly series expanded to %d occurrences; expected at least 2", len(rows))
+	}
+	target := rows[1]
+	if err := a.cancelInstance(ctx, cal, target.ID); err != nil {
+		return "", err
+	}
+	if len(target.Start.DateTime) < 10 {
+		return "", fmt.Errorf("the cancelled occurrence carried no start date")
+	}
+	return target.Start.DateTime[:10], nil
+}

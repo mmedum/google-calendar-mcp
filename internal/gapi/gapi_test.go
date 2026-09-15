@@ -45,7 +45,7 @@ func TestReadsAgainstTheFake(t *testing.T) {
 	if got, err := c.ListEvents(ctx, "primary", gapi.EventsListOptions{}); err != nil || len(got.Items) == 0 {
 		t.Fatalf("ListEvents = %v, %v", got, err)
 	}
-	if got, err := c.ListInstances(ctx, "primary", "ev-weekly", gapi.EventsListOptions{}); err != nil || len(got.Items) != 1 {
+	if got, err := c.ListInstances(ctx, "primary", "ev-weekly", gapi.EventsListOptions{}); err != nil || len(got.Items) != 2 {
 		t.Fatalf("ListInstances = %v, %v", got, err)
 	}
 	if got, err := c.ListACL(ctx, "primary", ""); err != nil || len(got.Items) != 2 {
@@ -305,7 +305,9 @@ func TestListInstancesPassesItsOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListInstances: %v", err)
 	}
-	if len(got.Items) != 1 {
+	// Two of the seeded occurrences fall in March; the cancelled one is
+	// in April, so showDeleted does not add it here.
+	if len(got.Items) != 2 {
 		t.Fatalf("got %d instances", len(got.Items))
 	}
 	if got.Items[0].RecurringEventID != "ev-weekly" {

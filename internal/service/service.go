@@ -10,9 +10,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/config"
 	"github.com/mmedum/google-calendar-mcp/internal/gapi"
@@ -124,11 +126,39 @@ func (s *Service) Zone(ctx context.Context, fromCall, calendarTZ string) (when.Z
 // found" for a calendar that is simply on page two is the kind of wrong
 // answer nobody thinks to check.
 func (s *Service) Calendars(ctx context.Context, showHidden bool) ([]model.Calendar, error) {
+	all, err := s.allCalendars(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if showHidden {
+		return all, nil
+	}
+	out := make([]model.Calendar, 0, len(all))
+	for _, c := range all {
+		if !c.Hidden {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// allCalendars reads every subscribed calendar once per process,
+// hidden ones included, and filters afterwards.
+//
+// One list, not two. The first version cached only the list WITHOUT
+// hidden calendars, and every caller that wanted the full one — which
+// is every calendar resolution, because a hidden calendar still
+// resolves — went to the network again. `check_availability` on 55
+// addresses re-listed the account's calendars 55 times and then
+// reported `api_requests: 2`, because the batches were counted and the
+// resolutions were not. The visible list is the full one minus the
+// hidden entries, so there is nothing a second fetch could learn.
+func (s *Service) allCalendars(ctx context.Context) ([]model.Calendar, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	if s.calendarsAt && !showHidden {
+	if s.calendarsAt {
 		out := s.calendars
 		s.mu.Unlock()
 		return out, nil
@@ -138,7 +168,7 @@ func (s *Service) Calendars(ctx context.Context, showHidden bool) ([]model.Calen
 	var out []model.Calendar
 	token := ""
 	for {
-		page, err := s.API.ListCalendars(ctx, token, showHidden)
+		page, err := s.API.ListCalendars(ctx, token, true)
 		if err != nil {
 			return nil, err
 		}
@@ -160,11 +190,9 @@ func (s *Service) Calendars(ctx context.Context, showHidden bool) ([]model.Calen
 		return strings.ToLower(out[i].Title) < strings.ToLower(out[j].Title)
 	})
 
-	if !showHidden {
-		s.mu.Lock()
-		s.calendars, s.calendarsAt = out, true
-		s.mu.Unlock()
-	}
+	s.mu.Lock()
+	s.calendars, s.calendarsAt = out, true
+	s.mu.Unlock()
 	return out, nil
 }
 
@@ -356,8 +384,13 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 	sched.Matched = len(sched.Events)
 	if len(sched.Events) > budget {
 		sched.Events = sched.Events[:budget]
-		sched.Truncated = true
 	}
+	// Truncated means the caller is not looking at everything: either
+	// the budget cut the list, or a page is still waiting. Deciding it
+	// from the overflow alone called a read complete when it had stopped
+	// exactly at its budget with more to come — and the token it handed
+	// back said otherwise.
+	sched.Truncated = sched.Matched > budget || sched.NextPageToken != ""
 	return sched, nil
 }
 
@@ -379,31 +412,53 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		opts.OrderBy = "startTime"
 	}
 
-	var out []model.Event
-	requests := 0
-	token := ""
+	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, opts,
+		func(ctx context.Context, opts gapi.EventsListOptions) (*gcal.EventList, error) {
+			return s.API.ListEvents(ctx, c.ID, opts)
+		})
+	return events, requests, token, err
+}
+
+// drain reads pages until the budget is reached or the pages run out.
+//
+// It is §4.5's completeness policy in one place: stop at the budget
+// rather than draining a year of events to throw them away, and hand
+// back the token so the caller can say how to continue. The two read
+// paths had a copy each and had already drifted on what "truncated"
+// means.
+func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, budget int,
+	opts gapi.EventsListOptions,
+	fetch func(context.Context, gapi.EventsListOptions) (*gcal.EventList, error),
+) (events []model.Event, requests int, nextToken string, err error) {
+	// Never ask for more than the budget will keep.
+	//
+	// A page is the unit Google's token points past, so discarding the
+	// tail of a page loses everything between the budget and the page
+	// boundary: with max_events=10 the first page returned 250, ten were
+	// shown, and the token resumed at 251. The other 240 vanished while
+	// the result said it was resumable. Asking for the budget makes the
+	// token line up with what the caller actually saw.
+	if budget > 0 && (opts.MaxResults == 0 || opts.MaxResults > budget) {
+		opts.MaxResults = budget
+	}
 	for {
-		page, err := s.API.ListEvents(ctx, c.ID, opts)
+		page, ferr := fetch(ctx, opts)
 		requests++
-		if err != nil {
-			return nil, requests, "", err
+		if ferr != nil {
+			return nil, requests, "", ferr
 		}
 		for _, raw := range page.Items {
-			e, err := model.FromEvent(c.ID, raw, &zone)
-			if err != nil {
-				return nil, requests, "", err
+			e, cerr := model.FromEvent(calendarID, raw, &zone)
+			if cerr != nil {
+				return nil, requests, "", cerr
 			}
-			out = append(out, e)
+			events = append(events, e)
 		}
-		// Stop at the budget rather than draining a year of events to
-		// throw them away.
-		if page.NextPageToken == "" || len(out) >= budget {
-			token = page.NextPageToken
-			break
+		if page.NextPageToken == "" || len(events) >= budget {
+			return events, requests, page.NextPageToken, nil
 		}
 		opts.PageToken = page.NextPageToken
 	}
-	return out, requests, token, nil
 }
 
 // GetEvent reads one event.
@@ -588,4 +643,316 @@ func weekdayName(v string) string {
 	default:
 		return v
 	}
+}
+
+// ------------------------------------------------------------ instances
+
+// InstanceOptions is what list_instances takes.
+type InstanceOptions struct {
+	// Calendar is a reference, resolved through ResolveCalendar.
+	Calendar string
+	// EventID is the SERIES id. An instance id is not a series id, and
+	// the refusal below says so.
+	EventID  string
+	TimeZone string
+	// From and To bound the occurrences. Both or neither: a half window
+	// cannot be stated absolutely, and §4.5 says every read states its
+	// window.
+	From string
+	To   string
+	// ShowCancelled reveals the occurrences that were removed from the
+	// series, which is what a cancelled instance is (§2.13).
+	ShowCancelled bool
+	MaxEvents     int
+	PageToken     string
+}
+
+// Instances expands one series into its occurrences.
+//
+// One API request per page, and no read of the parent: the occurrences
+// are what was asked for, and fetching the series as well to quote its
+// rule would double the cost of every call for a line the caller can get
+// from get_event.
+func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Instances, error) {
+	if err := s.ready(); err != nil {
+		return render.Instances{}, err
+	}
+	if strings.TrimSpace(o.EventID) == "" {
+		return render.Instances{}, gapi.Errf(gapi.ClassInvalid,
+			"event_id is required: it is the id of the repeating event, which list_events reports as "+
+				"series_id on each occurrence")
+	}
+	c, err := s.ResolveCalendar(ctx, o.Calendar)
+	if err != nil {
+		return render.Instances{}, err
+	}
+	zone, err := s.Zone(ctx, o.TimeZone, c.TimeZone)
+	if err != nil {
+		return render.Instances{}, err
+	}
+
+	out := render.Instances{
+		SeriesID: o.EventID, CalendarID: c.ID, Zone: zone,
+		ShowCancelled: o.ShowCancelled,
+	}
+	opts := gapi.EventsListOptions{
+		TimeZone: zone.Name(), MaxResults: 250,
+		ShowDeleted: o.ShowCancelled, PageToken: o.PageToken,
+	}
+
+	hasFrom, hasTo := strings.TrimSpace(o.From) != "", strings.TrimSpace(o.To) != ""
+	switch {
+	case hasFrom != hasTo:
+		return render.Instances{}, gapi.Errf(gapi.ClassInvalid,
+			"pass both from and to, or neither. Neither means the whole series, as far as the "+
+				"event budget reaches; the result says if it stopped early")
+	case hasFrom:
+		win, werr := s.window(o.From, o.To, zone)
+		if werr != nil {
+			return render.Instances{}, werr
+		}
+		out.Window = &win
+		opts.TimeMin, opts.TimeMax = win.Start.String(), win.End.String()
+	}
+
+	budget := o.MaxEvents
+	if budget <= 0 {
+		budget = s.Cfg.MaxEvents
+	}
+
+	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, opts,
+		func(ctx context.Context, opts gapi.EventsListOptions) (*gcal.EventList, error) {
+			return s.API.ListInstances(ctx, c.ID, o.EventID, opts)
+		})
+	out.Requests = requests
+	if err != nil {
+		return render.Instances{}, instancesError(err, o.EventID)
+	}
+	out.Events, out.NextPageToken = events, token
+	for _, e := range events {
+		if out.Title == "" {
+			out.Title = e.Title
+		}
+		if e.SeriesID != "" {
+			out.SeriesID = e.SeriesID
+		}
+	}
+	if len(out.Events) > budget {
+		out.Events = out.Events[:budget]
+	}
+	// Truncated means the caller is not looking at the whole series:
+	// either the budget cut the list, or a page is still waiting.
+	out.Truncated = len(events) > budget || out.NextPageToken != ""
+	return out, nil
+}
+
+// instancesError explains the mistake this call invites.
+//
+// events.instances wants the SERIES id, and the id a model has in hand
+// is usually an occurrence's — it is what list_events returns with
+// expand=true. Google answers that with a bare "not found", which sends
+// the caller looking for a deleted event.
+func instancesError(err error, id string) error {
+	cls, ok := gapi.ClassOf(err)
+	if !ok || (cls != gapi.ClassNotFound && cls != gapi.ClassInvalid) {
+		return err
+	}
+	return gapi.Wrap(cls, err,
+		"no repeating event with id %s on that calendar. If that id came from list_events with the "+
+			"occurrences expanded, it names one occurrence rather than the series: use the series_id "+
+			"from that occurrence instead", id)
+}
+
+// --------------------------------------------------------- availability
+
+// AvailabilityOptions is what check_availability takes.
+type AvailabilityOptions struct {
+	Calendars []string
+	From      string
+	To        string
+	TimeZone  string
+	// MinMinutes drops free gaps shorter than this. Zero keeps them all.
+	MinMinutes int
+}
+
+// FreeBusyBatch is the API's ceiling on calendars per query (§2.10).
+const FreeBusyBatch = 50
+
+// Availability answers "when is this person free" from freebusy.query.
+//
+// Never from a list of events: a list misses everything whose details
+// the caller cannot see and ignores transparency, so it answers "free"
+// for somebody who is busy (§4.6). The two rules that follow from that
+// are here: a calendar that errored is reported unknown rather than
+// free, and the free gaps say how many calendars they were computed
+// from.
+func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (render.AvailabilityReport, error) {
+	if err := s.ready(); err != nil {
+		return render.AvailabilityReport{}, err
+	}
+	refs := o.Calendars
+	if len(refs) == 0 {
+		refs = []string{"primary"}
+	}
+	if len(refs) > config.MaxFreeBusyCalendars {
+		return render.AvailabilityReport{}, gapi.Errf(gapi.ClassInvalid,
+			"asked about %d calendars; this server answers for at most %d in one availability call. "+
+				"That is not GCAL_MAX_CALENDARS, which bounds the reads that cost a request per calendar: "+
+				"free/busy answers for %d calendars per request (§2.10). Split the request",
+			len(refs), config.MaxFreeBusyCalendars, FreeBusyBatch)
+	}
+
+	ids, firstTZ, err := s.freeBusyTargets(ctx, refs)
+	if err != nil {
+		return render.AvailabilityReport{}, err
+	}
+	zone, err := s.Zone(ctx, o.TimeZone, firstTZ)
+	if err != nil {
+		return render.AvailabilityReport{}, err
+	}
+	win, err := s.window(o.From, o.To, zone)
+	if err != nil {
+		return render.AvailabilityReport{}, err
+	}
+
+	report := render.AvailabilityReport{
+		Window: win, Zone: zone,
+		MinGap: time.Duration(o.MinMinutes) * time.Minute,
+	}
+
+	// §2.10 caps one query at 50 calendars, so more than that is more
+	// than one request — and §4.7 says the result reports how many.
+	for batch := range slices.Chunk(ids, FreeBusyBatch) {
+		req := &gcal.FreeBusyRequest{
+			TimeMin: win.Start.String(), TimeMax: win.End.String(),
+			TimeZone: zone.Name(), CalendarExpansionMax: FreeBusyBatch,
+		}
+		for _, id := range batch {
+			req.Items = append(req.Items, gcal.FreeBusyRequestItem{ID: id})
+		}
+		resp, err := s.API.QueryFreeBusy(ctx, req)
+		report.Requests++
+		if err != nil {
+			return render.AvailabilityReport{}, err
+		}
+		for _, id := range batch {
+			report.Answers = append(report.Answers, answerFor(id, resp, zone))
+		}
+	}
+
+	var busy []model.Busy
+	for _, a := range report.Answers {
+		if a.Unknown {
+			continue
+		}
+		report.GapsFrom++
+		busy = append(busy, a.Busy...)
+	}
+	// Gaps computed from nothing are the whole window, which is the one
+	// answer §4.6 forbids: "nobody could be read" must not arrive as
+	// "everybody is free". The decision is here rather than in the
+	// renderer, so the text and the structured half cannot disagree —
+	// they did, and the JSON was the one offering the window.
+	if report.GapsFrom > 0 {
+		report.Gaps = model.FreeGaps(win, busy, report.MinGap)
+	}
+	return report, nil
+}
+
+// answerFor turns one calendar's slot in the response into an answer,
+// and a missing slot into "unknown" rather than into "free".
+//
+// A calendar Google did not answer for is the case that matters:
+// calendarExpansionMax truncating the query looks exactly like this, and
+// the difference between "no busy blocks" and "no answer" is somebody's
+// meeting.
+func answerFor(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
+	out := model.Availability{CalendarID: id}
+	cal, ok := resp.Calendars[id]
+	if !ok {
+		out.Unknown = true
+		out.Reason = "Google returned no answer for this calendar"
+		return out
+	}
+	if len(cal.Errors) > 0 {
+		out.Unknown = true
+		out.Reason = freeBusyReason(cal.Errors[0])
+		return out
+	}
+	for _, p := range cal.Busy {
+		start, serr := when.ParseZoned(p.Start, zone.Loc)
+		end, eerr := when.ParseZoned(p.End, zone.Loc)
+		if serr != nil || eerr != nil {
+			// Unknown rather than partial: half a busy list read as a
+			// whole one is the shape §4.6 refuses.
+			out.Busy = nil
+			out.Unknown, out.Reason = true, "Google returned a busy period this server could not read"
+			return out
+		}
+		out.Busy = append(out.Busy, model.Busy{Start: start, End: end})
+	}
+	return out
+}
+
+// freeBusyReason says what a per-calendar error means, in the words the
+// caller needs. Google's reasons here are short and unexplained.
+func freeBusyReason(e gcal.FreeBusyError) string {
+	switch e.Reason {
+	case "notFound":
+		return "no such calendar, or this account cannot see it"
+	case "internalError":
+		return "Google failed to read it; try again"
+	case "rateLimitExceeded", "quotaExceeded":
+		return "Google is rate limiting this account"
+	case "":
+		return "Google reported an error without a reason"
+	default:
+		return e.Reason
+	}
+}
+
+// freeBusyTargets turns the caller's references into calendar ids.
+//
+// It deliberately does NOT resolve an address. Free/busy is the one read
+// that works on a calendar this account cannot open (§4.6), so resolving
+// one first would refuse exactly the query the tool exists for — and it
+// would cost two failing round trips per colleague, because a calendar
+// nobody is subscribed to answers neither calendarList.get nor
+// calendars.get.
+//
+// A title is still resolved, because a typo that silently became an id
+// would come back "unknown" and read as a real answer.
+func (s *Service) freeBusyTargets(ctx context.Context, refs []string) (ids []string, firstTZ string, err error) {
+	// The subscribed list, read once, for the zone. A calendar this
+	// account knows carries one; one it cannot read does not, and that
+	// is not a reason to refuse the query.
+	known := map[string]model.Calendar{}
+	if cals, cerr := s.Calendars(ctx, true); cerr == nil {
+		for _, c := range cals {
+			known[c.ID] = c
+		}
+	}
+
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		id := ref
+		if ref == "" || strings.EqualFold(ref, "primary") || !strings.Contains(ref, "@") {
+			c, rerr := s.ResolveCalendar(ctx, ref)
+			if rerr != nil {
+				return nil, "", rerr
+			}
+			id = c.ID
+			known[c.ID] = c
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+		if firstTZ == "" {
+			firstTZ = known[id].TimeZone
+		}
+	}
+	return ids, firstTZ, nil
 }

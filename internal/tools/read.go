@@ -114,6 +114,53 @@ func registerRead(s *mcp.Server, d Deps) {
 		},
 	})
 
+	add(s, d, Def[listInstancesIn, service.InstancesResult]{
+		Name: "list_instances",
+		Description: "The occurrences of one repeating event. " +
+			"`event_id` is the SERIES id, which list_events reports as series_id on each occurrence — an " +
+			"occurrence's own id is not a series id. " +
+			"Pass both from and to for a window, or neither for the whole series. " + zoneHelp + " " +
+			"Each occurrence reports its own id, and says when it was moved from its scheduled time. " +
+			"Cancelled occurrences are hidden unless show_cancelled is set, and a cancelled occurrence is " +
+			"how one date is removed from a series — so pass it when you need to know which dates are gone. " +
+			"Use get_event on the series id to see the recurrence rule itself.",
+		Kind: Read,
+		Handle: func(ctx context.Context, in listInstancesIn) (service.InstancesResult, error) {
+			out, err := d.Service.Instances(ctx, service.InstanceOptions{
+				Calendar: in.Calendar, EventID: in.EventID, TimeZone: in.TimeZone,
+				From: in.From, To: in.To, ShowCancelled: in.ShowCancelled,
+				MaxEvents: in.MaxEvents, PageToken: in.PageToken,
+			})
+			if err != nil {
+				return service.InstancesResult{}, err
+			}
+			return service.NewInstancesResult(out), nil
+		},
+	})
+
+	add(s, d, Def[checkAvailabilityIn, service.AvailabilityResult]{
+		Name: "check_availability",
+		Description: "When people are busy, and when they are free, in a window. " + windowHelp + " " + zoneHelp + " " +
+			"This asks Google's free/busy service rather than listing events, which matters: it sees busy time " +
+			"on calendars whose events you cannot read, and it respects events marked \"free\", so a list of " +
+			"events is not the same answer. " +
+			"A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. " +
+			"The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to " +
+			"use. Working hours are not applied: pass a narrower window if you only want office hours. " +
+			"Calendars are asked in batches of 50, and the result says how many requests that took.",
+		Kind: Read,
+		Handle: func(ctx context.Context, in checkAvailabilityIn) (service.AvailabilityResult, error) {
+			out, err := d.Service.Availability(ctx, service.AvailabilityOptions{
+				Calendars: in.Calendars, From: in.From, To: in.To,
+				TimeZone: in.TimeZone, MinMinutes: in.MinMinutes,
+			})
+			if err != nil {
+				return service.AvailabilityResult{}, err
+			}
+			return service.NewAvailabilityResult(out), nil
+		},
+	})
+
 	add(s, d, Def[getSettingsIn, service.SettingsResult]{
 		Name: "get_settings",
 		Description: "The account's own Calendar settings: its time zone, which day the week starts on, and the " +
@@ -164,6 +211,25 @@ type getEventIn struct {
 	Calendar string `json:"calendar" jsonschema:"The calendar the event is on. An event id is unique per calendar, not globally."`
 	EventID  string `json:"event_id" jsonschema:"The event id, from list_events or search_events."`
 	TimeZone string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the times in."`
+}
+
+type listInstancesIn struct {
+	Calendar      string `json:"calendar" jsonschema:"The calendar the series is on."`
+	EventID       string `json:"event_id" jsonschema:"The repeating event's id. On an occurrence from list_events this is its series_id, not its own id."`
+	From          string `json:"from,omitempty" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Pass both from and to, or neither."`
+	To            string `json:"to,omitempty" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Pass both from and to, or neither."`
+	TimeZone      string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the occurrences in."`
+	ShowCancelled bool   `json:"show_cancelled,omitempty" jsonschema:"Include occurrences that were cancelled, which is how single dates are removed from a series."`
+	MaxEvents     int    `json:"max_events,omitempty" jsonschema:"Cap on occurrences returned. The server has its own budget and says when it truncated."`
+	PageToken     string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+}
+
+type checkAvailabilityIn struct {
+	Calendars  []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read."`
+	From       string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
+	To         string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
+	TimeZone   string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
+	MinMinutes int      `json:"min_minutes,omitempty" jsonschema:"Ignore free gaps shorter than this many minutes."`
 }
 
 type getSettingsIn struct{}

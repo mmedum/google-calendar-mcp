@@ -3,6 +3,9 @@
 /google-calendar-mcp.exe
 /.gates
 /.gates.exe
+# `go build ./scripts/gates` with no -o lands here.
+/gates
+/gates.exe
 /dist/
 
 # Test and gate artefacts

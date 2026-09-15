@@ -1,6 +1,6 @@
 {
   "fetched": "2026-09-15",
-  "note": "Written by `gates api-diff`; nobody edits this. One verdict per method lives in testdata/api-coverage.tsv.",
+  "note": "Written by `gates api-diff`; nobody edits this. One verdict per method lives in testdata/api-coverage.tsv and one per field in testdata/api-fields.tsv.",
   "apis": [
     {
       "api": "calendar",
@@ -199,6 +199,109 @@
       "name": "settings.watch",
       "verb": "POST",
       "path": "users/me/settings/watch"
+    }
+  ],
+  "schemas": [
+    {
+      "resource": "Event",
+      "fields": [
+        "anyoneCanAddSelf",
+        "attachments",
+        "attendees",
+        "attendeesOmitted",
+        "birthdayProperties",
+        "colorId",
+        "conferenceData",
+        "created",
+        "creator",
+        "description",
+        "end",
+        "endTimeUnspecified",
+        "etag",
+        "eventLabelId",
+        "eventType",
+        "extendedProperties",
+        "focusTimeProperties",
+        "gadget",
+        "guestsCanInviteOthers",
+        "guestsCanModify",
+        "guestsCanSeeOtherGuests",
+        "hangoutLink",
+        "htmlLink",
+        "iCalUID",
+        "id",
+        "kind",
+        "location",
+        "locked",
+        "organizer",
+        "originalStartTime",
+        "outOfOfficeProperties",
+        "privateCopy",
+        "recurrence",
+        "recurringEventId",
+        "reminders",
+        "sequence",
+        "source",
+        "start",
+        "status",
+        "summary",
+        "transparency",
+        "updated",
+        "visibility",
+        "workingLocationProperties"
+      ]
+    },
+    {
+      "resource": "Calendar",
+      "fields": [
+        "autoAcceptInvitations",
+        "conferenceProperties",
+        "dataOwner",
+        "description",
+        "etag",
+        "id",
+        "kind",
+        "labelProperties",
+        "location",
+        "summary",
+        "timeZone"
+      ]
+    },
+    {
+      "resource": "CalendarListEntry",
+      "fields": [
+        "accessRole",
+        "autoAcceptInvitations",
+        "backgroundColor",
+        "colorId",
+        "conferenceProperties",
+        "dataOwner",
+        "defaultReminders",
+        "deleted",
+        "description",
+        "etag",
+        "foregroundColor",
+        "hidden",
+        "id",
+        "kind",
+        "location",
+        "notificationSettings",
+        "primary",
+        "selected",
+        "summary",
+        "summaryOverride",
+        "timeZone"
+      ]
+    },
+    {
+      "resource": "AclRule",
+      "fields": [
+        "etag",
+        "id",
+        "kind",
+        "role",
+        "scope"
+      ]
     }
   ]
 }

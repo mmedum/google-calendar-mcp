@@ -74,6 +74,12 @@ const (
 	// DefaultConcurrency bounds requests in flight during a fan-out.
 	DefaultConcurrency = 4
 	MaxConcurrency     = 16
+	// MaxFreeBusyCalendars bounds one availability call, and is higher
+	// than MaxCalendars because the cost is different: a schedule read
+	// spends one request per calendar, while free/busy answers for 50 in
+	// one (§2.10). Asking about a whole team is the ordinary case for
+	// that tool and would otherwise be refused at 25.
+	MaxFreeBusyCalendars = 100
 )
 
 // Config is the validated runtime configuration.

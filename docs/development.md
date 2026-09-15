@@ -24,9 +24,11 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make licenses` | the dependency licence allow-list |
 | `make secrets` | gitleaks |
 | `make api-coverage` | every published API method is used or written off, with a reason |
+| `make api-fields` | every published field of the four main resources is modelled or written off, with a reason |
 | `make classes` | the error vocabulary is closed **from both sides** |
 | `make leaks` | no deployer-specific data in the tree |
 | `make pins` | actions pinned to SHAs, tools pinned to versions |
+| `make live-cover` | every published tool has a step in the live driver |
 | `make parity` | `make check` and `ci.yml` run the same things |
 | `make schema-diff` | the tool surface against the last tag |
 | `make smoke` | the binary over stdio, and a clean exit on disconnect |
@@ -62,10 +64,33 @@ twice reported success while its results were wrong.
 2. Put the logic in `internal/service`, not the handler. The handlers are
    thin so the rules are testable in one place.
 3. Add it to the README's tool table, or `make staleness` fails.
-4. Look at `make schema-diff` for anything breaking.
+4. Add a step to `scripts/livecal`, or `make live-cover` fails. A tool
+   with no live step is the one nobody remembers to drive: the fake
+   answers it, every test passes, and the first real call is a user's.
+5. Look at `make schema-diff` for anything breaking.
 
 ## Adding an API call
 
 `make api-coverage` fails on a client method with no verdict. Add a row
 to `testdata/api-coverage.tsv` saying `used` with the method that
 implements it, or `out` with why not.
+
+## Adding a wire field
+
+`make api-fields` fails on a field of `Event`, `Calendar`,
+`CalendarListEntry` or `AclRule` that `internal/gcal` carries with no row
+in `testdata/api-fields.tsv`, and on a row saying `out` for a field the
+code actually reads. Fields come from the discovery document through
+`make api-diff`, so a field Google adds arrives as a gate failure naming
+it rather than as silence.
+
+## Renderer golden files
+
+`testdata/golden/` holds what each renderer prints. A change to how a
+schedule reads shows up as a diff somebody has to look at:
+
+```
+go test ./internal/render -update
+```
+
+Regenerating is one flag; reading the diff is the part that matters.

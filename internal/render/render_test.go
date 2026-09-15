@@ -143,7 +143,9 @@ func TestRecurrenceIsExplained(t *testing.T) {
 		{"RRULE:FREQ=DAILY", "every day"},
 		{"RRULE:FREQ=DAILY;INTERVAL=3", "every 3 days"},
 		{"RRULE:FREQ=WEEKLY;BYDAY=TU", "every week on Tuesday"},
-		{"RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE", "every 2 weeks on Monday, Wednesday"},
+		{"RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE", "every 2 weeks on Monday and Wednesday"},
+		{"RRULE:FREQ=MONTHLY;BYDAY=2TU", "2nd Tuesday"},
+		{"RRULE:FREQ=MONTHLY;BYMONTHDAY=-1", "last day"},
 		{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10", "10 times"},
 		{"RRULE:FREQ=MONTHLY", "every month"},
 		{"RRULE:FREQ=YEARLY", "every year"},
@@ -301,5 +303,75 @@ func TestDuration(t *testing.T) {
 		if got := render.Duration(c.in); got != c.want {
 			t.Fatalf("Duration(%s) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestBothLineRenderersCarryTheSameTags.
+//
+// The two views had their own tag lists, and the instances view had
+// quietly stopped showing four of them. A reader looking at one series
+// would not have been told that an occurrence is out of office, that
+// Google truncated its guest list, that nobody set an end time, or that
+// it does not make anybody busy.
+func TestBothLineRenderersCarryTheSameTags(t *testing.T) {
+	z := zone(t, "Europe/Copenhagen")
+	e := timed(t, "2026-03-16T09:00:00+01:00", "2026-03-16T10:00:00+01:00", "Europe/Copenhagen")
+	e.Type = gcal.EventTypeOutOfOffice
+	e.EndInvented = true
+	e.AttendeesTruncated = true
+	e.Transparent = true
+	e.Location = "Room 4"
+	e.Attendees = []model.Attendee{{Email: "a@example.test"}}
+
+	schedule := render.EventLine(e, z)
+	instance := render.InstanceLine(e, z)
+
+	for _, want := range []string{
+		"out of office", "no end time set", "guest list truncated by Google",
+		"free", "at Room 4", "1 guest",
+	} {
+		if !strings.Contains(schedule, want) {
+			t.Fatalf("EventLine does not mention %q:\n%s", want, schedule)
+		}
+		if !strings.Contains(instance, want) {
+			t.Fatalf("InstanceLine does not mention %q:\n%s", want, instance)
+		}
+	}
+	// And the one deliberate difference: an occurrence says which date
+	// was removed, not merely that something was cancelled.
+	e.Status = gcal.StatusCancelled
+	if got := render.InstanceLine(e, z); !strings.Contains(got, "removed from the series") {
+		t.Fatalf("a cancelled occurrence reads as an ordinary cancellation:\n%s", got)
+	}
+	if got := render.EventLine(e, z); !strings.Contains(got, "cancelled") {
+		t.Fatalf("EventLine lost its cancelled tag:\n%s", got)
+	}
+}
+
+// TestAFreeGapAcrossMidnightShowsBothDates. A multi-day window is the
+// ordinary case for availability, and "2026-03-20 17:00-09:00" reads as
+// ending before it began.
+func TestAFreeGapAcrossMidnightShowsBothDates(t *testing.T) {
+	z := zone(t, "Europe/Copenhagen")
+	start, err := when.ParseZoned("2026-03-20T17:00:00+01:00", z.Loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, err := when.ParseZoned("2026-03-21T09:00:00+01:00", z.Loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := when.NewWindow(start, end, z.Loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := render.AvailabilityReport{
+		Window: w, Zone: z, GapsFrom: 1,
+		Answers: []model.Availability{{CalendarID: "primary"}},
+		Gaps:    []when.Window{w},
+	}
+	got := rep.Text()
+	if !strings.Contains(got, "2026-03-20 17:00 to 2026-03-21 09:00") {
+		t.Fatalf("a gap across midnight does not show both dates:\n%s", got)
 	}
 }

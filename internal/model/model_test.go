@@ -2,6 +2,7 @@ package model_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/model"
@@ -196,5 +197,184 @@ func TestCanWrite(t *testing.T) {
 		if got := (model.Calendar{Role: role}).CanWrite(); got != want {
 			t.Fatalf("CanWrite(%q) = %v, want %v", role, got, want)
 		}
+	}
+}
+
+// zoned is a helper for the interval arithmetic below.
+func zonedAt(t *testing.T, s string, loc *time.Location) when.Zoned {
+	t.Helper()
+	z, err := when.ParseZoned(s, loc)
+	if err != nil {
+		t.Fatalf("ParseZoned(%q): %v", s, err)
+	}
+	return z
+}
+
+func busyAt(t *testing.T, start, end string, loc *time.Location) model.Busy {
+	t.Helper()
+	return model.Busy{Start: zonedAt(t, start, loc), End: zonedAt(t, end, loc)}
+}
+
+func gapStrings(gaps []when.Window) []string {
+	out := make([]string, 0, len(gaps))
+	for _, g := range gaps {
+		out = append(out, g.Start.T.Format("15:04")+"-"+g.End.T.Format("15:04"))
+	}
+	return out
+}
+
+func TestMergeBusy(t *testing.T) {
+	loc, err := when.LoadLocation("Europe/Copenhagen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		in   []model.Busy
+		want []string
+	}{
+		{"nothing", nil, nil},
+		{
+			name: "two people busy at once is one busy block",
+			in: []model.Busy{
+				busyAt(t, "2026-03-16T09:00:00+01:00", "2026-03-16T10:00:00+01:00", loc),
+				busyAt(t, "2026-03-16T09:30:00+01:00", "2026-03-16T10:30:00+01:00", loc),
+			},
+			want: []string{"09:00-10:30"},
+		},
+		{
+			name: "touching blocks join, because there is no gap between them",
+			in: []model.Busy{
+				busyAt(t, "2026-03-16T09:00:00+01:00", "2026-03-16T10:00:00+01:00", loc),
+				busyAt(t, "2026-03-16T10:00:00+01:00", "2026-03-16T11:00:00+01:00", loc),
+			},
+			want: []string{"09:00-11:00"},
+		},
+		{
+			name: "a block inside another disappears into it",
+			in: []model.Busy{
+				busyAt(t, "2026-03-16T09:00:00+01:00", "2026-03-16T12:00:00+01:00", loc),
+				busyAt(t, "2026-03-16T10:00:00+01:00", "2026-03-16T11:00:00+01:00", loc),
+			},
+			want: []string{"09:00-12:00"},
+		},
+		{
+			name: "separate blocks stay separate, in order",
+			in: []model.Busy{
+				busyAt(t, "2026-03-16T14:00:00+01:00", "2026-03-16T15:00:00+01:00", loc),
+				busyAt(t, "2026-03-16T09:00:00+01:00", "2026-03-16T10:00:00+01:00", loc),
+			},
+			want: []string{"09:00-10:00", "14:00-15:00"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := model.Merge(c.in)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %d blocks, want %d", len(got), len(c.want))
+			}
+			for i, b := range got {
+				s := b.Start.T.Format("15:04") + "-" + b.End.T.Format("15:04")
+				if s != c.want[i] {
+					t.Fatalf("block %d = %s, want %s", i, s, c.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFreeGaps(t *testing.T) {
+	loc, err := when.LoadLocation("Europe/Copenhagen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := when.NewWindow(
+		zonedAt(t, "2026-03-16T09:00:00+01:00", loc),
+		zonedAt(t, "2026-03-16T17:00:00+01:00", loc), loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		busy []model.Busy
+		min  time.Duration
+		want []string
+	}{
+		{"nobody is busy", nil, 0, []string{"09:00-17:00"}},
+		{
+			name: "one meeting leaves two gaps",
+			busy: []model.Busy{busyAt(t, "2026-03-16T12:00:00+01:00", "2026-03-16T13:00:00+01:00", loc)},
+			want: []string{"09:00-12:00", "13:00-17:00"},
+		},
+		{
+			name: "busy from the start leaves one gap",
+			busy: []model.Busy{busyAt(t, "2026-03-16T09:00:00+01:00", "2026-03-16T12:00:00+01:00", loc)},
+			want: []string{"12:00-17:00"},
+		},
+		{
+			name: "busy all window leaves none",
+			busy: []model.Busy{busyAt(t, "2026-03-16T08:00:00+01:00", "2026-03-16T18:00:00+01:00", loc)},
+			want: nil,
+		},
+		{
+			name: "a meeting outside the window changes nothing",
+			busy: []model.Busy{busyAt(t, "2026-03-16T19:00:00+01:00", "2026-03-16T20:00:00+01:00", loc)},
+			want: []string{"09:00-17:00"},
+		},
+		{
+			name: "overlapping meetings do not produce a gap between them",
+			busy: []model.Busy{
+				busyAt(t, "2026-03-16T10:00:00+01:00", "2026-03-16T12:00:00+01:00", loc),
+				busyAt(t, "2026-03-16T11:00:00+01:00", "2026-03-16T13:00:00+01:00", loc),
+			},
+			want: []string{"09:00-10:00", "13:00-17:00"},
+		},
+		{
+			name: "min drops the gaps too short to use",
+			busy: []model.Busy{
+				busyAt(t, "2026-03-16T09:15:00+01:00", "2026-03-16T12:00:00+01:00", loc),
+				busyAt(t, "2026-03-16T12:20:00+01:00", "2026-03-16T17:00:00+01:00", loc),
+			},
+			min:  30 * time.Minute,
+			want: nil,
+		},
+		{
+			name: "min keeps the gaps that are long enough",
+			busy: []model.Busy{busyAt(t, "2026-03-16T09:15:00+01:00", "2026-03-16T12:00:00+01:00", loc)},
+			min:  30 * time.Minute,
+			want: []string{"12:00-17:00"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := gapStrings(model.FreeGaps(window, c.busy, c.min))
+			if len(got) != len(c.want) {
+				t.Fatalf("got %v, want %v", got, c.want)
+			}
+			for i := range c.want {
+				if got[i] != c.want[i] {
+					t.Fatalf("gap %d = %s, want %s (all: %v)", i, got[i], c.want[i], got)
+				}
+			}
+		})
+	}
+}
+
+// TestFreeGapsAcrossADaylightSavingTransition: the 29 March day is 23
+// hours long in Copenhagen, and a free gap over it must be 23 hours
+// rather than the 24 an arithmetic on dates would report.
+func TestFreeGapsAcrossADaylightSavingTransition(t *testing.T) {
+	loc, err := when.LoadLocation("Europe/Copenhagen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := when.DayWindow(when.MustParseDate("2026-03-29"), loc)
+	gaps := model.FreeGaps(day, nil, 0)
+	if len(gaps) != 1 {
+		t.Fatalf("got %d gaps over an empty day", len(gaps))
+	}
+	if got := gaps[0].Duration(); got != 23*time.Hour {
+		t.Fatalf("the day of the spring-forward transition was reported as %v, want 23h", got)
 	}
 }

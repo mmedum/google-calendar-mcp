@@ -1,14 +1,28 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 0 built and verified live (2026-09-15).** The
-scaffolding, the gates, the time model and the six read tools are in;
-`make check` is green across all seventeen of its targets; and the live
-driver has run against a real Workspace account — 19 steps, none failed,
-none undetermined, and the transcript was read rather than counted.
-Spike D passed. Spike G answered its positive half. **One thing is still
-owed: spike G's negative half**, which needs a profile logged in with
-`GCAL_SHARING=off`, and which is the half the scope decision in §10
-actually rests on.
+**Status: phase 1 built, not yet run live (2026-09-15).** Phase 0 —
+the scaffolding, the gates, the time model and the six read tools — is
+built, verified live and committed. Phase 1 adds `internal/recur`,
+`list_instances` and `check_availability`, taking the read surface to
+eight tools; `make check` is green across nineteen targets. **Nothing in
+phase 1 counts until the driver runs against a real account and its
+transcript is read** (§13), and three spikes are built and waiting for
+exactly that: C (a recurrence written with no zone), H (free/busy on a
+calendar nobody can read) and I (the 50-calendar ceiling at 51). Still
+owed from phase 0: **spike G's negative half**, which needs a profile
+logged in with `GCAL_SHARING=off`, and CI has never run on macOS or
+Windows.
+
+**What phase 1 found in phase 0's own record.** Three gates this
+document listed as part of `make check` did not exist: `api-fields`,
+`live-cover` and `mcpb`. `parity` did not notice, because it compares
+`make check` with CI and both were equally short — a list of gates is
+not a gate. `internal/gcal`'s doc comment said a gate held its field
+list; it did not. `testdata/golden/` was an empty directory while §13
+described golden files as part of the test surface. Phase 1 built the
+first two gates and the golden files; `mcpb` belongs with the bundle in
+phase 4. The first thing `live-cover` did was fail on both tools phase 1
+had just added, which is the argument for it.
 
 **What the live run found that the gates could not.** Two defects, both
 in code that reads as obviously correct. Event ids are base32hex —
@@ -53,9 +67,9 @@ preamble says to expect.
 **Everything here was checked against the Calendar API v3 discovery
 document** (`www.googleapis.com/discovery/v1/apis/calendar/v3/rest`,
 revision 20260826, fetched 2026-09-15), the Calendar guides, and the
-public MCP calendar servers named in §1. §18 is the evidence log. Nine
-of its twenty rows refute an assumption this design started out
-holding, and one of the nine reversed the single most consequential
+public MCP calendar servers named in §1. §18 is the evidence log. Eleven
+of its thirty-two rows refute an assumption this design started out
+holding, and one of them reversed the single most consequential
 decision in it — §4.3, where the maintainer's own proposed default
 turned out to be the thing Google warns in writing can lose a user's
 events.
@@ -592,6 +606,24 @@ the busy set, in the resolved zone — because the question behind the
 question is almost always "when can we meet", and making the model do
 interval arithmetic over a list is how a meeting gets booked at 02:00.
 
+Three details are decided, all in phase 1:
+
+- **A calendar missing from the response is unknown**, exactly like one
+  that errored. That is what a query truncated at `calendarExpansionMax`
+  looks like from here: no busy list, no error, no row.
+- **An address is not resolved before it is asked about.** Free/busy is
+  the one read that works on a calendar this account cannot open, so
+  resolving the reference first would refuse the query the tool exists
+  for. A title is still resolved, because a typo that silently became an
+  id would come back "unknown" and read as a real answer.
+- **Its own ceiling.** One call asks about at most 100 calendars, not
+  `GCAL_MAX_CALENDARS`, because the cost is different: a schedule read
+  spends a request per calendar and this spends one per fifty. The
+  refusal says which limit it is, so nobody changes the wrong setting.
+
+`min_minutes` drops gaps too short to use. Working hours are NOT applied
+(§17.2).
+
 ### 7.4 Writing events
 
 `create_event`, `update_event`, `cancel_event`, `move_event`,
@@ -749,8 +781,16 @@ written off with a reason. Without it, "we support events" hides the fact
 that `attachments`, `extendedProperties`, `gadget` and the four
 event-type property blocks were never considered.
 
-Phase 0 writes the record for every field; the write path fills the
-verdicts in as the phases reach them.
+Phase 1 writes the record: 81 fields, 56 modelled and 25 written off,
+each with a reason. `api-diff` records the field list from the discovery
+document alongside the methods, so a field Google adds arrives as a gate
+failure naming it. The write path fills verdicts in as the phases reach
+them, and a reason of the form `planned=N` names the phase that will.
+
+Phase 0 was supposed to write this record and did not, while
+`internal/gcal`'s own doc comment said a gate held the list. Nothing
+noticed, because `parity` compares `make check` with CI and both were
+equally short.
 
 ## 9. Confidentiality, security, safety
 
@@ -918,8 +958,15 @@ terminal first.
 `make check` and CI run the same set, asserted by the `parity` gate:
 `fmt`, `vet` (including the tagged tests), `tidy`, `lint`, `cover`,
 `vuln`, `licenses`, `secrets`, `api-coverage`, `api-fields`, `classes`,
-`leaks`, `transcript`, `live-cover`, `mcpb`, `parity`, `pins`,
-`schema-diff`, `smoke`, `staleness`.
+`leaks`, `transcript`, `live-cover`, `parity`, `pins`, `schema-diff`,
+`smoke`, `staleness` — nineteen targets.
+
+`mcpb`, the bundle manifest gate, is the one this list named before it
+existed. It arrives with the bundle in phase 4; until then it is in §16
+as owed rather than here as done. Three gates were named here while
+absent — `api-fields`, `live-cover` and `mcpb` — and the first two were
+built in phase 1. A list of gates is not a gate, which is the same
+mistake, one level up, that this family of checks exists to catch.
 
 **Green gates are not done.** Anything touching the write path or a
 response shape gets a live run before it counts, and **the transcript is
@@ -962,7 +1009,12 @@ states its question and its verdict separately.
   If it reproduces, §4.3 may need to refuse `none` on insert outright.
 - **Spike C — daylight saving.** A weekly recurrence at 09:00 local,
   spanning a transition, written with a zone and written without one.
-  Confirm the drift and confirm its absence.
+  Confirm the drift and confirm its absence. *The zoned half is
+  confirmed (§18 row 23). Built in phase 1: the driver now writes the
+  same series with no `timeZone` and reads its occurrences back, so the
+  unzoned half answers on the next live run — including the outcome
+  where Google refuses it outright, which would put §2.2's "required"
+  behind the API rather than behind the reference page.*
 - **Spike D — all-day events west of UTC.** Create one from a
   negative-offset zone and read it back from a positive-offset one.
   This is §3's first row and the most common defect in the category.
@@ -978,9 +1030,18 @@ states its question and its verdict separately.
   later if wrong.
 - **Spike H — free/busy on an unreadable calendar.** Query a calendar the
   user cannot read and confirm the per-calendar error shape §4.6 depends
-  on.
+  on. *Built in phase 1 as a `check_availability` step: the query must
+  succeed, the calendar must come back UNKNOWN rather than free, and the
+  free gaps must say they were computed from fewer calendars than were
+  asked about.*
 - **Spike I — the 50-calendar ceiling.** Confirm `calendarExpansionMax`
-  behaves as documented at 50 and at 51.
+  behaves as documented at 50 and at 51. *Built in phase 1, and it goes
+  through the driver's own API rather than the tool, because the server
+  batches at 50 and would never produce the request the spike is about.
+  The answer that matters is whether 51 is refused or silently
+  truncated: a truncation arrives as a calendar missing from the
+  response, which §4.6 reports as unknown — and that is the case the
+  code now has and nobody had seen.*
 
 ## 16. Delivery phases
 
@@ -1013,9 +1074,102 @@ rather than later because it costs an afternoon and is the difference
 between a vocabulary and a habit. Spikes D and G. A live run whose
 transcript is read.
 
-**Phase 1 — recurrence and availability (v0.1.0).** `internal/recur`;
-`list_instances` and `check_availability`; the `expand`/`series` decision
-of §7.2 and the free-gap arithmetic of §7.3. Spikes C, H and I.
+**Phase 1 — recurrence and availability (v0.1.0). Built 2026-09-15,
+NOT yet run live.** `internal/recur`: RFC 5545 rules parsed once for the
+whole server, expansion that walks dates and carries the wall clock
+(§2.2), EXDATE and RDATE, and the three scopes of §4.2 with the
+`this_and_following` arithmetic phase 2 will call. `list_instances` and
+`check_availability`, taking the read surface to eight tools. The
+free-gap arithmetic of §7.3, in `internal/model` beside the busy
+intervals it works on. The `expand`/`series` decision was already
+built in phase 0.
+
+Phase 1 also repaid two of phase 0's debts, both of them gates this
+document listed as done while they did not exist: **`api-fields`** (§8b,
+81 verdicts) and **`live-cover`**, which holds every published tool to
+having a step in the live driver — it caught both new tools immediately.
+`testdata/golden/` was an empty directory; the renderers have golden
+files now. Outstanding: **the `mcpb` bundle gate**, which belongs with
+the bundle in phase 4, and **spike G's negative half** from phase 0.
+
+Spikes C, H and I are built and wait for a live run. Nothing in this
+phase counts until that run happens and its transcript is read.
+
+**What the phase 1 review found, and what was left.** Thirteen defects,
+none of which the test suite caught — every gate was green when the review
+started, and the reviews that found them ran the code rather than
+reading it.
+
+Six were in `internal/recur`, and they share a shape: the expansion was
+right about the hard thing (a wall clock across a transition) and wrong
+about the ordinary ones. An `RDATE` was appended after the walk and so
+escaped the window; `BYDAY` was walked in the order it was written, so
+`WE,MO` and `MO,WE` answered differently; `BYDAY` and `BYMONTHDAY` were
+treated as alternatives where RFC 5545 intersects them; a yearly rule
+ignored `BYDAY` entirely, which is every "fourth Thursday in November"
+holiday; a series ending exactly at the read limit was reported as
+endless, in the refusal text §4.2 makes a scope decision from; and
+"this and following" counted visible occurrences where a COUNT counts
+generated ones, so an excluded date lost an occurrence and an added one
+made the two halves overlap. Each is now a test written as the
+reproduction that found it.
+
+Two were about paging, and they are the same mistake twice: a page is
+the unit Google's token points past. `list_instances` asked for a page
+of 250, kept the caller's `max_events`, and handed back the token for
+the whole page — losing everything in between while saying the read was
+resumable. `list_events` decided truncation from the overflow alone, so
+a read that stopped exactly at its budget called itself complete. The
+fake was complicit: it ignored `maxResults`, so neither could be
+reproduced against it. It honours it now, which is what Google does.
+
+And two in the tool surface: `check_availability` resolved every calendar
+reference through `ResolveCalendar`, which re-listed the account's
+calendars once per reference because the cache only ever held the list
+*without* hidden calendars — and then spent two more failing round trips
+per address that was not in it. Asking about 55 colleagues cost 168 HTTP
+requests to set up a query the result reported as 2, which is §4.7's
+"one tool call is one API request" failing quietly in the direction the
+result cannot show. One cached list and no resolution for an address
+takes it to 4, and a test now fails if the count creeps back. A second
+defect: with every calendar unknown, the text said free time could not
+be computed while the structured half still offered the whole window as
+free — the two halves of one result disagreeing about exactly the thing
+§4.6 exists to prevent. The decision moved into the service, where both
+halves read it.
+
+Three smaller ones, all of them things a reader would have seen and a
+test did not: `list_instances` and `list_events` had separate tag lists,
+so an occurrence never said it was out of office, had no end time set,
+or carried a guest list Google had truncated; an `UNTIL` that is an
+instant was honoured on a timed series and ignored on an all-day one;
+and a free gap crossing midnight rendered as `17:00-09:00`, which reads
+as ending before it began.
+
+Four suggestions were considered and not taken, recorded here rather
+than lost:
+
+- **One generic expansion driver in `internal/recur`.** `ExpandDates`
+  and `ExpandTimes` share the date walker — the part that matters — but
+  repeat the loop around it. The duplication had already caused one
+  drift, an instant `UNTIL` honoured on the timed path and ignored on
+  the all-day one; that is fixed and tested. The generic version is
+  worth doing when phase 2 gives the all-day path its first caller,
+  which is also when it can be tested against real use.
+- **One table-driven record gate.** `api-coverage`, `api-fields` and
+  `live-cover` are the same shape three times: a published set, a
+  hand-written verdict set, failure in both directions, a reason on
+  every write-off, a tally. Collapsing them restructures phase 0's gates
+  and phase 1 is not the place. The concrete gap that review found *is*
+  fixed: `api-coverage` never implemented the "a client call with no row
+  fails" direction this document and CLAUDE.md rule 11 both promised.
+- **`live-cover`'s exemptions as a TSV**, like the other two records.
+  Kept as a map in the driver's own source deliberately: an exemption
+  says why a tool cannot be driven, and it belongs beside the steps it
+  is an exception to.
+- **`MaxFreeBusyCalendars` as a setting.** §7.3 decided the two ceilings
+  differ, not that both should be configurable. One more knob whose
+  right value is the API's own limit is a knob nobody should turn.
 
 **Phase 2 — writing events (v0.2.0).** The write path: `plan` and its
 guards, `If-Match`, the client-generated id, `dry_run`. `create_event`,
@@ -1045,6 +1199,20 @@ bundle exercised from a real install; and whatever §17 is still holding.
    takes a working-window parameter, or leaves the filtering to the
    model, is undecided. Leaning toward a parameter with no default, on
    §4.3's reasoning. **Open.**
+
+   Phase 1 shipped `check_availability` without one, and the argument
+   that should decide it is now clear. **A window is one interval;
+   working hours are a daily mask.** Over a single day the two are the
+   same thing and the model can narrow the window itself. Over "next
+   week" they are not: the model cannot express 09:00–17:00 on five days
+   as one window, so it either accepts a fifteen-hour overnight gap in
+   the answer or makes five calls, which is five requests against §11's
+   budget. `min_minutes` does not help — an overnight gap is the longest
+   one in the list and passes any minimum.
+
+   Adding an optional parameter later is additive, so shipping without
+   one blocks nothing. The decision is which of the two the server
+   should own, and the daily-mask point is the one to decide it on.
 3. **Conferencing.** Creating a Meet link is a `conferenceData`
    `createRequest` with a caller-generated `requestId`, and it is in
    scope by §1's boundary. Whether it is a parameter on `create_event` or
@@ -1103,6 +1271,11 @@ what §15 exists to settle, and they are marked.
 | 24 | `acl.list` needs `calendar.acls.readonly` (§2.15) | Discovery document; **spike G live, 2026-09-15 — positive half only** | **Confirmed from the primary source; the negative half is deliberately not probed.** With the scope granted, `acl.list` succeeds. Proving it is *refused* without the scope needs a grant that never had it — and Google stores a grant per OAuth client and user, so a later authorization asking for less does not revoke what was already given. Getting a clean negative would mean revoking this server's access at the account level and logging in again, which throws away the working login to re-confirm what the discovery document already states plainly: `acl.get` lists `calendar.readonly` among its scopes and `acl.list` does not. **The consequence is contained**, which is why this is acceptable: if §2.15 is wrong, the only cost is one scope on the consent screen that nothing needs, and `get_calendar` already reports a refused sharing read as a note rather than as an empty list (§7.1). Spike G stays in §15 and answers itself the first time anyone runs the driver under a narrower grant |
 | 27 | A profile's recorded scopes are the ones the account granted | Live, 2026-09-15 | **Refuted.** `login` stored what it *asked for*, so `status` presented a request as a fact about the grant — a scope Google refused would have been listed as held. It now records what `tokeninfo` reports the token actually carries, falling back to the request only when that call fails. Spike G reads the live token for the same reason: the recorded list would let it answer confidently and wrongly |
 | 25 | `tokeninfo` reports which account signed in | Live, 2026-09-15 | **Refuted.** It returns an email only when an email scope was granted, and this server asks for none — so the account was silently blank and `status` had a field that could never populate. The account is now read from the primary calendar's id, which is the address, and costs no extra scope. Asking for `userinfo.email` was rejected: a calendar server should not need to read a profile to say whose calendar it is looking at |
+| 28 | The `Event` resource has 44 published properties, and the four resources this server models have 81 between them | Discovery document, revision 20260826, fetched 2026-09-15 | **Confirmed, and now held by a gate.** `api-diff` records the field list beside the methods and `api-fields` holds one verdict per field: 56 modelled, 25 written off. The count in §8b is no longer a number somebody typed |
+| 29 | `colorId` is how an event's colour is set | Discovery document, `Event.eventLabelId` | **Superseded, and worth knowing before phase 2 writes a colour.** `eventLabelId` "supersedes the index-based colorId property" and refers to a label defined on the calendar (`Calendar.labelProperties`). Both are written off for now; §8b's row says so rather than leaving the newer field unmentioned |
+| 30 | A daylight-saving transition is an hour | tzdata, through `internal/recur`'s table tests | **Refuted.** Australia/Lord_Howe shifts by 30 minutes, so the week containing its transition is 168h30m. The expansion walks dates and carries the wall clock, so the size of the shift never enters the arithmetic — the test asserts the gap to prove the transition was really there |
+| 31 | `events.instances` takes any event id | Discovery document, `events.instances` | **Unverified, and deliberately not guessed. Tier 3.** The parameter is documented only as "Recurring event identifier". What Google returns for an id that exists but is not a series — 404, 400, or the instance itself — is not stated, so `caltest` picks 400 with a comment saying it is a choice, the server explains the mistake for both, and the live driver records the real answer. The part that is this server's to get right is the message: a bare "not found" sends a caller looking for a deleted event when they passed an occurrence's id |
+| 32 | `EXDATE` and `RDATE` carry a `TZID` parameter, or a `VALUE=DATE` form on an all-day series | RFC 5545 §3.8.5, and the shape Google returns in `recurrence` | **Asserted from the specification, not probed live. Tier 3.** `internal/recur` parses both and resolves a bare local time in the series' own zone. An all-day point stays a date and yields no instant, which is §4.1 again. A series carrying anything this package cannot expand — `EXRULE`, a second `RRULE`, a frequency below DAILY — is refused rather than expanded, because a count that is quietly too large is the number a caller would put in front of a user |
 | 26 | Redirecting the config directory and the environment isolates a test | Live, the hard way, 2026-09-15 | **Refuted, having been written down here first.** The OS keyring cannot be redirected by either, so `go test ./cmd/...` found the maintainer's real refresh token under the default profile, revoked the grant at Google and deleted it. `TestMain` now substitutes the keyring for the whole package, with a decoy test that fails if that is ever dropped. The sibling servers carry the same warning; having it in the source did not prevent it |
 
 ### Deviations from the shared Go MCP server standard

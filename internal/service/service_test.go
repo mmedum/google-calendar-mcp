@@ -335,12 +335,20 @@ func TestBudgetTruncatesAndSaysSo(t *testing.T) {
 	if !sched.Truncated {
 		t.Fatal("a read past its budget did not report truncation")
 	}
-	if sched.Matched <= len(sched.Events) {
-		t.Fatalf("matched %d, shown %d; a truncated read must say how many it found",
-			sched.Matched, len(sched.Events))
+	if len(sched.Events) != 1 {
+		t.Fatalf("a budget of 1 returned %d events", len(sched.Events))
+	}
+	// A read that stops at its budget with more to come has to say so
+	// and hand back a way to continue. It used to report itself
+	// complete, because truncation was decided from the overflow alone.
+	if sched.NextPageToken == "" {
+		t.Fatal("a truncated read gave no page token to continue from")
 	}
 	if !strings.Contains(sched.Text(), "budget") {
 		t.Fatalf("the rendered text does not mention truncation:\n%s", sched.Text())
+	}
+	if !strings.Contains(sched.Text(), "there are more") {
+		t.Fatalf("the text does not say the list is incomplete:\n%s", sched.Text())
 	}
 }
 
@@ -594,5 +602,37 @@ func TestSettingsAreReadOnce(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("settings were read %d times; every read needs the zone, so they are cached", n)
+	}
+}
+
+// TestHiddenCalendarStillResolvesByTitle.
+//
+// Resolution looks at every calendar, hidden ones included: a calendar
+// hidden in the Calendar UI is still one this account can read, and
+// "not found" for it would be a lie (§6.1). The list is now read once
+// and filtered, so this is the assertion that the filter is applied
+// where it should be and not to the resolution.
+func TestHiddenCalendarStillResolvesByTitle(t *testing.T) {
+	fake := caltest.Seed()
+	fake.Entries["readonly@group.calendar.example.test"].Hidden = true
+	svc := newService(t, fake)
+	ctx := context.Background()
+
+	got, err := svc.ResolveCalendar(ctx, "Sample Readonly")
+	if err != nil {
+		t.Fatalf("a hidden calendar must still resolve by title: %v", err)
+	}
+	if got.ID != "readonly@group.calendar.example.test" {
+		t.Fatalf("resolved to %q", got.ID)
+	}
+
+	visible, err := svc.Calendars(ctx, false)
+	if err != nil {
+		t.Fatalf("Calendars: %v", err)
+	}
+	for _, c := range visible {
+		if c.ID == got.ID {
+			t.Fatal("the hidden calendar appeared in the visible list")
+		}
 	}
 }

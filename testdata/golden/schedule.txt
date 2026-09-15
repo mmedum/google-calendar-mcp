@@ -1,0 +1,16 @@
+2026-03-16T00:00:00+01:00 to 2026-03-21T00:00:00+01:00 (Europe/Copenhagen)
+times are in Europe/Copenhagen, the calendar's own time zone
+calendars: Sample Primary
+recurring events are shown once, as a series with its rule
+
+2026-03-16 (Monday)
+  09:00-09:15  Morning sync  [2 guests]
+  13:00-14:00  Blocked but free  [free]
+
+2026-03-17 (Tuesday)
+  14:00-15:00  Weekly review  [series: every week on Tuesday, 10 times]
+
+2026-03-20 (Friday)
+  2026-03-20  all day  Public holiday
+
+4 events.

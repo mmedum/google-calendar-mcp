@@ -18,11 +18,17 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_ENABLE_DESTRUCTIVE` | `-enable-destructive` | `false` | Register `delete_calendar` and `clear_calendar`. Each still needs `confirm` on the call. |
 | `GCAL_SHARING` | `-sharing` | `on` | `on` or `off`. Off removes the calendar sharing tools entirely. |
 | `GCAL_MAX_EVENTS` | `-max-events` | `250` | Default event budget for one read. The result says when it truncated. |
-| `GCAL_MAX_CALENDARS` | `-max-calendars` | `25` | How many calendars one call may fan out across. The API caps free/busy expansion at 50. |
+| `GCAL_MAX_CALENDARS` | `-max-calendars` | `25` | How many calendars one call may fan out across, for the reads that cost one request per calendar: `list_events` and `search_events`. Maximum 50. |
 | `GCAL_CONCURRENCY` | `-concurrency` | `4` | Requests in flight during a fan-out. |
 | `GCAL_HTTP_TIMEOUT` | `-http-timeout` | `60s` | Per-attempt timeout for a read. |
 | `GCAL_WRITE_TIMEOUT` | `-write-timeout` | `120s` | Timeout for a write. |
 | `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. |
+
+`check_availability` is the exception to `GCAL_MAX_CALENDARS`: it asks
+about at most 100 calendars per call, because free/busy answers for 50
+per request where a schedule read spends one request per calendar. That
+ceiling is not configurable, and the refusal says which limit it is so
+nobody changes the wrong setting.
 
 Two more are read directly rather than through a flag:
 

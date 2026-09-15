@@ -8,6 +8,7 @@
 package model
 
 import (
+	"sort"
 	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
@@ -138,6 +139,24 @@ func (e Event) IsRecurring() bool { return e.IsSeries() || e.IsInstance() }
 // Cancelled reports whether the event is cancelled (§2.13).
 func (e Event) Cancelled() bool { return e.Status == gcal.StatusCancelled }
 
+// Moved reports whether this occurrence sits somewhere other than where
+// the series put it.
+//
+// The rule lives here rather than in the renderer and the result
+// builder, which each had their own copy: originalStartTime is the
+// instance's scheduled start and the difference between it and the
+// start is exactly an exception somebody made (§6.2).
+func (e Event) Moved() bool {
+	switch {
+	case e.OriginalStart.AllDay && e.Start.AllDay:
+		return !e.OriginalStart.Date.IsZero() && e.OriginalStart.Date != e.Start.Date
+	case !e.OriginalStart.At.IsZero() && !e.Start.At.IsZero():
+		return !e.OriginalStart.At.T.Equal(e.Start.At.T)
+	default:
+		return false
+	}
+}
+
 // ReachesPeople reports whether a write to this event can email
 // somebody, which is what makes `notify` required (§4.3.2). An event
 // with no guests but the organiser has no notification decision to make.
@@ -223,4 +242,75 @@ type Availability struct {
 	Busy       []Busy
 	Unknown    bool
 	Reason     string
+}
+
+// Merge returns the busy intervals of every calendar as one ordered,
+// non-overlapping set.
+//
+// Two people busy at the same time is one busy block, not two, and
+// subtracting overlapping intervals one at a time from a window is how a
+// gap gets counted twice. Merging first makes the arithmetic below
+// trivial and is the only place the overlap rule lives.
+func Merge(busy []Busy) []Busy {
+	if len(busy) == 0 {
+		return nil
+	}
+	ordered := make([]Busy, len(busy))
+	copy(ordered, busy)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Start.T.Before(ordered[j].Start.T) })
+
+	out := []Busy{ordered[0]}
+	for _, b := range ordered[1:] {
+		last := &out[len(out)-1]
+		// Touching counts as overlapping: an event ending at 10:00 and
+		// one starting at 10:00 leave no gap between them, and reporting
+		// a zero-length gap there is noise a caller has to filter.
+		if !b.Start.T.After(last.End.T) {
+			if b.End.T.After(last.End.T) {
+				last.End = b.End
+			}
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// FreeGaps is the window with the busy intervals taken out of it.
+//
+// It is here rather than left to the caller because the question behind
+// "is this person free" is almost always "when can we meet", and a model
+// doing interval arithmetic over a list of busy blocks is how a meeting
+// gets booked at 02:00 (§7.3).
+//
+// min drops gaps shorter than a meeting worth having; a zero min keeps
+// them all. What this does NOT do is decide what counts as working
+// hours: the API has no such field, 09:00 is not 09:00 everywhere, and
+// §17.2 leaves that choice to the caller, who can narrow the window.
+func FreeGaps(w when.Window, busy []Busy, min time.Duration) []when.Window {
+	var out []when.Window
+	cursor := w.Start
+	add := func(from, to when.Zoned) {
+		if !to.T.After(from.T) {
+			return
+		}
+		if to.T.Sub(from.T) < min {
+			return
+		}
+		out = append(out, when.Window{Start: from, End: to, Loc: w.Loc})
+	}
+
+	for _, b := range Merge(busy) {
+		if !b.End.T.After(w.Start.T) || !b.Start.T.Before(w.End.T) {
+			continue // entirely outside the window
+		}
+		if b.Start.T.After(cursor.T) {
+			add(cursor, b.Start.In(w.Loc))
+		}
+		if b.End.T.After(cursor.T) {
+			cursor = b.End.In(w.Loc)
+		}
+	}
+	add(cursor, w.End)
+	return out
 }

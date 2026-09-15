@@ -49,6 +49,9 @@ func apiDiff(out io.Writer) error {
 		Version   string                  `json:"version"`
 		Revision  string                  `json:"revision"`
 		Resources map[string]resourceNode `json:"resources"`
+		Schemas   map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		} `json:"schemas"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return fmt.Errorf("parse the discovery document: %w (the committed snapshot is unchanged)", err)
@@ -60,9 +63,24 @@ func apiDiff(out io.Writer) error {
 	}
 	sort.Slice(methods, func(i, j int) bool { return methods[i].Name < methods[j].Name })
 
+	schemas := make([]schemaRow, 0, len(fieldResources))
+	for _, name := range fieldResources {
+		schema, ok := doc.Schemas[name]
+		if !ok {
+			return fmt.Errorf("the discovery document has no %s schema; refusing to overwrite the snapshot", name)
+		}
+		fields := make([]string, 0, len(schema.Properties))
+		for f := range schema.Properties {
+			fields = append(fields, f)
+		}
+		sort.Strings(fields)
+		schemas = append(schemas, schemaRow{Resource: name, Fields: fields})
+	}
+
 	next := apiSurface{
 		Fetched: time.Now().UTC().Format("2006-01-02"),
 		Methods: methods,
+		Schemas: schemas,
 	}
 	next.APIs = append(next.APIs, struct {
 		API      string `json:"api"`
@@ -76,10 +94,12 @@ func apiDiff(out io.Writer) error {
 		Note    string `json:"note"`
 		APIs    any    `json:"apis"`
 		Methods any    `json:"methods"`
+		Schemas any    `json:"schemas"`
 	}{
 		Fetched: next.Fetched,
-		Note:    "Written by `gates api-diff`; nobody edits this. One verdict per method lives in testdata/api-coverage.tsv.",
-		APIs:    next.APIs, Methods: next.Methods,
+		Note: "Written by `gates api-diff`; nobody edits this. One verdict per method lives in " +
+			"testdata/api-coverage.tsv and one per field in testdata/api-fields.tsv.",
+		APIs: next.APIs, Methods: next.Methods, Schemas: next.Schemas,
 	}, "", "  ")
 	if err != nil {
 		return err
@@ -98,7 +118,8 @@ func apiDiff(out io.Writer) error {
 	if before != nil {
 		reportChanges(out, before, &next)
 	}
-	_, _ = fmt.Fprintf(out, "  snapshot rewritten: %d methods, revision %s\n", len(methods), doc.Revision)
+	_, _ = fmt.Fprintf(out, "  snapshot rewritten: %d methods, %d resources, revision %s\n",
+		len(methods), len(schemas), doc.Revision)
 	return nil
 }
 
@@ -129,6 +150,8 @@ func walkResources(res map[string]resourceNode, prefix string) []methodRow {
 }
 
 func reportChanges(out io.Writer, before, after *apiSurface) {
+	reportFieldChanges(out, before, after)
+
 	had := map[string]methodRow{}
 	for _, m := range before.Methods {
 		had[m.Name] = m
@@ -149,6 +172,33 @@ func reportChanges(out io.Writer, before, after *apiSurface) {
 	for name := range had {
 		if _, still := has[name]; !still {
 			_, _ = fmt.Fprintf(out, "  GONE    %s — remove its verdict\n", name)
+		}
+	}
+}
+
+// reportFieldChanges names the fields that appeared or vanished, which
+// is what somebody has to write a verdict for.
+func reportFieldChanges(out io.Writer, before, after *apiSurface) {
+	had := map[string]bool{}
+	for _, s := range before.Schemas {
+		for _, f := range s.Fields {
+			had[s.Resource+"."+f] = true
+		}
+	}
+	has := map[string]bool{}
+	for _, s := range after.Schemas {
+		for _, f := range s.Fields {
+			has[s.Resource+"."+f] = true
+		}
+	}
+	for name := range has {
+		if !had[name] {
+			_, _ = fmt.Fprintf(out, "  NEW     field %s — needs a verdict in api-fields.tsv\n", name)
+		}
+	}
+	for name := range had {
+		if !has[name] {
+			_, _ = fmt.Fprintf(out, "  GONE    field %s — remove its verdict\n", name)
 		}
 	}
 }

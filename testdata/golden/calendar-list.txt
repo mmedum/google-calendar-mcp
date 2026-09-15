@@ -1,0 +1,20 @@
+3 calendars.
+
+Sample Primary
+  id: primary
+  time zone: Europe/Copenhagen
+  your access: owner — can see and change everything, including who else has access
+  your primary calendar
+
+Team (renamed)
+  (you renamed this; others see "Sample Team")
+  id: team@group.calendar.example.test
+  time zone: America/Chicago
+  your access: writer — can see and change events, including private ones
+
+Sample Readonly
+  id: readonly@group.calendar.example.test
+  time zone: UTC
+  your access: freeBusyReader — can see only whether the time is busy, never what the event is
+  hidden from your calendar list; its events are not drawn in the Calendar UI
+

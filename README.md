@@ -101,15 +101,17 @@ Every setting is in `docs/configuration.md`.
 | `list_events` | The events on one or more calendars in a window. |
 | `search_events` | Free-text search across a window. |
 | `get_event` | One event, with its guests and their responses. |
+| `list_instances` | The occurrences of one repeating event, with the dates that were moved or removed. |
+| `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. |
 | `get_settings` | The account's time zone, week start and colour palette. |
 
-Read-only by default in the sense that matters: phase 0 has no write
-tools at all. `GCAL_READONLY=true` additionally requests only read
-scopes, so the API itself refuses a write.
+Read-only by default in the sense that matters: there are no write tools
+yet. `GCAL_READONLY=true` additionally requests only read scopes, so the
+API itself refuses a write.
 
 ## Safety
 
-- Nothing is destructive in phase 0: there are no write tools at all.
+- Nothing here is destructive: there are no write tools yet.
   When writes arrive, the two that remove something Calendar cannot bring
   back — deleting a calendar, and clearing every event from one — will be
   unregistered unless `GCAL_ENABLE_DESTRUCTIVE=true`, and will still need

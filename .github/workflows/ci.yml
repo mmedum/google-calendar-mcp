@@ -65,10 +65,14 @@ jobs:
         run: make classes
       - name: API coverage
         run: make api-coverage
+      - name: API field coverage
+        run: make api-fields
       - name: leak scan
         run: make leaks
       - name: transcript redaction
         run: make transcript
+      - name: live driver coverage
+        run: make live-cover
       - name: workflow pins
         run: make pins
       - name: make/CI parity

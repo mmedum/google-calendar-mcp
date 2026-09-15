@@ -13,8 +13,10 @@
 //	go run ./scripts/gates coverage cov.out 80
 //	go run ./scripts/gates classes
 //	go run ./scripts/gates api-coverage
+//	go run ./scripts/gates api-fields
 //	go run ./scripts/gates leaks [history]
 //	go run ./scripts/gates transcript
+//	go run ./scripts/gates live-cover ./google-calendar-mcp
 //	go run ./scripts/gates pins
 //	go run ./scripts/gates parity
 //	go run ./scripts/gates smoke ./google-calendar-mcp
@@ -32,8 +34,9 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fail("usage: gates coverage PROFILE MIN | classes | api-coverage | api-diff | leaks [history] | " +
-			"transcript | pins | parity | smoke BIN | schema-diff BIN | staleness BIN")
+		fail("usage: gates coverage PROFILE MIN | classes | api-coverage | api-fields | api-diff | " +
+			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
+			"staleness BIN")
 	}
 	root, err := repoRoot()
 	if err != nil {
@@ -50,8 +53,12 @@ func main() {
 		check(classGate(), "error classes")
 	case "api-coverage":
 		check(apiCoverageGate(), "API coverage")
+	case "api-fields":
+		check(apiFieldsGate(), "API field coverage")
 	case "transcript":
 		check(transcriptGate(), "transcript redaction")
+	case "live-cover":
+		check(liveCoverGate(binArg()), "live driver coverage")
 	case "api-diff":
 		// Manual: it reaches the network. What CI holds is the snapshot
 		// this writes, not the fetch itself — the standard's split

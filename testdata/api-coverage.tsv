@@ -8,9 +8,9 @@
 # gate, a client call with no row fails, and a verdict for a method that
 # no longer exists fails.
 #
-# Phase 0 implements the reads. A row marked `used` whose client method
-# does not exist yet names the phase that builds it, and the gate treats
-# that as a promise rather than a lie — see planned= below.
+# Phases 0 and 1 implement the reads. A row marked `used` whose client
+# method does not exist yet names the phase that builds it, and the gate
+# treats that as a promise rather than a lie — see planned= below.
 #
 # api	method	verdict	reason
 calendar	acl.delete	used	planned=3 unshare_calendar
@@ -40,14 +40,14 @@ calendar	events.delete	used	planned=2 cancel_event, whole event
 calendar	events.get	used	gapi.GetEvent, behind get_event
 calendar	events.import	out	carries a private copy of an event between systems, preserving iCalUID and organiser: a migration tool, not a scheduling one, with different failure modes (§1)
 calendar	events.insert	used	planned=2 create_event, with a client-generated id (§2.11)
-calendar	events.instances	used	planned=1 list_instances
+calendar	events.instances	used	gapi.ListInstances, behind list_instances
 calendar	events.list	used	gapi.ListEvents, behind list_events and search_events
 calendar	events.move	used	planned=2 move_event
 calendar	events.patch	used	planned=2 every event write; §4.4 patches always
 calendar	events.quickAdd	out	parses a natural-language string, but gives no control over the time zone and does not report which fields it set; the model calling this server is a better parser (§17.4)
 calendar	events.update	out	PUT: drops attendees, RSVPs and recurrence when they are omitted. §4.4, and this is the method that rule exists for
 calendar	events.watch	out	needs a public HTTPS webhook (§1)
-calendar	freebusy.query	used	planned=1 check_availability
+calendar	freebusy.query	used	gapi.QueryFreeBusy, behind check_availability; batched at 50 (§2.10)
 calendar	settings.get	out	settings.list returns every setting in one request
 calendar	settings.list	used	gapi.ListSettings, behind get_settings and §4.1's zone resolution
 calendar	settings.watch	out	needs a public HTTPS webhook (§1)

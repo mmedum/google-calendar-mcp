@@ -314,3 +314,145 @@ type SettingsResult struct {
 
 // Render implements Rendered.
 func (r SettingsResult) Render() string { return r.text }
+
+// InstancesResult is list_instances.
+type InstancesResult struct {
+	SeriesID   string `json:"series_id"`
+	CalendarID string `json:"calendar_id"`
+	Title      string `json:"title,omitempty"`
+	// Window is absent when the caller asked about the whole series.
+	Window     *WindowOut      `json:"window,omitempty"`
+	TimeZone   string          `json:"time_zone"`
+	ZoneSource string          `json:"time_zone_source"`
+	Instances  []OccurrenceOut `json:"instances"`
+	Shown      int             `json:"shown"`
+	Truncated  bool            `json:"truncated"`
+	// CancelledHidden says a cancelled occurrence would not be in this
+	// list. It is the difference between "the series has these dates"
+	// and "the series has these dates plus ones somebody removed".
+	CancelledHidden bool   `json:"cancelled_hidden"`
+	NextPageToken   string `json:"next_page_token,omitempty"`
+	Requests        int    `json:"api_requests"`
+
+	text string
+}
+
+// OccurrenceOut is one occurrence, with what makes it differ from the
+// rest of the series.
+type OccurrenceOut struct {
+	EventOut
+	// OriginalStart is where this occurrence was scheduled before
+	// anybody moved it. It identifies the instance even after the move
+	// (§6.2), which is why it is reported rather than inferred.
+	OriginalStart string `json:"original_start,omitempty"`
+	Moved         bool   `json:"moved,omitempty"`
+	Cancelled     bool   `json:"cancelled,omitempty"`
+}
+
+// Render implements Rendered.
+func (r InstancesResult) Render() string { return r.text }
+
+// NewInstancesResult builds the reply.
+func NewInstancesResult(in render.Instances) InstancesResult {
+	out := InstancesResult{
+		SeriesID: in.SeriesID, CalendarID: in.CalendarID, Title: in.Title,
+		TimeZone: in.Zone.Name(), ZoneSource: string(in.Zone.Source),
+		Shown: len(in.Events), Truncated: in.Truncated,
+		CancelledHidden: !in.ShowCancelled,
+		NextPageToken:   in.NextPageToken, Requests: in.Requests,
+		text: in.Text(),
+	}
+	if in.Window != nil {
+		out.Window = &WindowOut{From: in.Window.Start.String(), To: in.Window.End.String()}
+	}
+	for _, e := range in.Events {
+		occ := OccurrenceOut{EventOut: NewEventOut(e), Cancelled: e.Cancelled(), Moved: e.Moved()}
+		switch {
+		case e.OriginalStart.AllDay:
+			occ.OriginalStart = e.OriginalStart.Date.String()
+		case !e.OriginalStart.At.IsZero():
+			occ.OriginalStart = e.OriginalStart.At.String()
+		}
+		out.Instances = append(out.Instances, occ)
+	}
+	return out
+}
+
+// AvailabilityResult is check_availability.
+type AvailabilityResult struct {
+	Window     WindowOut `json:"window"`
+	TimeZone   string    `json:"time_zone"`
+	ZoneSource string    `json:"time_zone_source"`
+	// Calendars carries one answer each, in the order asked. An answer
+	// is busy intervals or unknown — never an empty list standing in for
+	// a calendar that could not be read (§4.6).
+	Calendars []AvailabilityOut `json:"calendars"`
+	Free      []IntervalOut     `json:"free"`
+	// FreeFrom is how many calendars the free gaps were computed from.
+	// Zero means none could be read, and Free is empty rather than the
+	// whole window (§4.6).
+	FreeFrom int `json:"free_computed_from"`
+	// MinMinutes echoes the filter, so a caller can tell an empty Free
+	// from one their own filter emptied.
+	MinMinutes int `json:"min_minutes,omitempty"`
+	// Unknown is how many calendars could not be read. A caller that
+	// reads Free without reading this is booking blind.
+	Unknown  int `json:"unknown_calendars"`
+	Requests int `json:"api_requests"`
+
+	text string
+}
+
+// AvailabilityOut is one calendar's answer.
+type AvailabilityOut struct {
+	CalendarID string        `json:"calendar_id"`
+	Busy       []IntervalOut `json:"busy"`
+	Unknown    bool          `json:"unknown,omitempty"`
+	Reason     string        `json:"unknown_reason,omitempty"`
+}
+
+// IntervalOut is a span, absolute at both ends and with its length said
+// once so a caller does not compute it.
+type IntervalOut struct {
+	Start   string `json:"start"`
+	End     string `json:"end"`
+	Minutes int    `json:"minutes"`
+}
+
+// Render implements Rendered.
+func (r AvailabilityResult) Render() string { return r.text }
+
+// NewAvailabilityResult builds the reply.
+func NewAvailabilityResult(rep render.AvailabilityReport) AvailabilityResult {
+	out := AvailabilityResult{
+		Window:   WindowOut{From: rep.Window.Start.String(), To: rep.Window.End.String()},
+		TimeZone: rep.Zone.Name(), ZoneSource: string(rep.Zone.Source),
+		MinMinutes: int(rep.MinGap.Minutes()),
+		FreeFrom:   rep.GapsFrom,
+		Unknown:    rep.Unknown(), Requests: rep.Requests,
+		text: rep.Text(),
+	}
+	for _, a := range rep.Answers {
+		ans := AvailabilityOut{CalendarID: a.CalendarID, Unknown: a.Unknown, Reason: a.Reason}
+		for _, b := range a.Busy {
+			ans.Busy = append(ans.Busy, interval(b.Start, b.End))
+		}
+		// An unknown calendar reports no busy list at all. An empty one
+		// would read as "free", which is the confusion §4.6 is about.
+		if ans.Busy == nil && !a.Unknown {
+			ans.Busy = []IntervalOut{}
+		}
+		out.Calendars = append(out.Calendars, ans)
+	}
+	for _, g := range rep.Gaps {
+		out.Free = append(out.Free, interval(g.Start, g.End))
+	}
+	return out
+}
+
+func interval(start, end when.Zoned) IntervalOut {
+	return IntervalOut{
+		Start: start.String(), End: end.String(),
+		Minutes: int(end.T.Sub(start.T).Minutes()),
+	}
+}

@@ -86,7 +86,18 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		out.Printf("could not fill the scratch calendar: %v\n", err)
 		return 2
 	}
-	out.Printf("filled with %d invented events\n\n", len(seedEvents()))
+	// One occurrence of the weekly series is removed, because a
+	// cancelled instance is how a single date leaves a series and
+	// list_instances exists to show which dates are gone.
+	state := seedState{}
+	cancelled, err := api.removeOneOccurrence(ctx, scratch)
+	if err != nil {
+		out.Printf("could not cancel one occurrence: %v\n", redact.String(err.Error()))
+		return 2
+	}
+	state.cancelledOccurrence = cancelled
+	out.Printf("filled with %d invented events; the occurrence on %s was cancelled\n\n",
+		len(seedEvents()), cancelled)
 
 	sess, err := startServer(ctx, bin, profile)
 	if err != nil {
@@ -96,24 +107,34 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	defer sess.close()
 
 	r := &results{out: out}
-	for _, st := range steps(scratch) {
+	for _, st := range steps(scratch, state) {
 		r.run(ctx, sess, st)
 	}
 
-	// Spike G does not go through the tool surface: it asks what the
-	// GRANT allows, which is a question about the scopes rather than
-	// about a tool.
-	r.total++
-	v, note := spikeG(ctx, out, api, scratch)
-	switch v {
-	case pass:
-		out.Printf("ok    %-28s %s\n", "spike G: acl scopes", note)
-	case undetermined:
-		r.undetermined++
-		out.Printf("?     %-28s %s\n", "spike G: acl scopes", note)
-	default:
-		r.failed++
-		out.Printf("FAIL  %-28s %s\n", "spike G: acl scopes", note)
+	// The spikes that do not go through the tool surface. Each asks
+	// something about the API itself — what a grant allows, what Google
+	// does with a recurrence carrying no zone, where the free/busy
+	// ceiling really is — which no tool call can answer.
+	for _, sp := range []struct {
+		name string
+		run  func(context.Context, *redact.Printer, *liveAPI, string) (verdict, string)
+	}{
+		{"spike G: acl scopes", spikeG},
+		{"spike C: unzoned series", spikeC},
+		{"spike I: 50 vs 51 calendars", spikeI},
+	} {
+		r.total++
+		v, note := sp.run(ctx, out, api, scratch)
+		switch v {
+		case pass:
+			out.Printf("ok    %-28s %s\n", sp.name, note)
+		case undetermined:
+			r.undetermined++
+			out.Printf("?     %-28s %s\n", sp.name, note)
+		default:
+			r.failed++
+			out.Printf("FAIL  %-28s %s\n", sp.name, note)
+		}
 	}
 
 	out.Printf("\n%d steps, %d failed, %d undetermined\n", r.total, r.failed, r.undetermined)
@@ -202,7 +223,15 @@ const (
 	scratchZone = "Europe/Copenhagen"
 )
 
-func steps(scratch string) []step {
+// liveUncovered names tools that have no step here, and why.
+//
+// `gates live-cover` reads it: a tool with neither a step nor an entry
+// fails the gate, and an entry with no reason fails it too. The map can
+// only shrink — a tool listed here and driven anyway also fails, so an
+// exemption cannot outlive the reason for it.
+var liveUncovered = map[string]string{}
+
+func steps(scratch string, state seedState) []step {
 	window := map[string]any{"from": "2026-03-15", "to": "2026-03-31"}
 	cal := func(extra map[string]any) map[string]any {
 		out := map[string]any{"calendars": []string{scratch}}
@@ -441,6 +470,168 @@ func steps(scratch string) []step {
 					return fail, "the timed event does not render its start in the calendar's zone"
 				}
 				return pass, "rendered 09:00 in " + scratchZone
+			},
+		},
+		{
+			name: "list_instances whole series",
+			tool: "list_instances",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "occurrence") {
+					return fail, "the result does not report occurrences"
+				}
+				// The cancelled one must NOT be here, and the result has
+				// to say it is hiding it.
+				if strings.Contains(r.text, state.cancelledOccurrence) {
+					return fail, "a cancelled occurrence appeared without show_cancelled"
+				}
+				if !strings.Contains(r.text, "Cancelled occurrences are hidden") {
+					return fail, "the result hides cancelled occurrences without saying so"
+				}
+				return pass, "occurrences listed, cancelled one hidden and declared"
+			},
+		},
+		{
+			name: "list_instances show_cancelled",
+			tool: "list_instances",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID, "show_cancelled": true},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, state.cancelledOccurrence) {
+					return fail, "the cancelled occurrence on " + state.cancelledOccurrence + " is still missing"
+				}
+				if !strings.Contains(r.text, "CANCELLED") {
+					return fail, "the cancelled occurrence is not marked as one"
+				}
+				return pass, "the removed date is shown and marked"
+			},
+		},
+		{
+			name: "list_instances window",
+			tool: "list_instances",
+			args: map[string]any{
+				"calendar": scratch, "event_id": weeklyID,
+				"from": "2026-03-17", "to": "2026-03-18",
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "2026-03-17") {
+					return fail, "the first occurrence is missing from its own window"
+				}
+				if strings.Contains(r.text, "2026-03-31") {
+					return fail, "an occurrence outside the window came back"
+				}
+				return pass, "one occurrence, inside the window"
+			},
+		},
+		{
+			// DST through list_instances: every occurrence of the zoned
+			// series must read 14:00, including the ones after 29 March.
+			name: "instances hold their clock",
+			tool: "list_instances",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID, "time_zone": scratchZone},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				for _, drifted := range []string{"13:00-14:00", "15:00-16:00"} {
+					if strings.Contains(r.text, drifted) {
+						return fail, "an occurrence drifted to " + drifted
+					}
+				}
+				if n := strings.Count(r.text, "14:00-15:00"); n < 2 {
+					return undetermined, "fewer than two occurrences came back; nothing to compare"
+				}
+				return pass, "every occurrence at 14:00 local, across the transition"
+			},
+		},
+		{
+			name: "list_instances rejects an occurrence id",
+			tool: "list_instances",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID + "_20260324t130000z"},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "an occurrence id was accepted as a series id"
+				}
+				// The class is Google's choice and is what this step
+				// records; what this server owes is the explanation.
+				if !strings.Contains(r.text, "series_id") {
+					return fail, "the refusal does not explain the mistake: " + truncate(r.text, 200)
+				}
+				return pass, "refused, and said which id to use: " + firstLine(truncate(r.text, 120))
+			},
+		},
+		{
+			name: "check_availability",
+			tool: "check_availability",
+			args: map[string]any{
+				"calendars": []string{scratch},
+				"from":      "2026-03-16", "to": "2026-03-16",
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "busy") && !strings.Contains(r.text, "free") {
+					return fail, "the result says neither busy nor free"
+				}
+				// The seeded timed probe is 09:00-10:00, so the day is
+				// not free all through.
+				if strings.Contains(r.text, "free for the whole window") {
+					return fail, "a calendar with an event on it came back free for the whole window"
+				}
+				return pass, "busy blocks and free gaps reported"
+			},
+		},
+		{
+			name: "free gaps filtered",
+			tool: "check_availability",
+			args: map[string]any{
+				"calendars": []string{scratch},
+				"from":      "2026-03-16", "to": "2026-03-16", "min_minutes": 30,
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "30m or longer") {
+					return fail, "the result does not echo the filter it applied"
+				}
+				return pass, "gaps of 30 minutes or more"
+			},
+		},
+		{
+			// SPIKE H. A calendar this account cannot read must come back
+			// UNKNOWN, never folded into free (§4.6). The id is invented
+			// and belongs to nobody.
+			name: "spike H: unreadable calendar",
+			tool: "check_availability",
+			args: map[string]any{
+				"calendars": []string{scratch, noSuchCalendar},
+				"from":      "2026-03-16", "to": "2026-03-16",
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "the whole query failed instead of reporting one calendar as unknown: " +
+						truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "UNKNOWN") {
+					return fail, "an unreadable calendar was not reported unknown"
+				}
+				if !strings.Contains(r.text, "Do not treat this as free") {
+					return fail, "the result does not warn against reading unknown as free"
+				}
+				if !strings.Contains(r.text, "could not be read") {
+					return fail, "the free gaps do not say a calendar was missing from them"
+				}
+				return pass, "CONFIRMS §4.6: per-calendar error, reported unknown, gaps qualified"
 			},
 		},
 		{

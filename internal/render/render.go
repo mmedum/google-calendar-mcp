@@ -21,6 +21,7 @@ import (
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/model"
+	"github.com/mmedum/google-calendar-mcp/internal/recur"
 	"github.com/mmedum/google-calendar-mcp/internal/when"
 )
 
@@ -92,7 +93,16 @@ func (s Schedule) Text() string {
 func (s Schedule) footer() string {
 	var b strings.Builder
 	if s.Truncated {
-		fmt.Fprintf(&b, "Showing %d of %d events — the read hit its budget.", len(s.Events), s.Matched)
+		// "Showing 1 of 1 events" is what this said when the read
+		// stopped exactly at its budget: the total is not known, because
+		// not knowing it is the point of a budget. Say what is true —
+		// there are more — rather than a ratio that reads as complete.
+		if s.Matched > len(s.Events) {
+			fmt.Fprintf(&b, "Showing %d of %d events — the read hit its budget.", len(s.Events), s.Matched)
+		} else {
+			fmt.Fprintf(&b, "%d event%s — the read hit its budget, and there are more.",
+				len(s.Events), plural(len(s.Events)))
+		}
 		if s.NextPageToken != "" {
 			b.WriteString(" Pass page_token to continue.")
 		}
@@ -111,12 +121,38 @@ func EventLine(e model.Event, z when.Zone) string {
 	var b strings.Builder
 	b.WriteString(TimeRange(e, z))
 	b.WriteString("  ")
-	title := e.Title
-	if title == "" {
-		title = "(no title)"
-	}
-	b.WriteString(title)
+	b.WriteString(Title(e))
 
+	tags := commonTags(e)
+	if e.IsSeries() {
+		tags = append(tags, "series: "+Recurrence(e.Recurrence))
+	}
+	if e.IsInstance() {
+		tags = append(tags, "one occurrence")
+	}
+	if len(tags) > 0 {
+		fmt.Fprintf(&b, "  [%s]", strings.Join(tags, "; "))
+	}
+	return b.String()
+}
+
+// Title is the event's title, or a stand-in. An empty title is a real
+// thing on a real calendar and rendering nothing for it loses the row.
+func Title(e model.Event) string {
+	if e.Title == "" {
+		return "(no title)"
+	}
+	return e.Title
+}
+
+// commonTags are the marks every view of an event carries.
+//
+// One list, because the two line renderers each had their own and the
+// instances view had quietly stopped showing four of them: an
+// out-of-office occurrence, an invented end time, a guest list Google
+// truncated, and an event that does not make anybody busy. A tag added
+// to one view and not the other is the same defect waiting to happen.
+func commonTags(e model.Event) []string {
 	var tags []string
 	if e.Cancelled() {
 		tags = append(tags, "cancelled")
@@ -125,12 +161,6 @@ func EventLine(e model.Event, z when.Zone) string {
 		// Worth saying: it is on the calendar and does not make the
 		// person busy, which is the distinction §4.6 turns on.
 		tags = append(tags, "free")
-	}
-	if e.IsSeries() {
-		tags = append(tags, "series: "+Recurrence(e.Recurrence))
-	}
-	if e.IsInstance() {
-		tags = append(tags, "one occurrence")
 	}
 	if t := eventTypeTag(e.Type); t != "" {
 		tags = append(tags, t)
@@ -147,10 +177,7 @@ func EventLine(e model.Event, z when.Zone) string {
 	if e.Location != "" {
 		tags = append(tags, "at "+e.Location)
 	}
-	if len(tags) > 0 {
-		fmt.Fprintf(&b, "  [%s]", strings.Join(tags, "; "))
-	}
-	return b.String()
+	return tags
 }
 
 // TimeRange renders an event's span.
@@ -183,91 +210,24 @@ func TimeRange(e model.Event, z when.Zone) string {
 	return fmt.Sprintf("%s-%s", start, e.End.At.T.Format("15:04"))
 }
 
-// Recurrence explains an RRULE in prose, falling back to the rule itself.
+// Recurrence explains a recurrence in prose, falling back to the rule
+// itself.
 //
-// It explains rather than reformats: a caller who wrote the rule should
-// see their rule, and a reader who did not should see what it means.
+// The parsing lives in internal/recur, which is also what validates a
+// rule on a write and what expands one. One parser, so a rule cannot
+// read one way in a result and another way in a guard.
 func Recurrence(rules []string) string {
-	for _, r := range rules {
-		if !strings.HasPrefix(strings.ToUpper(r), "RRULE:") {
-			continue
+	set, err := recur.Parse(rules)
+	if err != nil {
+		// An unreadable rule is shown as itself. A caller who wrote it
+		// recognises their own line, and a wrong explanation is worse
+		// than none.
+		if len(rules) > 0 {
+			return rules[0]
 		}
-		if s := explainRRule(r); s != "" {
-			return s
-		}
-		return r
+		return "repeats"
 	}
-	if len(rules) > 0 {
-		return rules[0]
-	}
-	return "repeats"
-}
-
-func explainRRule(rule string) string {
-	body := rule[strings.Index(rule, ":")+1:]
-	parts := map[string]string{}
-	for _, kv := range strings.Split(body, ";") {
-		if i := strings.Index(kv, "="); i > 0 {
-			parts[strings.ToUpper(kv[:i])] = kv[i+1:]
-		}
-	}
-	freq := strings.ToUpper(parts["FREQ"])
-	var out string
-	interval := parts["INTERVAL"]
-	switch freq {
-	case "DAILY":
-		out = "every day"
-		if interval != "" && interval != "1" {
-			out = "every " + interval + " days"
-		}
-	case "WEEKLY":
-		out = "every week"
-		if interval != "" && interval != "1" {
-			out = "every " + interval + " weeks"
-		}
-		if d := parts["BYDAY"]; d != "" {
-			out += " on " + weekdays(d)
-		}
-	case "MONTHLY":
-		out = "every month"
-		if interval != "" && interval != "1" {
-			out = "every " + interval + " months"
-		}
-	case "YEARLY":
-		out = "every year"
-	default:
-		return ""
-	}
-	if c := parts["COUNT"]; c != "" {
-		out += ", " + c + " times"
-	}
-	if u := parts["UNTIL"]; u != "" {
-		out += ", until " + u
-	}
-	return out
-}
-
-var dayNames = map[string]string{
-	"MO": "Monday", "TU": "Tuesday", "WE": "Wednesday", "TH": "Thursday",
-	"FR": "Friday", "SA": "Saturday", "SU": "Sunday",
-}
-
-func weekdays(byday string) string {
-	var out []string
-	for _, d := range strings.Split(byday, ",") {
-		d = strings.ToUpper(strings.TrimSpace(d))
-		// A BYDAY can carry an ordinal, as in "2TU".
-		key := d
-		if len(d) > 2 {
-			key = d[len(d)-2:]
-		}
-		if name, ok := dayNames[key]; ok {
-			out = append(out, name)
-		} else {
-			out = append(out, d)
-		}
-	}
-	return strings.Join(out, ", ")
+	return set.Explain()
 }
 
 // eventTypeTag names the event types that are not ordinary meetings
@@ -331,11 +291,16 @@ func CalendarLine(c model.Calendar) string {
 	if c.Primary {
 		flags = append(flags, "your primary calendar")
 	}
+	// Two different facts, and the first version of these lines said
+	// both of them in nearly the same words. Google's meanings: hidden
+	// is hidden from the LIST of calendars; selected is whether its
+	// events are drawn in the grid. A calendar can be either without
+	// being the other.
 	if c.Hidden {
-		flags = append(flags, "hidden in the Calendar UI")
+		flags = append(flags, "hidden from your calendar list")
 	}
 	if !c.Selected {
-		flags = append(flags, "not shown in the Calendar UI")
+		flags = append(flags, "its events are not drawn in the Calendar UI")
 	}
 	if len(flags) > 0 {
 		fmt.Fprintf(&b, "  %s\n", strings.Join(flags, "; "))
@@ -343,14 +308,151 @@ func CalendarLine(c model.Calendar) string {
 	return b.String()
 }
 
+// ---------------------------------------------------------- instances
+
+// Instances is one series expanded into its occurrences.
+type Instances struct {
+	SeriesID   string
+	Title      string
+	CalendarID string
+	// Window is the span the caller asked about, nil when they asked
+	// about the whole series.
+	Window *when.Window
+	Zone   when.Zone
+	Events []model.Event
+
+	Truncated     bool
+	NextPageToken string
+	Requests      int
+	ShowCancelled bool
+}
+
+// Text renders the occurrences of a series.
+func (i Instances) Text() string {
+	var b strings.Builder
+
+	title := i.Title
+	if title == "" {
+		title = "(no title)"
+	}
+	fmt.Fprintf(&b, "%s\n", title)
+	fmt.Fprintf(&b, "series %s on calendar %s\n", i.SeriesID, i.CalendarID)
+	if i.Window != nil {
+		fmt.Fprintf(&b, "%s\n", *i.Window)
+	} else {
+		b.WriteString("the whole series\n")
+	}
+	fmt.Fprintf(&b, "%s\n\n", i.Zone.Explain())
+
+	if len(i.Events) == 0 {
+		b.WriteString("No occurrences.\n")
+		return b.String()
+	}
+
+	for _, e := range i.Events {
+		fmt.Fprintf(&b, "  %s\n", InstanceLine(e, i.Zone))
+	}
+	b.WriteString("\n")
+
+	fmt.Fprintf(&b, "%d occurrence%s", len(i.Events), plural(len(i.Events)))
+	if i.Truncated {
+		b.WriteString(" — the read hit its budget")
+		if i.NextPageToken != "" {
+			b.WriteString("; pass page_token to continue")
+		}
+	}
+	b.WriteString(".\n")
+	if !i.ShowCancelled {
+		// A cancelled occurrence is how one date is removed from a
+		// series, so its absence is a fact about the series rather than
+		// a detail. A caller who does not know it is hidden reads this
+		// list as "these are the dates" when one of them is gone.
+		b.WriteString("Cancelled occurrences are hidden; pass show_cancelled to see which dates were removed.\n")
+	}
+	if i.Requests > 1 {
+		fmt.Fprintf(&b, "(%d API requests)\n", i.Requests)
+	}
+	return b.String()
+}
+
+// InstanceLine is one occurrence, marked with what makes it differ from
+// the rest of the series.
+//
+// Every line carries its date. A schedule groups by day and can leave
+// the date off each row; a series is a list of dates, and "14:00-15:00"
+// three times over says nothing about which occurrence is which.
+func InstanceLine(e model.Event, z when.Zone) string {
+	var b strings.Builder
+	if !e.Start.AllDay && !e.Start.At.IsZero() {
+		d := e.Start.At.Date()
+		fmt.Fprintf(&b, "%s %s  ", d, d.Weekday().String()[:3])
+	}
+	b.WriteString(TimeRange(e, z))
+	b.WriteString("  ")
+	b.WriteString(Title(e))
+
+	// The id first, because addressing one occurrence is what a caller
+	// comes here for. "cancelled" is replaced with a longer line: in a
+	// series it does not mean the meeting was called off, it means this
+	// date was taken out.
+	tags := []string{"id " + e.ID}
+	for _, t := range commonTags(e) {
+		if t == "cancelled" {
+			t = "CANCELLED — this date was removed from the series"
+		}
+		tags = append(tags, t)
+	}
+	if moved := movedFrom(e); moved != "" {
+		tags = append(tags, "moved from "+moved)
+	}
+	fmt.Fprintf(&b, "  [%s]", strings.Join(tags, "; "))
+	return b.String()
+}
+
+// movedFrom says where an occurrence used to be. Whether it moved at all
+// is model.Event.Moved; this only formats the answer, and shows the date
+// as well as the time when the move crossed a day.
+func movedFrom(e model.Event) string {
+	if !e.Moved() {
+		return ""
+	}
+	if e.Start.AllDay {
+		return e.OriginalStart.Date.String()
+	}
+	if e.OriginalStart.At.Date() != e.Start.At.Date() {
+		return e.OriginalStart.At.T.Format("2006-01-02 15:04")
+	}
+	return e.OriginalStart.At.T.Format("15:04")
+}
+
 // ---------------------------------------------------------- availability
 
 // AvailabilityReport is what check_availability returns.
 type AvailabilityReport struct {
-	Window   when.Window
-	Zone     when.Zone
-	Answers  []model.Availability
+	Window  when.Window
+	Zone    when.Zone
+	Answers []model.Availability
+	// Gaps are the intervals nobody is busy, already filtered by MinGap.
+	Gaps []when.Window
+	// GapsFrom is how many calendars the gaps were computed from. Zero
+	// with answers present means nothing could be read, and the service
+	// leaves Gaps empty rather than offering a window it knows nothing
+	// about (§4.6).
+	GapsFrom int
+	// MinGap is the shortest gap reported, zero when the caller set none.
+	MinGap   time.Duration
 	Requests int
+}
+
+// Unknown is how many calendars could not be read.
+func (r AvailabilityReport) Unknown() int {
+	n := 0
+	for _, a := range r.Answers {
+		if a.Unknown {
+			n++
+		}
+	}
+	return n
 }
 
 // Text renders availability, keeping "unknown" distinct from "free".
@@ -375,8 +477,58 @@ func (r AvailabilityReport) Text() string {
 			}
 		}
 	}
+
+	b.WriteString("\n")
+	b.WriteString(r.gaps())
 	if r.Requests > 1 {
 		fmt.Fprintf(&b, "\n(%d API requests)\n", r.Requests)
+	}
+	return b.String()
+}
+
+func (r AvailabilityReport) gaps() string {
+	var b strings.Builder
+	unknown := r.Unknown()
+
+	switch {
+	case r.GapsFrom == 0 && len(r.Answers) > 0:
+		// Nothing was read, so there is no free time to report. Printing
+		// the whole window as free here is the defect §4.6 exists to
+		// prevent, and it is worth refusing to print rather than
+		// qualifying.
+		b.WriteString("No free time can be computed: not one of these calendars could be read.\n")
+		return b.String()
+	case len(r.Gaps) == 0 && r.MinGap > 0:
+		fmt.Fprintf(&b, "No free gap of %s or more in this window.\n", Duration(r.MinGap))
+	case len(r.Gaps) == 0:
+		b.WriteString("No free time in this window.\n")
+	default:
+		if r.MinGap > 0 {
+			fmt.Fprintf(&b, "Free, %s or longer:\n", Duration(r.MinGap))
+		} else {
+			b.WriteString("Free:\n")
+		}
+		for _, g := range r.Gaps {
+			// A gap that crosses midnight needs the end's date too, or
+			// "2026-03-20 17:00-09:00" reads as ending before it began.
+			// Availability windows are routinely several days long.
+			if g.End.Date() != g.Start.Date() {
+				fmt.Fprintf(&b, "  %s %s to %s %s (%s)\n",
+					g.Start.Date(), g.Start.T.Format("15:04"),
+					g.End.Date(), g.End.T.Format("15:04"), Duration(g.Duration()))
+				continue
+			}
+			fmt.Fprintf(&b, "  %s %s-%s (%s)\n",
+				g.Start.Date(), g.Start.T.Format("15:04"), g.End.T.Format("15:04"),
+				Duration(g.Duration()))
+		}
+	}
+
+	if unknown > 0 {
+		// The gaps were computed from the calendars that answered, so
+		// they are an upper bound on free time rather than an answer.
+		fmt.Fprintf(&b, "\nThese gaps come from %d of %d calendars: %d could not be read, "+
+			"so somebody may be busy in them.\n", len(r.Answers)-unknown, len(r.Answers), unknown)
 	}
 	return b.String()
 }
