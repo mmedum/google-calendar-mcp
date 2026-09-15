@@ -45,7 +45,14 @@ func main() {
 	// point at one — hardcoding the default profile made that half
 	// unanswerable and would have wasted a login to find out.
 	profile := flag.String("profile", "default", "the configuration profile to drive")
+	// Spike I's readable half creates 51 real calendars and deletes
+	// them. That is a lot to do to somebody's account for one question,
+	// so it is asked for rather than assumed.
+	ceiling := flag.Bool("spike-ceiling", false,
+		"spike I: also probe the free/busy ceiling with 51 REAL calendars, created and deleted")
 	flag.Parse()
+
+	spikeCeiling = *ceiling
 
 	showFilter = *show
 
@@ -153,6 +160,9 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 
 // showFilter names the steps whose full body should be printed.
 var showFilter string
+
+// spikeCeiling arms the half of spike I that creates real calendars.
+var spikeCeiling bool
 
 // results tallies and prints, through the redactor only.
 type results struct {
@@ -767,7 +777,14 @@ func steps(scratch string, state seedState) []step {
 				if !r.isError {
 					return fail, "an invented zone was accepted"
 				}
-				return pass, "refused"
+				// [invalid], not [unavailable]: a zone that does not
+				// exist will not start existing, and [unavailable] is
+				// retryable, so the caller was told to retry a request
+				// that can never succeed.
+				if !strings.Contains(r.text, "[invalid]") {
+					return fail, "an impossible zone is not classified invalid: " + truncate(r.text, 160)
+				}
+				return pass, "refused with [invalid]"
 			},
 		},
 	}

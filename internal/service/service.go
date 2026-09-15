@@ -9,8 +9,9 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -115,7 +116,17 @@ func (s *Service) userZone(ctx context.Context) string {
 // Zone resolves the zone for a call: the caller's, then the calendar's,
 // then the user's (§4.1). calendarTZ may be empty.
 func (s *Service) Zone(ctx context.Context, fromCall, calendarTZ string) (when.Zone, error) {
-	return when.Resolve(fromCall, calendarTZ, s.userZone(ctx))
+	z, err := when.Resolve(fromCall, calendarTZ, s.userZone(ctx))
+	if err != nil {
+		// Classified, not passed through. An unwrapped error from
+		// internal/when is not a *gapi.Error, so it fell through to the
+		// default class — [unavailable], which is retryable. A zone that
+		// does not exist will not start existing, and telling a caller
+		// to retry a request that cannot succeed is worse than refusing
+		// it. s.window classifies the same package's errors the same way.
+		return when.Zone{}, gapi.Wrap(gapi.ClassInvalid, err, "%s", err.Error())
+	}
+	return z, nil
 }
 
 // ------------------------------------------------------------ calendars
@@ -341,6 +352,41 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		budget = s.Cfg.MaxEvents
 	}
 
+	resume, err := decodeCursor(o.PageToken)
+	if err != nil {
+		return render.Schedule{}, err
+	}
+	// A continuation reads only the calendars that still have pages. One
+	// that finished is absent from the cursor, and reading it again would
+	// repeat its first page as though it were new.
+	if resume != nil {
+		still := make([]model.Calendar, 0, len(cals))
+		for _, c := range cals {
+			if _, more := resume[c.ID]; more {
+				still = append(still, c)
+			}
+		}
+		if len(still) == 0 {
+			return render.Schedule{}, gapi.Errf(gapi.ClassInvalid,
+				"that page_token was issued for a different set of calendars, and none of the "+
+					"calendars asked for here has a page waiting. Pass the calendars the token came "+
+					"from, or omit the token to start again")
+		}
+		cals = still
+	}
+
+	// The budget bounds the whole result, so it is shared out before the
+	// calendars are read rather than applied to the pile afterwards. A
+	// calendar with little on it leaves its share unused, which costs a
+	// round trip on a continuation and never costs an event: the
+	// alternative discards what has already been paged past. Computed
+	// after the cursor narrows the list, so a continuation gives its
+	// whole budget to the calendars that still have pages.
+	perCalendar := budget / len(cals)
+	if perCalendar < 1 {
+		perCalendar = 1
+	}
+
 	sched := render.Schedule{Window: win, Zone: zone, Expanded: o.Expand}
 	for _, c := range cals {
 		sched.Calendars = append(sched.Calendars, c.Title)
@@ -361,41 +407,42 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			evs, reqs, token, err := s.readCalendar(ctx, c, o, zone, win, budget)
+			evs, reqs, token, err := s.readCalendar(ctx, c, o, resume[c.ID], zone, win, perCalendar)
 			results[i] = result{evs, reqs, token, err}
 		}(i, c)
 	}
 	wg.Wait()
 
-	for _, r := range results {
+	next := map[string]string{}
+	for i, r := range results {
 		if r.err != nil {
 			return render.Schedule{}, r.err
 		}
 		sched.Events = append(sched.Events, r.events...)
 		sched.Requests += r.requests
 		if r.token != "" {
-			sched.NextPageToken = r.token
+			next[cals[i].ID] = r.token
 		}
 	}
+	sched.NextPageToken = encodeCursor(next)
 
 	sort.Slice(sched.Events, func(i, j int) bool {
 		return sortKey(sched.Events[i]) < sortKey(sched.Events[j])
 	})
 
 	sched.Matched = len(sched.Events)
-	if len(sched.Events) > budget {
-		sched.Events = sched.Events[:budget]
-	}
-	// Truncated means the caller is not looking at everything: either
-	// the budget cut the list, or a page is still waiting. Deciding it
-	// from the overflow alone called a read complete when it had stopped
-	// exactly at its budget with more to come — and the token it handed
-	// back said otherwise.
-	sched.Truncated = sched.Matched > budget || sched.NextPageToken != ""
+	// Nothing is cut here, and that is the point. The combined list used
+	// to be truncated to the budget after every calendar had been read,
+	// which threw away events whose page token had already moved past
+	// them — unreachable from the cursor the caller was handed, while
+	// the result called itself resumable. The budget is divided across
+	// the calendars up front instead, so the total is bounded by what
+	// was fetched rather than by what is discarded.
+	sched.Truncated = sched.NextPageToken != ""
 	return sched, nil
 }
 
-func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOptions,
+func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOptions, pageToken string,
 	zone when.Zone, win when.Window, budget int,
 ) ([]model.Event, int, string, error) {
 	opts := gapi.EventsListOptions{
@@ -406,7 +453,7 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		ShowDeleted:  o.ShowCancelled,
 		TimeZone:     zone.Name(),
 		MaxResults:   250,
-		PageToken:    o.PageToken,
+		PageToken:    pageToken,
 	}
 	// §2.9: orderBy=startTime is only legal with singleEvents.
 	if o.Expand {
@@ -427,6 +474,60 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 // back the token so the caller can say how to continue. The two read
 // paths had a copy each and had already drifted on what "truncated"
 // means.
+// pageCursor is what `next_page_token` actually carries.
+//
+// One call can read several calendars, and a Google page token is scoped
+// to one calendar and one query. Handing back a single token — whichever
+// calendar happened to produce one last — resumed the wrong calendar
+// from an unrelated offset, or failed outright, and silently discarded
+// the tokens for the rest. A caller who followed it believed they had
+// seen everything.
+//
+// So the cursor holds one token per calendar, and names ONLY the
+// calendars with more to read: one that finished is absent, and a
+// continuation skips it rather than reading it again. It stays a single
+// opaque string, so the tool schema is unchanged and a caller still just
+// passes back what it was given.
+type pageCursor struct {
+	V    int               `json:"v"`
+	Cals map[string]string `json:"c"`
+}
+
+const pageCursorVersion = 1
+
+func encodeCursor(tokens map[string]string) string {
+	if len(tokens) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(pageCursor{V: pageCursorVersion, Cals: tokens})
+	if err != nil {
+		// Unreachable for a map of strings, and a lost token is better
+		// than a bad one: an empty cursor reads as "nothing more", which
+		// Truncated still contradicts.
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// decodeCursor returns the per-calendar tokens, or nil for a first read.
+func decodeCursor(tok string) (map[string]string, error) {
+	if strings.TrimSpace(tok) == "" {
+		return nil, nil
+	}
+	bad := gapi.Errf(gapi.ClassInvalid,
+		"page_token is not one this server issued. Pass back the next_page_token from a previous "+
+			"read of the same calendars, unchanged, or omit it to start again")
+	raw, err := base64.RawURLEncoding.DecodeString(tok)
+	if err != nil {
+		return nil, bad
+	}
+	var c pageCursor
+	if err := json.Unmarshal(raw, &c); err != nil || c.V != pageCursorVersion || len(c.Cals) == 0 {
+		return nil, bad
+	}
+	return c.Cals, nil
+}
+
 // showCancelled is the caller's promise, passed in rather than read off
 // opts.ShowDeleted. The two are not the same knob: ShowDeleted is what
 // this server asked Google for, and the defect being fixed here is
@@ -558,6 +659,16 @@ func parseBound(v string, zone when.Zone, upper bool) (when.Zoned, error) {
 	return z, nil
 }
 
+// sortKey orders a schedule the way the renderer groups it: by LOCAL
+// date, in the zone the read resolved.
+//
+// It used to sort timed events by their UTC instant and all-day events
+// by their local date, while `render.dayKey` grouped both by local date.
+// East of UTC the two disagree — in Asia/Tokyo an 08:00 event carries a
+// UTC key on the previous day — so an all-day event landed in the middle
+// of its own day instead of at the front, which is what this function
+// promises. Every event here has already been converted to the one
+// resolved zone, so a local key is consistent across calendars.
 func sortKey(e model.Event) string {
 	if e.Start.AllDay {
 		// All-day events sort to the front of their day, which is where
@@ -567,7 +678,7 @@ func sortKey(e model.Event) string {
 	if e.Start.At.IsZero() {
 		return "9999"
 	}
-	return e.Start.At.T.UTC().Format("2006-01-02T15:04:05")
+	return e.Start.At.T.Format("2006-01-02T15:04:05")
 }
 
 // CalendarDetail is get_calendar: the calendar plus who it is shared
@@ -714,7 +825,7 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 			"event_id is required: it is the id of the repeating event, which list_events reports as "+
 				"series_id on each occurrence")
 	}
-	if series, start, ok := seriesOf(o.EventID); ok {
+	if series, start, ok := gcal.SplitOccurrenceID(o.EventID); ok {
 		return render.Instances{}, gapi.Errf(gapi.ClassInvalid,
 			"%s names the occurrence starting %s, not the series. Pass %s — the series_id list_events "+
 				"reports on each occurrence — and list_instances expands the whole series",
@@ -782,31 +893,6 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	// either the budget cut the list, or a page is still waiting.
 	out.Truncated = len(events) > budget || out.NextPageToken != ""
 	return out, nil
-}
-
-// occurrenceSuffix is the start time Google appends to a series id to
-// name one occurrence: `20260324T130000Z`, or a bare date for an all-day
-// series. Matched case-insensitively, because a model that lowercased
-// the id is making the same mistake.
-var occurrenceSuffix = regexp.MustCompile(`^[0-9]{8}([Tt][0-9]{6}[Zz])?$`)
-
-// seriesOf reports whether an id names one occurrence, and of what.
-//
-// The split is safe because an event id is base32hex — lowercase a-v and
-// the digits — so an underscore cannot appear in one (§18).
-//
-// Refusing here rather than on Google's answer is the point. An
-// occurrence id is not invalid to events.instances: Google expands it to
-// whatever that occurrence is, and a cancelled one expands to nothing.
-// So the call returned 200 and an empty list, and the tool reported "No
-// occurrences" for a series that had three — a wrong answer where a
-// refusal was owed (§18).
-func seriesOf(id string) (series, start string, ok bool) {
-	i := strings.LastIndex(id, "_")
-	if i <= 0 || !occurrenceSuffix.MatchString(id[i+1:]) {
-		return "", "", false
-	}
-	return id[:i], id[i+1:], true
 }
 
 // instancesError says where the id should have come from.

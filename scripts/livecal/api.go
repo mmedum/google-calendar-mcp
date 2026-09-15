@@ -151,6 +151,36 @@ func (a *liveAPI) deleteCalendar(ctx context.Context, id string) error {
 	return a.do(ctx, http.MethodDelete, "/calendars/"+id, nil, nil)
 }
 
+// createFillerCalendars makes n real, readable, empty calendars, and
+// returns what it managed to create even when it then fails.
+//
+// Only spike I needs these, and only to answer whether the free/busy
+// ceiling counts calendars it can actually expand. They are the driver's
+// own, so §9.1 holds, but 51 calendars on somebody's real account is not
+// something to do by default — `-spike-ceiling` gates it, and the caller
+// deletes what comes back whatever the error.
+func (a *liveAPI) createFillerCalendars(ctx context.Context, n int) ([]string, error) {
+	ids := make([]string, 0, n)
+	for i := range n {
+		var out struct {
+			ID string `json:"id"`
+		}
+		err := a.do(ctx, http.MethodPost, "/calendars", map[string]any{
+			"summary":     fmt.Sprintf("%s ceiling %02d", scratchTitle, i),
+			"description": "Created by the google-calendar-mcp live driver. Safe to delete.",
+			"timeZone":    scratchZone,
+		}, &out)
+		if err != nil {
+			return ids, err
+		}
+		if out.ID == "" {
+			return ids, fmt.Errorf("Google returned no calendar id")
+		}
+		ids = append(ids, out.ID)
+	}
+	return ids, nil
+}
+
 type seedEvent struct {
 	id    string
 	body  map[string]any
@@ -204,26 +234,9 @@ func seedEvents() []seedEvent {
 	}
 }
 
-// validEventID holds §2.11's rule locally, so a bad id is caught before
-// a request is built rather than as Google's "Invalid resource id
-// value", which names neither the field nor the constraint.
-func validEventID(id string) error {
-	if len(id) < 5 || len(id) > 1024 {
-		return fmt.Errorf("event id %q is %d characters; Google requires 5 to 1024", id, len(id))
-	}
-	for i, r := range id {
-		ok := (r >= 'a' && r <= 'v') || (r >= '0' && r <= '9')
-		if !ok {
-			return fmt.Errorf("event id %q has %q at position %d; base32hex allows only a-v and 0-9 "+
-				"(not w, x, y or z)", id, r, i)
-		}
-	}
-	return nil
-}
-
 func (a *liveAPI) seed(ctx context.Context, cal string) error {
 	for _, e := range seedEvents() {
-		if err := validEventID(e.id); err != nil {
+		if err := gcal.ValidEventID(e.id); err != nil {
 			return err
 		}
 		// sendUpdates=none is correct here and nowhere else: these events

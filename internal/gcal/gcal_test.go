@@ -131,3 +131,51 @@ func TestEventRoundTrips(t *testing.T) {
 		t.Fatalf("round trip lost data: %+v", out)
 	}
 }
+
+func TestValidEventID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   string
+		ok   bool
+	}{
+		{"base32hex", "livecaltimedprobe00000000000001", true},
+		{"digits only", "01234", true},
+		{"too short", "abcd", false},
+		{"w is not base32hex", "abcdw", false},
+		{"z is not base32hex", "zzzzz", false},
+		{"uppercase", "ABCDE", false},
+		{"an underscore is not in the grammar", "ev-weekly_20260324T130000Z", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := gcal.ValidEventID(tc.id)
+			if tc.ok && err != nil {
+				t.Fatalf("%q was refused: %v", tc.id, err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("%q was accepted", tc.id)
+			}
+		})
+	}
+}
+
+func TestSplitOccurrenceID(t *testing.T) {
+	for _, tc := range []struct {
+		id, series, start string
+		ok                bool
+	}{
+		{"ev-weekly_20260324T130000Z", "ev-weekly", "20260324T130000Z", true},
+		{"ev-weekly_20260324t130000z", "ev-weekly", "20260324t130000z", true},
+		{"ev-allday_20260320", "ev-allday", "20260320", true},
+		// A series id, which must survive untouched.
+		{"livecalrepeatprobe0000000000001", "", "", false},
+		// An underscore that is not an occurrence start.
+		{"ev-weekly_notadate", "", "", false},
+		{"_20260324T130000Z", "", "", false},
+	} {
+		series, start, ok := gcal.SplitOccurrenceID(tc.id)
+		if ok != tc.ok || series != tc.series || start != tc.start {
+			t.Fatalf("SplitOccurrenceID(%q) = %q, %q, %v; want %q, %q, %v",
+				tc.id, series, start, ok, tc.series, tc.start, tc.ok)
+		}
+	}
+}

@@ -89,7 +89,7 @@ func registerRead(s *mcp.Server, d Deps) {
 				Calendars: in.Calendars, TimeZone: in.TimeZone,
 				From: in.From, To: in.To, Query: in.Query,
 				Expand:    true,
-				MaxEvents: in.MaxEvents,
+				MaxEvents: in.MaxEvents, PageToken: in.PageToken,
 			})
 			if err != nil {
 				return service.ScheduleResult{}, err
@@ -205,6 +205,7 @@ type searchEventsIn struct {
 	To        string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
 	TimeZone  string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
 	MaxEvents int      `json:"max_events,omitempty" jsonschema:"Cap on events returned."`
+	PageToken string   `json:"page_token,omitempty" jsonschema:"Continue a truncated search, from next_page_token."`
 }
 
 type getEventIn struct {

@@ -14,7 +14,12 @@
 // Checked against the discovery document, revision 20260826.
 package gcal
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+)
 
 // ---------------------------------------------------------- EventDateTime
 
@@ -426,4 +431,65 @@ type Colors struct {
 type ColorPair struct {
 	Background string `json:"background,omitempty"`
 	Foreground string `json:"foreground,omitempty"`
+}
+
+// ------------------------------------------------------------ event ids
+
+// An event id is base32hex: the digits and the lowercase letters a
+// through v, 5 to 1024 characters (§2.11). w, x, y and z are refused,
+// which is not obvious and cost a live run — Google answers "Invalid
+// resource id value", naming neither the field nor the constraint
+// (§18 row 21).
+//
+// The rule lives here rather than in the one caller that first needed
+// it. Three places depend on it: the live driver generates ids, the
+// server refuses an occurrence id by splitting on a character the
+// grammar excludes, and §2.11 lets a client supply an id on insert.
+const (
+	// EventIDMinLen and EventIDMaxLen bound a client-supplied id.
+	EventIDMinLen = 5
+	EventIDMaxLen = 1024
+)
+
+// ValidEventID reports why an id is not a legal event id, or nil.
+func ValidEventID(id string) error {
+	if len(id) < EventIDMinLen || len(id) > EventIDMaxLen {
+		return fmt.Errorf("event id %q is %d characters; Google requires %d to %d",
+			id, len(id), EventIDMinLen, EventIDMaxLen)
+	}
+	for i, r := range id {
+		if !isBase32HexDigit(r) {
+			return fmt.Errorf("event id %q has %q at position %d; base32hex allows only a-v and 0-9 "+
+				"(not w, x, y or z)", id, r, i)
+		}
+	}
+	return nil
+}
+
+func isBase32HexDigit(r rune) bool {
+	return (r >= 'a' && r <= 'v') || (r >= '0' && r <= '9')
+}
+
+// occurrenceSuffix is the start Google appends to a series id to name
+// one occurrence: `20260324T130000Z`, or a bare date on an all-day
+// series. Matched case-insensitively, because a model that lowercased
+// the whole id is making the same mistake.
+var occurrenceSuffix = regexp.MustCompile(`^[0-9]{8}([Tt][0-9]{6}[Zz])?$`)
+
+// SplitOccurrenceID reports whether an id names one occurrence of a
+// series, and if so which series and which start.
+//
+// The split on "_" is safe because ValidEventID's grammar has no
+// underscore in it, so an id carrying one is either an occurrence id or
+// not an event id at all (§18 row 35).
+//
+// This is a grammar, not a policy. get_event must keep ACCEPTING an
+// occurrence id — that is how a single occurrence is addressed — so the
+// decision to refuse one belongs to the caller that has a reason to.
+func SplitOccurrenceID(id string) (series, start string, ok bool) {
+	i := strings.LastIndex(id, "_")
+	if i <= 0 || !occurrenceSuffix.MatchString(id[i+1:]) {
+		return "", "", false
+	}
+	return id[:i], id[i+1:], true
 }

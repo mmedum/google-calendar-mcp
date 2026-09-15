@@ -22,6 +22,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   no summary — so `list_events` with `no_expand` showed a row with no
   date and no title, and counted it. Cancelled events are filtered by
   the server now rather than by the parameter.
+- Continuing a truncated multi-calendar read lost events. A Google page
+  token is scoped to one calendar, and `list_events` kept whichever
+  calendar produced one last and handed that single token back for all
+  of them — so a continuation resumed the wrong calendar from an
+  unrelated offset and dropped the others' pages, while the result said
+  it was resumable. `next_page_token` now carries one token per
+  calendar, and names only the calendars with more to read. It is still
+  one opaque string, so nothing about the tool surface changed.
+- The event budget was applied twice on a multi-calendar read, once per
+  calendar and again to the combined list. The second cut discarded
+  events the page token had already moved past, so they were reachable
+  from nowhere. The budget is shared out across the calendars before
+  they are read, and nothing fetched is thrown away.
+- `search_events` accepts `page_token`. It was rendering "Pass
+  page_token to continue" for a parameter it did not have.
+- An impossible time zone is refused as `[invalid]`, not
+  `[unavailable]`. The latter is retryable, so a caller was told to
+  retry a request that could never succeed.
+- An all-day event sorts to the front of its day east of UTC. Timed
+  events were ordered by their UTC instant and all-day events by their
+  local date, while the renderer groups by local date — so in
+  Asia/Tokyo a day rendered `08:00`, `all day`, `10:00`.
+- The event-id rule has one owner. `gcal.ValidEventID` and
+  `gcal.SplitOccurrenceID` replace a copy in the live driver and a
+  second, separate copy in the service, each of which depended on the
+  other's premise.
 - `doctor` could print an access token. The tokeninfo URL carries the
   token as a query parameter, and a transport failure stringifies the
   whole URL into the error `doctor` reports — which is the output a user

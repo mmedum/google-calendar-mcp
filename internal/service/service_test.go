@@ -746,3 +746,173 @@ func TestFilteringCancelledDoesNotBuyExtraPages(t *testing.T) {
 			"the budget bounds what is drained, not what survives (§4.7)", got.Requests)
 	}
 }
+
+// TestAllDayEventSortsToTheFrontOfItsDayEastOfUTC.
+//
+// sortKey ordered timed events by their UTC instant and all-day events
+// by their local date, while the renderer groups both by local date. In
+// Asia/Tokyo an 08:00 event has a UTC key on the previous day, so it
+// sorted ahead of the all-day event the renderer put above it: the day
+// rendered 08:00, all day, 10:00.
+func TestAllDayEventSortsToTheFrontOfItsDayEastOfUTC(t *testing.T) {
+	fake := caltest.Seed()
+	const tz = "Asia/Tokyo"
+	fake.AddEvent("primary", caltest.AllDay("ev-tokyo-allday", "All day in Tokyo",
+		"2026-06-10", "2026-06-11"))
+	fake.AddEvent("primary", caltest.Timed("ev-tokyo-early", "Early in Tokyo",
+		"2026-06-10T08:00:00+09:00", "2026-06-10T09:00:00+09:00", tz))
+	fake.AddEvent("primary", caltest.Timed("ev-tokyo-late", "Late in Tokyo",
+		"2026-06-10T10:00:00+09:00", "2026-06-10T11:00:00+09:00", tz))
+
+	svc := newService(t, fake)
+	got, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-06-10", To: "2026-06-10", TimeZone: tz,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, e := range got.Events {
+		order = append(order, e.ID)
+	}
+	want := []string{"ev-tokyo-allday", "ev-tokyo-early", "ev-tokyo-late"}
+	if len(order) != len(want) {
+		t.Fatalf("got %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("got %v, want the all-day event first: %v", order, want)
+		}
+	}
+}
+
+// TestAnImpossibleZoneIsInvalidNotRetryable.
+//
+// [unavailable] is retryable, so a caller was told to retry a zone that
+// will never exist.
+func TestAnImpossibleZoneIsInvalidNotRetryable(t *testing.T) {
+	svc, _ := seeded(t)
+	_, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-03-15", To: "2026-03-16", TimeZone: "Mars/Olympus_Mons",
+	})
+	if err == nil {
+		t.Fatal("an invented zone was accepted")
+	}
+	cls, ok := gapi.ClassOf(err)
+	if !ok {
+		t.Fatalf("the refusal carries no class: %v", err)
+	}
+	if cls != gapi.ClassInvalid {
+		t.Fatalf("an impossible zone is classified %s; retryable=%v", cls, cls.Retryable())
+	}
+}
+
+// TestPageTokenResumesEachCalendarSeparately.
+//
+// A Google page token is scoped to one calendar. The fan-out used to
+// keep whichever calendar produced a token last and hand that single
+// token back, so continuing a two-calendar read resumed the wrong
+// calendar from an unrelated offset and dropped the other's pages
+// entirely — while the result said it was resumable.
+func TestPageTokenResumesEachCalendarSeparately(t *testing.T) {
+	fake := caltest.Seed()
+	fake.PageSize = 1
+	svc := newService(t, fake)
+	ctx := context.Background()
+
+	opts := service.ListOptions{
+		Calendars: []string{"primary", "team@group.calendar.example.test"},
+		From:      "2026-03-15", To: "2026-03-31", MaxEvents: 1,
+	}
+	first, err := svc.ListEvents(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Truncated || first.NextPageToken == "" {
+		t.Fatalf("a budget of 1 over two calendars reported truncated=%v token=%q",
+			first.Truncated, first.NextPageToken)
+	}
+
+	// Walk the whole read through the token and collect every id. No id
+	// may repeat, and the walk must terminate.
+	seen := map[string]int{}
+	for _, e := range first.Events {
+		seen[e.ID]++
+	}
+	token, pages := first.NextPageToken, 0
+	for token != "" {
+		pages++
+		if pages > 50 {
+			t.Fatal("paging did not terminate")
+		}
+		opts.PageToken = token
+		next, err := svc.ListEvents(ctx, opts)
+		if err != nil {
+			t.Fatalf("continuing with the token failed: %v", err)
+		}
+		for _, e := range next.Events {
+			seen[e.ID]++
+		}
+		token = next.NextPageToken
+	}
+	for id, n := range seen {
+		if n > 1 {
+			t.Fatalf("%s came back %d times across the paged walk", id, n)
+		}
+	}
+
+	// The same read in one go must find the same events.
+	opts.PageToken, opts.MaxEvents = "", 250
+	whole, err := svc.ListEvents(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != len(whole.Events) {
+		t.Fatalf("the paged walk saw %d events, the single read %d", len(seen), len(whole.Events))
+	}
+}
+
+// TestPageTokenFromOtherCalendarsIsRefused: a token names the calendars
+// it was issued for, so one that names none of the calendars asked for
+// is a mistake worth saying out loud rather than an empty result.
+func TestPageTokenFromOtherCalendarsIsRefused(t *testing.T) {
+	fake := caltest.Seed()
+	fake.PageSize = 1
+	svc := newService(t, fake)
+	ctx := context.Background()
+
+	first, err := svc.ListEvents(ctx, service.ListOptions{
+		Calendars: []string{"primary"}, From: "2026-03-15", To: "2026-03-31", MaxEvents: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.NextPageToken == "" {
+		t.Fatal("no token to carry to the wrong calendar")
+	}
+	_, err = svc.ListEvents(ctx, service.ListOptions{
+		Calendars: []string{"team@group.calendar.example.test"},
+		From:      "2026-03-15", To: "2026-03-31", PageToken: first.NextPageToken,
+	})
+	if err == nil {
+		t.Fatal("a token from another calendar was accepted")
+	}
+	if !strings.Contains(err.Error(), "[invalid]") {
+		t.Fatalf("the refusal is not classified invalid: %v", err)
+	}
+}
+
+// TestAMangledPageTokenIsRefused, rather than silently read as a first
+// page.
+func TestAMangledPageTokenIsRefused(t *testing.T) {
+	svc, _ := seeded(t)
+	_, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-03-15", To: "2026-03-31", PageToken: "not-a-cursor",
+	})
+	if err == nil {
+		t.Fatal("a mangled page_token was accepted")
+	}
+	if !strings.Contains(err.Error(), "[invalid]") {
+		t.Fatalf("the refusal is not classified invalid: %v", err)
+	}
+}

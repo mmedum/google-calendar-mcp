@@ -142,6 +142,18 @@ func spikeI(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	const caveat = " Fifty of the ids were unreadable, so this does not settle 51 READABLE calendars: " +
 		"the ceiling may count only the calendars it expands"
 
+	// The readable half, which is the only thing the unreadable run
+	// cannot settle. Off by default: it creates 51 real calendars on a
+	// real account, and 51 calendars nobody asked for is a worse outcome
+	// than an unanswered question if this crashes halfway.
+	if spikeCeiling {
+		v, note := ceilingWithReadableCalendars(ctx, out, api)
+		if v != undetermined {
+			return v, note
+		}
+		out.Printf("      readable half: %s\n", note)
+	}
+
 	switch {
 	case len(atFiftyOne) == 51:
 		return pass, "51 distinct ids came back as 51 entries with no expansion cap set, so Google " +
@@ -175,4 +187,55 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// ceilingWithReadableCalendars answers what the unreadable ids cannot:
+// whether free/busy trims a request of 51 calendars it can actually
+// expand.
+//
+// It creates them, asks, and deletes them, reporting anything it could
+// not delete so nothing is left behind silently (§9.1). Every calendar
+// is one this driver made, so it still reads only what it wrote.
+func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api *liveAPI) (verdict, string) {
+	const want = 51
+	ids, err := api.createFillerCalendars(ctx, want)
+	defer func() {
+		stuck := 0
+		for _, id := range ids {
+			if derr := api.deleteCalendar(context.Background(), id); derr != nil {
+				stuck++
+				out.Printf("      WARNING: could not delete filler calendar %s: %v\n",
+					redact.ID(id), redact.String(derr.Error()))
+			}
+		}
+		if stuck > 0 {
+			out.Printf("      %d filler calendars are still on the account; delete them by hand\n", stuck)
+			return
+		}
+		out.Printf("      %d filler calendars deleted\n", len(ids))
+	}()
+	if err != nil {
+		return undetermined, fmt.Sprintf("could only create %d of %d calendars: %s",
+			len(ids), want, redact.String(err.Error()))
+	}
+
+	answered, err := api.freeBusy(ctx, ids, 0)
+	if err != nil {
+		return pass, "CONFIRMS §2.10: 51 READABLE calendars in one free/busy query is refused (" +
+			redact.String(firstLine(err.Error())) + "). The batching at 50 is correctness"
+	}
+	out.Printf("      51 readable calendars, no expansion cap: %d answered, %d errored\n",
+		len(answered), errored(answered))
+	switch {
+	case len(answered) == want:
+		return pass, "51 READABLE calendars all came back, so the documented maximum of 50 does not " +
+			"cap a free/busy request at all. §4.6's batching at 50 is politeness, and the rule that " +
+			"matters — a calendar missing from the response is unknown, never free — stands on spike H"
+	case len(answered) > 0:
+		return pass, fmt.Sprintf("51 READABLE calendars came back as %d: Google TRIMS the excess "+
+			"silently, so a calendar can be absent from the response entirely. That is exactly what "+
+			"§4.6 reports as unknown rather than free, and the batching at 50 is correctness", len(answered))
+	default:
+		return undetermined, "51 readable calendars answered for none, which is neither a refusal nor a trim"
+	}
 }

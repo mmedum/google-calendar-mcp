@@ -1050,8 +1050,11 @@ states its question and its verdict separately.
   `calendarExpansionMax` to 50, so a response carrying 50 would have
   been the driver's own cap read as Google's ceiling. With distinct ids
   and no cap, all 51 come back, neither refused nor trimmed. Fifty of them were
-  unreadable, so it does not settle 51 readable calendars, and the spike
-  now says so in its own verdict (§18 row 12).
+  unreadable, so it does not settle 51 readable calendars on its own.
+  That half is built and gated behind `-spike-ceiling`, which creates 51
+  real calendars, asks, and deletes them: it is off by default because 51
+  calendars nobody asked for is a worse outcome than an unanswered
+  question if the run dies halfway (§18 row 12).
 
 ## 16. Delivery phases
 
@@ -1248,43 +1251,56 @@ work and the one where the transcript matters most.
 §13 with the three tasks named there; a second MCP client; the `.mcpb`
 bundle exercised from a real install; and whatever §17 is still holding.
 
-### 16a. Found by review, not yet fixed
+### 16a. Found by review, and fixed
 
 Five defects the phase 1 review turned up in code phases 0 and 1 had
-already committed. None is in this session's own changes, none is
-blocking, and each is written down here rather than fixed in a session
-that was verifying something else — CLAUDE.md's definition of done
-allows a finding to be resolved *or written down*, and widening a
-verification session into a repair session is how a phase stops being
-one session.
+already committed. All five are fixed; each is listed with what it was,
+because the shape of the mistake is the useful part.
 
-1. **Multi-calendar paging hands one calendar's token to every
-   calendar.** `ListEvents` fans out and passes the same `page_token`
-   into each calendar's read, then keeps only the last non-empty token.
-   A Google page token is scoped to one calendar and one query, so
-   continuing a truncated two-calendar read either fails on the others
-   or resumes them from an unrelated offset — and the tokens for the
-   rest are discarded while the result still says "Pass page_token to
-   continue." **The honest fix is a token per calendar**, which changes
-   the result shape, so it belongs with a phase that can carry it.
-2. **`search_events` advertises a `page_token` it does not accept.** Its
-   input has no such field, but it returns the schedule result, which
-   renders the sentence and carries the token. Either thread the token
-   through (subject to 1) or suppress both for this tool.
-3. **An invalid time zone is classified `[unavailable]`, which is
-   retryable.** `Service.Zone` returns `internal/when`'s error
-   unwrapped, so it never becomes a `gapi.Error` and falls through to
-   the default class. A caller passing a zone that does not exist is
-   told to retry a request that cannot succeed. `s.window` already wraps
-   the same package's errors as `[invalid]`; `Zone` should.
-4. **`sortKey` mixes UTC and local.** Timed events sort by their UTC
+1. **Multi-calendar paging handed one calendar's token to every
+   calendar.** `ListEvents` fans out, and a Google page token is scoped
+   to one calendar and one query — but the fan-out kept whichever
+   calendar produced a token last and passed that one back to all of
+   them, discarding the rest. Continuing a truncated two-calendar read
+   resumed the wrong calendar from an unrelated offset and lost the
+   others' pages, while the result said "Pass page_token to continue."
+   `next_page_token` is now a cursor carrying **one token per calendar**,
+   naming only the calendars with more to read, so a continuation never
+   re-reads a calendar that finished. It stays one opaque string, so no
+   tool schema changed.
+
+   Fixing it exposed a second defect underneath, which is why the first
+   attempt still lost events: the budget was applied **twice**, once per
+   calendar and again to the combined list. The second cut threw away
+   events whose page token had already moved past them — unreachable
+   from the cursor the caller was handed. The budget is divided across
+   the calendars up front now, and nothing fetched is discarded.
+2. **`search_events` advertised a `page_token` it did not accept.** Its
+   input had no such field, but it returns the schedule result, which
+   renders the sentence and carries the token. It takes one now, which
+   1 made worth having.
+3. **An invalid time zone was classified `[unavailable]`, which is
+   retryable.** `Service.Zone` returned `internal/when`'s error
+   unwrapped, so it never became a `gapi.Error` and fell through to the
+   default class: a caller passing a zone that does not exist was told to
+   retry a request that could never succeed. It is `[invalid]` now, as
+   `s.window` already was, and the live driver holds the class.
+4. **`sortKey` mixed UTC and local.** Timed events sorted by their UTC
    instant and all-day events by their local date, while the renderer
-   groups by local date. East of UTC the two disagree, so an all-day row
-   can land in the middle of its own day instead of at the front, which
-   is what its doc comment promises. The golden fixture is
-   Europe/Copenhagen with the all-day event alone on its day, so it does
-   not catch it.
-5. **The event-id rule lives in two places.** §18 row 35.
+   groups by local date. East of UTC the two disagree — in Asia/Tokyo an
+   08:00 event carries a key on the previous day — so an all-day event
+   landed in the middle of its own day instead of at the front, which is
+   what the function's own comment promised. The golden fixture is
+   Europe/Copenhagen with the all-day event alone on its day, so it
+   could not catch it.
+5. **The event-id rule lived in two places.** `validEventID` was in the
+   live driver and the occurrence-id grammar was in `internal/service`,
+   each depending on the other's premise and neither owning it.
+   `gcal.ValidEventID` and `gcal.SplitOccurrenceID` own both now, beside
+   the wire types they describe, which is also where §2.11's
+   client-supplied id on insert will need them in phase 2. The grammar
+   is a grammar and not a policy: `get_event` still accepts an
+   occurrence id, because that is how one occurrence is addressed.
 
 ## 17. Open decisions
 
@@ -1378,7 +1394,7 @@ what §15 exists to settle, and they are marked.
 | 32 | `EXDATE` and `RDATE` carry a `TZID` parameter, or a `VALUE=DATE` form on an all-day series | RFC 5545 §3.8.5, and the shape Google returns in `recurrence` | **Asserted from the specification, not probed live. Tier 3.** `internal/recur` parses both and resolves a bare local time in the series' own zone. An all-day point stays a date and yields no instant, which is §4.1 again. A series carrying anything this package cannot expand — `EXRULE`, a second `RRULE`, a frequency below DAILY — is refused rather than expanded, because a count that is quietly too large is the number a caller would put in front of a user |
 | 26 | Redirecting the config directory and the environment isolates a test | Live, the hard way, 2026-09-15 | **Refuted, having been written down here first.** The OS keyring cannot be redirected by either, so `go test ./cmd/...` found the maintainer's real refresh token under the default profile, revoked the grant at Google and deleted it. `TestMain` now substitutes the keyring for the whole package, with a decoy test that fails if that is ever dropped. The sibling servers carry the same warning; having it in the source did not prevent it |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
-| 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. **Owed next:** the grammar and `validEventID` are one rule in two places, the driver's copy in `scripts/livecal/api.go` and the server's in `internal/service`. §2.11 lets a client supply an event id on insert, so phase 2 brings the rule into `internal/` and both should land in one owner then |
+| 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |
 
 ### Deviations from the shared Go MCP server standard
