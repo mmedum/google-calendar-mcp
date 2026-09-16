@@ -1614,3 +1614,18 @@ func (s *Server) AnyEventID(calID string) string {
 	}
 	return ids[0]
 }
+
+// EventIDs lists the live events on a calendar, for a test that needs to
+// change several of them.
+func (s *Server) EventIDs(calID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ids []string
+	for id, e := range s.Events[calID] {
+		if e.Status != gcal.StatusCancelled {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}

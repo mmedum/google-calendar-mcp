@@ -39,6 +39,14 @@ import (
 // which reaches the caller as `[stale]` naming the one cure — ask again
 // with no token at all.
 
+// baselineRequests caps the pages a baseline will walk for its token.
+//
+// A baseline keeps paging past the event budget because the token is the
+// point of the call, but it cannot page for ever: §11 budgets requests
+// per call, and a calendar that needs more than this is a fact the
+// caller has to be told rather than a reason to keep spending.
+const baselineRequests = 25
+
 // ChangesOptions is one call to ListChanges.
 type ChangesOptions struct {
 	Calendar string
@@ -86,13 +94,38 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		MaxResults:  budget,
 	}
 
+	// A baseline and an incremental read stop for different reasons, and
+	// the difference is not a nicety — a live run found a baseline that
+	// could never produce a token at all.
+	//
+	// On a BASELINE the rows are not changes. The result says so: nothing
+	// changed, this is the starting point. What the caller actually wants
+	// is the token, and the token arrives on the LAST page only — so on a
+	// calendar with a long deletion history (a real one had 507 rows
+	// across 3 pages, most of them tombstones from deleted events) the
+	// event budget stops the read before the last page and no token ever
+	// comes back. Paging past the budget loses nothing there, because the
+	// token means "everything up to here is known".
+	//
+	// On an INCREMENTAL read every row IS a change the caller needs, so
+	// the budget stops it and the token is withheld: handing one over
+	// would mark changes as seen that were never delivered.
+	//
+	// Paging is §4.7's exception, named here and counted in the result.
 	for {
 		page, perr := s.API.ListEvents(ctx, c.ID, opts)
 		out.Requests++
 		if perr != nil {
 			return render.Changes{}, changesError(perr, o.SyncToken)
 		}
+		atBudget := len(out.Changed)+len(out.Deleted) >= budget
 		for _, raw := range page.Items {
+			if out.Baseline && atBudget {
+				// Counted, not carried: the caller is establishing a
+				// starting point, not reading a calendar.
+				out.Skipped++
+				continue
+			}
 			// A tombstone is the answer, not a row to skip. Google
 			// sends it bare — an id and a status, with no start and no
 			// summary — so it is never put through model.FromEvent,
@@ -113,11 +146,20 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		}
 		out.NextPageToken = page.NextPageToken
 		done := page.NextPageToken == ""
-		if done || len(out.Changed)+len(out.Deleted) >= budget {
-			out.Complete = done
-			break
+		switch {
+		case done:
+			out.Complete = true
+		case out.Baseline && out.Requests >= baselineRequests:
+			// A cap, so a calendar nobody can baseline fails loudly
+			// rather than spending §11's whole budget on one call.
+			out.Complete = false
+		case !out.Baseline && len(out.Changed)+len(out.Deleted) >= budget:
+			out.Complete = false
+		default:
+			opts.PageToken = page.NextPageToken
+			continue
 		}
-		opts.PageToken = page.NextPageToken
+		break
 	}
 
 	// Said rather than implied: an incomplete read carries no token, so

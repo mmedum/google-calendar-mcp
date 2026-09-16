@@ -145,8 +145,11 @@ func registerRead(s *mcp.Server, d Deps) {
 			"list_events cannot tell you it is gone, and this returns its id under deleted. " +
 			"Call it once with no sync_token to get a baseline and a token; pass that token next time and " +
 			"you get only what has changed since. " +
-			"The token comes back with the LAST page only, so a truncated read has none — continue with " +
-			"page_token until it arrives, and do not store a token you did not get. " +
+			"The token comes back with the LAST page only. A baseline therefore pages all the way to the " +
+			"end to fetch one, and says how many rows it passed over on the way — they are covered by the " +
+			"token, not lost. An INCREMENTAL read stops at its budget instead and hands back no token, " +
+			"because every row there is a change you have not seen yet; continue with page_token until " +
+			"the token arrives, and never store one you did not get. " +
 			"It takes no window, no search and no ordering: Google forbids all of them alongside a sync " +
 			"token, and deleted events are always included. " +
 			"If the token has expired the call fails [stale]; ask again with no sync_token and start over.",

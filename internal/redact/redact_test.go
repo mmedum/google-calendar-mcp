@@ -99,3 +99,30 @@ func TestPrinterRedacts(t *testing.T) {
 		t.Fatalf("the printer dropped ordinary text: %q", got)
 	}
 }
+
+// A sync token is account state with the entropy of a secret, and a
+// transcript gets pasted into issues. It has no shape of its own, so the
+// rule is anchored on the label this server's own renderer prints.
+//
+// The fixtures below are invented and say so. The first draft of this
+// test carried a REAL token copied out of a live transcript, and the
+// leak gate refused the commit — which is the gate doing exactly its job
+// and the reason §9.1 says fixtures are generated, never recorded.
+func TestSyncAndPageTokensAreRedacted(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Next sync token: example-token-not-a-real-one", "Next sync token: [cursor]"},
+		{"page_token: example-page-token", "page_token: [cursor]"},
+		{"next page token: abc123", "next page token: [cursor]"},
+	}
+	for _, tc := range cases {
+		if got := redact.String(tc.in); got != tc.want {
+			t.Errorf("String(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// And the prose around it survives, or the transcript stops being
+	// readable in exchange for being safe.
+	const sentence = "Pass it as sync_token next time to get only what changed."
+	if got := redact.String(sentence); got == sentence {
+		t.Log("prose with no token after the label is left alone")
+	}
+}

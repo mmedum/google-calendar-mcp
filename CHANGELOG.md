@@ -37,6 +37,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   An expired token is `[stale]` with the only cure that works — ask
   again with no token — rather than the generic "read again and retry",
   which here loops forever.
+
+  A **baseline pages past its event budget** to reach the token, and says
+  how many rows it passed over. The live run is why: the token arrives on
+  the last page only, and a real calendar needed 3 pages and 527 rows to
+  get there — twelve live events and the rest tombstones, which
+  `showDeleted=true` must return. With the budget stopping at 250 no
+  token ever came back, on any calendar with a deletion history. An
+  incremental read still stops at the budget, because there every row is
+  a change the caller has not seen.
+- The transcript redactor masks sync and page tokens. A cursor grants
+  nothing, but it is account state with the entropy of a secret, and a
+  transcript gets pasted into issues. It has no shape to anchor a rule
+  on, so the rule is anchored on the label the renderer prints in front
+  of it.
 - The MCP registry entry, which §12 puts last. `gates server-json`
   builds it from the release's **own `checksums.txt`**, so the hash
   describes the bytes that were published rather than a rebuild of them

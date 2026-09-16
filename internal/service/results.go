@@ -725,6 +725,8 @@ type ChangesResult struct {
 	SyncToken     string `json:"sync_token,omitempty"`
 	NextPageToken string `json:"next_page_token,omitempty"`
 	Requests      int    `json:"api_requests"`
+	// Skipped counts rows a baseline paged past to reach its token.
+	Skipped int `json:"skipped,omitempty"`
 
 	text string
 }
@@ -739,9 +741,9 @@ func NewChangesResult(in render.Changes) ChangesResult {
 		TimeZone: in.Zone.Name(), ZoneSource: string(in.Zone.Source),
 		Baseline: in.Baseline, Complete: in.Complete,
 		SyncToken: in.SyncToken, NextPageToken: in.NextPageToken,
-		Requests: in.Requests,
-		Deleted:  in.Deleted,
-		text:     in.Text(),
+		Requests: in.Requests, Skipped: in.Skipped,
+		Deleted: in.Deleted,
+		text:    in.Text(),
 	}
 	for _, e := range in.Changed {
 		out.Changed = append(out.Changed, NewEventOut(e))

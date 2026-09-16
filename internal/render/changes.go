@@ -31,6 +31,11 @@ type Changes struct {
 	SyncToken     string
 	NextPageToken string
 	Requests      int
+	// Skipped counts rows a baseline paged past without reporting. They
+	// are not changes — the token covers them — and carrying hundreds of
+	// tombstones to establish a starting point would be cost with no
+	// answer in it.
+	Skipped int
 }
 
 // Text renders what changed.
@@ -52,6 +57,10 @@ func (c Changes) Text() string {
 	case c.Baseline:
 		fmt.Fprintf(&b, "%d event%s on the calendar now. Nothing is reported as changed: this call "+
 			"establishes the starting point.\n", len(c.Changed), plural(len(c.Changed)))
+		if c.Skipped > 0 {
+			fmt.Fprintf(&b, "%d further row%s were paged past to reach the sync token, which is what a "+
+				"baseline is for. They are covered by the token, not lost.\n", c.Skipped, plural(c.Skipped))
+		}
 	case len(c.Changed) == 0 && len(c.Deleted) == 0:
 		b.WriteString("Nothing changed.\n")
 	}

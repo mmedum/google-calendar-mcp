@@ -109,10 +109,54 @@ func TestChangesReportsADeletionAListCannot(t *testing.T) {
 	}
 }
 
-// Google issues the token with the last page only, so a read that did
-// not finish has none — and a caller who stored one anyway would skip
-// every page it had not seen.
-func TestAnUnfinishedReadHandsBackNoSyncToken(t *testing.T) {
+// Google issues the token with the last page only, so an INCREMENTAL
+// read stopped by its budget has none — and a caller who stored one
+// anyway would mark changes as seen that were never delivered.
+func TestAnUnfinishedIncrementalReadHandsBackNoSyncToken(t *testing.T) {
+	svc, fake := seeded(t)
+	ctx := context.Background()
+
+	base, err := svc.ListChanges(ctx, service.ChangesOptions{Calendar: "primary"})
+	if err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+
+	// More changes than the budget will carry.
+	for _, id := range fake.EventIDs("primary") {
+		fake.Touch("primary", id)
+	}
+	fake.PageSize = 1
+
+	got, err := svc.ListChanges(ctx, service.ChangesOptions{
+		Calendar: "primary", SyncToken: base.SyncToken, MaxEvents: 1})
+	if err != nil {
+		t.Fatalf("ListChanges: %v", err)
+	}
+	if got.Complete {
+		t.Fatal("the read stopped at its budget and called itself complete")
+	}
+	if got.SyncToken != "" {
+		t.Fatalf("an unfinished incremental read handed back the token %q, which marks changes as seen "+
+			"that were never delivered", got.SyncToken)
+	}
+	if got.NextPageToken == "" {
+		t.Fatal("an unfinished read gave no page token, so it cannot be continued")
+	}
+	if !strings.Contains(got.Text(), "NO sync token") {
+		t.Fatalf("the result does not say the token is missing:\n%s", got.Text())
+	}
+}
+
+// And the other half, which a live run found the hard way: a BASELINE
+// pages past its budget to reach the token.
+//
+// On a real calendar the scratch account had 507 rows across 3 pages,
+// nearly all of them tombstones from deleted events. With the budget
+// stopping the read at 250 the last page was never reached, so no token
+// ever came back and incremental sync could not be started at all. The
+// rows are not changes on a baseline — the token covers them — so paging
+// past them loses nothing.
+func TestABaselinePagesPastItsBudgetToReachTheToken(t *testing.T) {
 	svc, fake := seeded(t)
 	fake.PageSize = 1
 
@@ -121,18 +165,22 @@ func TestAnUnfinishedReadHandsBackNoSyncToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListChanges: %v", err)
 	}
-	if got.Complete {
-		t.Fatal("the read stopped at its budget and called itself complete")
+	if !got.Complete {
+		t.Fatal("a baseline stopped before the last page, so it can never produce a token")
 	}
-	if got.SyncToken != "" {
-		t.Fatalf("an unfinished read handed back the sync token %q, which skips everything it did not read",
-			got.SyncToken)
+	if got.SyncToken == "" {
+		t.Fatal("a baseline reached the end and still handed back no token")
 	}
-	if got.NextPageToken == "" {
-		t.Fatal("an unfinished read gave no page token, so it cannot be continued")
+	if got.Requests < 2 {
+		t.Fatalf("a baseline over %d one-event pages spent %d requests; it did not page",
+			fake.PageSize, got.Requests)
 	}
-	if !strings.Contains(got.Text(), "NO sync token") {
-		t.Fatalf("the result does not say the token is missing:\n%s", got.Text())
+	if got.Skipped == 0 {
+		t.Fatal("the baseline carried every row despite its budget, so nothing was paged past")
+	}
+	// And it says so, rather than silently dropping them.
+	if !strings.Contains(got.Text(), "paged past") {
+		t.Fatalf("the result does not admit to skipping rows:\n%s", got.Text())
 	}
 }
 

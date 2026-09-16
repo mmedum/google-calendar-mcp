@@ -38,11 +38,26 @@ var (
 	tokenRe = regexp.MustCompile(`\b1//[0-9A-Za-z_\-]{10,}\b`)
 	// An OAuth client id.
 	clientRe = regexp.MustCompile(`\b\d{6,}-[a-z0-9]{10,}\.apps\.googleusercontent\.com\b`)
+	// A sync or page token, anchored on the LABEL rather than a shape.
+	//
+	// The tokens are opaque base64 and have no shape of their own, so a
+	// shape rule would either miss them or match half the transcript.
+	// The label is a better anchor than a shape anyway: it is printed by
+	// this server's own renderer, so it cannot drift without the
+	// renderer changing.
+	//
+	// They are cursors rather than credentials — neither grants access —
+	// but they are account state with the entropy of a secret, and the
+	// leak gate already refuses a string of that shape in the tree. A
+	// transcript that is pasted into an issue should not be the
+	// exception.
+	cursorRe = regexp.MustCompile(`(?i)((?:next sync token|sync_token|page_token|next page token)[:=] ?)\S+`)
 )
 
 // String redacts one value.
 func String(s string) string {
 	s = tokenRe.ReplaceAllString(s, "[token]")
+	s = cursorRe.ReplaceAllString(s, "${1}[cursor]")
 	s = clientRe.ReplaceAllString(s, "[client-id]")
 	s = calendarRe.ReplaceAllString(s, "[calendar-id]")
 	s = eventLinkRe.ReplaceAllString(s, "[calendar-url]")

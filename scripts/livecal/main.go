@@ -262,6 +262,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike K: clear on a secondary", spikeK},
 		{"spike L: calendar and acl If-Match", spikeL},
 		{"spike M: conference creation", spikeM},
+		{"spike N: what suppresses nextSyncToken", spikeN},
 	} {
 		r.total++
 		v, note := sp.run(ctx, out, api, scratch)
@@ -965,7 +966,13 @@ func steps(scratch string, state seedState) []step {
 				}
 				token := afterLabel(r.text, "Next sync token: ")
 				if token == "" {
-					return fail, "the baseline handed back no sync token, so nothing can follow it"
+					// The first live run died here, and the cause was
+					// not the tool: the scratch calendar carries ~500
+					// tombstones, the token arrives on the last page
+					// only, and the event budget stopped the read
+					// before it. A baseline pages past the budget now.
+					return fail, "the baseline handed back no sync token, so nothing can follow it — " +
+						"is it stopping before the last page again?"
 				}
 				syncToken = token
 				return pass, "baseline read, sync token issued"
