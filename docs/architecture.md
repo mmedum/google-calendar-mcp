@@ -6,8 +6,10 @@ phase 1 — `internal/recur`, `list_instances` and `check_availability` —
 and phase 2 — `internal/plan`, the five event writes, `If-Match`, the
 client-generated id and `dry_run` — are built, verified live and
 committed. The surface is thirteen tools; `make check` is green across
-nineteen targets; the live driver runs 55 steps against a real account
-with none failing.
+nineteen targets; the live driver runs **60 steps against a real account
+with none failing** — 7 undetermined by default, being the five that
+reach a real person and spikes A and B, all of which need
+`-spike-notify` and a configured guest.
 
 **What phase 2's live runs cost and taught.** Six runs. The first failed
 five steps: three were the driver's own assertions, which grepped a whole
@@ -44,7 +46,9 @@ longer withdraw. Nine of §18's forty-four rows were written or rewritten
 on 2026-09-16, four of them correcting something this document had
 asserted earlier the same day.
 
-**Still owed:** spike G's negative half, and **CI has never run on macOS
+**Still owed:** spike A's `externalOnly` arm and spike B, which need an
+out-of-domain guest and a non-Google one and cannot be scored by any
+driver (§15); spike G's negative half; and **CI has never run on macOS
 or Windows** — the workflow covers all three platforms and the branch
 has never been pushed. Both platforms cross-compile clean, including the
 tagged tests, so a first run is unlikely to fail on compilation; the
