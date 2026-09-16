@@ -1,0 +1,13 @@
+DRY RUN — nothing was written.
+
+Would create "Not really" on Sample Primary.
+
+  before: (did not exist)
+  after:  2026-04-01  09:00-10:00  Not really
+
+Asked Google to notify nobody, of 1 guest. Google says some mail may still be sent, so this is not a promise of silence.
+
+Nothing was sent. Everything above is what a real call would do.
+
+id: abcdef0123 on calendar primary
+times are in Europe/Copenhagen, the calendar's own time zone

@@ -138,6 +138,35 @@ func registerRead(s *mcp.Server, d Deps) {
 		},
 	})
 
+	add(s, d, Def[listChangesIn, service.ChangesResult]{
+		Name: "list_changes",
+		Description: "What changed on a calendar since you last looked. " +
+			"This is the only read that reports DELETIONS: a deleted event stops matching a window, so " +
+			"list_events cannot tell you it is gone, and this returns its id under deleted. " +
+			"Call it once with no sync_token to get a baseline and a token; pass that token next time and " +
+			"you get only what has changed since. " +
+			"The token comes back with the LAST page only. A baseline therefore pages all the way to the " +
+			"end to fetch one, and says how many rows it passed over on the way — they are covered by the " +
+			"token, not lost. An INCREMENTAL read stops at its budget instead and hands back no token, " +
+			"because every row there is a change you have not seen yet; continue with page_token until " +
+			"the token arrives, and never store one you did not get. " +
+			"It takes no window, no search and no ordering: Google forbids all of them alongside a sync " +
+			"token, and deleted events are always included. " +
+			"If the token has expired the call fails [stale]; ask again with no sync_token and start over.",
+		Kind: Read,
+		Handle: func(ctx context.Context, in listChangesIn) (service.ChangesResult, error) {
+			out, err := d.Service.ListChanges(ctx, service.ChangesOptions{
+				Calendar: in.Calendar, SyncToken: in.SyncToken,
+				PageToken: in.PageToken, TimeZone: in.TimeZone,
+				MaxEvents: in.MaxEvents,
+			})
+			if err != nil {
+				return service.ChangesResult{}, err
+			}
+			return service.NewChangesResult(out), nil
+		},
+	})
+
 	add(s, d, Def[checkAvailabilityIn, service.AvailabilityResult]{
 		Name: "check_availability",
 		Description: "When people are busy, and when they are free, in a window. " + windowHelp + " " + zoneHelp + " " +
@@ -146,13 +175,18 @@ func registerRead(s *mcp.Server, d Deps) {
 			"events is not the same answer. " +
 			"A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. " +
 			"The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to " +
-			"use. Working hours are not applied: pass a narrower window if you only want office hours. " +
+			"use. " +
+			"working_from, working_to and working_days mask the gaps to a working week: a window is one " +
+			"interval, so \"next week, 09:00 to 17:00\" cannot be asked for as a window and would otherwise " +
+			"come back with a fifteen-hour gap every night. There is no default — without them every hour of " +
+			"the window counts, and the result always says which was used. " +
 			"Calendars are asked in batches of 50, and the result says how many requests that took.",
 		Kind: Read,
 		Handle: func(ctx context.Context, in checkAvailabilityIn) (service.AvailabilityResult, error) {
 			out, err := d.Service.Availability(ctx, service.AvailabilityOptions{
 				Calendars: in.Calendars, From: in.From, To: in.To,
 				TimeZone: in.TimeZone, MinMinutes: in.MinMinutes,
+				WorkingFrom: in.WorkingFrom, WorkingTo: in.WorkingTo, WorkingDays: in.WorkingDays,
 			})
 			if err != nil {
 				return service.AvailabilityResult{}, err
@@ -225,12 +259,23 @@ type listInstancesIn struct {
 	PageToken     string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
 }
 
+type listChangesIn struct {
+	Calendar  string `json:"calendar" jsonschema:"The calendar to check for changes."`
+	SyncToken string `json:"sync_token,omitempty" jsonschema:"A token from a previous call's sync_token. Leave it out the first time to get a baseline and a token. Opaque: never build or edit one."`
+	PageToken string `json:"page_token,omitempty" jsonschema:"Continue a read that did not finish, from next_page_token. The sync token arrives with the last page."`
+	TimeZone  string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the changed events in."`
+	MaxEvents int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
+}
+
 type checkAvailabilityIn struct {
-	Calendars  []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read."`
-	From       string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
-	To         string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
-	TimeZone   string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
-	MinMinutes int      `json:"min_minutes,omitempty" jsonschema:"Ignore free gaps shorter than this many minutes."`
+	Calendars   []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read."`
+	From        string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
+	To          string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
+	TimeZone    string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
+	MinMinutes  int      `json:"min_minutes,omitempty" jsonschema:"Ignore free gaps shorter than this many minutes."`
+	WorkingFrom string   `json:"working_from,omitempty" jsonschema:"Start of the working day as hh:mm local, e.g. 09:00. Pass it with working_to. No default: without it the whole window counts."`
+	WorkingTo   string   `json:"working_to,omitempty" jsonschema:"End of the working day as hh:mm local, e.g. 17:00. Must be later in the day than working_from; a shift crossing midnight is refused."`
+	WorkingDays []string `json:"working_days,omitempty" jsonschema:"Weekdays to keep, as mon tue wed thu fri sat sun. Empty means every day; the server does not assume anybody's working week."`
 }
 
 type getSettingsIn struct{}

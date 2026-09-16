@@ -9,6 +9,7 @@ import (
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/model"
+	"github.com/mmedum/google-calendar-mcp/internal/plan"
 	"github.com/mmedum/google-calendar-mcp/internal/render"
 	"github.com/mmedum/google-calendar-mcp/internal/when"
 )
@@ -225,12 +226,51 @@ func TestGoldenAvailability(t *testing.T) {
 	}
 	rep := render.AvailabilityReport{
 		Window: w, Zone: z, Answers: answers,
-		Gaps:     model.FreeGaps(w, all, 30*time.Minute),
+		Gaps:     model.FreeGaps(w, all, 30*time.Minute, when.Hours{}),
 		GapsFrom: 2,
 		MinGap:   30 * time.Minute,
 		Requests: 1,
 	}
 	golden(t, "availability", rep.Text())
+}
+
+// TestGoldenAvailabilityWorkingHours is the answer §17.2 is about: a
+// week asked about at once, with the nights and the weekend out of it.
+// Without the mask the longest gap in this answer is an overnight one,
+// which passes any min_minutes and is useless.
+func TestGoldenAvailabilityWorkingHours(t *testing.T) {
+	z := goldenZone(t)
+	w := goldenWindow(t, z, "2026-03-16T00:00:00+01:00", "2026-03-21T00:00:00+01:00")
+	busy := func(start, end string) model.Busy {
+		s, err := when.ParseZoned(start, z.Loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e, err := when.ParseZoned(end, z.Loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return model.Busy{Start: s, End: e}
+	}
+	answers := []model.Availability{
+		{CalendarID: "primary", Busy: []model.Busy{
+			busy("2026-03-16T09:00:00+01:00", "2026-03-16T17:00:00+01:00"),
+			busy("2026-03-17T09:00:00+01:00", "2026-03-17T12:00:00+01:00"),
+			busy("2026-03-18T14:00:00+01:00", "2026-03-18T17:00:00+01:00"),
+		}},
+	}
+	hours, err := when.ParseHours("09:00", "17:00", []string{"mon", "tue", "wed", "thu", "fri"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := render.AvailabilityReport{
+		Window: w, Zone: z, Answers: answers, Hours: hours,
+		Gaps:     model.FreeGaps(w, answers[0].Busy, 30*time.Minute, hours),
+		GapsFrom: 1,
+		MinGap:   30 * time.Minute,
+		Requests: 1,
+	}
+	golden(t, "availability-working-hours", rep.Text())
 }
 
 func TestGoldenAvailabilityAllUnknown(t *testing.T) {
@@ -244,4 +284,200 @@ func TestGoldenAvailabilityAllUnknown(t *testing.T) {
 		Requests: 1,
 	}
 	golden(t, "availability-unknown", rep.Text())
+}
+
+// The write report is the one result a caller acts on twice: once to see
+// what happened, and again to decide whether to tell somebody. §4.9 says
+// what it has to carry, and a golden file is how a change to any of it
+// arrives as a diff rather than as a surprise.
+func TestGoldenWrite(t *testing.T) {
+	z := goldenZone(t)
+	before := goldenEvent(t, "abcdef0123", "Project review",
+		"2026-03-18T10:00:00+01:00", "2026-03-18T11:00:00+01:00")
+	before.Location = "Room 1"
+	before.Attendees = []model.Attendee{
+		{Email: "colleague@example.test", Response: gcal.ResponseAccepted},
+		{Email: "partner@elsewhere.test", Response: gcal.ResponseNeedsAction},
+	}
+	after := before
+	after.Location = "Room 2"
+	after.ETag = `"abcdef0123-2"`
+
+	w := render.WriteReport{
+		Verb: render.VerbUpdate, Calendar: "Sample Primary", Zone: z,
+		Before: &before, After: &after,
+		Changes: []plan.Change{{Field: "location", From: "Room 1", To: "Room 2"}},
+		Notify: "Asked Google to notify all 2 guests, 1 of them outside your organisation." +
+			" That is what was asked for, not what arrived: the API reports nothing about delivery.",
+		Requests: 2,
+	}
+	golden(t, "write-update", w.Text())
+}
+
+// A cancellation with nothing left afterwards, and a scope: the two
+// shapes the update golden does not cover.
+func TestGoldenWriteCancelled(t *testing.T) {
+	z := goldenZone(t)
+	before := goldenEvent(t, "abcdef0123", "Weekly review",
+		"2026-03-24T14:00:00+01:00", "2026-03-24T15:00:00+01:00")
+	before.SeriesID = "abcdef0123"
+
+	w := render.WriteReport{
+		Verb: render.VerbCancel, Calendar: "Sample Primary", Zone: z, Scope: "instance",
+		Before:  &before,
+		Changes: []plan.Change{{Field: "status", From: "confirmed", To: "cancelled"}},
+		Notify:  "Nobody to notify: this write reaches no guests, so no notification was requested.",
+		Notes: []string{
+			"This event has no guests, so nobody else is holding it.",
+			"One occurrence, cancelled with a status patch rather than deleted.",
+		},
+		Requests: 1,
+	}
+	golden(t, "write-cancel", w.Text())
+}
+
+// A dry run says so first, and says it wrote nothing.
+func TestGoldenWriteDryRun(t *testing.T) {
+	z := goldenZone(t)
+	after := goldenEvent(t, "abcdef0123", "Not really", "2026-04-01T09:00:00+02:00",
+		"2026-04-01T10:00:00+02:00")
+	w := render.WriteReport{
+		Verb: render.VerbCreate, DryRun: true, Calendar: "Sample Primary", Zone: z,
+		After:  &after,
+		Notify: "Asked Google to notify nobody, of 1 guest. Google says some mail may still be sent, so this is not a promise of silence.",
+	}
+	golden(t, "write-dry-run", w.Text())
+}
+
+// The calendar write report, which carries the distinction §7.5 is
+// about: what changed on the calendar everybody sees, and what changed
+// only for this account.
+func TestGoldenCalendarWrite(t *testing.T) {
+	before := model.Calendar{
+		ID: "team@group.calendar.example.test", Title: "Sample Team",
+		TimeZone: "Europe/Copenhagen", Role: gcal.RoleOwner, Selected: true,
+	}
+	after := before
+	after.Title = "Sample Team — planning"
+
+	c := render.CalendarReport{
+		Verb: render.VerbUpdate, Calendar: after, Before: &before,
+		Changes: []plan.Change{
+			{Field: "title", From: "Sample Team", To: "Sample Team — planning"},
+			{Field: "color_id", From: "3", To: "7"},
+		},
+		Notes: []string{
+			"That changes the calendar for everybody it is shared with, not only for you. " +
+				"To change only your own view of it, pass my_name rather than title.",
+			"Those are your own settings for this calendar. Nobody else sees any of them change.",
+		},
+		Requests: 4,
+	}
+	golden(t, "calendar-update", c.Text())
+}
+
+// Unsubscribing is the result most likely to be misread, so the golden
+// holds the sentence that says what it did not do.
+func TestGoldenCalendarUnsubscribe(t *testing.T) {
+	cal := model.Calendar{
+		ID: "team@group.calendar.example.test", Title: "Sample Team",
+		TimeZone: "Europe/Copenhagen", Role: gcal.RoleReader, Selected: true,
+	}
+	c := render.CalendarReport{
+		Verb: render.VerbUnsubscribe, Calendar: cal,
+		Notes: []string{
+			"This removes the calendar from YOUR list. The calendar itself is untouched, every event on it " +
+				"stays, and nobody else sees any difference. Subscribe again with subscribe:true and the id above.",
+		},
+		Requests: 2,
+	}
+	golden(t, "calendar-unsubscribe", c.Text())
+}
+
+// A share, with exposure on both sides: §7.6's rule is that the result
+// answers "who can see this now", and the golden is how a change to that
+// answer arrives as a diff.
+func TestGoldenSharing(t *testing.T) {
+	before := []model.Sharing{
+		{RuleID: "user:owner@example.test", ScopeType: gcal.ScopeTypeUser,
+			Value: "owner@example.test", Role: gcal.RoleOwner},
+	}
+	added := model.Sharing{
+		RuleID: "user:colleague@example.test", ScopeType: gcal.ScopeTypeUser,
+		Value: "colleague@example.test", Role: gcal.RoleReader,
+	}
+	s := render.SharingReport{
+		Verb: render.VerbShare, CalendarID: "team@group.calendar.example.test", Title: "Sample Team",
+		Before: before, After: append(append([]model.Sharing{}, before...), added), Changed: &added,
+		Notify: "Asked Google to email the person this rule names about the change. That is what was asked " +
+			"for, not what arrived: the API reports nothing about delivery.",
+		Requests: 2,
+	}
+	golden(t, "sharing-share", s.Text())
+}
+
+// A public calendar, listed: the public rule comes first and is shouted,
+// because a reader scanning addresses will not notice a word in the
+// middle of the list.
+func TestGoldenSharingPublic(t *testing.T) {
+	rules := []model.Sharing{
+		{RuleID: "user:owner@example.test", ScopeType: gcal.ScopeTypeUser,
+			Value: "owner@example.test", Role: gcal.RoleOwner},
+		{RuleID: "default", ScopeType: gcal.ScopeTypeDefault, Role: gcal.RoleFreeBusyReader},
+		{RuleID: "domain:example.test", ScopeType: gcal.ScopeTypeDomain,
+			Value: "example.test", Role: gcal.RoleReader},
+	}
+	s := render.SharingReport{
+		CalendarID: "team@group.calendar.example.test", Title: "Sample Team", After: rules,
+		Notes: []string{
+			"This calendar is PUBLIC: anybody at all can see only whether the time is busy, never what the " +
+				"event is. unshare_calendar with who:anyone removes that rule — which stops new readers and " +
+				"takes nothing back from whoever has already looked.",
+		},
+		Requests: 1,
+	}
+	golden(t, "sharing-public", s.Text())
+}
+
+// Tokens that read as invented, deliberately. A fixture shaped like a
+// real Google token is a string with the entropy of a credential sitting
+// in the repository — the leak gate refuses one, and rightly: §9.1 says
+// fixtures are generated, never recorded, and "it is only a test" is how
+// a real one gets committed one day.
+const (
+	syntheticSyncToken = "example-sync-token-not-a-real-one"
+	syntheticPageToken = "example-page-token-not-a-real-one"
+)
+
+// Incremental sync (§17.1). Two goldens, because the interesting half is
+// what the result says when it has no token to give.
+func TestGoldenChanges(t *testing.T) {
+	z := goldenZone(t)
+	moved := goldenEvent(t, "ev-standup", "Standup",
+		"2026-03-17T14:00:00+01:00", "2026-03-17T15:00:00+01:00")
+
+	c := render.Changes{
+		CalendarID: "primary", CalendarName: "Work", Zone: z,
+		Changed: []model.Event{moved},
+		Deleted: []string{"ev-gone-1", "ev-gone-2"},
+		// A finished read: the token is the point of the whole call.
+		Complete: true, SyncToken: syntheticSyncToken, Requests: 1,
+	}
+	golden(t, "changes", c.Text())
+}
+
+func TestGoldenChangesUnfinished(t *testing.T) {
+	z := goldenZone(t)
+	moved := goldenEvent(t, "ev-standup", "Standup",
+		"2026-03-17T14:00:00+01:00", "2026-03-17T15:00:00+01:00")
+
+	// Google issues the sync token with the last page only, so a read
+	// that stopped early has none — and this is the result that has to
+	// say so rather than leaving the caller to notice.
+	c := render.Changes{
+		CalendarID: "primary", CalendarName: "Work", Zone: z,
+		Changed:  []model.Event{moved},
+		Complete: false, NextPageToken: syntheticPageToken, Requests: 2,
+	}
+	golden(t, "changes-unfinished", c.Text())
 }

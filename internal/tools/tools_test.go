@@ -11,6 +11,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/internal/config"
 	"github.com/mmedum/google-calendar-mcp/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/server"
 	"github.com/mmedum/google-calendar-mcp/internal/service"
 	"github.com/mmedum/google-calendar-mcp/internal/tools"
@@ -62,13 +63,38 @@ func names(ts []*mcp.Tool) map[string]*mcp.Tool {
 	return out
 }
 
-func TestReadSurfaceIsTheEightReadTools(t *testing.T) {
+// readTools is §8's first block: everything read-only mode keeps, and
+// everything that asks for only the read scopes. `list_changes` is one
+// of them — incremental sync reads, and the token it hands back is the
+// caller's to keep (§17.1).
+var readTools = []string{
+	"list_calendars", "get_calendar", "list_events",
+	"search_events", "get_event", "list_instances",
+	"check_availability", "get_settings", "list_changes",
+}
+
+// writeTools is phase 2's block: the five event writes.
+var writeTools = []string{
+	"create_event", "update_event", "cancel_event", "move_event", "respond_to_event",
+}
+
+// calendarTools is phase 3's, minus the ones behind a gate: creating a
+// calendar and managing it register wherever a write does.
+var calendarTools = []string{"create_calendar", "manage_calendar"}
+
+// sharingTools is what GCAL_SHARING=off removes, the read among them
+// (§7.6).
+var sharingTools = []string{"list_sharing", "share_calendar", "unshare_calendar"}
+
+// gatedTools need GCAL_ENABLE_DESTRUCTIVE to register at all, and
+// confirm:true on the call besides (§9).
+var gatedTools = []string{"delete_calendar", "clear_calendar"}
+
+func TestTheDefaultSurfaceIsEverythingButTheGatedTools(t *testing.T) {
 	got := names(listTools(t, baseConfig()))
-	want := []string{
-		"list_calendars", "get_calendar", "list_events",
-		"search_events", "get_event", "list_instances",
-		"check_availability", "get_settings",
-	}
+	want := append(append([]string{}, readTools...), writeTools...)
+	want = append(want, calendarTools...)
+	want = append(want, sharingTools...)
 	for _, n := range want {
 		if _, ok := got[n]; !ok {
 			t.Fatalf("tool %q is not registered", n)
@@ -79,15 +105,32 @@ func TestReadSurfaceIsTheEightReadTools(t *testing.T) {
 	}
 }
 
+// §10: read-only mode registers only the read tools, because it also
+// requests only the read scopes. A write tool left registered there
+// would fail at Google with a 403 nobody can act on.
+func TestReadOnlyModeDropsEveryWrite(t *testing.T) {
+	cfg := baseConfig()
+	cfg.ReadOnly = true
+	got := names(listTools(t, cfg))
+	for _, n := range append(append(append([]string{}, writeTools...), calendarTools...),
+		append(sharingTools, gatedTools...)...) {
+		if _, ok := got[n]; ok {
+			t.Fatalf("read-only mode registered %q", n)
+		}
+	}
+	if len(got) != len(readTools) {
+		t.Fatalf("read-only registered %d tools, expected the %d reads: %v", len(got), len(readTools), got)
+	}
+}
+
 // TestReadOnlyKeepsEveryReadTool: read-only must not be a quieter
 // server, only a safer one.
 func TestReadOnlyKeepsEveryReadTool(t *testing.T) {
-	full := names(listTools(t, tools.FullSurface(baseConfig())))
 	cfg := baseConfig()
 	cfg.ReadOnly = true
 	readOnly := names(listTools(t, cfg))
 
-	for name := range full {
+	for _, name := range readTools {
 		if _, ok := readOnly[name]; !ok {
 			t.Fatalf("read-only mode dropped %q, which is a read tool", name)
 		}
@@ -141,12 +184,60 @@ func TestEveryToolHasADescriptionAndAFlatSchema(t *testing.T) {
 // TestReadToolsAreAnnotatedReadOnly: the annotation is a hint a client
 // may ignore, but an incorrect one is actively misleading.
 func TestReadToolsAreAnnotatedReadOnly(t *testing.T) {
-	for _, tool := range listTools(t, baseConfig()) {
+	got := names(listTools(t, baseConfig()))
+	for _, name := range readTools {
+		tool := got[name]
 		if !tool.Annotations.ReadOnlyHint {
-			t.Fatalf("%s is a phase 0 read tool and is not annotated read-only", tool.Name)
+			t.Fatalf("%s is a read tool and is not annotated read-only", name)
 		}
 		if tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
-			t.Fatalf("%s claims an open world; a calendar read does not reach outside the account", tool.Name)
+			t.Fatalf("%s claims an open world; a calendar read does not reach outside the account", name)
+		}
+	}
+	for _, name := range writeTools {
+		if got[name].Annotations.ReadOnlyHint {
+			t.Fatalf("%s writes and is annotated read-only", name)
+		}
+	}
+}
+
+// An annotation a client uses to decide whether to ask a person has to
+// be true. cancel_event is not behind the destructive FLAG — §9 argues
+// that a gate everybody turns on protects nobody — but it is still the
+// one write here that removes a meeting, and the hint says so.
+func TestCancelEventIsAnnotatedDestructiveWithoutBeingGated(t *testing.T) {
+	got := names(listTools(t, baseConfig()))
+	cancel, ok := got["cancel_event"]
+	if !ok {
+		t.Fatal("cancel_event must register without GCAL_ENABLE_DESTRUCTIVE (§9)")
+	}
+	if cancel.Annotations.DestructiveHint == nil || !*cancel.Annotations.DestructiveHint {
+		t.Fatal("cancel_event removes a meeting and must be annotated destructive")
+	}
+	for _, name := range []string{"create_event", "update_event", "respond_to_event", "move_event"} {
+		a := got[name].Annotations
+		if a.DestructiveHint != nil && *a.DestructiveHint {
+			t.Fatalf("%s is annotated destructive and is not", name)
+		}
+	}
+}
+
+// Every write tool has to teach the two rules a model will otherwise
+// learn from a refusal.
+func TestEveryWriteToolDocumentsNotifyAndDryRun(t *testing.T) {
+	got := names(listTools(t, tools.FullSurface(baseConfig())))
+	for _, name := range writeTools {
+		d := got[name].Description
+		if !strings.Contains(d, "notify") {
+			t.Errorf("%s does not mention notify, which it requires", name)
+		}
+		if !strings.Contains(d, "dry_run") {
+			t.Errorf("%s does not mention dry_run", name)
+		}
+	}
+	for _, name := range []string{"update_event", "cancel_event", "move_event", "respond_to_event"} {
+		if !strings.Contains(got[name].Description, "scope") {
+			t.Errorf("%s does not mention scope, which it requires on a repeating event", name)
 		}
 	}
 }
@@ -410,7 +501,7 @@ func TestEveryToolAnswers(t *testing.T) {
 	}{
 		{"list_calendars", nil, "Sample Primary"},
 		{"list_calendars", map[string]any{"include_hidden": true}, "Sample Primary"},
-		{"get_calendar", map[string]any{"calendar": "primary"}, "Shared with"},
+		{"get_calendar", map[string]any{"calendar": "primary"}, "who can see it"},
 		{"get_settings", nil, "Europe/Copenhagen"},
 		{"list_events", map[string]any{"from": "2026-03-16", "to": "2026-03-17"}, "Morning sync"},
 		{"list_events", map[string]any{
@@ -549,7 +640,11 @@ func TestAMissingRequiredArgumentIsCaughtBySchema(t *testing.T) {
 
 func session(t *testing.T, cfg config.Config) (*mcp.ClientSession, func()) {
 	t.Helper()
-	fake := caltest.Seed()
+	return sessionWith(t, cfg, caltest.Seed())
+}
+
+func sessionWith(t *testing.T, cfg config.Config, fake *caltest.Server) (*mcp.ClientSession, func()) {
+	t.Helper()
 	base := fake.Start()
 	api := gapi.New(nil)
 	api.Base = base
@@ -635,5 +730,98 @@ func TestListInstancesWarnsAboutTheIDItNeeds(t *testing.T) {
 		if !strings.Contains(tool.Description, want) {
 			t.Fatalf("list_instances does not say which id it wants (%q):\n%s", want, tool.Description)
 		}
+	}
+}
+
+// The write tools at the boundary a model actually sees: the arguments
+// go in as JSON, and both halves of the result come back.
+//
+// The service tests hold the rules; this holds the wiring, which is the
+// half a unit test on the service cannot reach — a handler that passed
+// the wrong field through would leave every service test green.
+func TestTheWriteToolsWorkThroughTheProtocol(t *testing.T) {
+	fake := caltest.Seed()
+	invite := caltest.Timed("ev-invite", "Somebody else's meeting",
+		"2026-03-19T13:00:00+01:00", "2026-03-19T14:00:00+01:00", "Europe/Copenhagen")
+	invite.Organizer = &gcal.EventPerson{Email: "host@example.test"}
+	invite.Attendees = []gcal.EventAttendee{
+		{Email: "host@example.test", Organizer: true, ResponseStatus: gcal.ResponseAccepted},
+		{Email: "owner@example.test", Self: true, ResponseStatus: gcal.ResponseNeedsAction},
+	}
+	fake.AddEvent("primary", invite)
+
+	cs, cleanup := sessionWith(t, tools.FullSurface(baseConfig()), fake)
+	defer cleanup()
+	ctx := context.Background()
+
+	calls := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"create_event", map[string]any{
+			"title": "Written through the protocol",
+			"start": "2026-04-01T09:00:00+02:00", "end": "2026-04-01T10:00:00+02:00",
+		}, "Created"},
+		{"create_event", map[string]any{
+			"title": "All day, through the protocol",
+			"start": "2026-04-03", "end": "2026-04-03", "dry_run": true,
+		}, "DRY RUN"},
+		{"update_event", map[string]any{
+			"calendar": "primary", "event_id": "ev-standup", "location": "Room 2",
+		}, "location"},
+		{"respond_to_event", map[string]any{
+			"calendar": "primary", "event_id": "ev-invite",
+			"response": "tentative", "notify": "all",
+		}, "your response"},
+		{"move_event", map[string]any{
+			"calendar": "primary", "event_id": "ev-standup",
+			"to_calendar": "team@group.calendar.example.test",
+		}, "Moved"},
+		{"cancel_event", map[string]any{
+			"calendar": "primary", "event_id": "ev-transparent",
+		}, "Cancelled"},
+	}
+	for _, c := range calls {
+		t.Run(c.name+"/"+c.want, func(t *testing.T) {
+			res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: c.name, Arguments: c.args})
+			if err != nil {
+				t.Fatalf("CallTool(%s): %v", c.name, err)
+			}
+			if res.IsError {
+				t.Fatalf("%s failed: %s", c.name, text(t, res))
+			}
+			// Both halves, never the same bytes (§10).
+			if res.StructuredContent == nil {
+				t.Fatalf("%s returned no structured half", c.name)
+			}
+			if got := text(t, res); !strings.Contains(got, c.want) {
+				t.Fatalf("%s did not mention %q:\n%s", c.name, c.want, got)
+			}
+		})
+	}
+}
+
+// A refusal arrives as a tool result carrying a class, never as a
+// protocol error (§6.5).
+func TestAWriteRefusalArrivesAsAClassifiedToolResult(t *testing.T) {
+	cs, cleanup := session(t, tools.FullSurface(baseConfig()))
+	defer cleanup()
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "create_event",
+		Arguments: map[string]any{
+			"title": "No notify", "start": "2026-04-01T09:00:00+02:00",
+			"end": "2026-04-01T10:00:00+02:00", "guests": []string{"somebody@example.test"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("a refusal must not be a protocol error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("creating an event with guests and no notify must be refused (§4.3)")
+	}
+	if got := text(t, res); !strings.Contains(got, "[invalid]") {
+		t.Fatalf("the refusal carries no class:\n%s", got)
 	}
 }

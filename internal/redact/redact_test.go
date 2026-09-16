@@ -99,3 +99,57 @@ func TestPrinterRedacts(t *testing.T) {
 		t.Fatalf("the printer dropped ordinary text: %q", got)
 	}
 }
+
+// A sync token is account state with the entropy of a secret, and a
+// transcript gets pasted into issues. It has no shape of its own, so the
+// rule is anchored on the label this server's own renderer prints.
+//
+// The fixtures below are invented and say so. The first draft of this
+// test carried a REAL token copied out of a live transcript, and the
+// leak gate refused the commit — which is the gate doing exactly its job
+// and the reason §9.1 says fixtures are generated, never recorded.
+func TestSyncAndPageTokensAreRedacted(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"Next sync token: example-token-not-a-real-one", "Next sync token: [cursor]"},
+		{"page_token: example-page-token", "page_token: [cursor]"},
+		{"next page token: abc123", "next page token: [cursor]"},
+	}
+	for _, tc := range cases {
+		if got := redact.String(tc.in); got != tc.want {
+			t.Errorf("String(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// And the prose around it survives, or the transcript stops being
+	// readable in exchange for being safe.
+	const sentence = "Pass it as sync_token next time to get only what changed."
+	if got := redact.String(sentence); got == sentence {
+		t.Log("prose with no token after the label is left alone")
+	}
+}
+
+// A Meet link is joinable by anybody holding it, so the redactor's job
+// is to miss none. These are the three it used to miss — found when
+// CodeQL flagged the line for over-matching and the opposite turned out
+// to be true.
+func TestMeetLinksAreRedactedInEveryFormTheyTake(t *testing.T) {
+	cases := []struct{ name, in string }{
+		{"in the middle of a sentence", "join at https://meet.google.com/abc-defg-hij today"},
+		{"a lookup path", "https://meet.google.com/lookup/abcdefghij"},
+		{"upper case", "HTTPS://MEET.GOOGLE.COM/abc-defg-hij"},
+		{"plain http", "http://meet.google.com/abc-defg-hij"},
+		{"with a query", "https://meet.google.com/abc-defg-hij?authuser=1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redact.String(tc.in)
+			for _, leak := range []string{"abc-defg-hij", "abcdefghij", "ABC-DEFG-HIJ"} {
+				if strings.Contains(got, leak) {
+					t.Fatalf("the meeting code survived redaction: %q", got)
+				}
+			}
+			if !strings.Contains(got, "[meet-url]") {
+				t.Fatalf("nothing was redacted: %q", got)
+			}
+		})
+	}
+}

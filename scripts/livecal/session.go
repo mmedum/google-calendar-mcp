@@ -37,7 +37,17 @@ func startServer(ctx context.Context, bin, profile string) (*session, error) {
 	cmd := exec.CommandContext(ctx, bin)
 	// The server must read the same login the driver set up with, or the
 	// two halves of the run would be looking at different accounts.
-	cmd.Env = append(cmd.Environ(), "GCAL_LOG_LEVEL=error", "GCAL_PROFILE="+profile)
+	//
+	// The destructive flag is set here and nowhere else. delete_calendar
+	// and clear_calendar do not REGISTER without it (§9), so a driver
+	// that left it unset could not drive them at all and would leave the
+	// probe calendar behind on every run. What makes arming it safe is
+	// not care: every step that could reach one names a calendar this
+	// driver created, and a step whose calendar was never created is
+	// SKIPPED rather than called — because a tool call naming no
+	// calendar resolves to the account's primary one.
+	cmd.Env = append(cmd.Environ(),
+		"GCAL_LOG_LEVEL=error", "GCAL_PROFILE="+profile, "GCAL_ENABLE_DESTRUCTIVE=true")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -162,4 +172,31 @@ func (s *session) call(ctx context.Context, tool string, args map[string]any) (c
 		b.WriteString(c.Text)
 	}
 	return callResult{text: b.String(), isError: res.IsError}, nil
+}
+
+// readResource reads one resource, the way a client that attaches
+// rather than calls would (§8).
+//
+// A resource read answers with a protocol error rather than an error
+// result, so a refusal arrives here as a transport failure and is
+// turned into the same callResult shape a tool refusal takes — the
+// steps then read alike.
+func (s *session) readResource(ctx context.Context, uri string) (callResult, error) {
+	raw, err := s.request(ctx, "resources/read", map[string]any{"uri": uri})
+	if err != nil {
+		return callResult{text: err.Error(), isError: true}, nil
+	}
+	var res struct {
+		Contents []struct {
+			Text string `json:"text"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return callResult{}, err
+	}
+	var b strings.Builder
+	for _, c := range res.Contents {
+		b.WriteString(c.Text)
+	}
+	return callResult{text: b.String()}, nil
 }

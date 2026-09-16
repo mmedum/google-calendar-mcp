@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
@@ -256,3 +257,83 @@ func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api 
 		return undetermined, "51 readable calendars answered for none, which is neither a refusal nor a trim"
 	}
 }
+
+// spikeJ — does events.move honour If-Match?
+//
+// The one question phase 2 left open. §4.4 puts every write under
+// If-Match, and move_event is the single exception: events.move is a
+// POST with the destination in the query string and no body, and neither
+// the reference nor the discovery document says whether the header
+// applies. So the server sends none, and its result says the protection
+// is absent — which is honest, and is also an assumption. Rule 13 says
+// an assumption gets probed before it is adopted, and this is the probe.
+//
+// The discriminator is a STALE etag. A current one would succeed whether
+// the header is honoured or ignored, and would settle nothing — which is
+// exactly the shape of failure §15 opens by naming.
+func spikeJ(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
+	if spikeDest == "" {
+		return undetermined, "no destination calendar this run, so there is nothing to move to"
+	}
+	id := "livecalmatchprobe" + runSuffix
+	if err := gcal.ValidEventID(id); err != nil {
+		return fail, err.Error()
+	}
+	body := map[string]any{
+		"id": id, "summary": "Livecal If-Match probe",
+		"start": map[string]any{"dateTime": "2026-04-15T09:00:00+02:00", "timeZone": scratchZone},
+		"end":   map[string]any{"dateTime": "2026-04-15T10:00:00+02:00", "timeZone": scratchZone},
+	}
+	if err := api.insertEvent(ctx, scratch, body); err != nil {
+		return fail, "could not create the probe event: " + redact.String(err.Error())
+	}
+	defer func() {
+		// Wherever it ended up. No guests, so nothing can be mailed.
+		for _, cal := range []string{scratch, spikeDest} {
+			_ = api.do(context.Background(), http.MethodDelete,
+				"/calendars/"+cal+"/events/"+id+"?sendUpdates=none", nil, nil)
+		}
+	}()
+
+	first, err := api.getEvent(ctx, scratch, id)
+	if err != nil {
+		return fail, "could not read the probe event: " + redact.String(err.Error())
+	}
+	stale := first.ETag
+	if stale == "" {
+		return undetermined, "Google returned no etag on the probe event, so there is nothing to go stale"
+	}
+	// Move the etag on, so the one held above is genuinely out of date.
+	if err := api.patchEvent(ctx, scratch, id, map[string]any{"location": "moved the etag on"}); err != nil {
+		return fail, "could not patch the probe event: " + redact.String(err.Error())
+	}
+	fresh, err := api.getEvent(ctx, scratch, id)
+	if err != nil {
+		return fail, "could not re-read the probe event: " + redact.String(err.Error())
+	}
+	if fresh.ETag == stale {
+		return undetermined, "the etag did not move after a patch, so a stale one cannot be built"
+	}
+
+	status, moveErr := api.status(ctx, http.MethodPost,
+		"/calendars/"+scratch+"/events/"+id+"/move?destination="+spikeDest+"&sendUpdates=none",
+		stale, nil, nil)
+	out.Printf("      move with a STALE If-Match answered %d\n", status)
+
+	switch {
+	case status == http.StatusPreconditionFailed:
+		return pass, "HONOURED: a stale If-Match is refused with 412, so move_event can and should carry " +
+			"the etag — §4.4's exception is not needed and the tool should take one"
+	case status >= 200 && status < 300:
+		return pass, "IGNORED: a stale If-Match was accepted and the event moved anyway, so events.move " +
+			"offers no optimistic concurrency and move_event is right to take no etag and to say so"
+	case moveErr != nil:
+		return undetermined, "the move failed for another reason, so the header question is unsettled: " +
+			redact.String(moveErr.Error())
+	default:
+		return undetermined, fmt.Sprintf("the move answered %d, which settles neither way", status)
+	}
+}
+
+// spikeDest is the destination calendar for spike J, set by the run.
+var spikeDest string

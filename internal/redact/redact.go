@@ -31,18 +31,51 @@ var (
 	calendarRe = regexp.MustCompile(`\b[A-Za-z0-9]{20,}@group\.calendar\.google\.com\b`)
 	// An event link carries the event id in its eid.
 	eventLinkRe = regexp.MustCompile(`https://[A-Za-z0-9.\-]*google\.com/calendar/[^\s"]*`)
+	// A Meet link is a credential in URL form: anybody holding it can
+	// walk into the meeting.
+	//
+	// DELIBERATELY UNANCHORED, and CodeQL's go/regex/missing-regexp-anchor
+	// is wrong about this line. That rule is written for a regex used to
+	// VALIDATE a URL, where matching anywhere lets an attacker embed an
+	// allowed host in a longer string and bypass the check. This one
+	// REDACTS: it has to find a link wherever it appears, and anchoring
+	// it would stop it matching a link in the middle of a sentence —
+	// which is where every link in a transcript appears.
+	//
+	// The real risk here is the opposite one, under-matching, and the
+	// first version had three of those: it missed an upper-case URL,
+	// missed http://, and stopped at the first slash so
+	// `meet.google.com/lookup/<code>` was redacted down to the code
+	// itself. All three leaked a joinable meeting into a transcript.
+	meetRe = regexp.MustCompile(`(?i)https?://meet\.google\.com/[^\s"'<>)\]]*`)
 	// A refresh token's literal prefix.
 	tokenRe = regexp.MustCompile(`\b1//[0-9A-Za-z_\-]{10,}\b`)
 	// An OAuth client id.
 	clientRe = regexp.MustCompile(`\b\d{6,}-[a-z0-9]{10,}\.apps\.googleusercontent\.com\b`)
+	// A sync or page token, anchored on the LABEL rather than a shape.
+	//
+	// The tokens are opaque base64 and have no shape of their own, so a
+	// shape rule would either miss them or match half the transcript.
+	// The label is a better anchor than a shape anyway: it is printed by
+	// this server's own renderer, so it cannot drift without the
+	// renderer changing.
+	//
+	// They are cursors rather than credentials — neither grants access —
+	// but they are account state with the entropy of a secret, and the
+	// leak gate already refuses a string of that shape in the tree. A
+	// transcript that is pasted into an issue should not be the
+	// exception.
+	cursorRe = regexp.MustCompile(`(?i)((?:next sync token|sync_token|page_token|next page token)[:=] ?)\S+`)
 )
 
 // String redacts one value.
 func String(s string) string {
 	s = tokenRe.ReplaceAllString(s, "[token]")
+	s = cursorRe.ReplaceAllString(s, "${1}[cursor]")
 	s = clientRe.ReplaceAllString(s, "[client-id]")
 	s = calendarRe.ReplaceAllString(s, "[calendar-id]")
 	s = eventLinkRe.ReplaceAllString(s, "[calendar-url]")
+	s = meetRe.ReplaceAllString(s, "[meet-url]")
 	s = emailRe.ReplaceAllStringFunc(s, maskEmail)
 	return s
 }

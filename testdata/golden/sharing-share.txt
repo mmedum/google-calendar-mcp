@@ -1,0 +1,12 @@
+Shared "Sample Team" with colleague@example.test.
+
+who could see it before:
+  owner@example.test — owner (can see and change everything, including who else has access)
+
+who can see it now:
+  owner@example.test — owner (can see and change everything, including who else has access)
+  colleague@example.test — reader (can see events; private events show without their details)
+
+Asked Google to email the person this rule names about the change. That is what was asked for, not what arrived: the API reports nothing about delivery.
+
+(2 API requests)

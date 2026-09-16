@@ -1,0 +1,15 @@
+2026-03-16T00:00:00+01:00 to 2026-03-21T00:00:00+01:00 (Europe/Copenhagen)
+times are in Europe/Copenhagen, the calendar's own time zone
+
+primary
+  busy 2026-03-16 09:00-17:00
+  busy 2026-03-17 09:00-12:00
+  busy 2026-03-18 14:00-17:00
+
+Free within 09:00-17:00, Mon Tue Wed Thu Fri, 30m or longer:
+  2026-03-17 12:00-17:00 (5h)
+  2026-03-18 09:00-14:00 (5h)
+  2026-03-19 09:00-17:00 (8h)
+  2026-03-20 09:00-17:00 (8h)
+
+Only working hours are shown: 09:00-17:00, Mon Tue Wed Thu Fri, Europe/Copenhagen. Free time outside them is not listed.

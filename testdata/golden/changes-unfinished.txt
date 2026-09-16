@@ -1,0 +1,9 @@
+Changes on Work
+times are in Europe/Copenhagen, the calendar's own time zone
+
+Changed (1)
+  2026-03-17 Tue  14:00-15:00  Standup  [id ev-standup]
+
+This read did not finish, so there is NO sync token yet — Google issues one with the last page only. Pass page_token to continue; the token arrives at the end.
+page_token: example-page-token-not-a-real-one
+(2 API requests)

@@ -134,11 +134,11 @@ func TestReachesPeopleExcludesSelfAndRooms(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			e := model.Event{Attendees: c.att}
-			if got := e.ReachesPeople(); got != c.want {
-				t.Fatalf("ReachesPeople() = %v, want %v", got, c.want)
+			if got := len(e.Guests("")) > 0; got != c.want {
+				t.Fatalf("Guests() non-empty = %v, want %v", got, c.want)
 			}
-			if got := e.GuestCount(); got != c.count {
-				t.Fatalf("GuestCount() = %d, want %d", got, c.count)
+			if got := e.GuestCount(""); got != c.count {
+				t.Fatalf("GuestCount(\"\") = %d, want %d", got, c.count)
 			}
 		})
 	}
@@ -296,12 +296,13 @@ func TestFreeGaps(t *testing.T) {
 	}
 
 	cases := []struct {
-		name string
-		busy []model.Busy
-		min  time.Duration
-		want []string
+		name  string
+		busy  []model.Busy
+		min   time.Duration
+		hours when.Hours
+		want  []string
 	}{
-		{"nobody is busy", nil, 0, []string{"09:00-17:00"}},
+		{name: "nobody is busy", want: []string{"09:00-17:00"}},
 		{
 			name: "one meeting leaves two gaps",
 			busy: []model.Busy{busyAt(t, "2026-03-16T12:00:00+01:00", "2026-03-16T13:00:00+01:00", loc)},
@@ -345,10 +346,31 @@ func TestFreeGaps(t *testing.T) {
 			min:  30 * time.Minute,
 			want: []string{"12:00-17:00"},
 		},
+		{
+			name:  "the working-hours mask cuts the gap down",
+			hours: mustHours(t, "10:00", "12:00", nil),
+			want:  []string{"10:00-12:00"},
+		},
+		{
+			// The order the three steps run in, as a test: masking
+			// leaves 10:00-10:20 and min_minutes then removes it. Run
+			// the other way round the sliver survives, because the
+			// unmasked gap it came from was eight hours long.
+			name:  "min is applied after the mask, not before it",
+			busy:  []model.Busy{busyAt(t, "2026-03-16T10:20:00+01:00", "2026-03-16T17:00:00+01:00", loc)},
+			min:   30 * time.Minute,
+			hours: mustHours(t, "10:00", "12:00", nil),
+			want:  nil,
+		},
+		{
+			name:  "a weekday the mask does not name leaves no free time",
+			hours: mustHours(t, "09:00", "17:00", []string{"sat", "sun"}),
+			want:  nil,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := gapStrings(model.FreeGaps(window, c.busy, c.min))
+			got := gapStrings(model.FreeGaps(window, c.busy, c.min, c.hours))
 			if len(got) != len(c.want) {
 				t.Fatalf("got %v, want %v", got, c.want)
 			}
@@ -361,6 +383,15 @@ func TestFreeGaps(t *testing.T) {
 	}
 }
 
+func mustHours(t *testing.T, from, to string, days []string) when.Hours {
+	t.Helper()
+	h, err := when.ParseHours(from, to, days)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 // TestFreeGapsAcrossADaylightSavingTransition: the 29 March day is 23
 // hours long in Copenhagen, and a free gap over it must be 23 hours
 // rather than the 24 an arithmetic on dates would report.
@@ -370,7 +401,7 @@ func TestFreeGapsAcrossADaylightSavingTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 	day := when.DayWindow(when.MustParseDate("2026-03-29"), loc)
-	gaps := model.FreeGaps(day, nil, 0)
+	gaps := model.FreeGaps(day, nil, 0, when.Hours{})
 	if len(gaps) != 1 {
 		t.Fatalf("got %d gaps over an empty day", len(gaps))
 	}

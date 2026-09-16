@@ -106,6 +106,21 @@ type SchemaDump struct {
 	Server     string       `json:"server"`
 	SDKVersion string       `json:"sdk_version"`
 	Tools      []SchemaTool `json:"tools"`
+	// Resources are part of the surface a client sees, so they are part
+	// of what a diff has to notice. A resource removed is as breaking as
+	// a tool removed, and nothing else would have reported it.
+	Resources []SchemaResource `json:"resources,omitempty"`
+}
+
+// SchemaResource is one resource or resource template in a dump.
+type SchemaResource struct {
+	Name string `json:"name"`
+	// URI is set on a fixed resource, URITemplate on a templated one.
+	// Exactly one of them, which is what tells the two apart in a diff.
+	URI         string `json:"uri,omitempty"`
+	URITemplate string `json:"uri_template,omitempty"`
+	MIMEType    string `json:"mime_type,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // SchemaTool is one tool in a dump.
@@ -162,7 +177,36 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 	}
 	sort.Slice(dump.Tools, func(i, j int) bool { return dump.Tools[i].Name < dump.Tools[j].Name })
 
+	rs, err := cs.ListResources(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("server: list resources: %w", err)
+	}
+	for _, r := range rs.Resources {
+		dump.Resources = append(dump.Resources, SchemaResource{
+			Name: r.Name, URI: r.URI, MIMEType: r.MIMEType, Description: r.Description,
+		})
+	}
+	tmpl, err := cs.ListResourceTemplates(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("server: list resource templates: %w", err)
+	}
+	for _, r := range tmpl.ResourceTemplates {
+		dump.Resources = append(dump.Resources, SchemaResource{
+			Name: r.Name, URITemplate: r.URITemplate, MIMEType: r.MIMEType, Description: r.Description,
+		})
+	}
+	sort.Slice(dump.Resources, func(i, j int) bool { return dump.Resources[i].key() < dump.Resources[j].key() })
+
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(dump)
+}
+
+// key is how a resource is identified in a diff: its URI, or its
+// template when it has one.
+func (r SchemaResource) key() string {
+	if r.URI != "" {
+		return r.URI
+	}
+	return r.URITemplate
 }

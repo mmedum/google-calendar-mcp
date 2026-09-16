@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -195,17 +196,24 @@ func (s *Service) allCalendars(ctx context.Context) ([]model.Calendar, error) {
 		}
 		token = page.NextPageToken
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Primary != out[j].Primary {
-			return out[i].Primary
-		}
-		return strings.ToLower(out[i].Title) < strings.ToLower(out[j].Title)
-	})
+	sortCalendars(out)
 
 	s.mu.Lock()
 	s.calendars, s.calendarsAt = out, true
 	s.mu.Unlock()
 	return out, nil
+}
+
+// sortCalendars is the order the list is held in: the account's own
+// calendar first, then by title. Its own function because a row added to
+// the cache after a write has to land where a re-read would have put it.
+func sortCalendars(cals []model.Calendar) {
+	sort.Slice(cals, func(i, j int) bool {
+		if cals[i].Primary != cals[j].Primary {
+			return cals[i].Primary
+		}
+		return strings.ToLower(cals[i].Title) < strings.ToLower(cals[j].Title)
+	})
 }
 
 // ResolveCalendar turns a reference into a calendar (§6.1).
@@ -270,6 +278,19 @@ func (s *Service) ResolveCalendar(ctx context.Context, ref string) (model.Calend
 }
 
 func (s *Service) calendarByID(ctx context.Context, id string) (model.Calendar, error) {
+	// "primary" is answered from the list this process has already read,
+	// when it has one. Every call resolves a calendar and the list is
+	// cached for the process, so going to calendarList.get for the alias
+	// spends a request on a question already answered — once per tool
+	// call, on the commonest reference there is. That is the shape of
+	// the defect phase 1 found in check_availability, one request at a
+	// time instead of 166, and invisible for the same reason: the
+	// result's own count does not include it.
+	if strings.EqualFold(id, "primary") {
+		if c, ok := s.cachedPrimary(); ok {
+			return c, nil
+		}
+	}
 	// The list entry carries the access role and the per-user overrides,
 	// which the calendar resource does not, so prefer it.
 	if entry, err := s.API.GetCalendarListEntry(ctx, id); err == nil {
@@ -279,10 +300,28 @@ func (s *Service) calendarByID(ctx context.Context, id string) (model.Calendar, 
 	if err != nil {
 		return model.Calendar{}, err
 	}
-	return model.Calendar{
-		ID: cal.ID, Title: cal.Summary, TimeZone: cal.TimeZone,
-		Description: cal.Description, ETag: cal.ETag,
-	}, nil
+	return model.FromCalendar(*cal), nil
+}
+
+// cachedPrimary returns the account's own calendar from the list this
+// process has already read.
+//
+// Only from the cache: it never triggers the read itself. A caller that
+// asked for one calendar should not pay for the whole list, and a list
+// that is not there yet means the direct read below is the cheaper
+// answer.
+func (s *Service) cachedPrimary() (model.Calendar, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.calendarsAt {
+		return model.Calendar{}, false
+	}
+	for _, c := range s.calendars {
+		if c.Primary {
+			return c, true
+		}
+	}
+	return model.Calendar{}, false
 }
 
 // --------------------------------------------------------------- events
@@ -634,7 +673,7 @@ func (s *Service) window(from, to string, zone when.Zone) (when.Window, error) {
 	}
 	w, err := when.NewWindow(start, end, zone.Loc)
 	if err != nil {
-		return when.Window{}, gapi.Wrap(gapi.ClassInvalid, err, "%s", err.Error())
+		return when.Window{}, classifyPlan(err)
 	}
 	return w, nil
 }
@@ -705,27 +744,20 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 		out.Note = "Sharing tools are off in this server (GCAL_SHARING=off), so the sharing list was not read."
 		return out, nil
 	}
-	acl, err := s.API.ListACL(ctx, c.ID, "")
+	rules, err := s.sharingRules(ctx, c.ID)
 	if err != nil {
-		cls, _ := gapi.ClassOf(err)
-		if cls == gapi.ClassAuth || cls == gapi.ClassForbidden {
-			out.Note = "Could not read who this calendar is shared with: the signed-in account has not granted " +
-				"the calendar.acls.readonly scope. Run `google-calendar-mcp login` again. " +
-				"This is not the same as the calendar being shared with nobody."
-			return out, nil
+		note, ok := unreadableSharing(err)
+		if !ok {
+			return CalendarResult{}, err
 		}
-		return CalendarResult{}, err
+		// Reported as a note rather than as a failure: the rest of this
+		// card is a successful read, and an empty sharing list would say
+		// "shared with nobody", which is the wrong answer rather than a
+		// missing one.
+		out.Note = note
+		return out, nil
 	}
-	for _, r := range acl.Items {
-		who := r.Scope.Value
-		if r.Scope.IsPublic() {
-			who = "anyone"
-		}
-		out.Sharing = append(out.Sharing, SharingOut{
-			Who: who, ScopeType: r.Scope.Type, Role: r.Role,
-			RoleMeans: gcal.RoleMeans(r.Role), Public: r.Scope.IsPublic(),
-		})
-	}
+	out.Sharing = sharingOut(rules)
 	return out, nil
 }
 
@@ -746,10 +778,22 @@ func (s *Service) SettingsSummary(ctx context.Context) (SettingsResult, error) {
 
 	// Colours are a separate call and a nicety: a failure here must not
 	// take down the tool whose real job is reporting the time zone.
-	if colors, err := s.API.GetColors(ctx); err == nil && len(colors.Event) > 0 {
-		out.EventColors = map[string]string{}
-		for id, pair := range colors.Event {
-			out.EventColors[id] = pair.Background
+	if colors, err := s.API.GetColors(ctx); err == nil {
+		if len(colors.Event) > 0 {
+			out.EventColors = map[string]string{}
+			for id, pair := range colors.Event {
+				out.EventColors[id] = pair.Background
+			}
+		}
+		// The calendar palette is a different set of ids from the event
+		// one, and manage_calendar's color_id indexes THIS one. Reporting
+		// only the event colours left that parameter with no published
+		// source for its values.
+		if len(colors.Calendar) > 0 {
+			out.CalendarColors = map[string]string{}
+			for id, pair := range colors.Calendar {
+				out.CalendarColors[id] = pair.Background
+			}
 		}
 	}
 
@@ -769,10 +813,32 @@ func (s *Service) SettingsSummary(ctx context.Context) (SettingsResult, error) {
 		fmt.Fprintf(&b, "Locale: %s\n", out.Locale)
 	}
 	if n := len(out.EventColors); n > 0 {
-		fmt.Fprintf(&b, "%d event colours available.\n", n)
+		fmt.Fprintf(&b, "%d event colours available, ids %s.\n", n, colourIDs(out.EventColors))
+	}
+	if n := len(out.CalendarColors); n > 0 {
+		fmt.Fprintf(&b, "%d calendar colours available, ids %s — these are what manage_calendar's "+
+			"color_id takes.\n", n, colourIDs(out.CalendarColors))
 	}
 	out.text = b.String()
 	return out, nil
+}
+
+// colourIDs lists a palette's ids in numeric order, because a map
+// iterates in none and a caller needs to know which ids exist.
+func colourIDs(palette map[string]string) string {
+	ids := make([]string, 0, len(palette))
+	for id := range palette {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		a, aerr := strconv.Atoi(ids[i])
+		b, berr := strconv.Atoi(ids[j])
+		if aerr == nil && berr == nil {
+			return a < b
+		}
+		return ids[i] < ids[j]
+	})
+	return strings.Join(ids, ", ")
 }
 
 func weekdayName(v string) string {
@@ -889,6 +955,19 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	if len(out.Events) > budget {
 		out.Events = out.Events[:budget]
 	}
+	// Ordered AFTER the cut, never before.
+	//
+	// Google does not return occurrences in date order — the live run
+	// got a cancelled 24 March after 7 April — and a list of dates out
+	// of order is hard to read for the question this tool answers, which
+	// is "which dates does this series have". But sorting before the
+	// budget cut would keep a different SET than the page token accounts
+	// for, and the ones dropped would be reachable from nowhere. That is
+	// the defect phase 1 fixed in the schedule read; this is the same
+	// trap one tool over.
+	sort.Slice(out.Events, func(i, j int) bool {
+		return sortKey(out.Events[i]) < sortKey(out.Events[j])
+	})
 	// Truncated means the caller is not looking at the whole series:
 	// either the budget cut the list, or a page is still waiting.
 	out.Truncated = len(events) > budget || out.NextPageToken != ""
@@ -922,6 +1001,13 @@ type AvailabilityOptions struct {
 	TimeZone  string
 	// MinMinutes drops free gaps shorter than this. Zero keeps them all.
 	MinMinutes int
+	// WorkingFrom, WorkingTo and WorkingDays are the daily mask of
+	// §17.2, all optional and none with a default. They are the caller's
+	// own strings, parsed here, because "09:00" is a reading rather than
+	// a time and the zone that turns it into one is resolved below.
+	WorkingFrom string
+	WorkingTo   string
+	WorkingDays []string
 }
 
 // FreeBusyBatch is the API's ceiling on calendars per query (§2.10).
@@ -963,9 +1049,13 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 	if err != nil {
 		return render.AvailabilityReport{}, err
 	}
+	hours, err := when.ParseHours(o.WorkingFrom, o.WorkingTo, o.WorkingDays)
+	if err != nil {
+		return render.AvailabilityReport{}, classifyPlan(err)
+	}
 
 	report := render.AvailabilityReport{
-		Window: win, Zone: zone,
+		Window: win, Zone: zone, Hours: hours,
 		MinGap: time.Duration(o.MinMinutes) * time.Minute,
 	}
 
@@ -1003,7 +1093,7 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 	// renderer, so the text and the structured half cannot disagree —
 	// they did, and the JSON was the one offering the window.
 	if report.GapsFrom > 0 {
-		report.Gaps = model.FreeGaps(win, busy, report.MinGap)
+		report.Gaps = model.FreeGaps(win, busy, report.MinGap, hours)
 	}
 	return report, nil
 }

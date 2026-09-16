@@ -42,13 +42,34 @@ const (
 	// because widening access is the one act here whose blast radius
 	// leaves the account.
 	Sharing
+	// SharingRead reads who can see a calendar. It changes nothing, so
+	// its annotations say read-only — but GCAL_SHARING=off removes it
+	// with the other two, because a deployment that has turned sharing
+	// off has turned off the surface, not merely the writes.
+	//
+	// Read-only mode drops it as well. §8 registers the eight read tools
+	// there and this is not one of them: get_calendar already reports a
+	// calendar's exposure, so nothing is unreachable, and the read-only
+	// surface stays the list §8 names rather than the list minus a
+	// judgement call.
+	SharingRead
+	// Cancelling removes a meeting. It is its own Kind for one reason:
+	// its annotation has to say DESTRUCTIVE while it still registers
+	// without the destructive flag.
+	//
+	// §9 argues both halves. Cancelling a meeting is what a calendar is
+	// for and Google keeps the record, so gating it would put a flag
+	// between the model and the most ordinary write there is — training
+	// people to set GCAL_ENABLE_DESTRUCTIVE permanently, which would arm
+	// clear_calendar too. A gate everybody turns on protects nobody. But
+	// a client deciding whether to confirm with a person deserves the
+	// truthful hint, and "this may destroy something" is the truth.
+	Cancelling
 	// Destructive removes something Calendar cannot bring back. Not
 	// registered at all unless the destructive flag is set, and still
-	// needs confirm on the call.
-	//
-	// Note what is NOT here: cancel_event. §9 argues it — a gate
-	// everybody turns on protects nobody, and cancelling a meeting is
-	// the most ordinary write there is.
+	// needs confirm on the call. The two are delete_calendar and
+	// clear_calendar; cancel_event is Cancelling above, and §9 argues
+	// the difference.
 	Destructive
 )
 
@@ -65,6 +86,9 @@ func Register(s *mcp.Server, d Deps) {
 		d.Logger = slog.New(slog.DiscardHandler)
 	}
 	registerRead(s, d)
+	registerWrite(s, d)
+	registerCalendars(s, d)
+	registerResources(s, d)
 }
 
 // Def is one tool.
@@ -137,7 +161,7 @@ func allowed(k Kind, cfg config.Config) bool {
 		return true
 	case Destructive:
 		return cfg.EnableDestructive && !cfg.ReadOnly
-	case Sharing:
+	case Sharing, SharingRead:
 		return cfg.Sharing && !cfg.ReadOnly
 	default:
 		return !cfg.ReadOnly
@@ -147,10 +171,12 @@ func allowed(k Kind, cfg config.Config) bool {
 func annotationsFor(k Kind) *mcp.ToolAnnotations {
 	no, yes := ptr(false), ptr(true)
 	switch k {
-	case Read:
+	case Read, SharingRead:
 		return &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: no}
 	case IdempotentWrite:
 		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: no, OpenWorldHint: no}
+	case Cancelling:
+		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: yes, OpenWorldHint: no}
 	case Destructive:
 		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: no}
 	case Sharing:

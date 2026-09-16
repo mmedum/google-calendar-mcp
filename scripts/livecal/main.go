@@ -27,9 +27,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/internal/when"
 )
 
 func main() {
@@ -86,7 +89,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 2
 	}
 
-	scratch, created, err := api.ensureScratchCalendar(ctx)
+	scratch, created, err := api.ensureScratchCalendar(ctx, scratchTitle)
 	if err != nil {
 		out.Printf("could not create the scratch calendar: %v\n", redact.String(err.Error()))
 		// The one failure here that is not a bug and not a setup
@@ -130,8 +133,31 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}()
 	}
 
+	// The write path needs two things the read path did not: somewhere
+	// to move an event to, and an invitation this account can answer.
+	dest, destCreated, destNote := destinationCalendar(ctx, api)
+	out.Printf("%s\n", destNote)
+	if destCreated && !keep {
+		defer func() {
+			if err := api.deleteCalendar(context.Background(), dest); err != nil {
+				out.Printf("WARNING: could not delete the destination calendar %s: %v\n",
+					redact.ID(dest), redact.String(err.Error()))
+				out.Printf("delete it by hand; this driver must leave nothing behind\n")
+			}
+		}()
+	}
+
 	if err := api.seed(ctx, scratch); err != nil {
 		out.Printf("could not fill the scratch calendar: %v\n", err)
+		return 2
+	}
+	self, err := api.primaryAddress(ctx)
+	if err != nil {
+		out.Printf("could not read this account's own address: %v\n", redact.String(err.Error()))
+		return 2
+	}
+	if err := api.seedRSVP(ctx, scratch, self); err != nil {
+		out.Printf("could not seed the invitation to answer: %v\n", redact.String(err.Error()))
 		return 2
 	}
 	// One occurrence of the weekly series is removed, because a
@@ -170,7 +196,50 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		noSuchCalendar:     true,
 		unknownCalendarRef: true,
 	}}
+	// The destination calendar is this driver's too, so a step naming it
+	// may have its body printed. An empty id is not added: §9.1's
+	// allow-list must never gain a blank key that matches an absent
+	// argument.
+	if dest != "" {
+		r.invented[dest] = true
+	}
+
+	spikeDest = dest
+	writes := &writeState{dest: dest, self: self}
+	// The only address in this run that belongs to another person. It is
+	// read from the environment and never written anywhere: not to a
+	// file, not to the transcript (the redactor masks it by shape), and
+	// above all not into this repository (§9.1).
+	if spikeNotify {
+		writes.guest = guestsFromEnv().internal
+	}
 	for _, st := range steps(scratch, state) {
+		r.run(ctx, sess, st)
+	}
+	// The writes run after the reads, so a read step never sees a
+	// calendar half-way through being rewritten — and so the read steps'
+	// expectations stay about what the seed put there.
+	for _, st := range writeSteps(scratch, writes) {
+		r.run(ctx, sess, st)
+	}
+
+	// Phase 3, on a calendar of its own that create_calendar makes and
+	// delete_calendar removes. It is registered as the driver's own as
+	// soon as it exists, so §9.1 lets its bodies be printed; a run that
+	// fails before the delete step leaves it behind, so the deferred
+	// sweep below removes it.
+	cals := &calendarState{remember: func(id string) { r.invented[id] = true }}
+	defer func() {
+		if cals.probe == "" {
+			return
+		}
+		// Best effort, and silent when it is already gone: the delete
+		// step removes it in an ordinary run and this is the net for the
+		// runs that stop early. A calendar left behind costs the next
+		// run a creation from a quota that is not refunded (§18 row 36).
+		_ = api.deleteCalendar(context.Background(), cals.probe)
+	}()
+	for _, st := range calendarSteps(cals) {
 		r.run(ctx, sess, st)
 	}
 
@@ -189,6 +258,11 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike E: this and following", spikeE},
 		{"spike F: duplicate insert", spikeF},
 		{"spike I: 50 vs 51 calendars", spikeI},
+		{"spike J: move under If-Match", spikeJ},
+		{"spike K: clear on a secondary", spikeK},
+		{"spike L: calendar and acl If-Match", spikeL},
+		{"spike M: conference creation", spikeM},
+		{"spike N: what suppresses nextSyncToken", spikeN},
 	} {
 		r.total++
 		v, note := sp.run(ctx, out, api, scratch)
@@ -211,6 +285,18 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 1
 	}
 	out.Printf("\nGreen is not done: read every line above before believing it.\n")
+	if writes.guest != "" {
+		// Said at the END, because this is the one thing in the run that
+		// somebody else has to act on, and a driver whose discipline is
+		// "read the transcript" should not bury it forty lines up.
+		out.Printf("\nThis run mailed a real person, and left one meeting behind on purpose.\n")
+		out.Printf("  \u2022 %q was cancelled with notify:none. It is gone from this account and\n", quietTitle)
+		out.Printf("    STILL ON THEIRS, and this account can no longer withdraw it (\u00a718 row 43).\n")
+		out.Printf("    Ask them to delete it; nothing here can.\n")
+		out.Printf("  \u2022 Spikes A and B set up events and cannot score themselves: who received\n")
+		out.Printf("    what is visible in an inbox and nowhere in the API. Read the inbox AND\n")
+		out.Printf("    the calendar, then write the verdict into \u00a718 by hand.\n")
+	}
 	return 0
 }
 
@@ -240,11 +326,11 @@ type results struct {
 
 // show prints a step's whole result when asked, so the transcript can
 // be read rather than counted.
-func (r *results) show(st step, res callResult) {
+func (r *results) show(st step, args map[string]any, res callResult) {
 	if showFilter == "" || !strings.Contains(st.name, showFilter) {
 		return
 	}
-	if r.withheld(st) {
+	if r.withheld(args) {
 		return
 	}
 	for _, line := range strings.Split(strings.TrimRight(res.text, "\n"), "\n") {
@@ -269,8 +355,8 @@ func (r *results) show(st step, res callResult) {
 // content this driver invented. A step that names none is account-wide
 // by construction. It fails closed, so an argument shape this does not
 // understand is withheld rather than printed.
-func (r *results) withheld(st step) bool {
-	if st.readsOnlyInvented(r.invented) {
+func (r *results) withheld(args map[string]any) bool {
+	if readsOnlyInvented(args, r.invented) {
 		return false
 	}
 	r.out.Printf("      (body withheld: this step reads past the calendar the driver created, §9.1)\n")
@@ -279,10 +365,14 @@ func (r *results) withheld(st step) bool {
 
 // readsOnlyInvented is the allow-list §9.1 asks for, anchored on ids
 // this driver generated rather than on a shape a real id cannot take.
-func (st step) readsOnlyInvented(invented map[string]bool) bool {
+// The keys are every argument that names a calendar. A tool that takes
+// one this list does not know about reads as "names none", which is
+// account-wide by construction and withheld — which is the direction
+// this has to fail in.
+func readsOnlyInvented(args map[string]any, invented map[string]bool) bool {
 	named := 0
-	for _, key := range []string{"calendar", "calendars"} {
-		switch v := st.args[key].(type) {
+	for _, key := range []string{"calendar", "calendars", "to_calendar"} {
+		switch v := args[key].(type) {
 		case nil:
 		case string:
 			named++
@@ -305,7 +395,15 @@ func (st step) readsOnlyInvented(invented map[string]bool) bool {
 
 func (r *results) run(ctx context.Context, s *session, st step) {
 	r.total++
-	res, err := s.call(ctx, st.tool, st.args)
+	if st.skip != nil {
+		if why := st.skip(); why != "" {
+			r.undetermined++
+			r.out.Printf("?     %-28s %s\n", st.name, why)
+			return
+		}
+	}
+	args := st.reads()
+	res, err := s.callFor(ctx, st, st.arguments())
 	if err != nil {
 		r.failed++
 		r.out.Printf("FAIL  %-28s transport: %v\n", st.name, err)
@@ -315,7 +413,7 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 	switch verdict {
 	case pass:
 		r.out.Printf("ok    %-28s %s\n", st.name, note)
-		r.show(st, res)
+		r.show(st, args, res)
 	case undetermined:
 		r.undetermined++
 		r.out.Printf("?     %-28s %s\n", st.name, note)
@@ -324,7 +422,7 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 		r.out.Printf("FAIL  %-28s %s\n", st.name, note)
 		// The body, redacted, so a failure can be diagnosed without a
 		// second run — unless the step reads past the scratch calendar.
-		if !r.withheld(st) {
+		if !r.withheld(args) {
 			r.out.Printf("      %s\n", truncate(res.text, 400))
 		}
 	}
@@ -339,10 +437,168 @@ const (
 )
 
 type step struct {
-	name  string
-	tool  string
-	args  map[string]any
+	name string
+	tool string
+	// resource names the published resource this step reads instead of
+	// calling a tool: the URI or template exactly as the surface
+	// publishes it, because that is the key `live-cover` matches. uriFn
+	// builds the concrete URI, which usually names something an earlier
+	// step created.
+	resource string
+	uriFn    func() string
+	args     map[string]any
+	// argsFn defers the arguments to run time, and wins over args when
+	// set. A write step's target is usually something an earlier step
+	// created, so its id does not exist when the list is built.
+	argsFn func() map[string]any
+	// skip returns a reason this step cannot run, or an empty string.
+	// Checked BEFORE the call, and that is the point rather than a
+	// nicety: a step whose target an earlier step failed to create would
+	// otherwise be called with no calendar named, and a calendar
+	// reference this server cannot resolve is the PRIMARY one. A driver
+	// that may not read past what it wrote (§9.1) must not be able to
+	// write past it either, and "the tool refuses without confirm" is
+	// care rather than structure — it is also the last guard in the
+	// chain rather than the first.
+	skip  func() string
 	check func(callResult) (verdict, string)
+}
+
+// reads is what the §9.1 print decision is made from: the calendars
+// this step actually touches.
+//
+// For a tool call that is its arguments. For a resource read it is
+// derived from the URI the step READS, not from anything the step
+// declares — a declaration is a flag in an argument map's clothes, and
+// a uriFn edited to point somewhere else while the declaration still
+// said "scratch" would print a real calendar's body. The rule §9.1
+// requires is that the two cannot disagree, so there is only one of
+// them.
+func (st step) reads() map[string]any {
+	if st.resource == "" {
+		return st.arguments()
+	}
+	calendar, _ := splitResourceURI(st.uriFn())
+	if calendar == "" {
+		// Account-wide by construction: the calendar list resource names
+		// no calendar, so its body is withheld.
+		return nil
+	}
+	return map[string]any{"calendar": calendar}
+}
+
+// splitResourceURI takes the calendar and event ids out of a gcal://
+// URI, as internal/tools does for the server side.
+func splitResourceURI(uri string) (calendar, event string) {
+	rest, ok := strings.CutPrefix(uri, "gcal://calendars/")
+	if !ok {
+		return "", ""
+	}
+	parts := strings.Split(rest, "/")
+	switch {
+	case len(parts) == 1:
+		return parts[0], ""
+	case len(parts) == 3 && parts[1] == "events":
+		return parts[0], parts[2]
+	default:
+		return "", ""
+	}
+}
+
+// callFor runs the step: a tool call, or a resource read.
+func (s *session) callFor(ctx context.Context, st step, args map[string]any) (callResult, error) {
+	if st.resource != "" {
+		return s.readResource(ctx, st.uriFn())
+	}
+	return s.call(ctx, st.tool, args)
+}
+
+// arguments resolves the step's arguments, late if it has to.
+func (st step) arguments() map[string]any {
+	if st.argsFn != nil {
+		return st.argsFn()
+	}
+	return st.args
+}
+
+// gapRow matches one free gap as the renderer prints it, in both of its
+// forms: "2026-03-17 12:00-17:00 (5h)" and the cross-midnight
+// "2026-03-17 12:00 to 2026-03-18 09:00 (21h)".
+//
+// Both, because the second is what a mask that did NOT apply produces —
+// an overnight gap — so a pattern matching only the first would skip the
+// one row it exists to catch and pass on the heading alone.
+var gapRow = regexp.MustCompile(
+	`^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?:-(\d{2}:\d{2})| to (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})) \(`)
+
+// gapsOutside returns the free gaps that fall outside a working-hours
+// mask of from..to on weekdays — which is the assertion §17.2's step
+// needs, and it is about the ROWS rather than about the sentence over
+// them. A mask that said it applied and did not would otherwise pass on
+// its own heading.
+func gapsOutside(text, from, to string) []string {
+	var bad []string
+	for _, line := range strings.Split(text, "\n") {
+		m := gapRow.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		day, err := when.ParseDate(m[1])
+		if err != nil {
+			continue
+		}
+		// A gap that ends on another DAY is outside any working-hours
+		// mask by construction, whatever its clock times say.
+		if m[4] != "" {
+			bad = append(bad, strings.TrimSpace(line))
+			continue
+		}
+		weekend := day.Weekday() == time.Saturday || day.Weekday() == time.Sunday
+		if weekend || m[2] < from || m[3] > to {
+			bad = append(bad, strings.TrimSpace(line))
+		}
+	}
+	return bad
+}
+
+// linesWith returns the rendered rows that mention needle.
+//
+// Every assertion about one event's time or date goes through this, and
+// the live run is why: two of them grepped the whole result for a date
+// or a clock time, so an unrelated probe seeded on 19 March at 13:00
+// made "the all-day event moved to the previous day" and "the series
+// drifted to 13:00-14:00" both fire. Neither had. An assertion that can
+// be satisfied by a line it is not about is the failure §15 opens by
+// naming, pointed the other way.
+func linesWith(text, needle string) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, needle) {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	return out
+}
+
+// clockTime is HH:MM, which is what tells an occurrence row from a
+// heading that merely names the same event.
+var clockTime = regexp.MustCompile(`[0-9]{2}:[0-9]{2}`)
+
+// timedRows returns the rows for one event that actually carry a clock.
+//
+// list_instances prints the series title on a header line of its own and
+// then again on every occurrence, so a filter on the title alone picks
+// up a line with no time in it — and an assertion about drift fires on
+// the heading. That is the same mistake as the one linesWith fixed, one
+// level in.
+func timedRows(text, needle string) []string {
+	var out []string
+	for _, line := range linesWith(text, needle) {
+		if clockTime.MatchString(line) {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func truncate(s string, n int) string {
@@ -370,6 +626,11 @@ const (
 var liveUncovered = map[string]string{}
 
 func steps(scratch string, state seedState) []step {
+	// The sync token the baseline step issues, read by the step after
+	// it. seedState arrives by value, so it cannot carry something one
+	// step learns and the next one needs.
+	var syncToken string
+
 	window := map[string]any{"from": "2026-03-15", "to": "2026-03-31"}
 	cal := func(extra map[string]any) map[string]any {
 		out := map[string]any{"calendars": []string{scratch}}
@@ -427,6 +688,59 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
+			// The three resources of §8, read the way a client that
+			// attaches rather than calls would. This one is account-wide
+			// by construction, so its body is withheld and the check
+			// says what it verified instead (§9.1).
+			name:     "resource: calendar list",
+			resource: "gcal://calendars",
+			uriFn:    func() string { return "gcal://calendars" },
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, scratchTitle) {
+					return fail, "the scratch calendar is missing from the resource"
+				}
+				return pass, "the calendar list read as a resource"
+			},
+		},
+		{
+			// A secondary calendar id is an address, so this URI carries
+			// an at sign written as itself — the form a model will
+			// write, and the one a template without reserved expansion
+			// silently fails to match.
+			name:     "resource: one calendar",
+			resource: "gcal://calendars/{+calendar_id}",
+			uriFn:    func() string { return "gcal://calendars/" + scratch },
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, scratchTitle) {
+					return fail, "the resource is not the scratch calendar"
+				}
+				return pass, "the calendar card read as a resource"
+			},
+		},
+		{
+			name:     "resource: one event",
+			resource: "gcal://calendars/{+calendar_id}/events/{+event_id}",
+			uriFn:    func() string { return "gcal://calendars/" + scratch + "/events/" + timedID },
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "id: "+timedID) {
+					return fail, "the resource is not the event that was asked for"
+				}
+				if !strings.Contains(r.text, timedTitle) {
+					return fail, "the event resource does not carry the event"
+				}
+				return pass, "one event read as a resource"
+			},
+		},
+		{
 			name: "list_events expanded",
 			tool: "list_events",
 			args: cal(nil),
@@ -480,14 +794,17 @@ func steps(scratch string, state seedState) []step {
 				if r.isError {
 					return fail, "returned an error"
 				}
-				if !strings.Contains(r.text, allDayDate) {
-					return fail, fmt.Sprintf("the all-day event is not on %s when read from Pacific/Honolulu", allDayDate)
+				rows := linesWith(r.text, allDayTitle)
+				if len(rows) == 0 {
+					return fail, "the all-day event is missing from a window that contains it"
 				}
-				if strings.Contains(r.text, "2026-03-19") {
-					return fail, "the all-day event moved to the previous day"
-				}
-				if !strings.Contains(r.text, "all day") {
-					return fail, "the all-day event did not render as all-day"
+				for _, row := range rows {
+					if !strings.Contains(row, allDayDate) {
+						return fail, "the all-day event moved when read from Pacific/Honolulu: " + row
+					}
+					if !strings.Contains(row, "all day") {
+						return fail, "the all-day event did not render as all-day: " + row
+					}
 				}
 				return pass, "stayed on " + allDayDate + " from a UTC-10 zone"
 			},
@@ -500,8 +817,14 @@ func steps(scratch string, state seedState) []step {
 				if r.isError {
 					return fail, "returned an error"
 				}
-				if !strings.Contains(r.text, allDayDate) {
-					return fail, "the all-day event moved when read from Pacific/Auckland"
+				rows := linesWith(r.text, allDayTitle)
+				if len(rows) == 0 {
+					return fail, "the all-day event is missing from a window that contains it"
+				}
+				for _, row := range rows {
+					if !strings.Contains(row, allDayDate) {
+						return fail, "the all-day event moved when read from Pacific/Auckland: " + row
+					}
 				}
 				return pass, "stayed on " + allDayDate + " from a UTC+13 zone"
 			},
@@ -520,18 +843,19 @@ func steps(scratch string, state seedState) []step {
 				if r.isError {
 					return fail, "returned an error"
 				}
-				before := strings.Count(r.text, "14:00-15:00")
-				if before < 2 {
+				rows := timedRows(r.text, weeklyTitle)
+				if len(rows) < 2 {
 					return undetermined, "fewer than two occurrences of the series came back; nothing to compare"
 				}
 				// A drifted series renders 13:00 or 15:00 after the
-				// transition. Neither may appear.
-				for _, drifted := range []string{"13:00-14:00", "15:00-16:00"} {
-					if strings.Contains(r.text, drifted) {
-						return fail, "the series drifted to " + drifted + " across the 29 March transition"
+				// transition. Asserted on the series' OWN rows, so no
+				// other event on the page can satisfy or break it.
+				for _, row := range rows {
+					if !strings.Contains(row, "14:00-15:00") {
+						return fail, "an occurrence drifted across the 29 March transition: " + row
 					}
 				}
-				return pass, fmt.Sprintf("%d occurrences all at 14:00 local, across the 29 March transition", before)
+				return pass, fmt.Sprintf("%d occurrences all at 14:00 local, across the 29 March transition", len(rows))
 			},
 		},
 		{
@@ -626,6 +950,63 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
+			// §17.1. Two calls, because the claim worth driving live is
+			// not "it lists" but "the token round-trips": the baseline
+			// hands one back, and passing it returns a quiet answer
+			// rather than the whole calendar again.
+			name: "list_changes baseline and round-trip",
+			tool: "list_changes",
+			args: map[string]any{"calendar": scratch},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "Baseline for") {
+					return fail, "a call with no token did not report itself as a baseline"
+				}
+				token := afterLabel(r.text, "Next sync token: ")
+				if token == "" {
+					// The first live run died here, and the cause was
+					// not the tool: the scratch calendar carries ~500
+					// tombstones, the token arrives on the last page
+					// only, and the event budget stopped the read
+					// before it. A baseline pages past the budget now.
+					return fail, "the baseline handed back no sync token, so nothing can follow it — " +
+						"is it stopping before the last page again?"
+				}
+				syncToken = token
+				return pass, "baseline read, sync token issued"
+			},
+		},
+		{
+			name: "list_changes with the token",
+			tool: "list_changes",
+			argsFn: func() map[string]any {
+				return map[string]any{"calendar": scratch, "sync_token": syncToken}
+			},
+			skip: func() string {
+				if syncToken == "" {
+					return "the baseline step issued no token"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if strings.Contains(r.text, "Baseline for") {
+					return fail, "a call WITH a token still reported a baseline"
+				}
+				if !strings.Contains(r.text, "Changes on") {
+					return fail, "the result does not report itself as a change list"
+				}
+				if afterLabel(r.text, "Next sync token: ") == "" {
+					return fail, "the incremental read handed back no new token, so the chain stops here"
+				}
+				return pass, "token accepted, a new one issued"
+			},
+		},
+		{
 			name: "list_instances whole series",
 			tool: "list_instances",
 			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
@@ -694,13 +1075,14 @@ func steps(scratch string, state seedState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 200)
 				}
-				for _, drifted := range []string{"13:00-14:00", "15:00-16:00"} {
-					if strings.Contains(r.text, drifted) {
-						return fail, "an occurrence drifted to " + drifted
-					}
-				}
-				if n := strings.Count(r.text, "14:00-15:00"); n < 2 {
+				rows := timedRows(r.text, weeklyTitle)
+				if len(rows) < 2 {
 					return undetermined, "fewer than two occurrences came back; nothing to compare"
+				}
+				for _, row := range rows {
+					if !strings.Contains(row, "14:00-15:00") {
+						return fail, "an occurrence drifted: " + row
+					}
 				}
 				return pass, "every occurrence at 14:00 local, across the transition"
 			},
@@ -765,6 +1147,58 @@ func steps(scratch string, state seedState) []step {
 					return fail, "the result does not echo the filter it applied"
 				}
 				return pass, "gaps of 30 minutes or more"
+			},
+		},
+		{
+			// §17.2. A week asked about in one call: without the mask
+			// the answer's longest gap is an overnight one, which passes
+			// any min_minutes and is useless.
+			name: "availability, working hours",
+			tool: "check_availability",
+			args: map[string]any{
+				"calendars": []string{scratch},
+				"from":      "2026-03-16", "to": "2026-03-20",
+				"working_from": "09:00", "working_to": "17:00",
+				"working_days": []string{"mon", "tue", "wed", "thu", "fri"},
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "Only working hours are shown") {
+					return fail, "the result does not say the gaps were masked"
+				}
+				if !strings.Contains(r.text, "Free within 09:00-17:00") {
+					return fail, "the heading does not name the mask it applied"
+				}
+				// The assertion that matters, and it is about the rows
+				// rather than the sentence: no gap may begin before
+				// 09:00, end after 17:00, or fall at a weekend.
+				if bad := gapsOutside(r.text, "09:00", "17:00"); len(bad) > 0 {
+					return fail, "a gap outside the mask was reported: " + bad[0]
+				}
+				return pass, "gaps masked to the working week"
+			},
+		},
+		{
+			// The refusal, which has to be classified rather than
+			// falling through to [unavailable] — a caller told to retry
+			// an overnight mask would retry forever.
+			name: "overnight mask refused",
+			tool: "check_availability",
+			args: map[string]any{
+				"calendars": []string{scratch},
+				"from":      "2026-03-16", "to": "2026-03-20",
+				"working_from": "22:00", "working_to": "06:00",
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "a mask crossing midnight was accepted"
+				}
+				if !strings.Contains(r.text, "[invalid]") {
+					return fail, "the refusal is not classified invalid: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid]"
 			},
 		},
 		{
@@ -852,4 +1286,16 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 	}
+}
+
+// afterLabel returns the rest of the line following a label, trimmed.
+// The driver reads values out of rendered text, so a label that moves is
+// a step that reports nothing rather than one that passes wrongly.
+func afterLabel(text, label string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), label); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }

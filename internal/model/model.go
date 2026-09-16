@@ -9,6 +9,7 @@ package model
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
@@ -27,7 +28,19 @@ type Calendar struct {
 	Hidden      bool
 	ColorID     string
 	Description string
-	ETag        string
+	// Conference is which conference types this calendar accepts, nil
+	// when Google said nothing about it — which is not a refusal (§17.3).
+	Conference *gcal.ConferenceProperties
+	// No etag, deliberately. A calendar is TWO resources — itself and
+	// this user's subscription to it — with an etag each, and a single
+	// field here carried whichever read had produced the value: the
+	// subscription's etag reached calendars.delete and was refused on
+	// every call, reported to the caller as somebody else's edit.
+	// Splitting it in two left two fields nothing read, because a write
+	// cannot use a cached etag anyway: these tools have no `force`, so a
+	// version minutes old would be a [stale] refusal with no way past
+	// it. Each write reads the etag it is held to, immediately before
+	// making the write, and holds it as a local.
 }
 
 // FromCalendarList converts one subscription entry.
@@ -35,7 +48,8 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 	c := Calendar{
 		ID: e.ID, Title: e.Summary, TimeZone: e.TimeZone, Role: e.AccessRole,
 		Primary: e.Primary, Selected: e.Selected, Hidden: e.Hidden,
-		ColorID: e.ColorID, Description: e.Description, ETag: e.ETag,
+		ColorID: e.ColorID, Description: e.Description,
+		Conference: e.ConferenceProperties,
 	}
 	// A rename is this user's alone: the same calendar has a different
 	// name for a colleague, so both are carried and the renderer says so.
@@ -44,6 +58,22 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 		c.Original = e.Summary
 	}
 	return c
+}
+
+// FromCalendar converts the calendar RESOURCE, which is what a read by
+// id falls back to when the account is not subscribed to it.
+//
+// It exists because the hand-built literals it replaces were where a new
+// wire field went missing: `conferenceProperties` reached
+// FromCalendarList and not these, so a calendar resolved by id looked
+// like one that allows every conference type and the guard in §17.3
+// never fired for it. Two constructors, both here, is the shape that
+// makes the next field a one-line change rather than a hunt.
+func FromCalendar(c gcal.Calendar) Calendar {
+	return Calendar{
+		ID: c.ID, Title: c.Summary, TimeZone: c.TimeZone,
+		Description: c.Description, Conference: c.ConferenceProperties,
+	}
 }
 
 // CanWrite reports whether this user may change events here.
@@ -59,6 +89,18 @@ type When struct {
 	AllDay bool
 	Date   when.Date
 	At     when.Zoned
+}
+
+// IsZero reports whether this end of an event was set at all.
+//
+// Which half to look at depends on AllDay, and that is exactly the check
+// callers kept writing out longhand and getting subtly different each
+// time.
+func (w When) IsZero() bool {
+	if w.AllDay {
+		return w.Date.IsZero()
+	}
+	return w.At.IsZero()
 }
 
 // ParseWhen converts a wire EventDateTime, rendering any instant in loc.
@@ -120,7 +162,10 @@ type Event struct {
 	OriginalStart When
 
 	Transparent bool
-	Attendees   []Attendee
+	// Conference is the event's video meeting, if it has one: the link
+	// to join, or the fact that Google is still making it (§17.3).
+	Conference gcal.Conference
+	Attendees  []Attendee
 	// AttendeesTruncated is Google's attendeesOmitted.
 	AttendeesTruncated bool
 	Organizer          string
@@ -157,29 +202,42 @@ func (e Event) Moved() bool {
 	}
 }
 
-// ReachesPeople reports whether a write to this event can email
-// somebody, which is what makes `notify` required (§4.3.2). An event
-// with no guests but the organiser has no notification decision to make.
-func (e Event) ReachesPeople() bool {
+// Guests are the attendees who are other people: not this account, and
+// not a room.
+//
+// This is the one definition of "who a write can reach", which is what
+// §4.3.2 hangs on — a write that reaches nobody does not have to ask
+// about notification.
+//
+// account is the signed-in account's own address, and it is needed
+// because Google's `self` flag is NOT sufficient. The live driver put
+// the account on its own event, on a calendar the account owns, and the
+// attendee came back without `self` — so the caller counted as their own
+// guest and a write that reached nobody demanded a notification
+// decision. The flag appears to be relative to the calendar in the
+// request rather than to the authenticated user, and a secondary
+// calendar is not the user; that mechanism is a reading of one live
+// observation, so the fix does not depend on it being right.
+//
+// An empty account falls back to the flag alone, which is what a
+// renderer has: it is describing an event, not deciding a refusal.
+func (e Event) Guests(account string) []Attendee {
+	out := make([]Attendee, 0, len(e.Attendees))
 	for _, a := range e.Attendees {
-		if !a.Self && !a.Resource {
-			return true
+		if a.Self || a.Resource {
+			continue
 		}
+		if account != "" && strings.EqualFold(a.Email, account) {
+			continue
+		}
+		out = append(out, a)
 	}
-	return false
+	return out
 }
 
 // GuestCount is how many people would be reached. The count goes in a
 // refusal; the addresses never do (§9).
-func (e Event) GuestCount() int {
-	n := 0
-	for _, a := range e.Attendees {
-		if !a.Self && !a.Resource {
-			n++
-		}
-	}
-	return n
-}
+func (e Event) GuestCount(account string) int { return len(e.Guests(account)) }
 
 // Attendee is one guest.
 type Attendee struct {
@@ -201,6 +259,7 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		Recurrence: e.Recurrence, SeriesID: e.RecurringEventID,
 		EndInvented:        e.EndTimeUnspecified,
 		Transparent:        e.Transparency == gcal.TransparencyTransparent,
+		Conference:         gcal.ReadConference(e.ConferenceData),
 		AttendeesTruncated: e.AttendeesOmitted,
 	}
 	var err error
@@ -224,6 +283,71 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		})
 	}
 	return out, nil
+}
+
+// Sharing is one ACL rule as this server presents it: who can see a
+// calendar, and what they can see (§7.6).
+//
+// One type, so that get_calendar's exposure block, list_sharing and the
+// before/after on a share are the same lines computed once. Two
+// renderings of "who can see this calendar" is how one result comes to
+// contradict another.
+type Sharing struct {
+	// RuleID is the rule's own address, which unshare_calendar deletes
+	// by. It is Google's, never built here.
+	RuleID string
+	// ScopeType is user, group, domain or default.
+	ScopeType string
+	// Value is the address or domain; empty for the public scope.
+	Value string
+	Role  string
+	ETag  string
+}
+
+// FromACL converts one wire rule.
+func FromACL(r gcal.AclRule) Sharing {
+	return Sharing{
+		RuleID: r.ID, ScopeType: r.Scope.Type, Value: r.Scope.Value,
+		Role: r.Role, ETag: r.ETag,
+	}
+}
+
+// Public reports whether this rule exposes the calendar to anybody at
+// all.
+func (s Sharing) Public() bool { return s.ScopeType == gcal.ScopeTypeDefault }
+
+// Who names the audience in the words a result uses.
+func (s Sharing) Who() string {
+	if s.Public() {
+		return "ANYONE, signed in or not"
+	}
+	if s.ScopeType == gcal.ScopeTypeDomain {
+		return "everybody in " + s.Value
+	}
+	return s.Value
+}
+
+// RoleMeans explains what this rule actually grants.
+func (s Sharing) RoleMeans() string { return gcal.RoleMeans(s.Role) }
+
+// Scope is the wire shape of this rule's audience.
+func (s Sharing) Scope() gcal.AclScope {
+	return gcal.AclScope{Type: s.ScopeType, Value: s.Value}
+}
+
+// PublicRule returns the rule that exposes a calendar to anybody at all,
+// if it has one.
+//
+// Here rather than in the renderer: "is this calendar public" is a
+// question about the calendar, and three callers ask it — one of them to
+// decide whether to warn, which is policy rather than presentation.
+func PublicRule(rules []Sharing) (Sharing, bool) {
+	for _, r := range rules {
+		if r.Public() {
+			return r, true
+		}
+	}
+	return Sharing{}, false
 }
 
 // Busy is one interval somebody is not free.
@@ -283,18 +407,21 @@ func Merge(busy []Busy) []Busy {
 // doing interval arithmetic over a list of busy blocks is how a meeting
 // gets booked at 02:00 (§7.3).
 //
-// min drops gaps shorter than a meeting worth having; a zero min keeps
-// them all. What this does NOT do is decide what counts as working
-// hours: the API has no such field, 09:00 is not 09:00 everywhere, and
-// §17.2 leaves that choice to the caller, who can narrow the window.
-func FreeGaps(w when.Window, busy []Busy, min time.Duration) []when.Window {
+// hours is the caller's working-hours mask, empty when they asked for
+// none: the API has no working-hours field, so this is the server's
+// (§17.2). min drops gaps shorter than a meeting worth having; a zero
+// min keeps them all.
+//
+// The order of the three steps is the whole reason they are one
+// function. Cut the busy time out, then apply the mask, then drop what
+// is too short: a 20-minute sliver left at the edge of the working day
+// is exactly what min_minutes exists to remove, and filtering before
+// the mask would report it.
+func FreeGaps(w when.Window, busy []Busy, min time.Duration, hours when.Hours) []when.Window {
 	var out []when.Window
 	cursor := w.Start
 	add := func(from, to when.Zoned) {
 		if !to.T.After(from.T) {
-			return
-		}
-		if to.T.Sub(from.T) < min {
 			return
 		}
 		out = append(out, when.Window{Start: from, End: to, Loc: w.Loc})
@@ -312,5 +439,18 @@ func FreeGaps(w when.Window, busy []Busy, min time.Duration) []when.Window {
 		}
 	}
 	add(cursor, w.End)
-	return out
+
+	if hours.Set() {
+		out = when.Intersect(out, hours.Windows(w))
+	}
+	if min <= 0 {
+		return out
+	}
+	kept := out[:0]
+	for _, g := range out {
+		if g.Duration() >= min {
+			kept = append(kept, g)
+		}
+	}
+	return kept
 }

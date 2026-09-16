@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/internal/auth"
 	"github.com/mmedum/google-calendar-mcp/internal/credentials"
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/internal/redact"
 	"github.com/mmedum/google-calendar-mcp/internal/userconfig"
 )
 
@@ -55,6 +57,20 @@ var (
 	weeklyID    = "livecalrepeatprobe" + runSuffix
 	cancelledID = "livecalcancelledprobe" + runSuffix
 )
+
+// destTitle is the second scratch calendar, and it exists for one tool.
+//
+// move_event changes which calendar an event lives on, so driving it
+// needs somewhere to move to — and that somewhere may not be the
+// operator's own calendar, because §9.1 says this driver writes only on
+// a calendar it created. So it creates a second one, adopts it on every
+// later run exactly as it adopts the first, and moves the event there
+// and straight back, leaving the scratch calendar as it found it.
+//
+// It costs one more of the calendar-creation quota §18 row 36 is about,
+// once. That is the price of driving the write path rather than
+// exempting it, and §13 is explicit that green gates are not done.
+const destTitle = scratchTitle + " destination"
 
 const apiBase = "https://www.googleapis.com/calendar/v3"
 
@@ -108,47 +124,63 @@ func newAPI(ctx context.Context, profile string) (*liveAPI, error) {
 }
 
 func (a *liveAPI) do(ctx context.Context, method, path string, body, out any) error {
+	return a.doWithMatch(ctx, method, path, "", body, out)
+}
+
+// doWithMatch is do with an If-Match header, for the one spike that has
+// to ask whether a method honours it. It also returns the HTTP status,
+// because "which status" IS the answer there rather than a detail.
+func (a *liveAPI) doWithMatch(ctx context.Context, method, path, ifMatch string, body, out any) error {
+	_, err := a.status(ctx, method, path, ifMatch, body, out)
+	return err
+}
+
+func (a *liveAPI) status(ctx context.Context, method, path, ifMatch string, body, out any) (int, error) {
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		r = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, apiBase+path, r)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if ifMatch != "" {
+		req.Header.Set("If-Match", ifMatch)
+	}
 	resp, err := a.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s failed", method, path)
+		return 0, fmt.Errorf("%s %s failed", method, path)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return err
+		return resp.StatusCode, err
 	}
 	if resp.StatusCode >= 300 {
 		// The body can carry the calendar's title; the caller prints
 		// through the redactor, which handles it.
-		return fmt.Errorf("%s %s returned %d: %s", method, path, resp.StatusCode, string(data))
+		return resp.StatusCode, fmt.Errorf("%s %s returned %d: %s",
+			method, path, resp.StatusCode, string(data))
 	}
 	if out != nil && len(data) > 0 {
-		return json.Unmarshal(data, out)
+		return resp.StatusCode, json.Unmarshal(data, out)
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
-func (a *liveAPI) createScratchCalendar(ctx context.Context) (string, error) {
+func (a *liveAPI) createScratchCalendar(ctx context.Context, title string) (string, error) {
 	var out struct {
 		ID string `json:"id"`
 	}
 	err := a.do(ctx, http.MethodPost, "/calendars", map[string]any{
-		"summary":     scratchTitle,
+		"summary":     title,
 		"description": "Created by the google-calendar-mcp live driver. Safe to delete.",
 		"timeZone":    scratchZone,
 	}, &out)
@@ -174,8 +206,8 @@ func (a *liveAPI) createScratchCalendar(ctx context.Context) (string, error) {
 // this driver looks past what it wrote. It matches its own title and
 // returns an id; nothing from the list is printed, and §9.1's rule about
 // the transcript is enforced separately, on what steps may show.
-func (a *liveAPI) ensureScratchCalendar(ctx context.Context) (id string, created bool, err error) {
-	found, err := a.findScratchCalendar(ctx)
+func (a *liveAPI) ensureScratchCalendar(ctx context.Context, title string) (id string, created bool, err error) {
+	found, err := a.findScratchCalendar(ctx, title)
 	if err != nil {
 		return "", false, err
 	}
@@ -187,13 +219,13 @@ func (a *liveAPI) ensureScratchCalendar(ctx context.Context) (id string, created
 		}
 		return found, false, nil
 	}
-	id, err = a.createScratchCalendar(ctx)
+	id, err = a.createScratchCalendar(ctx, title)
 	return id, true, err
 }
 
 // findScratchCalendar returns the id of a calendar this driver made, or
 // an empty string.
-func (a *liveAPI) findScratchCalendar(ctx context.Context) (string, error) {
+func (a *liveAPI) findScratchCalendar(ctx context.Context, title string) (string, error) {
 	var out struct {
 		Items []struct {
 			ID      string `json:"id"`
@@ -208,7 +240,7 @@ func (a *liveAPI) findScratchCalendar(ctx context.Context) (string, error) {
 			return "", err
 		}
 		for _, it := range out.Items {
-			if it.Summary == scratchTitle {
+			if it.Summary == title {
 				return it.ID, nil
 			}
 		}
@@ -424,6 +456,30 @@ func (a *liveAPI) seed(ctx context.Context, cal string) error {
 	return nil
 }
 
+// primaryAddress is the signed-in account's own calendar id, which is
+// its email address (§6.1).
+//
+// tokeninfo cannot supply it: it returns an email only when an email
+// scope was granted, and this server asks for none — which is what phase
+// 0's `login` reported as a field that could never populate (§18). The
+// primary calendar's id is the same fact, from a scope this server
+// already has.
+//
+// It reaches the transcript only through the redactor, which matches an
+// address by shape.
+func (a *liveAPI) primaryAddress(ctx context.Context) (string, error) {
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := a.do(ctx, http.MethodGet, "/calendars/primary", nil, &out); err != nil {
+		return "", err
+	}
+	if out.ID == "" {
+		return "", fmt.Errorf("Google returned a primary calendar with no id")
+	}
+	return out.ID, nil
+}
+
 // liveScopes asks Google what the current access token actually carries.
 //
 // The profile records what login was told at the time; this is what the
@@ -513,6 +569,9 @@ type instanceRow struct {
 		TimeZone string `json:"timeZone"`
 	} `json:"start"`
 	Status string `json:"status"`
+	// ETag is what spike J needs a stale copy of, to ask whether
+	// events.move honours If-Match.
+	ETag string `json:"etag"`
 }
 
 // listInstances reads a series' occurrences directly, for the setup that
@@ -600,4 +659,89 @@ func (a *liveAPI) removeOneOccurrence(ctx context.Context, cal string) (string, 
 		return "", fmt.Errorf("the cancelled occurrence carried no start date")
 	}
 	return target.Start.DateTime[:10], nil
+}
+
+// ------------------------------------------------- phase 3's own calls
+
+// countEvents is how spike K tells "cleared" from "accepted and did
+// nothing". A 2xx on its own says neither.
+func (a *liveAPI) countEvents(ctx context.Context, cal string) (int, error) {
+	var out struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := a.do(ctx, http.MethodGet,
+		"/calendars/"+cal+"/events?maxResults=250&showDeleted=false", nil, &out); err != nil {
+		return 0, err
+	}
+	return len(out.Items), nil
+}
+
+// calendarETag reads the calendar resource's own etag, which is not the
+// list entry's: two resources, two etags, and using one where the other
+// belongs is a 412 that reads as somebody else's edit.
+func (a *liveAPI) calendarETag(ctx context.Context, cal string) (string, error) {
+	var out struct {
+		ETag string `json:"etag"`
+	}
+	if err := a.do(ctx, http.MethodGet, "/calendars/"+cal, nil, &out); err != nil {
+		return "", err
+	}
+	return out.ETag, nil
+}
+
+func (a *liveAPI) patchCalendar(ctx context.Context, cal string, body map[string]any) error {
+	return a.do(ctx, http.MethodPatch, "/calendars/"+cal, body, nil)
+}
+
+// probeACLIfMatch asks whether acl.patch honours a stale If-Match.
+//
+// It creates a rule, moves its etag with a role change, and then patches
+// again with the etag it read before that. The rule names an address in
+// a domain that cannot resolve and is inserted with
+// sendNotifications=false, so nothing is sent and nobody can receive it;
+// the rule is removed at the end whatever happens.
+//
+// Returns the status of the stale write, or a reason it could not be
+// asked.
+func (a *liveAPI) probeACLIfMatch(ctx context.Context, cal string) (int, string) {
+	var rule struct {
+		ID   string `json:"id"`
+		ETag string `json:"etag"`
+	}
+	err := a.do(ctx, http.MethodPost, "/calendars/"+cal+"/acl?sendNotifications=false",
+		map[string]any{
+			"role":  "reader",
+			"scope": map[string]any{"type": "user", "value": probeGuest},
+		}, &rule)
+	if err != nil {
+		return 0, "the probe rule could not be created: " + redact.String(err.Error())
+	}
+	defer func() {
+		_ = a.do(context.Background(), http.MethodDelete,
+			"/calendars/"+cal+"/acl/"+url.PathEscape(rule.ID), nil, nil)
+	}()
+	if rule.ETag == "" {
+		return 0, "Google returned no etag on the new rule, so there is nothing to go stale"
+	}
+	stale := rule.ETag
+
+	// Move the etag on.
+	var fresh struct {
+		ETag string `json:"etag"`
+	}
+	if err := a.do(ctx, http.MethodPatch,
+		"/calendars/"+cal+"/acl/"+url.PathEscape(rule.ID)+"?sendNotifications=false",
+		map[string]any{"role": "writer"}, &fresh); err != nil {
+		return 0, "the probe rule could not be patched: " + redact.String(err.Error())
+	}
+	if fresh.ETag == stale {
+		return 0, "the rule's etag did not move after a patch, so a stale one cannot be built"
+	}
+
+	status, _ := a.status(ctx, http.MethodPatch,
+		"/calendars/"+cal+"/acl/"+url.PathEscape(rule.ID)+"?sendNotifications=false",
+		stale, map[string]any{"role": "reader"}, nil)
+	return status, ""
 }

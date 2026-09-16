@@ -10,3 +10,14 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # codeql-action is three actions that must run the same version:
+    # init writes a configuration file that analyze reads back, and a
+    # mismatch fails the run with "Loaded a configuration file for
+    # version X, but running version Y". Ungrouped, dependabot bumps
+    # them one per pull request, so EVERY one of those three pull
+    # requests fails CodeQL and none of them can be merged first. That
+    # is what happened at 4.31.2 -> 4.38.0.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"

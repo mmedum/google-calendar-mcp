@@ -1,0 +1,16 @@
+Updated "Sample Team — planning".
+
+Sample Team — planning
+  id: team@group.calendar.example.test
+  time zone: Europe/Copenhagen
+  your access: owner — can see and change everything, including who else has access
+
+changed:
+  title: Sample Team → Sample Team — planning
+  color_id: 3 → 7
+
+That changes the calendar for everybody it is shared with, not only for you. To change only your own view of it, pass my_name rather than title.
+
+Those are your own settings for this calendar. Nobody else sees any of them change.
+
+(4 API requests)

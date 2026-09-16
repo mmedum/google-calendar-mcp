@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-// liveCoverGate holds every published tool to having a live step.
+// liveCoverGate holds every published tool and resource to having a
+// live step.
 //
 // §13 says green gates are not done: anything touching the write path or
 // a response shape gets a live run, and the transcript is read. That is
@@ -88,7 +89,7 @@ func liveCoverGate(bin string) error {
 		return fmt.Errorf("%s", strings.Join(problems, "\n\n"))
 	}
 
-	fmt.Printf("  %d tools, %d steps: %d driven live, %d exempt with a reason\n",
+	fmt.Printf("  %d published tools and resources, %d steps: %d driven live, %d exempt with a reason\n",
 		len(published), steps, len(driven), len(exempt))
 	return nil
 }
@@ -122,11 +123,23 @@ func driverTools() (driven map[string]bool, exempt map[string]string, steps int,
 						continue
 					}
 					key, ok := kv.Key.(*ast.Ident)
-					if !ok || key.Name != "tool" {
+					if !ok {
 						continue
 					}
-					if lit := stringOf(kv.Value); lit != "" {
+					lit := stringOf(kv.Value)
+					if lit == "" {
+						continue
+					}
+					switch key.Name {
+					case "tool":
 						driven[lit] = true
+						steps++
+					case "resource":
+						// A resource step names the published URI or
+						// template, which is the key the dump uses, so
+						// a resource nobody reads live fails this gate
+						// exactly as an undriven tool does.
+						driven[resourceKey(lit)] = true
 						steps++
 					}
 				}

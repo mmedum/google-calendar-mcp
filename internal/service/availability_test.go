@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/config"
+	"github.com/mmedum/google-calendar-mcp/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/service"
@@ -185,6 +187,75 @@ func TestAvailabilityMinMinutes(t *testing.T) {
 	out := service.NewAvailabilityResult(got)
 	if out.MinMinutes != 30 {
 		t.Fatalf("the result does not echo min_minutes: %+v", out.MinMinutes)
+	}
+}
+
+// TestAvailabilityWorkingHours is §17.2's own argument as a test: a
+// week asked about in one call, where the longest gap without a mask is
+// an overnight one that passes any min_minutes.
+func TestAvailabilityWorkingHours(t *testing.T) {
+	fake := caltest.Seed()
+	fake.Busy["primary"] = nil
+	svc := newService(t, fake)
+
+	o := day("2026-03-16", "2026-03-20") // Monday to Friday
+	o.Calendars = []string{"primary"}
+	o.TimeZone = "Europe/Copenhagen"
+
+	unmasked, err := svc.Availability(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Availability: %v", err)
+	}
+	if len(unmasked.Gaps) != 1 {
+		t.Fatalf("an empty week is one gap, got %d", len(unmasked.Gaps))
+	}
+
+	o.WorkingFrom, o.WorkingTo = "09:00", "17:00"
+	o.WorkingDays = []string{"mon", "tue", "wed", "thu", "fri"}
+	got, err := svc.Availability(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Availability with working hours: %v", err)
+	}
+	if len(got.Gaps) != 5 {
+		t.Fatalf("got %d gaps over five working days, want 5", len(got.Gaps))
+	}
+	for _, g := range got.Gaps {
+		if g.Duration() != 8*time.Hour {
+			t.Fatalf("a working day came back as %v, want 8h", g.Duration())
+		}
+		if h := g.Start.T.Format("15:04"); h != "09:00" {
+			t.Fatalf("a gap starts at %s, want 09:00", h)
+		}
+	}
+	// The result says which mask it applied, in both halves: a Free
+	// list with the evenings silently removed is a different answer
+	// from the one the caller would read it as.
+	out := service.NewAvailabilityResult(got)
+	if out.WorkingHours == "" {
+		t.Fatal("the structured result does not say which working hours it used")
+	}
+	if !strings.Contains(got.Text(), "Only working hours are shown") {
+		t.Fatalf("the text does not say the gaps were masked:\n%s", got.Text())
+	}
+}
+
+// TestAvailabilityRefusesAMaskItCannotApply: the refusal is classified,
+// because an unwrapped when error falls through to [unavailable], which
+// tells a caller to retry something that cannot succeed (§16a.3).
+func TestAvailabilityRefusesAMaskItCannotApply(t *testing.T) {
+	svc, _ := seeded(t)
+	o := day("2026-03-16", "2026-03-20")
+	o.WorkingFrom, o.WorkingTo = "22:00", "06:00"
+
+	_, err := svc.Availability(context.Background(), o)
+	if err == nil {
+		t.Fatal("an overnight mask was accepted")
+	}
+	if cls, ok := gapi.ClassOf(err); !ok || cls != gapi.ClassInvalid {
+		t.Fatalf("class is %v (carried: %v), want invalid", cls, ok)
+	}
+	if strings.Contains(err.Error(), "when: invalid") {
+		t.Fatalf("the refusal repeats its own package prefix: %v", err)
 	}
 }
 

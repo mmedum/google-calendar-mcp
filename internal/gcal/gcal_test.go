@@ -179,3 +179,111 @@ func TestSplitOccurrenceID(t *testing.T) {
 		}
 	}
 }
+
+// §2.11: the id this server mints has to be one Google will accept, and
+// the rule is not obvious — w, x, y and z are out, and Google answers an
+// illegal id with "Invalid resource id value" naming neither the field
+// nor the constraint. That cost a live run (§18 row 21).
+func TestNewEventIDIsAlwaysLegal(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 500; i++ {
+		id, err := gcal.NewEventID()
+		if err != nil {
+			t.Fatalf("NewEventID: %v", err)
+		}
+		if err := gcal.ValidEventID(id); err != nil {
+			t.Fatalf("minted an id Google would refuse: %v", err)
+		}
+		if seen[id] {
+			t.Fatalf("minted the same id twice: %q", id)
+		}
+		seen[id] = true
+	}
+}
+
+// An occurrence id has to round-trip through the grammar that reads one,
+// or the two are two opinions about the same shape (§6.2).
+func TestOccurrenceIDRoundTrips(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		series string
+		start  gcal.EventDateTime
+		want   string
+	}{
+		{"timed, west of UTC", "abcdef0123",
+			gcal.EventDateTime{DateTime: "2026-03-24T09:00:00-05:00"}, "abcdef0123_20260324T140000Z"},
+		{"timed, east of UTC", "abcdef0123",
+			gcal.EventDateTime{DateTime: "2026-03-24T14:00:00+01:00"}, "abcdef0123_20260324T130000Z"},
+		{"all day carries no time", "abcdef0123",
+			gcal.EventDateTime{Date: "2026-03-24"}, "abcdef0123_20260324"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := gcal.OccurrenceID(c.series, c.start)
+			if err != nil {
+				t.Fatalf("OccurrenceID: %v", err)
+			}
+			if got != c.want {
+				t.Fatalf("got %q, want %q", got, c.want)
+			}
+			series, _, ok := gcal.SplitOccurrenceID(got)
+			if !ok || series != c.series {
+				t.Fatalf("SplitOccurrenceID(%q) = %q, %v; the two disagree about the grammar",
+					got, series, ok)
+			}
+		})
+	}
+}
+
+func TestOccurrenceIDNeedsAStart(t *testing.T) {
+	if _, err := gcal.OccurrenceID("abcdef0123", gcal.EventDateTime{}); err == nil {
+		t.Fatal("an occurrence with no start must be refused")
+	}
+	if _, err := gcal.OccurrenceID("", gcal.EventDateTime{Date: "2026-03-24"}); err == nil {
+		t.Fatal("an occurrence with no series must be refused")
+	}
+	if _, err := gcal.OccurrenceID("abcdef0123", gcal.EventDateTime{DateTime: "not a time"}); err == nil {
+		t.Fatal("an unparseable start must be refused")
+	}
+}
+
+// The patch type exists so "clear it" and "leave it" are different
+// things on the wire. Event cannot say the difference at all.
+func TestEventPatchDistinguishesClearingFromLeaving(t *testing.T) {
+	empty := ""
+	both, err := json.Marshal(gcal.EventPatch{Location: &empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(both), `"location":""`) {
+		t.Fatalf("clearing a field must be sent as empty, got %s", both)
+	}
+	none, err := json.Marshal(gcal.EventPatch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(none) != "{}" {
+		t.Fatalf("an empty patch must send nothing, got %s", none)
+	}
+	// And the same value on Event is dropped, which is the reason the
+	// patch type exists at all.
+	ev, err := json.Marshal(gcal.Event{Location: ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(ev), "location") {
+		t.Fatalf("Event was expected to drop an empty location: %s", ev)
+	}
+}
+
+// An empty, non-nil recurrence list ends the repetition; a nil one
+// leaves it alone.
+func TestEventPatchCanEndARecurrence(t *testing.T) {
+	stop := []string{}
+	out, err := json.Marshal(gcal.EventPatch{Recurrence: &stop})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"recurrence":[]`) {
+		t.Fatalf("an empty recurrence must be sent, got %s", out)
+	}
+}

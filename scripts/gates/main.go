@@ -22,6 +22,11 @@
 //	go run ./scripts/gates smoke ./google-calendar-mcp
 //	go run ./scripts/gates schema-diff ./google-calendar-mcp
 //	go run ./scripts/gates staleness ./google-calendar-mcp
+//	go run ./scripts/gates mcpb
+//	go run ./scripts/gates mcpb-pack DIST VERSION OUT
+//	go run ./scripts/gates release
+//	go run ./scripts/gates release-notes VERSION [CHANGELOG]
+//	go run ./scripts/gates server-json VERSION CHECKSUMS
 package main
 
 import (
@@ -37,7 +42,8 @@ func main() {
 		fail("usage: gates coverage PROFILE MIN | classes | api-coverage | api-fields | api-diff | " +
 			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
 			"schema-baseline BIN | " +
-			"staleness BIN")
+			"staleness BIN | mcpb | mcpb-pack DIST VERSION OUT | release | " +
+			"release-notes VERSION [CHANGELOG] | server-json VERSION CHECKSUMS")
 	}
 	root, err := repoRoot()
 	if err != nil {
@@ -80,6 +86,43 @@ func main() {
 		check(writeBaseline(binArg()), "schema baseline")
 	case "staleness":
 		check(staleness(binArg()), "staleness")
+	case "mcpb":
+		check(mcpbGate(), "bundle manifest")
+	case "release":
+		check(releaseGate(), "release wiring")
+	case "server-json":
+		// Release only, like mcpb-pack: it reads the checksums file a
+		// build produced, and writes the registry entry to stdout.
+		if len(os.Args) < 4 {
+			fail("usage: gates server-json VERSION CHECKSUMS")
+		}
+		if err := serverJSON(os.Args[2], os.Args[3], os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "server-json: %v\n", err)
+			os.Exit(1)
+		}
+	case "release-notes":
+		// Release only, and not a gate: it WRITES the release body
+		// rather than asserting anything, so it prints no "ok" line and
+		// its output is the point.
+		if len(os.Args) < 3 {
+			fail("usage: gates release-notes VERSION [CHANGELOG]")
+		}
+		file := ""
+		if len(os.Args) > 3 {
+			file = os.Args[3]
+		}
+		if err := releaseNotes(os.Args[2], file, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "release-notes: %v\n", err)
+			os.Exit(1)
+		}
+	case "mcpb-pack":
+		// Release only, and excused by name in the parity gate: this one
+		// needs binaries that exist after a build rather than names that
+		// exist in the repository.
+		if len(os.Args) < 5 {
+			fail("usage: gates mcpb-pack DIST VERSION OUT")
+		}
+		check(packMCPB(os.Args[2], os.Args[3], os.Args[4]), "bundle pack")
 	default:
 		fail("unknown gate %q", os.Args[1])
 	}

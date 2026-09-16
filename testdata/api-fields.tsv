@@ -21,7 +21,7 @@ Event	attendees	modelled	the guest list, and the reason notify is required on an
 Event	attendeesOmitted	modelled	Google truncated the list; a renderer that ignores it shows a meeting as smaller than it is
 Event	birthdayProperties	out	immutable, and only on eventType=birthday. The renderer marks such events so a model does not try to reschedule one (§2.12)
 Event	colorId	modelled	resolved to a colour name through colors.get, because "colorId 5" tells a person nothing
-Event	conferenceData	modelled	read as raw JSON and round-tripped; whether this server creates a Meet link is §17.3, still open
+Event	conferenceData	modelled	read as raw JSON and round-tripped, so a shape this server does not model survives a write; create_event asks for a Meet link through it (§17.3)
 Event	created	modelled	shown on an event card
 Event	creator	modelled	who made it; with organizer it decides whether an edit or an RSVP is the right call
 Event	description	modelled	content, renderer only (§9)
@@ -58,9 +58,9 @@ Event	summary	modelled	the title; content, so it reaches a renderer and never a 
 Event	transparency	modelled	an event marked free does not make somebody busy: the reason availability cannot come from a list (§4.6)
 Event	updated	modelled	shown on an event card, and the answer to "has this changed since I looked"
 Event	visibility	modelled	a private event reads differently depending on the caller's role, and the renderer must not imply it read the details
-Event	workingLocationProperties	out	only on eventType=workingLocation. It is the API's nearest thing to working hours and is not one: §17.2 keeps that decision open rather than reading it from here
+Event	workingLocationProperties	out	only on eventType=workingLocation. It is the API's nearest thing to working hours and is not one: §17.2 ships a working-hours mask the CALLER states, and reading somebody's office days off this field would be a different claim
 Calendar	autoAcceptInvitations	out	only meaningful on a Workspace resource calendar, which this server does not administer (§1)
-Calendar	conferenceProperties	out	which conference types a calendar allows. Needed only when this server creates conferences, which is §17.3 and still open
+Calendar	conferenceProperties	modelled	which conference types a calendar allows. create_event refuses a Meet link on a calendar whose published list does not name hangoutsMeet, rather than letting Google answer 200 with a failed request and an event that exists (§17.3)
 Calendar	dataOwner	out	read-only, and an email address: it is exactly the kind of field §9 keeps out of logs and results, and nothing here needs it
 Calendar	description	modelled	shown by get_calendar
 Calendar	etag	modelled	If-Match on a calendar patch (§4.4)
@@ -73,8 +73,8 @@ Calendar	timeZone	modelled	the second source in the zone resolution order, and t
 CalendarListEntry	accessRole	modelled	what this user may do here, which decides whether a write is refused before it is attempted (§7.1)
 CalendarListEntry	autoAcceptInvitations	out	read-only here, and only meaningful on a resource calendar (§1)
 CalendarListEntry	backgroundColor	modelled	the colour actually shown, which colorId only indexes
-CalendarListEntry	colorId	modelled	a per-user override; planned=3 manage_calendar sets it (§7.5)
-CalendarListEntry	conferenceProperties	out	as Calendar.conferenceProperties: §17.3
+CalendarListEntry	colorId	modelled	a per-user override, set by manage_calendar (§7.5); the ids come from the calendar palette in colors.get, which get_settings reports
+CalendarListEntry	conferenceProperties	modelled	as Calendar.conferenceProperties. Carried here too, so the calendar list this server already holds answers the question without a second request
 CalendarListEntry	dataOwner	out	read-only, and an email address nothing here needs (§9)
 CalendarListEntry	defaultReminders	modelled	the calendar's default reminders, which an event inherits
 CalendarListEntry	deleted	modelled	a deleted entry is skipped when the list is read
@@ -85,7 +85,7 @@ CalendarListEntry	hidden	modelled	hidden in the Calendar UI; list_calendars says
 CalendarListEntry	id	modelled	the calendar this subscription is to
 CalendarListEntry	kind	out	a constant string naming the resource type
 CalendarListEntry	location	modelled	shown by get_calendar
-CalendarListEntry	notificationSettings	out	planned=3 manage_calendar's per-user notification settings (§7.5). Not modelled while no tool writes them, because a read that shows settings nothing can change invites a request this server would refuse
+CalendarListEntry	notificationSettings	modelled	manage_calendar writes them (§7.5): what THIS user is emailed about on this calendar. The list is replaced whole, because that is what Google does with the object, and the method is always email — the only value the discovery document publishes
 CalendarListEntry	primary	modelled	the account's own calendar, which sorts first and is what "primary" resolves to
 CalendarListEntry	selected	modelled	not shown in the UI, which is not the same as hidden and confuses people
 CalendarListEntry	summary	modelled	the calendar's own title, which is what a colleague sees
