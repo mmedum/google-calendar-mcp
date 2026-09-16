@@ -32,6 +32,8 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make parity` | `make check` and `ci.yml` run the same things |
 | `make schema-diff` | the tool surface against the last tag |
 | `make smoke` | the binary over stdio, and a clean exit on disconnect |
+| `make mcpb` | the bundle manifest describes the bundle the packer stages |
+| `make release` | `.goreleaser.yaml` builds what the packer stages, and signs and uploads it |
 | `make staleness` | README, `docs/` and the code agree |
 
 Two are manual because they need the network:
@@ -84,6 +86,52 @@ What it does to the account, so nothing is a surprise:
 - `-show <substring>` prints the redacted body of every step whose name
   contains it. A pass/fail line cannot show a result that is confidently
   wrong, which is how the last three phases each found a defect.
+
+## Cutting a release
+
+`main` is released code and the tag is the maintainer's. What the tag
+does is in `.goreleaser.yaml` and `.github/workflows/release.yml`: six
+platform archives, `checksums.txt`, an SBOM per archive, a keyless cosign
+signature over the checksums, `actions/attest-build-provenance`, and the
+`.mcpb` bundle, packed in the universal binary's post hook so it reaches
+`checksums.txt` and therefore the signature.
+
+Rehearse it first. This runs everything except the three steps that need
+credentials, and leaves the whole tree under `dist/`:
+
+```
+go run github.com/goreleaser/goreleaser/v2@v2.18.1 release \
+  --snapshot --clean --skip=publish,sign,sbom
+make release-notes VERSION=Unreleased  # what the release page would say
+```
+
+At tag time the `[Unreleased]` heading becomes `[1.2.3]` and the same
+command takes that version. `gates release-notes` fails on a version with
+no section, so a tag pushed before the rename stops the release before
+goreleaser runs — which is the right way round, but it means the entry
+has to be written first.
+
+Then **check the version in five places**, because four of them agreeing
+is what a broken bundle looks like: the bundle's filename, the archive
+filenames, `manifest.json` inside the bundle, the binary's own
+`--version`, and `checksums.txt`. The bundle missing from that last file
+is the failure to look for — it ships unsigned and looks no different.
+
+Three things a rehearsal cannot tell you, so watch the first real run:
+
+- **Signing and provenance need an OIDC token**, which only a workflow
+  run has. `goreleaser check` and a full local build both pass while that
+  step is wrong.
+- **goreleaser refuses a dirty tree, and `--snapshot` skips that check.**
+  This is why the `before` hook is `go mod download` rather than
+  `go mod tidy`, and why the workflow writes its notes file outside the
+  checkout.
+- **Push tags one at a time.** GitHub drops tag events past the third in
+  a single push, and the release simply never runs.
+
+The MCP registry entry is not wired up yet. §12 puts it last because the
+registry does a HEAD on the bundle's download URL before accepting an
+entry, so it needs a release to exist first.
 
 ## Adding a tool
 

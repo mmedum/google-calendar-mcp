@@ -24,6 +24,8 @@
 //	go run ./scripts/gates staleness ./google-calendar-mcp
 //	go run ./scripts/gates mcpb
 //	go run ./scripts/gates mcpb-pack DIST VERSION OUT
+//	go run ./scripts/gates release
+//	go run ./scripts/gates release-notes VERSION [CHANGELOG]
 package main
 
 import (
@@ -39,7 +41,8 @@ func main() {
 		fail("usage: gates coverage PROFILE MIN | classes | api-coverage | api-fields | api-diff | " +
 			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
 			"schema-baseline BIN | " +
-			"staleness BIN | mcpb | mcpb-pack DIST VERSION OUT")
+			"staleness BIN | mcpb | mcpb-pack DIST VERSION OUT | release | " +
+			"release-notes VERSION [CHANGELOG]")
 	}
 	root, err := repoRoot()
 	if err != nil {
@@ -84,6 +87,23 @@ func main() {
 		check(staleness(binArg()), "staleness")
 	case "mcpb":
 		check(mcpbGate(), "bundle manifest")
+	case "release":
+		check(releaseGate(), "release wiring")
+	case "release-notes":
+		// Release only, and not a gate: it WRITES the release body
+		// rather than asserting anything, so it prints no "ok" line and
+		// its output is the point.
+		if len(os.Args) < 3 {
+			fail("usage: gates release-notes VERSION [CHANGELOG]")
+		}
+		file := ""
+		if len(os.Args) > 3 {
+			file = os.Args[3]
+		}
+		if err := releaseNotes(os.Args[2], file, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "release-notes: %v\n", err)
+			os.Exit(1)
+		}
 	case "mcpb-pack":
 		// Release only, and excused by name in the parity gate: this one
 		// needs binaries that exist after a build rather than names that

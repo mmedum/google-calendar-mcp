@@ -29,14 +29,21 @@ func testLauncher() []string {
 // fallback written at each call site.
 func repoFile(t *testing.T, path string) []byte {
 	t.Helper()
-	data, err := os.ReadFile("../../" + path)
-	if err != nil {
-		data, err = os.ReadFile(path)
-	}
+	data, err := os.ReadFile(repoPath(t, path))
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return data
+}
+
+// repoPath resolves a repository-relative path from wherever the test is
+// running, for the callers that need the PATH rather than the bytes.
+func repoPath(t *testing.T, path string) string {
+	t.Helper()
+	if _, err := os.Stat("../../" + path); err == nil {
+		return "../../" + path
+	}
+	return path
 }
 
 // good is the committed manifest, which every case starts from.

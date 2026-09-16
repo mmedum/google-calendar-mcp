@@ -12,7 +12,7 @@ COVER_MIN ?= 80
 # Where the release's binaries are, what version the bundle claims, and
 # where it lands. Only `mcpb-pack` reads them.
 DIST      ?= dist
-MCPB_OUT  ?= dist/google-calendar-mcp.mcpb
+MCPB_OUT  ?= dist/google-calendar-mcp_$(VERSION).mcpb
 # The gates are one binary. Building it once and running it saves a link
 # per gate, which is several seconds on every `make check`.
 GATES     ?= ./.gates$(EXE)
@@ -141,15 +141,28 @@ transcript: gates ## The live driver prints only through its redactor
 mcpb: gates ## The bundle manifest describes the bundle the packer builds
 	@$(GATES) mcpb
 
+.PHONY: release
+release: gates ## The release config builds what the packer stages, and signs and uploads it
+	@$(GATES) release
+
 # The other half of the bundle, and the reason there are two subcommands:
 # the gate above needs only the staged NAMES, which are static, so it
 # runs on every commit. This one needs the binaries, so it runs at
-# release time from goreleaser's universal-binary hook. It is deliberately
-# NOT in `check`, and therefore not in CI, which is why `parity` does not
-# see it.
+# release time, from the universal binary's post hook in .goreleaser.yaml
+# — which calls `go run ./scripts/gates` rather than this target, so a
+# rehearsal needs nothing but the Go toolchain. `make release` holds the
+# path it packs to against MCPB_OUT above. Deliberately NOT in `check`,
+# and therefore not in CI, which is why `parity` does not see it.
 .PHONY: mcpb-pack
 mcpb-pack: gates ## Pack the .mcpb from a built dist tree (release; manual)
 	@$(GATES) mcpb-pack $(DIST) $(VERSION) $(MCPB_OUT)
+
+# The release body, from the CHANGELOG section for the tag. release.yml
+# runs the gate directly and writes it outside the checkout; this target
+# is for reading what a tag would publish before pushing it.
+.PHONY: release-notes
+release-notes: gates ## Print the CHANGELOG section a tag would publish (manual)
+	@$(GATES) release-notes $(VERSION)
 
 .PHONY: live-cover
 live-cover: build gates ## Every published tool has a step in the live driver
@@ -175,7 +188,7 @@ evals-check: ## The eval scorers discriminate, with no model and no key
 	@$(GO) run -tags=evals ./scripts/evals -self-check
 
 .PHONY: check
-check: fmt vet tidy lint cover vuln licenses secrets api-coverage api-fields classes evals-check leaks mcpb transcript live-cover parity pins schema-diff smoke staleness ## Everything CI runs
+check: fmt vet tidy lint cover vuln licenses secrets api-coverage api-fields classes evals-check leaks mcpb release transcript live-cover parity pins schema-diff smoke staleness ## Everything CI runs
 
 .PHONY: clean
 clean:

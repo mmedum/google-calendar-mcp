@@ -9,6 +9,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The release itself: `.goreleaser.yaml` and
+  `.github/workflows/release.yml`. Six platform archives,
+  `checksums.txt`, an SBOM per archive, a keyless cosign signature over
+  the checksums, and `actions/attest-build-provenance` over every
+  published file. Built with `-trimpath` and a `mod_timestamp` taken from
+  the commit, so rebuilding a tag reproduces it byte for byte.
+
+  The bundle is packed in the universal binary's post hook — the one
+  point in the pipeline where every binary exists and `checksums.txt` has
+  not been written yet — and named in **both** `checksum.extra_files` and
+  `release.extra_files`. Both, or it ships unsigned, or it is hashed and
+  never published, and neither looks any different on the release page.
+
+  The release body is the CHANGELOG section for the tag, written by
+  `gates release-notes` and passed with `--release-notes`. There is no
+  `changelog:` block, deliberately: `disable` is read in that pipe's
+  `Skip`, which runs before `Run`, so the notes file is never opened and
+  the body collapses to the footer alone with every step still green.
+
+  A tag is only a pointer, so the workflow refuses to publish a commit
+  whose `ci` run was not green.
+- `make release`, which holds the release config against the bundle it
+  packs, on every commit rather than on release day. Each staged glob
+  must resolve to exactly one directory the build matrix produces; the
+  post hook must pack to the path the Makefile names; the bundle must be
+  both checksummed and uploaded; the archives must exclude the universal
+  binary; and the signature must pass `--bundle`, which cosign 3 made
+  required. Twenty-nine ways of breaking it are watched failing in tests.
+- One workflow reader for the gates, `scripts/gates/workflow.go`. The
+  first tool-pin check hand-rolled its own and was wrong in both of the
+  ways that goes wrong: it read every line of a step rather than the
+  `with:` block, so a `version:` under `env:` satisfied the pin, and it
+  understood one of YAML's two list styles, so a workflow it could not
+  read reported no problems at all. Both are regression cases now, and
+  the gate asserts a floor on how many installers it SAW.
+- The gate reads the macOS binary's name from `name_template`, not from
+  the build it joins. goreleaser defaults that template to the PROJECT
+  name, so taking it from `binary` was right only while the two matched:
+  renaming the project alone moved the file, left the gate green and
+  would have failed the pack at tag time (§18 row 71). `builds[].ignore`
+  is modelled for the same reason — without it a release shipping five
+  archives passed a check that says six.
+- `make pins` now holds the second half of its own comment. Every action
+  that INSTALLS a tool must pin the tool as well — `cosign-release`,
+  `syft-version`, goreleaser's `version` — because a SHA on the `uses:`
+  line pins the wrapper and says nothing about what it fetches. It reads
+  as complete when it is not. It also names `ci.yml` and `release.yml`
+  rather than counting to two, which two other workflows satisfied.
+- `gates release-notes`, which prints one version's changelog section.
+  It stops at the next heading and at the link footer, and lifts the
+  headings one level because GitHub renders the tag as the page's `h1`.
+
 - Resources, for clients that attach context rather than call tools:
   `gcal://calendars`, `gcal://calendars/{calendar_id}` and
   `gcal://calendars/{calendar_id}/events/{event_id}`. Each carries what
@@ -173,8 +225,164 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   its scheduled start. That address survives somebody moving the
   occurrence, which its own id does not tell you.
 
+- The live driver cancels events that have guests instead of deleting
+  them silently. Its cleanup used `sendUpdates=none`, which removes an
+  event from the organiser's calendar and leaves it on everyone else's —
+  so a day of probe runs left meetings on two real calendars that nobody
+  could get rid of. `-sweep-spikes` removes the kept spike events the
+  same way, cancelling them to their guests.
+- The live driver no longer mails anyone unless asked. Spikes A and B
+  sent four real invitations on every run with guest addresses
+  configured, which a phase that runs the driver dozens of times would
+  have turned into dozens of invitations to a colleague. They need
+  `-spike-notify` per run, like `-spike-ceiling`, so a variable left in
+  a shell profile cannot do it by accident.
+- `schema-diff` has a baseline before the first tag. It compared the
+  tool surface against the last git tag and there is no tag, so it
+  printed "no previous tag" and passed on every run since the project
+  started — inert through exactly the phases that add the most tools. It
+  now falls back to `testdata/schema-baseline.json`, written by
+  `make schema-baseline`.
+- Spike B is answered, and §4.3 refuses `none` when a guest is outside
+  the organiser's domain. A non-Google guest invited with `none`
+  received nothing, in a run where the same address had just received
+  two other invitations — and such a guest has no Google Calendar for
+  the event to appear in, so mail was the only way they could learn of
+  it. The event exists with them attached and they cannot discover it
+  (§18 row 44).
+- A result says what the server asked for, never what a guest received.
+  `all` looked like it did not reach out-of-domain guests — three runs,
+  both orderings, the same answer. Putting a non-Google address on the
+  same events showed one send at two receivers: it arrived at one and
+  not the other, so Google sent it and the receiving provider dropped
+  it. Three consistent runs were consistent because the instrument was
+  (§18 row 42).
+- Spike A is answered: `externalOnly` follows the organiser's domain,
+  and `sendUpdates=none` mailed nobody on insert. The second does not
+  soften §4.3 rule 3 — Google warns mail "might still be sent", so one
+  silent run is not a promise of silence — but it does retire the fear
+  that `none` is routinely noisy (§18 rows 40 and 41).
+- Spikes A and B, which set up §15's notification questions and
+  deliberately do not answer them: who received mail is visible in an
+  inbox and nowhere in any API response, so the driver creates the
+  events, says what to look for, and the verdict is written down by
+  hand. Guest addresses come from `GCAL_LIVE_GUEST_INTERNAL`,
+  `GCAL_LIVE_GUEST_EXTERNAL` and `GCAL_LIVE_GUEST_NONGOOGLE` and never
+  enter the repository.
+- Spikes E and F, and both are answered. **E**: "this and following"
+  resets exceptions after the target, confirmed on a real series — so
+  §4.2's warning is accurate and phase 2 must print it. The split came
+  from `Set.Split` in `internal/recur`, which makes this the first live check of
+  phase 1's scope arithmetic. **F**: two concurrent inserts of one
+  client-generated id gave one 200 and one 409, so the collision is
+  caught; `ambiguous_outcome` stays, because the API declines to
+  guarantee that and the class also covers a retry after a transport
+  failure.
+- The live driver reuses its scratch calendar. `-keep` leaves it and the
+  next run adopts and empties it, spending no calendar-creation quota —
+  which matters because that quota counts creations and is not refunded
+  by deleting. Event ids are generated per run, since a deleted event
+  does not release its id.
+
+- Phase 1: recurrence and availability.
+- `list_instances` — the occurrences of one repeating event, with the
+  dates that were moved and, on request, the ones that were cancelled. A
+  cancelled occurrence is how a single date leaves a series, so the
+  result says when it is hiding them.
+- `check_availability` — busy intervals and free gaps from
+  `freebusy.query`, not from a list of events: a list misses everything
+  whose details the caller cannot read and ignores events marked free. A
+  calendar that could not be read is reported unknown and never folded
+  into free, and the free gaps say how many calendars they were computed
+  from. `min_minutes` drops gaps too short to use.
+- `internal/recur`, the recurrence model: RFC 5545 rules parsed once for
+  the whole server, EXDATE and RDATE, prose explanations, and the three
+  scopes of §4.2 with the "this and following" arithmetic phase 2 needs.
+  Expansion walks dates and carries the wall clock, so a weekly 09:00
+  stays 09:00 across a daylight-saving transition; the table tests cover
+  both hemispheres and Lord Howe's 30-minute shift.
+- Free-gap arithmetic in `internal/model`, beside the busy intervals it
+  works on. Overlapping and touching busy blocks merge, so no gap is
+  reported between two meetings that run into each other.
+- Two gates this repository claimed to have and did not: `api-fields`,
+  one verdict per published field of `Event`, `Calendar`,
+  `CalendarListEntry` and `AclRule` (81 fields, 56 modelled, 25 written
+  off), and `live-cover`, which fails on a tool with no step in the live
+  driver. `make check` is nineteen targets.
+- Golden files for the renderers, in `testdata/golden/`, which §13 asked
+  for and phase 0 left as an empty directory. `go test ./internal/render
+  -update` rewrites them.
+- Live driver: steps for both new tools, and spikes C (a recurrence
+  written with no time zone), H (free/busy on a calendar nobody can
+  read) and I (the 50-calendar ceiling at 51). None of the three has run
+  yet.
+
+### Changed
+
+- `check_availability` has its own ceiling of 100 calendars per call
+  rather than `GCAL_MAX_CALENDARS`: free/busy answers for 50 calendars
+  in one request where a schedule read spends one per calendar. The
+  refusal says which limit it is.
+- Recurrence rules are explained by `internal/recur` rather than by a
+  second parser in the renderer, so a rule reads the same way in a
+  result and in a guard. "every 2 weeks on Monday and Wednesday" instead
+  of "on Monday, Wednesday", and ordinals ("2nd Tuesday", "last day").
+
+- Phase 0: the read surface, the repository's own gates, and the design.
+- Six tools: `list_calendars`, `get_calendar`, `list_events`,
+  `search_events`, `get_event`, `get_settings`.
+- `login`, `logout`, `status` and `doctor` subcommands. Loopback OAuth on
+  the 127.0.0.1 literal with PKCE S256, refresh token to the OS keyring
+  with a warned 0600 file fallback, and `--no-browser` for signing in
+  over SSH.
+- `internal/when`, the time model: an all-day event is a date and never
+  becomes an instant, and every timed event carries an IANA zone rather
+  than just an offset. Table tests cover daylight-saving transitions in
+  both hemispheres, a 30-minute transition, a non-hour offset and a zone
+  with no transitions at all.
+- Zone resolution in a fixed order — the call, the calendar, the
+  account's settings — which refuses rather than falling back to the
+  machine's own zone. Every read names which source it used.
+- A closed error vocabulary of twelve classes, held from both sides by
+  `make classes`.
+- A verdict for all 38 published Calendar v3 methods in
+  `testdata/api-coverage.tsv`, held by `make api-coverage` against the
+  committed discovery snapshot.
+- The repository's own gates as Go: coverage floor per package, error
+  classes, API coverage, leak scan, transcript redaction, workflow pins,
+  make/CI parity, stdio smoke, schema diff and staleness.
+- `internal/redact` and `scripts/livecal`, the live driver. It creates a
+  scratch calendar, reads only what it wrote, and deletes it; every
+  print goes through one redactor, which the transcript gate holds.
+
 ### Fixed
 
+- **The packer could never have staged a macOS binary.** Its glob was
+  `dist/*darwin*universal*/`, and goreleaser names that directory
+  `<id>_darwin_all` — the id comes first, so the glob matched nothing.
+  Every gate was green, because the packer only runs at release time and
+  there was no release to run it. `make release` reads the build matrix
+  now, so the two cannot drift again.
+- The bundle carried no version in its filename, and the binary inside it
+  reported a different version from the manifest beside it. The ldflags
+  stamped `{{ .Tag }}`, which is `v0.0.0` in a rehearsal while everything
+  else carries the snapshot version — so the one place a person would
+  check was the one place that could not be checked until a tag existed.
+  Both come from `{{ .Version }}` now, and a snapshot build agrees in all
+  five places.
+- The staleness gate could not see a root file. Its path extractor only
+  matched `cmd/`, `internal/`, `scripts/`, `docs/`, `testdata/`,
+  `packaging/` and `.github/`, so `.goreleaser.yaml` named in the docs
+  was not unchecked but UNSEEN — half of why §16 could list a release as
+  built while no such file existed. It matches root files by shape now.
+  Deriving the roots from the repository instead was tried and reverted:
+  a token counts as a path only if its root exists, so a missing file
+  files itself as prose and excuses itself (§18 row 70).
+- README's Status section still said "Phase 0: the read surface. Six
+  tools" with four phases built and twenty tools published. The staleness
+  gate reads the tool table, the settings and the documented paths; a
+  claim in prose that names no path is invisible to it, which is the same
+  blind spot that let the missing release scaffolding sit in §16 as done.
 - `manage_calendar` could report a change it had not made. Both halves
   listed their changes before sending them, and the sentence that says
   what stood when the second half failed is built from that list — so a
@@ -459,149 +667,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and revoked the maintainer's own Google grant. `TestMain` substitutes
   it for the whole `cmd` package, with a decoy test holding that.
 
-### Added
-
-- The live driver cancels events that have guests instead of deleting
-  them silently. Its cleanup used `sendUpdates=none`, which removes an
-  event from the organiser's calendar and leaves it on everyone else's —
-  so a day of probe runs left meetings on two real calendars that nobody
-  could get rid of. `-sweep-spikes` removes the kept spike events the
-  same way, cancelling them to their guests.
-- The live driver no longer mails anyone unless asked. Spikes A and B
-  sent four real invitations on every run with guest addresses
-  configured, which a phase that runs the driver dozens of times would
-  have turned into dozens of invitations to a colleague. They need
-  `-spike-notify` per run, like `-spike-ceiling`, so a variable left in
-  a shell profile cannot do it by accident.
-- `schema-diff` has a baseline before the first tag. It compared the
-  tool surface against the last git tag and there is no tag, so it
-  printed "no previous tag" and passed on every run since the project
-  started — inert through exactly the phases that add the most tools. It
-  now falls back to `testdata/schema-baseline.json`, written by
-  `make schema-baseline`.
-- Spike B is answered, and §4.3 refuses `none` when a guest is outside
-  the organiser's domain. A non-Google guest invited with `none`
-  received nothing, in a run where the same address had just received
-  two other invitations — and such a guest has no Google Calendar for
-  the event to appear in, so mail was the only way they could learn of
-  it. The event exists with them attached and they cannot discover it
-  (§18 row 44).
-- A result says what the server asked for, never what a guest received.
-  `all` looked like it did not reach out-of-domain guests — three runs,
-  both orderings, the same answer. Putting a non-Google address on the
-  same events showed one send at two receivers: it arrived at one and
-  not the other, so Google sent it and the receiving provider dropped
-  it. Three consistent runs were consistent because the instrument was
-  (§18 row 42).
-- Spike A is answered: `externalOnly` follows the organiser's domain,
-  and `sendUpdates=none` mailed nobody on insert. The second does not
-  soften §4.3 rule 3 — Google warns mail "might still be sent", so one
-  silent run is not a promise of silence — but it does retire the fear
-  that `none` is routinely noisy (§18 rows 40 and 41).
-- Spikes A and B, which set up §15's notification questions and
-  deliberately do not answer them: who received mail is visible in an
-  inbox and nowhere in any API response, so the driver creates the
-  events, says what to look for, and the verdict is written down by
-  hand. Guest addresses come from `GCAL_LIVE_GUEST_INTERNAL`,
-  `GCAL_LIVE_GUEST_EXTERNAL` and `GCAL_LIVE_GUEST_NONGOOGLE` and never
-  enter the repository.
-- Spikes E and F, and both are answered. **E**: "this and following"
-  resets exceptions after the target, confirmed on a real series — so
-  §4.2's warning is accurate and phase 2 must print it. The split came
-  from `Set.Split` in `internal/recur`, which makes this the first live check of
-  phase 1's scope arithmetic. **F**: two concurrent inserts of one
-  client-generated id gave one 200 and one 409, so the collision is
-  caught; `ambiguous_outcome` stays, because the API declines to
-  guarantee that and the class also covers a retry after a transport
-  failure.
-- The live driver reuses its scratch calendar. `-keep` leaves it and the
-  next run adopts and empties it, spending no calendar-creation quota —
-  which matters because that quota counts creations and is not refunded
-  by deleting. Event ids are generated per run, since a deleted event
-  does not release its id.
-
-- Phase 1: recurrence and availability.
-- `list_instances` — the occurrences of one repeating event, with the
-  dates that were moved and, on request, the ones that were cancelled. A
-  cancelled occurrence is how a single date leaves a series, so the
-  result says when it is hiding them.
-- `check_availability` — busy intervals and free gaps from
-  `freebusy.query`, not from a list of events: a list misses everything
-  whose details the caller cannot read and ignores events marked free. A
-  calendar that could not be read is reported unknown and never folded
-  into free, and the free gaps say how many calendars they were computed
-  from. `min_minutes` drops gaps too short to use.
-- `internal/recur`, the recurrence model: RFC 5545 rules parsed once for
-  the whole server, EXDATE and RDATE, prose explanations, and the three
-  scopes of §4.2 with the "this and following" arithmetic phase 2 needs.
-  Expansion walks dates and carries the wall clock, so a weekly 09:00
-  stays 09:00 across a daylight-saving transition; the table tests cover
-  both hemispheres and Lord Howe's 30-minute shift.
-- Free-gap arithmetic in `internal/model`, beside the busy intervals it
-  works on. Overlapping and touching busy blocks merge, so no gap is
-  reported between two meetings that run into each other.
-- Two gates this repository claimed to have and did not: `api-fields`,
-  one verdict per published field of `Event`, `Calendar`,
-  `CalendarListEntry` and `AclRule` (81 fields, 56 modelled, 25 written
-  off), and `live-cover`, which fails on a tool with no step in the live
-  driver. `make check` is nineteen targets.
-- Golden files for the renderers, in `testdata/golden/`, which §13 asked
-  for and phase 0 left as an empty directory. `go test ./internal/render
-  -update` rewrites them.
-- Live driver: steps for both new tools, and spikes C (a recurrence
-  written with no time zone), H (free/busy on a calendar nobody can
-  read) and I (the 50-calendar ceiling at 51). None of the three has run
-  yet.
-
-### Changed
-
-- `check_availability` has its own ceiling of 100 calendars per call
-  rather than `GCAL_MAX_CALENDARS`: free/busy answers for 50 calendars
-  in one request where a schedule read spends one per calendar. The
-  refusal says which limit it is.
-- Recurrence rules are explained by `internal/recur` rather than by a
-  second parser in the renderer, so a rule reads the same way in a
-  result and in a guard. "every 2 weeks on Monday and Wednesday" instead
-  of "on Monday, Wednesday", and ordinals ("2nd Tuesday", "last day").
-
-- Phase 0: the read surface, the repository's own gates, and the design.
-- Six tools: `list_calendars`, `get_calendar`, `list_events`,
-  `search_events`, `get_event`, `get_settings`.
-- `login`, `logout`, `status` and `doctor` subcommands. Loopback OAuth on
-  the 127.0.0.1 literal with PKCE S256, refresh token to the OS keyring
-  with a warned 0600 file fallback, and `--no-browser` for signing in
-  over SSH.
-- `internal/when`, the time model: an all-day event is a date and never
-  becomes an instant, and every timed event carries an IANA zone rather
-  than just an offset. Table tests cover daylight-saving transitions in
-  both hemispheres, a 30-minute transition, a non-hour offset and a zone
-  with no transitions at all.
-- Zone resolution in a fixed order — the call, the calendar, the
-  account's settings — which refuses rather than falling back to the
-  machine's own zone. Every read names which source it used.
-- A closed error vocabulary of twelve classes, held from both sides by
-  `make classes`.
-- A verdict for all 38 published Calendar v3 methods in
-  `testdata/api-coverage.tsv`, held by `make api-coverage` against the
-  committed discovery snapshot.
-- The repository's own gates as Go: coverage floor per package, error
-  classes, API coverage, leak scan, transcript redaction, workflow pins,
-  make/CI parity, stdio smoke, schema diff and staleness.
-- `internal/redact` and `scripts/livecal`, the live driver. It creates a
-  scratch calendar, reads only what it wrote, and deletes it; every
-  print goes through one redactor, which the transcript gate holds.
-
 ### Notes
 
-- Writing events, recurrence, availability and sharing are phases 1 to 3.
-  `docs/architecture.md` §16 has the plan.
-- **Verified live** against a real Workspace account: 19 steps, none
-  failed, transcript read. Spike D confirmed all-day stability from
-  UTC-10 and UTC+13; a weekly series held its wall clock across the
-  29 March transition.
+- The phase plan, and what is still owed, are in `docs/architecture.md` §16.
+- **Verified live** against a real Workspace account on every phase;
+  the last run was 85 steps with none failing, transcript read. Spike D
+  confirmed all-day stability from UTC-10 and UTC+13; a weekly series
+  held its wall clock across the 29 March transition.
 - Spike G confirmed its positive half. The negative half is not probed
   on purpose: Google's grant is per OAuth client and user, so proving a
   refusal would mean revoking this server's access and logging in again
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
-- CI has not yet run on macOS or Windows.

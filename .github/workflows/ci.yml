@@ -73,6 +73,8 @@ jobs:
         run: make evals-check
       - name: bundle manifest
         run: make mcpb
+      - name: release wiring
+        run: make release
       - name: transcript redaction
         run: make transcript
       - name: live driver coverage

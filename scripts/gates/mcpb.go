@@ -65,8 +65,15 @@ type staged struct {
 // bundleFiles is what a bundle contains. The macOS slot is goreleaser's
 // universal binary: a manifest has no key for the architecture, so every
 // platform it claims has to work on both.
+//
+// The universal glob reads "universal then darwin", which looks backwards
+// and is not: goreleaser names that directory <id>_darwin_all, so the id
+// comes FIRST. Written the obvious way round it matched nothing, and the
+// packer would have failed on the one file the macOS half of the bundle
+// is. `gates release` holds every glob here against the build matrix in
+// .goreleaser.yaml so neither can drift from the other again.
 var bundleFiles = []staged{
-	{path: "server/google-calendar-mcp-darwin", glob: "dist/*darwin*universal*/google-calendar-mcp", platform: "darwin"},
+	{path: "server/google-calendar-mcp-darwin", glob: "dist/*universal*darwin*/google-calendar-mcp", platform: "darwin"},
 	{path: "server/google-calendar-mcp.exe", glob: "dist/*windows_amd64*/google-calendar-mcp.exe", platform: "win32"},
 	{path: "server/launch-linux.sh", source: launcherPath, platform: "linux"},
 	{path: "server/google-calendar-mcp-linux-x64", glob: "dist/*linux_amd64*/google-calendar-mcp", launched: true},

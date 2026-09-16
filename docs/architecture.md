@@ -1,21 +1,51 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 4 is built, run live and green (2026-09-16).** Phase 0 —
-the scaffolding, the gates, the time model and the six read tools —
-phase 1 — `internal/recur`, `list_instances` and `check_availability` —
-phase 2 — `internal/plan`, the five event writes, `If-Match`, the
-client-generated id and `dry_run` — and phase 3 — the two calendar
-tools, the three sharing tools and the two gated ones — are built,
-verified live and committed. Phase 4 — the three resources, the
-working-hours mask, the conference parameter, the attendee warning,
-`scripts/evals` and the `.mcpb` bundle with its gate — is built,
-verified live and committed with them. The surface is **twenty tools and
-three resources**; `make check` is green across twenty-one targets; the
-live driver runs **85 steps against a real account with none failing**, 7
-undetermined by default, being the five that reach a real person and
-spikes A and B, all of which need `-spike-notify` and a configured guest.
-Five runs: one to see it work, two reading the new steps' bodies rather
-than their check lines, and two more after the reviews changed code.
+**Status: phase 5 is built and rehearsed (2026-09-16).** Phases 0 to 4 —
+the scaffolding and the time model with the six read tools; `internal/recur`,
+`list_instances` and `check_availability`; `internal/plan`, the five event
+writes, `If-Match`, the client-generated id and `dry_run`; the two calendar
+tools, the three sharing tools and the two gated ones; and the three
+resources, the working-hours mask, the conference parameter, the attendee
+warning, `scripts/evals` and the `.mcpb` bundle — are built, verified live
+and committed. Phase 5 is the release those four had nowhere to ship in:
+`.goreleaser.yaml`, `.github/workflows/release.yml`, the `release` gate
+that holds one against the other, and `gates release-notes`. The tool
+surface is unchanged at **twenty tools and three resources**; `make check`
+is green across **twenty-two** targets; the live driver's last run was 85
+steps against a real account with none failing.
+
+**The release is rehearsed and has never run for a tag.** Two `--snapshot`
+builds produced the six archives, the bundle and `checksums.txt`, and the
+version agrees in all five of §10b's places. Signing and provenance are
+the part no rehearsal reaches: both need an OIDC token only a real
+workflow run has, so the first tag is the first time they execute. Watch
+that run.
+
+**What phase 5 cost and taught, in one line each.** The packer's macOS
+glob **could never have matched anything**: goreleaser names that
+directory `<id>_darwin_all`, so the id comes first and
+`dist/*darwin*universal*/` reads the two words in the wrong order (§18
+row 64). Every gate was green with it in the tree, because the packer
+only runs at release time and there was no release — which is the whole
+argument for the `release` gate reading the build matrix on every commit.
+The binary's own `--version` was the one of §10b's five version checks a
+rehearsal could not perform, because the ldflags stamped `{{ .Tag }}` and
+a snapshot has no tag (§18 row 65). And the `pins` gate's failure message
+said "expected at least CI and release" while the check counted to two,
+which `ci.yml` and `codeql.yml` satisfied — row 62 one level down, a
+message that names a file beside a check that counts them.
+
+**The cleanup pass found worse than the phase did**, which is the second
+lesson. The tool-pin check this phase added — the half the standard calls
+the one that reads as complete when it is not — **was itself that**: it
+read every line of a step rather than the `with:` block, so a `version:`
+under `env:` satisfied it, and it understood one of YAML's two list
+styles, so a workflow it could not read reported no problems (§18 row
+69). Both were found by running it, not reading it. And the "more
+general" fix for the staleness gate's blind spot — derive the documented
+roots from the repository instead of listing them — is **circular**: a
+token counts as a path only if its root exists, so a missing file files
+itself as prose (§18 row 70). Shape, never existence.
 
 **What phase 4 cost and taught, in one line each.** Spike M asked what
 Google does with a conference create request and answered both halves
@@ -31,11 +61,14 @@ phase 0 entry claims goreleaser and a release workflow that **never
 existed**, so the bundle this phase built is packed by hand rather than
 by a signed release (§18 row 62).
 
-**Still owed**, said here rather than left implied: a second MCP client
-and the bundle installed from a real desktop, both deferred by decision;
-spike G's negative half, from phase 0; the release wiring above; and
-§17.1, incremental sync, which stays open. §17.2, §17.3 and §17.5 are
-decided and built.
+**Still owed**, said here rather than left implied: **a tag**, which is
+the only thing that exercises signing, provenance and the upload; the
+**MCP registry entry**, which §12 puts last and which needs a
+`server.json` and a publisher identity this repository does not have yet;
+a second MCP client and the bundle installed from a real desktop, both
+deferred by decision; spike G's negative half, from phase 0; and §17.1,
+incremental sync, which stays open. §17.2, §17.3 and §17.5 are decided
+and built.
 
 **What phase 3's live runs cost and taught. Three runs, and the second is
 the one worth reading.** The first failed two steps and both came from
@@ -1508,8 +1541,11 @@ line names, neither of which any test against a fake would have
 produced. Outstanding: **spike G's negative half**, and CI has never run
 on macOS or Windows. Not tagged: `main` is the maintainer's. The
 scaffolding of §12 and §13: Makefile, golangci, govulncheck,
-go-licenses, gitleaks, goreleaser, CI, CodeQL and release workflows,
-Dependabot, issue and PR templates, `CONTRIBUTING.md`.
+go-licenses, gitleaks, the CI and CodeQL workflows, Dependabot, issue and
+PR templates, `CONTRIBUTING.md`. This list said "goreleaser, CI, CodeQL
+and release workflows" until phase 5, and two of those four never
+existed (§18 row 62); phase 5 built them and the list says what was
+built.
 `login/logout/status/doctor`; `config`, `credentials`, `userconfig`,
 `auth`; `gapi` with the read methods; **`internal/when` complete with the
 table tests of §13**, because everything else stands on it; `render` for
@@ -2172,6 +2208,48 @@ row 63 records what the review found in phase 2's split arithmetic: the
 expansion runs in the zone the CALLER asked to see, and two attempts to
 make that produce a wrong rule did not.
 
+**Phase 5 — the release (v1.0.0). Built and rehearsed 2026-09-16.**
+`.goreleaser.yaml` and `.github/workflows/release.yml`, which §12
+specified and §16 listed among phase 0's work while neither existed
+(§18 row 62). Six platform archives, `checksums.txt`, an SBOM per
+archive, a keyless cosign signature over the checksums, and
+`actions/attest-build-provenance` over every published file; `-trimpath`
+and a `mod_timestamp` from the commit, so rebuilding a tag reproduces it.
+The bundle phase 4 built is packed in the universal binary's post hook
+and named in both `checksum.extra_files` and `release.extra_files`. The
+surface is unchanged; `make check` is twenty-two targets.
+
+**The gate is the point, not the config.** A release config is read once
+and then trusted, and the half that binds it to this repository — the
+staged globs, the pack path, the bundle reaching `checksums.txt` — is
+exactly the half nothing would notice being wrong until a tag. So
+`gates release` holds it on every commit: each staged glob must resolve
+to exactly ONE directory the build matrix produces, the post hook must
+pack to the path `MCPB_OUT` names, the bundle must be both checksummed
+and uploaded, the archives must exclude the universal binary, and the
+signature must pass `--bundle`. Twenty-nine ways of breaking it are watched
+failing in tests, as §10b asks for the manifest.
+
+**What the rehearsal found, which reading could not.** The packer's macOS
+glob was `dist/*darwin*universal*/` and goreleaser writes
+`dist/<id>_darwin_all/`, so it matched nothing and `mcpb-pack` would have
+failed on the one file the macOS half of the bundle is (§18 row 64). Two
+more came from checking §10b's five version places rather than assuming
+them: the bundle's filename carried no version at all, and the binary
+inside it reported `v0.0.0` while the manifest beside it reported the
+snapshot version — the ldflags stamped `{{ .Tag }}`, and a snapshot has
+no tag (§18 row 65). Both now come from `{{ .Version }}`, and a snapshot
+agrees in all five places.
+
+**What is deliberately not here.** The MCP registry entry, which §12
+puts last: it needs a `server.json`, a namespace and a publisher
+identity, and the registry does a HEAD on the bundle's download URL
+before it accepts an entry, so it cannot be built before a release
+exists. And the tag itself — signing and provenance need an OIDC token
+that only a real workflow run has, so `goreleaser check` and a full local
+snapshot both pass while that step is untested. The standard says to
+watch the first run after any change to it, which is what is owed next.
+
 ### 16a. Found by review, and fixed
 
 Five defects the phase 1 review turned up in code phases 0 and 1 had
@@ -2394,8 +2472,16 @@ what §15 exists to settle, and they are marked.
 | 59 | A URI template variable matches a calendar id | RFC 6570; the SDK's matcher, probed locally 2026-09-16 | **Refuted, and it would have made every secondary calendar unreachable.** `gcal://calendars/{calendar_id}` uses simple expansion, which matches unreserved characters only — and every secondary calendar id is an ADDRESS. The obvious URI, with the at sign written as itself, matches nothing and the read comes back "not found", while the percent-encoded form works; a model writing the id it was just given by `list_calendars` gets the first one. The templates use reserved expansion (`{+calendar_id}`) now, which matches both. That has a second consequence worth stating: reserved expansion also matches a slash, so the calendar template matches an EVENT URI too, and the SDK routes a read to the first template that matches. Both templates therefore share one handler that parses the URI itself, rather than depending on the order two registrations happen to be in |
 | 60 | Conference data is generated asynchronously, so an insert answers with a pending request and no link | Discovery document, `ConferenceData.createRequest` and `ConferenceRequestStatus`, revision 20260826; **spike M live, 2026-09-16** | **Refuted as the usual case, and the published one is kept anyway.** The insert answered `status: "success"` with the video entry point already in it — no waiting, no second read. The documentation says the data "is generated asynchronously" and publishes "pending" as a status, so the slower answer is a thing the API may do; one observation does not retire it, for the same reason spike F did not retire `ambiguous_outcome`. What changes is every sentence that said a caller usually has to read the event again: the link normally arrives with the event, `create_event` reports what came back rather than what it asked for, and "still being made" is the other answer rather than the expected one |
 | 61 | Conference data in an insert body is honoured | Discovery document, `events.insert.conferenceDataVersion`, revision 20260826; **spike M live, 2026-09-16** | **Refuted without the version parameter, and it fails silently.** `conferenceDataVersion` defaults to 0, which "ignores conference data in the event's body": the probe sent the same body twice, once with the parameter and once without, and the version-less insert answered **200 with the event created and no conference at all**. Success, with the one thing the caller asked for missing and nothing in the response saying so. The client sets the parameter from the BODY rather than taking it from each caller, so a call site cannot forget it, and `caltest` drops conference data without it exactly as Google does — a fake that accepted it would let this ship |
-| 62 | The release scaffolding §16 lists as done exists | **The tree, 2026-09-16** | **Refuted: there is no `.goreleaser.yaml` and no release workflow.** §16's phase 0 entry names "goreleaser, CI, CodeQL and release workflows" among the things it built; CI and CodeQL exist and the other two never did. Nothing noticed because nothing references them: the staleness gate checks paths named in backticks in the docs, and a claim in prose naming no path is invisible to it. This is the same shape as the three gates phase 1 found named but absent, and as the empty directories of row 46 — a list of things is not the things. The bundle this phase built is therefore packed by `make mcpb-pack` and installed by hand; wiring it into a signed release is owed, and §16 says so where it used to be claimed |
+| 62 | The release scaffolding §16 lists as done exists | **The tree, 2026-09-16** | **Refuted: there is no `.goreleaser.yaml` and no release workflow.** §16's phase 0 entry names "goreleaser, CI, CodeQL and release workflows" among the things it built; CI and CodeQL exist and the other two never did. Nothing noticed because nothing references them: the staleness gate checks paths named in backticks in the docs, and a claim in prose naming no path is invisible to it. This is the same shape as the three gates phase 1 found named but absent, and as the empty directories of row 46 — a list of things is not the things. The bundle this phase built is therefore packed by `make mcpb-pack` and installed by hand; wiring it into a signed release is owed, and §16 says so where it used to be claimed. **Closed in phase 5**, which built both, added the `release` gate so the config is held against the packer on every commit, and rewrote phase 0's list to name what it actually built |
 | 63 | A `this_and_following` split expands the series in the event's own zone | **Review, 2026-09-16; two reproduction attempts** | **Refuted as written, and the consequence is UNPROVEN.** The split reads the parent through `model.ParseWhen`, which re-renders the instant into the zone the CALL asked to be shown in and drops the wire `timeZone`; `recur.ExpandTimes` then takes its wall clock and its day walk from that. So a series read with a `time_zone` other than its own expands from a different anchor, and the head count that becomes the truncated series' `COUNT=` is computed over a different set of instants. Two attempts to make that change the answer — a weekly `BYDAY=MO` series in Asia/Tokyo split while shown in America/Los_Angeles, and a daily one near local midnight — produced the SAME rule on both sides, because the generated set and the target instant shift together and a rule's gap is wider than the shift. Recorded rather than fixed: the mechanism is real, the harm is not demonstrated, and threading the event's own zone through `Set.Split`, `Set.Reach` and `cancelFollowing` is a change to phase 2's write path that no test here can currently hold. Anybody picking it up should start with a rule whose LOCAL day walk changes the number of matches — `BYMONTHDAY=31`, or `BYDAY=-1SU` near a month boundary |
+| 64 | goreleaser writes the macOS universal binary somewhere a `dist/*darwin*universal*/` glob matches | **A snapshot build, 2026-09-16** | **Refuted, and the packer could never have worked.** The directory is `dist/<id>_darwin_all/<binary>` — the id comes FIRST, so a glob reading "darwin then universal" resolves to nothing, and `mcpb-pack` would have failed on the macOS binary at the most expensive moment there is. Phase 4 wrote that glob against a tool that did not exist yet, which is why no gate could hold it; the fix is `dist/*universal*darwin*/` and, more to the point, `gates release`, which derives every directory the build matrix produces and requires each staged glob to match exactly ONE of them. The same run confirmed the other three globs resolve, and that a glob of `dist/*darwin*/` would match three directories rather than none — the failure that packs the wrong binary rather than no binary |
+| 65 | A `--snapshot` rehearsal can check the version in all five places §10b names | **Two snapshot builds, 2026-09-16** | **Refuted as the config was first written, and now true.** The ldflags stamped `{{ .Tag }}`, which goreleaser resolves to `v0.0.0` in a repository with no tags, while the archives, the bundle and the manifest all carried the snapshot version — so the binary's own `--version` was the one place that disagreed, and it disagreed for a reason that would vanish on a real tag. A rehearsal that cannot exercise a check is not a rehearsal of it. `{{ .Version }}` is the same string as the tag either side of the `v`, which `internal/version` restores, so the release is unaffected and the snapshot now agrees in all five. The bundle's filename was the second: it carried no version at all, so it could not disagree and could not be checked either |
+| 66 | `changelog: disable: true` is how to leave `--release-notes` in charge | **The shared standard and three sibling servers' evidence, adopted unverified here** | **Refuted there, and the block is simply absent here.** `disable` is read in the changelog pipe's `Skip`, which runs before `Run`, so `ctx.ReleaseNotes` is never assigned and the notes file the workflow just wrote is never opened: the release body collapses to the footer alone while every step stays green. A server shipped that and every release page it published was a footer with nothing above it. Not verified in this repository — it cannot be, before a tag — which is why the config carries the reason in a comment where the block would otherwise be added back |
+| 67 | cosign's `--output-signature` and `--output-certificate` still produce a signature | **The shared standard and cosign's v3.0.1 release notes, adopted unverified here** | **Refuted for cosign 3.** `--bundle` moved from optional to required, and a config carrying only the older two gives cosign no output path at all: it fails with `create bundle file: open : no such file or directory` rather than degrading. It failed rather than degraded because the action was pinned and the tool it installs was not, which is the half of §9's pinning rule that reads as complete when it is not — `make pins` holds both halves now, for `cosign-release`, `syft-version` and goreleaser's own `version` |
+| 68 | `go mod tidy` is a safe goreleaser `before` hook | **The shared standard, adopted unverified here** | **Refuted, and it fails only on the tag.** A hook that can rewrite `go.mod` or `go.sum` dirties the tree, and goreleaser refuses to release from a dirty tree — while `--snapshot` runs the hook and skips that check, so every rehearsal stays green and the first real tag fails. The hook here is `go mod download`; tidiness is CI's job, which runs `go mod tidy -diff` on the same commit the release is cut from. The release workflow writes its notes file outside the checkout for the same reason |
+| 69 | The tool-pin half of `make pins` checks what its comment says | **Probed, 2026-09-16** | **Refuted twice over, in the first version written.** It split steps by indentation and then read EVERY line of a step for the input, so a `version:` under `env:` satisfied the goreleaser pin — and `version` is the most collidable input name there is. It also understood block sequences only, so a workflow written in flow style produced no steps, no installers and **no problems**: "looked at nothing" printing the sentence "found nothing", which is the one failure `scripts/gates` exists to refuse, committed inside the gate written to refuse it. Both were found by running the code rather than reading it. There is one workflow reader now, a YAML parse in `scripts/gates/workflow.go`, shared with the release gate; both failures are regression cases, and `pinGate` asserts a floor on how many installers it SAW rather than only on how many were wrong |
+| 70 | Deriving the documented-path roots from the repository's own top-level entries is the general fix for an allow-list of them | **Tried and reverted, 2026-09-16** | **Refuted: it is circular, and weaker than the list it replaced.** `checkPaths` treats a backticked token as a path only if its first segment is a root the repository has — so a file that does NOT exist has no such root, is filed as prose, and excuses itself. The motivating case proves it: `.goreleaser.yaml` named in the docs while no such file existed would be skipped rather than flagged, which is exactly how §16 could call the release built for four phases. A probe caught it immediately, having watched the shape-based version flag the same token. The rule is therefore SHAPE, never existence — a path under a source directory, or a root file with one of the extensions a root file here actually has. `.txt` and `.json` are excluded by name because `checksums.txt` and `manifest.json` are documented and live in a release archive and a bundle rather than in this repository |
+| 71 | A universal binary is named by the `binary` of the build it joins | **Probed with the two renamed apart, 2026-09-17** | **Refuted: it is named by `universal_binaries[].name_template`, which defaults to the PROJECT name.** A snapshot with `binary: gcal-probe` wrote `gcal-probe` into every ordinary target's directory and `google-calendar-mcp` into `..._darwin_all`. The release gate took that name from the build, so it was right only while `project_name` and `binary` happened to be the same string: renaming the project alone would have moved the macOS file, left the gate green and failed `mcpb-pack` at tag time — the same failure as row 64, reached through the gate written to prevent it. Found by `/code-review high`, which reasoned it out, and settled by the probe rather than by the reasoning |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |

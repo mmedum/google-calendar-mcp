@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -57,7 +58,10 @@ func staleness(bin string) error {
 	if settings < 8 {
 		return fmt.Errorf("found %d settings in the code; that is not the configuration surface", settings)
 	}
-	if paths < 5 {
+	// Raised from 5 when the roots became derived rather than listed:
+	// the docs name dozens of paths, and a floor an accident could clear
+	// is not a floor.
+	if paths < 25 {
 		return fmt.Errorf("checked %d documented paths; the extractor is not reading the docs", paths)
 	}
 
@@ -169,7 +173,45 @@ func checkSettings() ([]string, int, error) {
 // budget for the triage: a sibling's first pass reported 13 broken
 // references and every one was the extractor's fault. The exclusions
 // below are that triage, not a widening.
-var pathRe = regexp.MustCompile("`((?:cmd|internal|scripts|docs|testdata|packaging|\\.github)/[A-Za-z0-9_./-]+)`")
+// pathRe matches a repository path in backticks: a file under one of the
+// source directories, or a root file recognised by its SHAPE.
+//
+// Shape, never existence. The obvious "derive the roots from the
+// repository's own top-level entries" is circular and was tried here: a
+// token is treated as a path only if its root exists, so a file that
+// does not exist is filed as prose and excuses itself. That is the exact
+// case this widening was for — `.goreleaser.yaml` was named in the docs
+// while no such file existed, and §16 called the release built for four
+// phases.
+//
+// So the root half is an extension list, kept to the extensions a
+// repository file actually has at the top level. `.txt` and `.json` are
+// deliberately absent: `checksums.txt` and `manifest.json` are named in
+// the docs and live inside a release archive and a bundle, not here.
+var pathRe = regexp.MustCompile(
+	"`((?:cmd|internal|scripts|docs|testdata|packaging|\\.github)/[A-Za-z0-9_./-]+" +
+		"|[A-Za-z0-9_.-]+\\.(?:md|ya?ml|toml|mod|sum)" +
+		"|Makefile|LICENSE)`")
+
+// pathExists resolves a documented path.
+//
+// A bare workflow name is also tried under .github/workflows, because
+// the docs name `ci.yml` the way a person says it. It is still a
+// reference that has to resolve: a doc naming a workflow nobody wrote
+// fails here rather than reading as prose.
+func pathExists(p string) bool {
+	if _, err := os.Stat(p); err == nil {
+		return true
+	}
+	if strings.Contains(p, "/") {
+		return false
+	}
+	if ext := filepath.Ext(p); ext != ".yml" && ext != ".yaml" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(".github", "workflows", p))
+	return err == nil
+}
 
 // plannedRe marks a path a later phase builds: `internal/plan/` (phase 2).
 var plannedRe = regexp.MustCompile("^`[^`]+`[,]? \\(phase [0-9]+\\)")
@@ -197,7 +239,7 @@ func checkPaths() ([]string, int, error) {
 			}
 			seen[key] = true
 			checked++
-			if _, err := os.Stat(p); err == nil {
+			if pathExists(p) {
 				continue
 			}
 			// A path that does not exist yet is fine if the document

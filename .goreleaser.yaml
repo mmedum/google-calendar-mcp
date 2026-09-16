@@ -1,0 +1,150 @@
+version: 2
+
+project_name: google-calendar-mcp
+
+before:
+  hooks:
+    # Download, never tidy. A hook that can rewrite go.mod or go.sum
+    # dirties the tree, and goreleaser refuses to release from a dirty
+    # one — while `--snapshot` runs the hook and skips that check, so a
+    # rehearsal stays green and the tag fails. Tidiness is CI's job: it
+    # runs `go mod tidy -diff` on the commit the release is cut from.
+    - go mod download
+
+builds:
+  - id: google-calendar-mcp
+    main: ./cmd/google-calendar-mcp
+    binary: google-calendar-mcp
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    # The commit's time rather than the build's, so rebuilding the same
+    # tag produces byte-identical binaries.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    # {{ .Version }} rather than {{ .Tag }}: on a tag they are the same
+    # string either side of the `v`, which internal/version restores —
+    # but in a --snapshot rehearsal .Tag is v0.0.0 while everything else
+    # carries the snapshot version, so the binary is the one place that
+    # disagrees and the five-way version check cannot be rehearsed.
+    ldflags:
+      - -s -w -X github.com/mmedum/google-calendar-mcp/internal/version.Version={{ .Version }}
+
+# The macOS universal binary exists for the Claude Desktop bundle alone.
+# A manifest names a command per PLATFORM and has no key for the
+# architecture, so the macOS entry has to work on both. `ids` on the
+# archives below keeps it out of them: a fourth macOS download on the
+# release page is a choice nobody should have to make.
+universal_binaries:
+  - id: google-calendar-mcp-universal
+    ids: [google-calendar-mcp]
+    replace: false
+    hooks:
+      # The one point in the pipeline where every binary exists and
+      # checksums.txt has not been written, which is what MAKES it
+      # possible for the bundle to be in that file and therefore under
+      # the signature. It is not what puts it there: goreleaser hashes
+      # the artifacts IT built, and a file a hook drops into dist/ is not
+      # one. `checksum.extra_files` covers it and `release.extra_files`
+      # uploads it — both, or the bundle ships unsigned, or is hashed and
+      # never published, looking no different here either way.
+      #
+      # `go run` rather than `make`, so a rehearsal needs nothing but the
+      # Go toolchain. The three arguments are the packer's own order,
+      # and `gates release` holds the output path against the Makefile's.
+      post: go run ./scripts/gates mcpb-pack dist {{ .Version }} dist/google-calendar-mcp_{{ .Version }}.mcpb
+
+archives:
+  - id: archive
+    ids: [google-calendar-mcp]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+  # The bundle is not an archive goreleaser built, so packing it in the
+  # post hook is only half of what puts it here — the checksum step
+  # covers its own artifacts, and a file a hook dropped into dist/ is not
+  # one. Naming it is the other half, and being in checksums.txt is what
+  # gets it signed, because the signature is over that file.
+  extra_files:
+    - glob: ./dist/*.mcpb
+
+# One SBOM per archive, so somebody deploying a binary they did not build
+# can see what is inside it.
+sboms:
+  - artifacts: archive
+
+# The checksum file is signed with a keyless Sigstore certificate tied to
+# this workflow's OIDC identity: no private key to hold or leak.
+#
+# One bundle, not a separate signature and certificate. `--bundle` moved
+# from optional to REQUIRED in cosign 3, and a config carrying only the
+# old --output-signature and --output-certificate gives cosign no output
+# path at all: it fails with "create bundle file: open : no such file or
+# directory" rather than degrading. It fails that way because the action
+# is pinned and the tool it installs is pinned separately — see
+# .github/workflows/release.yml.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.bundle"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "--yes"
+      - "${artifact}"
+    artifacts: checksum
+    output: true
+
+# No changelog block, deliberately. The release body is the CHANGELOG.md
+# section for the tag, written by `gates release-notes` in release.yml and
+# passed with --release-notes; notes generated from commit subjects would
+# only publish our commit hygiene to somebody deciding whether to upgrade.
+#
+# Never write `changelog: disable: true` to get that effect. Disable is
+# read in the changelog pipe's Skip, which runs BEFORE Run, so
+# ctx.ReleaseNotes is never assigned and the notes file release.yml just
+# wrote is never opened: the body collapses to the footer alone, while
+# every step stays green. Deleting the block is what leaves
+# --release-notes in charge.
+
+release:
+  # A tag is the decision; a draft nobody remembers to publish is how
+  # releases go missing. Anything carrying a suffix like -rc1 is marked
+  # pre-release automatically.
+  draft: false
+  prerelease: auto
+  # Checksummed is not uploaded. Without this the bundle is named in
+  # checksums.txt and absent from the release, which is a hash of
+  # something nobody can download.
+  extra_files:
+    - glob: ./dist/*.mcpb
+  # Appended under the notes on every path, --release-notes included:
+  # internal/pipe/release/body.go renders Header, ReleaseNotes, Footer.
+  footer: |
+    ---
+
+    Built by GoReleaser from the tag. Every archive carries the binary,
+    LICENSE and README, and ships an SBOM beside it.
+
+    Verify a download before you run it:
+
+    ```bash
+    sha256sum -c checksums.txt --ignore-missing
+    cosign verify-blob checksums.txt --bundle checksums.txt.bundle \
+      --certificate-identity-regexp 'https://github\.com/mmedum/google-calendar-mcp/' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    gh attestation verify google-calendar-mcp_*.tar.gz --repo mmedum/google-calendar-mcp
+    ```
+
+    `.mcpb` is the Claude Desktop bundle: open it and Claude Desktop
+    installs the server and asks for your OAuth client JSON, with no
+    config file to edit. It covers macOS, Windows and Linux on both
+    architectures. It does **not** log you in — install the binary as
+    well, run `google-calendar-mcp login` once, and the bundle picks up
+    the same credentials. Its SHA-256 is in the same signed
+    `checksums.txt`.

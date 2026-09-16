@@ -36,8 +36,9 @@ The design, its evidence log and the phase plan are in
 
 ## Status
 
-Phase 0: the read surface. Six tools, listed below. Writing events,
-recurrence, availability and sharing are phases 1 to 3 — see
+Complete and in use: reading, writing, recurrence, availability,
+calendars, sharing, the resources and the Claude Desktop bundle. The
+tools are listed below, and the phase plan and what is still owed are in
 `docs/architecture.md` §16.
 
 ## Install
