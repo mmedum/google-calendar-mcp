@@ -61,6 +61,18 @@ type When struct {
 	At     when.Zoned
 }
 
+// IsZero reports whether this end of an event was set at all.
+//
+// Which half to look at depends on AllDay, and that is exactly the check
+// callers kept writing out longhand and getting subtly different each
+// time.
+func (w When) IsZero() bool {
+	if w.AllDay {
+		return w.Date.IsZero()
+	}
+	return w.At.IsZero()
+}
+
 // ParseWhen converts a wire EventDateTime, rendering any instant in loc.
 //
 // loc affects only how a timed event READS; it never touches an all-day
@@ -157,29 +169,29 @@ func (e Event) Moved() bool {
 	}
 }
 
-// ReachesPeople reports whether a write to this event can email
-// somebody, which is what makes `notify` required (§4.3.2). An event
-// with no guests but the organiser has no notification decision to make.
-func (e Event) ReachesPeople() bool {
+// Guests are the attendees who are other people: not this account, and
+// not a room.
+//
+// This is the one definition of "who a write can reach", which is what
+// §4.3.2 hangs on — a write that reaches nobody does not have to ask
+// about notification. It had two: the notification guard counted the
+// same filter again in its own package, so the rule that decides whether
+// a call is refused lived in two places and one result could have
+// quoted two different numbers.
+func (e Event) Guests() []Attendee {
+	out := make([]Attendee, 0, len(e.Attendees))
 	for _, a := range e.Attendees {
-		if !a.Self && !a.Resource {
-			return true
+		if a.Self || a.Resource {
+			continue
 		}
+		out = append(out, a)
 	}
-	return false
+	return out
 }
 
 // GuestCount is how many people would be reached. The count goes in a
 // refusal; the addresses never do (§9).
-func (e Event) GuestCount() int {
-	n := 0
-	for _, a := range e.Attendees {
-		if !a.Self && !a.Resource {
-			n++
-		}
-	}
-	return n
-}
+func (e Event) GuestCount() int { return len(e.Guests()) }
 
 // Attendee is one guest.
 type Attendee struct {

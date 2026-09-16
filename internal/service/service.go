@@ -270,6 +270,19 @@ func (s *Service) ResolveCalendar(ctx context.Context, ref string) (model.Calend
 }
 
 func (s *Service) calendarByID(ctx context.Context, id string) (model.Calendar, error) {
+	// "primary" is answered from the list this process has already read,
+	// when it has one. Every call resolves a calendar and the list is
+	// cached for the process, so going to calendarList.get for the alias
+	// spends a request on a question already answered — once per tool
+	// call, on the commonest reference there is. That is the shape of
+	// the defect phase 1 found in check_availability, one request at a
+	// time instead of 166, and invisible for the same reason: the
+	// result's own count does not include it.
+	if strings.EqualFold(id, "primary") {
+		if c, ok := s.cachedPrimary(); ok {
+			return c, nil
+		}
+	}
 	// The list entry carries the access role and the per-user overrides,
 	// which the calendar resource does not, so prefer it.
 	if entry, err := s.API.GetCalendarListEntry(ctx, id); err == nil {
@@ -283,6 +296,27 @@ func (s *Service) calendarByID(ctx context.Context, id string) (model.Calendar, 
 		ID: cal.ID, Title: cal.Summary, TimeZone: cal.TimeZone,
 		Description: cal.Description, ETag: cal.ETag,
 	}, nil
+}
+
+// cachedPrimary returns the account's own calendar from the list this
+// process has already read.
+//
+// Only from the cache: it never triggers the read itself. A caller that
+// asked for one calendar should not pay for the whole list, and a list
+// that is not there yet means the direct read below is the cheaper
+// answer.
+func (s *Service) cachedPrimary() (model.Calendar, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.calendarsAt {
+		return model.Calendar{}, false
+	}
+	for _, c := range s.calendars {
+		if c.Primary {
+			return c, true
+		}
+	}
+	return model.Calendar{}, false
 }
 
 // --------------------------------------------------------------- events

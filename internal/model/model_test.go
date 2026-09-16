@@ -134,8 +134,8 @@ func TestReachesPeopleExcludesSelfAndRooms(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			e := model.Event{Attendees: c.att}
-			if got := e.ReachesPeople(); got != c.want {
-				t.Fatalf("ReachesPeople() = %v, want %v", got, c.want)
+			if got := len(e.Guests()) > 0; got != c.want {
+				t.Fatalf("Guests() non-empty = %v, want %v", got, c.want)
 			}
 			if got := e.GuestCount(); got != c.count {
 				t.Fatalf("GuestCount() = %d, want %d", got, c.count)

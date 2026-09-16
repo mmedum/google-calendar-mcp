@@ -1,0 +1,14 @@
+Updated "Project review" on Sample Primary.
+
+  before: 2026-03-18  10:00-11:00  Project review  [2 guests; at Room 1]
+  after:  2026-03-18  10:00-11:00  Project review  [2 guests; at Room 2]
+
+changed:
+  location: Room 1 → Room 2
+
+Asked Google to notify all 2 guests, 1 of them outside your organisation. That is what was asked for, not what arrived: the API reports nothing about delivery.
+
+id: abcdef0123 on calendar primary
+etag: "abcdef0123-2" — pass it to the next write, which will be refused if somebody else changed this first
+times are in Europe/Copenhagen, the calendar's own time zone
+(2 API requests)

@@ -86,7 +86,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 2
 	}
 
-	scratch, created, err := api.ensureScratchCalendar(ctx)
+	scratch, created, err := api.ensureScratchCalendar(ctx, scratchTitle)
 	if err != nil {
 		out.Printf("could not create the scratch calendar: %v\n", redact.String(err.Error()))
 		// The one failure here that is not a bug and not a setup
@@ -130,8 +130,31 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}()
 	}
 
+	// The write path needs two things the read path did not: somewhere
+	// to move an event to, and an invitation this account can answer.
+	dest, destCreated, destNote := destinationCalendar(ctx, api)
+	out.Printf("%s\n", destNote)
+	if destCreated && !keep {
+		defer func() {
+			if err := api.deleteCalendar(context.Background(), dest); err != nil {
+				out.Printf("WARNING: could not delete the destination calendar %s: %v\n",
+					redact.ID(dest), redact.String(err.Error()))
+				out.Printf("delete it by hand; this driver must leave nothing behind\n")
+			}
+		}()
+	}
+
 	if err := api.seed(ctx, scratch); err != nil {
 		out.Printf("could not fill the scratch calendar: %v\n", err)
+		return 2
+	}
+	self, err := api.primaryAddress(ctx)
+	if err != nil {
+		out.Printf("could not read this account's own address: %v\n", redact.String(err.Error()))
+		return 2
+	}
+	if err := api.seedRSVP(ctx, scratch, self); err != nil {
+		out.Printf("could not seed the invitation to answer: %v\n", redact.String(err.Error()))
 		return 2
 	}
 	// One occurrence of the weekly series is removed, because a
@@ -170,7 +193,22 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		noSuchCalendar:     true,
 		unknownCalendarRef: true,
 	}}
+	// The destination calendar is this driver's too, so a step naming it
+	// may have its body printed. An empty id is not added: §9.1's
+	// allow-list must never gain a blank key that matches an absent
+	// argument.
+	if dest != "" {
+		r.invented[dest] = true
+	}
+
+	writes := &writeState{dest: dest, self: self}
 	for _, st := range steps(scratch, state) {
+		r.run(ctx, sess, st)
+	}
+	// The writes run after the reads, so a read step never sees a
+	// calendar half-way through being rewritten — and so the read steps'
+	// expectations stay about what the seed put there.
+	for _, st := range writeSteps(scratch, writes) {
 		r.run(ctx, sess, st)
 	}
 
@@ -240,11 +278,11 @@ type results struct {
 
 // show prints a step's whole result when asked, so the transcript can
 // be read rather than counted.
-func (r *results) show(st step, res callResult) {
+func (r *results) show(st step, args map[string]any, res callResult) {
 	if showFilter == "" || !strings.Contains(st.name, showFilter) {
 		return
 	}
-	if r.withheld(st) {
+	if r.withheld(args) {
 		return
 	}
 	for _, line := range strings.Split(strings.TrimRight(res.text, "\n"), "\n") {
@@ -269,8 +307,8 @@ func (r *results) show(st step, res callResult) {
 // content this driver invented. A step that names none is account-wide
 // by construction. It fails closed, so an argument shape this does not
 // understand is withheld rather than printed.
-func (r *results) withheld(st step) bool {
-	if st.readsOnlyInvented(r.invented) {
+func (r *results) withheld(args map[string]any) bool {
+	if readsOnlyInvented(args, r.invented) {
 		return false
 	}
 	r.out.Printf("      (body withheld: this step reads past the calendar the driver created, §9.1)\n")
@@ -279,10 +317,14 @@ func (r *results) withheld(st step) bool {
 
 // readsOnlyInvented is the allow-list §9.1 asks for, anchored on ids
 // this driver generated rather than on a shape a real id cannot take.
-func (st step) readsOnlyInvented(invented map[string]bool) bool {
+// The keys are every argument that names a calendar. A tool that takes
+// one this list does not know about reads as "names none", which is
+// account-wide by construction and withheld — which is the direction
+// this has to fail in.
+func readsOnlyInvented(args map[string]any, invented map[string]bool) bool {
 	named := 0
-	for _, key := range []string{"calendar", "calendars"} {
-		switch v := st.args[key].(type) {
+	for _, key := range []string{"calendar", "calendars", "to_calendar"} {
+		switch v := args[key].(type) {
 		case nil:
 		case string:
 			named++
@@ -305,7 +347,8 @@ func (st step) readsOnlyInvented(invented map[string]bool) bool {
 
 func (r *results) run(ctx context.Context, s *session, st step) {
 	r.total++
-	res, err := s.call(ctx, st.tool, st.args)
+	args := st.arguments()
+	res, err := s.call(ctx, st.tool, args)
 	if err != nil {
 		r.failed++
 		r.out.Printf("FAIL  %-28s transport: %v\n", st.name, err)
@@ -315,7 +358,7 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 	switch verdict {
 	case pass:
 		r.out.Printf("ok    %-28s %s\n", st.name, note)
-		r.show(st, res)
+		r.show(st, args, res)
 	case undetermined:
 		r.undetermined++
 		r.out.Printf("?     %-28s %s\n", st.name, note)
@@ -324,7 +367,7 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 		r.out.Printf("FAIL  %-28s %s\n", st.name, note)
 		// The body, redacted, so a failure can be diagnosed without a
 		// second run — unless the step reads past the scratch calendar.
-		if !r.withheld(st) {
+		if !r.withheld(args) {
 			r.out.Printf("      %s\n", truncate(res.text, 400))
 		}
 	}
@@ -339,10 +382,22 @@ const (
 )
 
 type step struct {
-	name  string
-	tool  string
-	args  map[string]any
-	check func(callResult) (verdict, string)
+	name string
+	tool string
+	args map[string]any
+	// argsFn defers the arguments to run time, and wins over args when
+	// set. A write step's target is usually something an earlier step
+	// created, so its id does not exist when the list is built.
+	argsFn func() map[string]any
+	check  func(callResult) (verdict, string)
+}
+
+// arguments resolves the step's arguments, late if it has to.
+func (st step) arguments() map[string]any {
+	if st.argsFn != nil {
+		return st.argsFn()
+	}
+	return st.args
 }
 
 func truncate(s string, n int) string {

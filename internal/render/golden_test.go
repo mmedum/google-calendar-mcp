@@ -9,6 +9,7 @@ import (
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/model"
+	"github.com/mmedum/google-calendar-mcp/internal/plan"
 	"github.com/mmedum/google-calendar-mcp/internal/render"
 	"github.com/mmedum/google-calendar-mcp/internal/when"
 )
@@ -244,4 +245,67 @@ func TestGoldenAvailabilityAllUnknown(t *testing.T) {
 		Requests: 1,
 	}
 	golden(t, "availability-unknown", rep.Text())
+}
+
+// The write report is the one result a caller acts on twice: once to see
+// what happened, and again to decide whether to tell somebody. §4.9 says
+// what it has to carry, and a golden file is how a change to any of it
+// arrives as a diff rather than as a surprise.
+func TestGoldenWrite(t *testing.T) {
+	z := goldenZone(t)
+	before := goldenEvent(t, "abcdef0123", "Project review",
+		"2026-03-18T10:00:00+01:00", "2026-03-18T11:00:00+01:00")
+	before.Location = "Room 1"
+	before.Attendees = []model.Attendee{
+		{Email: "colleague@example.test", Response: gcal.ResponseAccepted},
+		{Email: "partner@elsewhere.test", Response: gcal.ResponseNeedsAction},
+	}
+	after := before
+	after.Location = "Room 2"
+	after.ETag = `"abcdef0123-2"`
+
+	w := render.WriteReport{
+		Verb: render.VerbUpdate, Calendar: "Sample Primary", Zone: z,
+		Before: &before, After: &after,
+		Changes: []plan.Change{{Field: "location", From: "Room 1", To: "Room 2"}},
+		Notify: "Asked Google to notify all 2 guests, 1 of them outside your organisation." +
+			" That is what was asked for, not what arrived: the API reports nothing about delivery.",
+		Requests: 2,
+	}
+	golden(t, "write-update", w.Text())
+}
+
+// A cancellation with nothing left afterwards, and a scope: the two
+// shapes the update golden does not cover.
+func TestGoldenWriteCancelled(t *testing.T) {
+	z := goldenZone(t)
+	before := goldenEvent(t, "abcdef0123", "Weekly review",
+		"2026-03-24T14:00:00+01:00", "2026-03-24T15:00:00+01:00")
+	before.SeriesID = "abcdef0123"
+
+	w := render.WriteReport{
+		Verb: render.VerbCancel, Calendar: "Sample Primary", Zone: z, Scope: "instance",
+		Before:  &before,
+		Changes: []plan.Change{{Field: "status", From: "confirmed", To: "cancelled"}},
+		Notify:  "Nobody to notify: this write reaches no guests, so no notification was requested.",
+		Notes: []string{
+			"This event has no guests, so nobody else is holding it.",
+			"One occurrence, cancelled with a status patch rather than deleted.",
+		},
+		Requests: 1,
+	}
+	golden(t, "write-cancel", w.Text())
+}
+
+// A dry run says so first, and says it wrote nothing.
+func TestGoldenWriteDryRun(t *testing.T) {
+	z := goldenZone(t)
+	after := goldenEvent(t, "abcdef0123", "Not really", "2026-04-01T09:00:00+02:00",
+		"2026-04-01T10:00:00+02:00")
+	w := render.WriteReport{
+		Verb: render.VerbCreate, DryRun: true, Calendar: "Sample Primary", Zone: z,
+		After:  &after,
+		Notify: "Asked Google to notify nobody, of 1 guest. Google says some mail may still be sent, so this is not a promise of silence.",
+	}
+	golden(t, "write-dry-run", w.Text())
 }

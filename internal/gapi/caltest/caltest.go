@@ -56,6 +56,11 @@ type Server struct {
 	// Fail makes the next matching request fail. Key is "METHOD /path"
 	// prefix; value is the status.
 	Fail map[string]int
+	// Writes records every write served: the method, the path, and the
+	// sendUpdates the caller asked for. §4.3 has no default, so a test
+	// has to be able to assert that the server sent what the caller
+	// chose and nothing when nobody chose.
+	Writes []Write
 	// Requests records every path served, so a test can assert how many
 	// requests a fan-out spent (§11).
 	//
@@ -66,6 +71,9 @@ type Server struct {
 	Requests []string
 
 	mu sync.Mutex
+	// revs counts patches per event, so an etag moves on every write and
+	// a stale If-Match is refused the way Google refuses it.
+	revs map[string]int
 
 	// ACLScopeRequired makes acl.list refuse, which is how §2.15 is
 	// exercised offline: calendar.readonly does not cover it.
@@ -236,6 +244,188 @@ func Seed() *Server {
 	return s
 }
 
+// Write is one write this fake served.
+type Write struct {
+	Method      string
+	CalendarID  string
+	EventID     string
+	SendUpdates string
+	IfMatch     string
+}
+
+// Wrote returns a copy of the writes served so far.
+func (s *Server) Wrote() []Write {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Write, len(s.Writes))
+	copy(out, s.Writes)
+	return out
+}
+
+func (s *Server) recordWrite(w Write) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Writes = append(s.Writes, w)
+}
+
+// ---------------------------------------------------------------- writes
+
+// insertEvent is events.insert.
+//
+// Two things here are the ones worth having a fake for. A client-supplied
+// id is validated as base32hex, because Google answers an illegal one
+// with "Invalid resource id value" naming neither the field nor the rule
+// — which cost a live run (§18 row 21). And a duplicate id is a 409,
+// which is what makes a retry after an ambiguous failure safe rather than
+// a second meeting (§2.11, spike F).
+func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID string) {
+	if _, ok := s.Calendars[calID]; !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no calendar with that id")
+		return
+	}
+	var e gcal.Event
+	if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
+		writeErr(w, http.StatusBadRequest, "parseError", "bad event body")
+		return
+	}
+	s.recordWrite(Write{Method: "insert", CalendarID: calID, EventID: e.ID,
+		SendUpdates: r.URL.Query().Get("sendUpdates")})
+
+	if e.ID != "" {
+		if err := gcal.ValidEventID(e.ID); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid", "Invalid resource id value.")
+			return
+		}
+		if _, clash := s.Events[calID][e.ID]; clash {
+			writeErr(w, http.StatusConflict, "duplicate", "The requested identifier already exists.")
+			return
+		}
+	}
+	if e.ID == "" {
+		e.ID = fmt.Sprintf("caltest%d", len(s.Events[calID])+1)
+	}
+	if e.Status == "" {
+		e.Status = gcal.StatusConfirmed
+	}
+	e.ETag = etag(e.ID, 1)
+	s.mu.Lock()
+	if s.Events[calID] == nil {
+		s.Events[calID] = map[string]*gcal.Event{}
+	}
+	s.Events[calID][e.ID] = &e
+	s.mu.Unlock()
+	writeJSON(w, e)
+}
+
+// patchEvent is events.patch, under If-Match.
+//
+// The etag moves on every write, so a second patch carrying the first
+// one's etag is a 412 — which is the whole point of §4.4 and the thing a
+// fake that ignored If-Match would let pass.
+func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, eventID string) {
+	cur, ok := s.event(calID, eventID)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no event with that id on that calendar")
+		return
+	}
+	match := r.Header.Get("If-Match")
+	s.recordWrite(Write{Method: "patch", CalendarID: calID, EventID: eventID,
+		SendUpdates: r.URL.Query().Get("sendUpdates"), IfMatch: match})
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	var p gcal.EventPatch
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "parseError", "bad patch body")
+		return
+	}
+
+	s.mu.Lock()
+	next := *cur
+	// The fold lives on the type, so this fake cannot drift from what
+	// the server sends: a field added to EventPatch and forgotten here
+	// would make the fake quietly not apply it, and a test green over
+	// behaviour that never happened.
+	p.ApplyTo(&next)
+	if s.revs == nil {
+		s.revs = map[string]int{}
+	}
+	s.revs[eventID]++
+	next.ETag = etag(eventID, s.revs[eventID]+1)
+	s.Events[calID][eventID] = &next
+	s.mu.Unlock()
+	writeJSON(w, next)
+}
+
+// deleteEvent is events.delete: the event is gone, not cancelled.
+func (s *Server) deleteEvent(w http.ResponseWriter, r *http.Request, calID, eventID string) {
+	cur, ok := s.event(calID, eventID)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no event with that id on that calendar")
+		return
+	}
+	match := r.Header.Get("If-Match")
+	s.recordWrite(Write{Method: "delete", CalendarID: calID, EventID: eventID,
+		SendUpdates: r.URL.Query().Get("sendUpdates"), IfMatch: match})
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	s.mu.Lock()
+	delete(s.Events[calID], eventID)
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// moveEvent is events.move: the same event, a different calendar.
+func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventID string) {
+	dest := s.primaryID(r.URL.Query().Get("destination"))
+	cur, ok := s.event(calID, eventID)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no event with that id on that calendar")
+		return
+	}
+	if _, ok := s.Calendars[dest]; !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no destination calendar with that id")
+		return
+	}
+	s.recordWrite(Write{Method: "move", CalendarID: calID, EventID: eventID,
+		SendUpdates: r.URL.Query().Get("sendUpdates")})
+	s.mu.Lock()
+	moved := *cur
+	delete(s.Events[calID], eventID)
+	if s.Events[dest] == nil {
+		s.Events[dest] = map[string]*gcal.Event{}
+	}
+	s.Events[dest][eventID] = &moved
+	s.mu.Unlock()
+	writeJSON(w, moved)
+}
+
+// event reads one event under the lock.
+//
+// Under the lock because the write handlers mutate the same map: the
+// service issues writes one at a time today, so this is a race the
+// detector would find the first time anything fanned out rather than a
+// bug anybody has hit — which is the kind that arrives in the phase
+// after the one that wrote it.
+func (s *Server) event(calID, eventID string) (*gcal.Event, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.Events[calID][eventID]
+	return e, ok
+}
+
+// etagOK applies If-Match.
+//
+// An absent header is allowed, because this server sends none when the
+// read carried no etag. "*" matches anything, which is §4.4's explicit
+// override and never a default.
+func etagOK(match, current string) bool {
+	return match == "" || match == "*" || match == current
+}
+
 func etag(seed string, rev int) string { return fmt.Sprintf(`"%s-%d"`, seed, rev) }
 
 // record notes a served request.
@@ -272,7 +462,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	case path == "/users/me/calendarList" && r.Method == http.MethodGet:
 		s.listCalendars(w, r)
 	case strings.HasPrefix(path, "/users/me/calendarList/") && r.Method == http.MethodGet:
-		s.getEntry(w, trimID(path, "/users/me/calendarList/"))
+		s.getEntry(w, s.primaryID(trimID(path, "/users/me/calendarList/")))
 	case path == "/users/me/settings" && r.Method == http.MethodGet:
 		writeJSON(w, gcal.Settings{Items: s.Settings})
 	case path == "/colors" && r.Method == http.MethodGet:
@@ -280,18 +470,29 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	case path == "/freeBusy" && r.Method == http.MethodPost:
 		s.freeBusy(w, r)
 	case strings.HasSuffix(path, "/acl") && r.Method == http.MethodGet:
-		s.listACL(w, trimID(strings.TrimSuffix(path, "/acl"), "/calendars/"))
+		s.listACL(w, s.primaryID(trimID(strings.TrimSuffix(path, "/acl"), "/calendars/")))
+	case strings.HasSuffix(path, "/move") && r.Method == http.MethodPost:
+		cal, ev := s.splitEventPath(strings.TrimSuffix(path, "/move"))
+		s.moveEvent(w, r, cal, ev)
 	case strings.HasSuffix(path, "/instances") && r.Method == http.MethodGet:
 		rest := strings.TrimSuffix(path, "/instances")
-		cal, ev := splitEventPath(rest)
+		cal, ev := s.splitEventPath(rest)
 		s.listInstances(w, r, cal, ev)
 	case strings.Contains(path, "/events/") && r.Method == http.MethodGet:
-		cal, ev := splitEventPath(path)
+		cal, ev := s.splitEventPath(path)
 		s.getEvent(w, cal, ev)
 	case strings.HasSuffix(path, "/events") && r.Method == http.MethodGet:
-		s.listEvents(w, r, trimID(strings.TrimSuffix(path, "/events"), "/calendars/"))
+		s.listEvents(w, r, s.primaryID(trimID(strings.TrimSuffix(path, "/events"), "/calendars/")))
+	case strings.HasSuffix(path, "/events") && r.Method == http.MethodPost:
+		s.insertEvent(w, r, s.primaryID(trimID(strings.TrimSuffix(path, "/events"), "/calendars/")))
+	case strings.Contains(path, "/events/") && r.Method == http.MethodPatch:
+		cal, ev := s.splitEventPath(path)
+		s.patchEvent(w, r, cal, ev)
+	case strings.Contains(path, "/events/") && r.Method == http.MethodDelete:
+		cal, ev := s.splitEventPath(path)
+		s.deleteEvent(w, r, cal, ev)
 	case strings.HasPrefix(path, "/calendars/") && r.Method == http.MethodGet:
-		s.getCalendar(w, trimID(path, "/calendars/"))
+		s.getCalendar(w, s.primaryID(trimID(path, "/calendars/")))
 	default:
 		writeErr(w, http.StatusNotFound, "notFound", "caltest does not serve "+r.Method+" "+path)
 	}
@@ -576,6 +777,26 @@ func startsAfter(e *gcal.Event, timeMax string) bool {
 	return err == nil && !start.Before(t)
 }
 
+// primaryID resolves Google's "primary" alias to the calendar it names.
+//
+// The API accepts `primary` wherever a calendar id goes, and this fake
+// did not — which was invisible only because Seed gave a calendar the
+// literal id "primary". No real account has one: a primary calendar's id
+// is the account's email address, which is also what §4.3.5 splits the
+// guest count on. A fixture that dodges the alias makes the alias
+// untestable.
+func (s *Server) primaryID(id string) string {
+	if id != "primary" {
+		return id
+	}
+	for cid, e := range s.Entries {
+		if e.Primary {
+			return cid
+		}
+	}
+	return id
+}
+
 func trimID(path, prefix string) string {
 	id := strings.TrimPrefix(path, prefix)
 	if unesc, err := decodeSegment(id); err == nil {
@@ -584,7 +805,7 @@ func trimID(path, prefix string) string {
 	return id
 }
 
-func splitEventPath(path string) (calID, eventID string) {
+func (s *Server) splitEventPath(path string) (calID, eventID string) {
 	rest := strings.TrimPrefix(path, "/calendars/")
 	i := strings.Index(rest, "/events/")
 	if i < 0 {
@@ -592,7 +813,7 @@ func splitEventPath(path string) (calID, eventID string) {
 	}
 	cal, _ := decodeSegment(rest[:i])
 	ev, _ := decodeSegment(rest[i+len("/events/"):])
-	return cal, ev
+	return s.primaryID(cal), ev
 }
 
 func decodeSegment(s string) (string, error) {

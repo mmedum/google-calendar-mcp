@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 )
 
 // Class is the closed error vocabulary (§6.5).
@@ -227,17 +228,63 @@ func stripURL(err error) string {
 // here starts being emitted and the entry is not removed, so this map
 // can only shrink.
 //
-// Phase 0 is the read surface. Everything below belongs to the write
-// path, which is where a guard can refuse, an etag can move under you,
-// and an insert can land twice.
-var Planned = map[Class]string{
-	ClassBlocked:          "phase 2: the write guards, which refuse what the API would allow",
-	ClassAmbiguousOutcome: "phase 2: an insert that may have landed twice (§2.11)",
-	ClassUnsupported:      "phase 2: refusing an edit the API cannot make, such as changing a fromGmail event or an eventType after creation (§2.12)",
+// It is EMPTY as of phase 2, and that is the promise being kept rather
+// than a gate switched off. The three entries here were blocked,
+// ambiguous_outcome and unsupported, all of them the write path's:
+// blocked is §4.3.4's refusal of `none` for a guest outside the
+// organiser's domain; ambiguous_outcome is an insert whose answer never
+// arrived (§2.11); unsupported is "this and following" where this server
+// cannot build it out of two calls (§2.8). Every one of the twelve
+// classes is now emitted by code somebody can run.
+//
+// Note which two were NEVER here, because the first draft of this map
+// assumed they would be: conflict and stale are emitted by classify, on
+// 409, 410 and 412, and have been since phase 0. The write path is where
+// a caller most often MEETS them, which is not the same as where they
+// are produced — and the gate caught the difference.
+var Planned = map[Class]string{}
+
+// ------------------------------------------------------- counting calls
+
+// §4.7 says one tool call is one API request, and that where it cannot
+// be, the RESULT says how many it made. That only works if the count is
+// the truth, and a count kept by hand at each call site is not: the
+// write path incremented a field of its own and so missed every request
+// its shared setup spent — the calendar list, the settings, the
+// resolution — reporting 1 for a create that made 4. That is phase 1's
+// `api_requests: 2` for 168 requests, one order of magnitude down.
+//
+// So the counter lives in the context and the client increments it,
+// which means it counts every request actually made, including the
+// retries of §11, and cannot drift from the code that makes them.
+// Per-call rather than per-client, so two tool calls in flight together
+// do not count each other's work.
+//
+// The WRITE path uses it, and only the write path: the read tools still
+// count their own fetches by hand and so still omit the calendar list,
+// the settings and the resolutions, exactly as they did in phase 1. That
+// is a smaller gap — those reads are cached for the process and phase 1
+// removed the fan-out that made it large — but it is a gap, and saying
+// so here is better than a comment that reads as though it were closed.
+
+type counterKey struct{}
+
+// WithCounter returns a context that counts the requests made under it.
+func WithCounter(ctx context.Context) context.Context {
+	var n atomic.Int64
+	return context.WithValue(ctx, counterKey{}, &n)
 }
 
-// Note which two are NOT here, because the first draft of this map
-// assumed they would be: conflict and stale are already emitted, by
-// classify, on 409, 410 and 412. The write path is where a caller most
-// often MEETS them, which is not the same as where they are produced —
-// and the gate caught the difference.
+// Requests is how many requests have been made under this context.
+func Requests(ctx context.Context) int {
+	if n, ok := ctx.Value(counterKey{}).(*atomic.Int64); ok {
+		return int(n.Load())
+	}
+	return 0
+}
+
+func count(ctx context.Context) {
+	if n, ok := ctx.Value(counterKey{}).(*atomic.Int64); ok {
+		n.Add(1)
+	}
+}

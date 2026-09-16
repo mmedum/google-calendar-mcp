@@ -36,14 +36,14 @@ calendar	calendars.transferOwnership	out	requires a Workspace admin privilege an
 calendar	calendars.update	out	PUT: replaces the calendar whole. §4.4
 calendar	channels.stop	out	stops a push channel; there are none, because watch is out (§1)
 calendar	colors.get	used	gapi.GetColors, behind get_settings
-calendar	events.delete	used	planned=2 cancel_event, whole event
+calendar	events.delete	used	gapi.DeleteEvent, behind cancel_event for a whole event; one occurrence is a status patch instead (§7.4)
 calendar	events.get	used	gapi.GetEvent, behind get_event
 calendar	events.import	out	carries a private copy of an event between systems, preserving iCalUID and organiser: a migration tool, not a scheduling one, with different failure modes (§1)
-calendar	events.insert	used	planned=2 create_event, with a client-generated id (§2.11)
+calendar	events.insert	used	gapi.InsertEvent, behind create_event and the second half of a this_and_following update, with a client-generated id (§2.11)
 calendar	events.instances	used	gapi.ListInstances, behind list_instances
 calendar	events.list	used	gapi.ListEvents, behind list_events and search_events
-calendar	events.move	used	planned=2 move_event
-calendar	events.patch	used	planned=2 every event write; §4.4 patches always
+calendar	events.move	used	gapi.MoveEvent, behind move_event
+calendar	events.patch	used	gapi.PatchEvent, behind update_event, cancel_event on one occurrence, and respond_to_event; §4.4 patches always
 calendar	events.quickAdd	out	parses a natural-language string, but gives no control over the time zone and does not report which fields it set; the model calling this server is a better parser (§17.4)
 calendar	events.update	out	PUT: drops attendees, RSVPs and recurrence when they are omitted. §4.4, and this is the method that rule exists for
 calendar	events.watch	out	needs a public HTTPS webhook (§1)

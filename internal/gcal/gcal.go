@@ -15,10 +15,12 @@
 package gcal
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // ---------------------------------------------------------- EventDateTime
@@ -492,4 +494,150 @@ func SplitOccurrenceID(id string) (series, start string, ok bool) {
 		return "", "", false
 	}
 	return id[:i], id[i+1:], true
+}
+
+// NewEventID returns a random, legal event id (§2.11).
+//
+// A client-supplied id is what makes an insert nearly idempotent: a
+// retry after a failure nobody saw the answer to either lands or
+// collides with a 409, where an id Google chose would quietly create a
+// second event. Twenty-six base32hex characters is 130 bits, which is
+// more than enough for an id that only has to be unique on one calendar.
+//
+// The masking is exact rather than a modulo: 256 is eight times 32, so
+// the low five bits of a uniform byte are uniform over the alphabet.
+func NewEventID() (string, error) {
+	const alphabet = "0123456789abcdefghijklmnopqrstuv"
+	const n = 26
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("could not generate an event id: %w", err)
+	}
+	out := make([]byte, n)
+	for i, b := range buf {
+		out[i] = alphabet[b&31]
+	}
+	return string(out), nil
+}
+
+// ------------------------------------------------------------ the patch
+
+// EventPatch is the body of an events.patch call (§4.4).
+//
+// Every field is a pointer, and that is the whole point of the type: a
+// nil field is absent from the JSON and Google leaves it alone, while a
+// non-nil field pointing at an empty value is sent as empty and clears
+// it. Event itself cannot express the difference — `omitempty` drops an
+// empty string — so patching with Event would make "remove the
+// location" unsayable while looking like it worked.
+type EventPatch struct {
+	Summary     *string        `json:"summary,omitempty"`
+	Description *string        `json:"description,omitempty"`
+	Location    *string        `json:"location,omitempty"`
+	Start       *EventDateTime `json:"start,omitempty"`
+	End         *EventDateTime `json:"end,omitempty"`
+	// Recurrence points at the whole list because RFC 5545 lines are
+	// replaced together: an empty non-nil slice ends the repetition.
+	Recurrence *[]string `json:"recurrence,omitempty"`
+	// Attendees is read-modify-write, never a blind replacement (§4.4).
+	// The service builds it from the guest list it just read, under the
+	// etag from that read.
+	Attendees    *[]EventAttendee `json:"attendees,omitempty"`
+	Status       *string          `json:"status,omitempty"`
+	Transparency *string          `json:"transparency,omitempty"`
+	ColorID      *string          `json:"colorId,omitempty"`
+}
+
+// ApplyTo folds a patch into an event: what the resource looks like once
+// Google has applied it.
+//
+// It lives here, beside the type, because two callers need exactly this
+// and had a copy each — the service, building the body a
+// this_and_following insert sends, and the in-memory Calendar the tests
+// run against. Two copies of a field list is one field away from a fake
+// that silently does not apply what the server sent, which would make a
+// test green over behaviour that never happened.
+func (p EventPatch) ApplyTo(e *Event) {
+	if p.Summary != nil {
+		e.Summary = *p.Summary
+	}
+	if p.Description != nil {
+		e.Description = *p.Description
+	}
+	if p.Location != nil {
+		e.Location = *p.Location
+	}
+	if p.Start != nil {
+		e.Start = p.Start
+	}
+	if p.End != nil {
+		e.End = p.End
+	}
+	if p.Recurrence != nil {
+		e.Recurrence = *p.Recurrence
+	}
+	if p.Attendees != nil {
+		e.Attendees = *p.Attendees
+	}
+	if p.Status != nil {
+		e.Status = *p.Status
+	}
+	if p.Transparency != nil {
+		e.Transparency = *p.Transparency
+	}
+	if p.ColorID != nil {
+		e.ColorID = *p.ColorID
+	}
+}
+
+// sendUpdates values, the wire spelling of §4.3's notify.
+//
+// The server never sends one it was not given. Google's own default
+// differs between events and ACL rules (§2.5), so "leave it out" is not
+// a decision this server is willing to make on a caller's behalf.
+const (
+	SendUpdatesAll          = "all"
+	SendUpdatesExternalOnly = "externalOnly"
+	SendUpdatesNone         = "none"
+)
+
+// OccurrenceID is the id Google gives one occurrence of a series: the
+// series id, an underscore, and the occurrence's SCHEDULED start in UTC
+// (§6.2).
+//
+// The inverse of SplitOccurrenceID, and a test asserts it round-trips
+// through it, because the two would otherwise be two opinions about the
+// same grammar. It is what lets a caller address an instance as "this
+// series, that start" — the stable address, since originalStartTime
+// identifies the instance even after somebody moves it.
+//
+// The shape is not inferred: phase 1's live run read occurrence ids of
+// exactly this form back from Google, which is how it found that an
+// occurrence id reaching events.instances answers 200 (§18 row 35).
+//
+// The series id is NOT held to ValidEventID. That grammar is §2.11's
+// rule for an id a CLIENT supplies on insert; whether every id Google
+// itself issues obeys it is unverified, and refusing an id Google gave
+// out would be this server inventing a constraint. An id that is wrong
+// comes back as a 404 naming what to check.
+func OccurrenceID(series string, start EventDateTime) (string, error) {
+	if strings.TrimSpace(series) == "" {
+		return "", fmt.Errorf("an occurrence needs the id of the series it belongs to")
+	}
+	switch {
+	case start.IsAllDay():
+		d, err := time.Parse("2006-01-02", start.Date)
+		if err != nil {
+			return "", fmt.Errorf("%q is not a yyyy-mm-dd date", start.Date)
+		}
+		return series + "_" + d.Format("20060102"), nil
+	case start.DateTime != "":
+		t, err := time.Parse(time.RFC3339, start.DateTime)
+		if err != nil {
+			return "", fmt.Errorf("%q is not an RFC3339 timestamp", start.DateTime)
+		}
+		return series + "_" + t.UTC().Format("20060102T150405Z"), nil
+	default:
+		return "", fmt.Errorf("an occurrence needs a start: pass the scheduled date or timestamp")
+	}
 }

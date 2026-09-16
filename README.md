@@ -104,19 +104,46 @@ Every setting is in `docs/configuration.md`.
 | `list_instances` | The occurrences of one repeating event, with the dates that were moved or removed. |
 | `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. |
 | `get_settings` | The account's time zone, week start and colour palette. |
+| `create_event` | Create an event, one-off or repeating. |
+| `update_event` | Change an event. Only the fields you pass are touched. |
+| `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
+| `move_event` | Move an event to another calendar, which changes who organises it. |
+| `respond_to_event` | Answer an invitation: accepted, declined or tentative. |
 
-Read-only by default in the sense that matters: there are no write tools
-yet. `GCAL_READONLY=true` additionally requests only read scopes, so the
-API itself refuses a write.
+`GCAL_READONLY=true` registers the first eight and requests only read
+scopes, so the API itself refuses a write.
+
+Three rules run through every write, and each exists because guessing is
+what the surveyed servers do:
+
+- **`notify` is required** whenever the write can reach another person,
+  and there is no default in either direction. `none` is refused outright
+  when a guest is outside your organisation — such a guest may have no
+  Google Calendar for the event to appear in, so email is the only way
+  they can learn of it.
+- **`scope` is required** when the event repeats: `instance`, `series` or
+  `this_and_following`. "Move the standup to 10:30" is three different
+  operations and the API makes them look like one.
+- **Every write is a patch under `If-Match`**, so it is refused as
+  `[stale]` rather than overwriting somebody who changed it first. Adding
+  a guest reads the list and adds to it; it never replaces it.
+
+`dry_run: true` on any of them reports what would change and how many
+guests would be emailed, without writing.
 
 ## Safety
 
-- Nothing here is destructive: there are no write tools yet.
-  When writes arrive, the two that remove something Calendar cannot bring
-  back — deleting a calendar, and clearing every event from one — will be
-  unregistered unless `GCAL_ENABLE_DESTRUCTIVE=true`, and will still need
-  `confirm` on the call. Cancelling an event deliberately will not be
-  behind that flag; `docs/architecture.md` §9 argues why.
+- The two tools that remove something Calendar cannot bring back —
+  deleting a calendar, and clearing every event from one — arrive in a
+  later phase and will be unregistered unless
+  `GCAL_ENABLE_DESTRUCTIVE=true`, and will still need `confirm` on the
+  call. `cancel_event` is deliberately not behind that flag: cancelling a
+  meeting is what a calendar is for, Google keeps the record, and a gate
+  everybody turns on protects nobody. `docs/architecture.md` §9 argues
+  it. What guards it instead is the required `scope` and the required
+  `notify`.
+- A cancellation with `notify: none` removes the meeting from your
+  calendar and leaves it on your guests'. The result says so every time.
 - `GCAL_SHARING=off` removes the sharing tools entirely.
 - Logs carry the method, tool, outcome, duration and a truncated calendar
   id. Never an email address, event title, description, location or

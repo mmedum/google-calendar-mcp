@@ -136,6 +136,11 @@ func (c *Client) once(ctx context.Context, r request, out any) error {
 		body = bytes.NewReader(buf)
 	}
 
+	// Counted here rather than at the call sites: every request this
+	// client makes passes through, retries included, so a result's
+	// api_requests cannot drift from what Google was actually asked.
+	count(ctx)
+
 	req, err := http.NewRequestWithContext(ctx, r.method, u, body)
 	if err != nil {
 		// Never fmt the error: it carries the URL, and the URL carries
@@ -412,6 +417,107 @@ func (c *Client) GetColors(ctx context.Context) (*gcal.Colors, error) {
 	var out gcal.Colors
 	if err := c.do(ctx, request{
 		method: http.MethodGet, path: "/colors", idempotent: true,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// --------------------------------------------------------------- writes
+
+// The four write methods share three rules, held at the call sites
+// below rather than in a comment on each:
+//
+//   - sendUpdates is sent only when the caller made a choice. §4.3.2
+//     says a write that reaches nobody has no notification decision to
+//     make, and inventing one would put this server's guess where
+//     Google's inconsistent default already is (§2.5).
+//   - If-Match carries the etag from the read that produced the plan.
+//     A 412 becomes [stale] and is never retried: a retry applies the
+//     caller's intent to a resource somebody else has since changed.
+//   - Repeatability follows §11 and the exceptions are named. PATCH and
+//     DELETE are retried. events.insert and events.move are POSTs that
+//     are not.
+
+// InsertEvent creates an event (§2.11).
+//
+// Never retried, and this is the one the rule exists for: a
+// client-supplied id makes the insert NEARLY idempotent, and Google
+// declines to guarantee the collision is caught, so a retry can
+// double-book. The service reports [ambiguous_outcome] with the id
+// instead, so a caller can look rather than guess.
+func (c *Client) InsertEvent(ctx context.Context, calendarID string, e *gcal.Event, sendUpdates string) (*gcal.Event, error) {
+	q := url.Values{}
+	if sendUpdates != "" {
+		q.Set("sendUpdates", sendUpdates)
+	}
+	var out gcal.Event
+	if err := c.do(ctx, request{
+		method: http.MethodPost, path: "/calendars/" + esc(calendarID) + "/events",
+		query: q, body: e, idempotent: false,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PatchEvent applies a partial update under If-Match (§4.4).
+//
+// events.update is never called: it is a PUT, and omitting attendees
+// there deletes every guest and every RSVP. etag is required by the
+// caller's own discipline rather than by this signature — "*" forces the
+// write through and is an explicit choice, never a default.
+func (c *Client) PatchEvent(ctx context.Context, calendarID, eventID string,
+	p *gcal.EventPatch, sendUpdates, etag string,
+) (*gcal.Event, error) {
+	q := url.Values{}
+	if sendUpdates != "" {
+		q.Set("sendUpdates", sendUpdates)
+	}
+	var out gcal.Event
+	if err := c.do(ctx, request{
+		method: http.MethodPatch,
+		path:   "/calendars/" + esc(calendarID) + "/events/" + esc(eventID),
+		query:  q, body: p, etag: etag, idempotent: true,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteEvent removes an event whole.
+//
+// Retried, because a repeat of a delete that already landed answers 404
+// or 410 rather than removing something else. The service turns that
+// into "already gone" rather than a failure.
+func (c *Client) DeleteEvent(ctx context.Context, calendarID, eventID, sendUpdates, etag string) error {
+	q := url.Values{}
+	if sendUpdates != "" {
+		q.Set("sendUpdates", sendUpdates)
+	}
+	return c.do(ctx, request{
+		method: http.MethodDelete,
+		path:   "/calendars/" + esc(calendarID) + "/events/" + esc(eventID),
+		query:  q, etag: etag, idempotent: true,
+	}, nil)
+}
+
+// MoveEvent changes which calendar an event belongs to.
+//
+// A POST that is not idempotent and is not retried (§11): the second
+// call cannot tell "the move did not happen" from "the move happened and
+// the event is no longer here".
+func (c *Client) MoveEvent(ctx context.Context, calendarID, eventID, destination, sendUpdates string) (*gcal.Event, error) {
+	q := url.Values{}
+	q.Set("destination", destination)
+	if sendUpdates != "" {
+		q.Set("sendUpdates", sendUpdates)
+	}
+	var out gcal.Event
+	if err := c.do(ctx, request{
+		method: http.MethodPost,
+		path:   "/calendars/" + esc(calendarID) + "/events/" + esc(eventID) + "/move",
+		query:  q, idempotent: false,
 	}, &out); err != nil {
 		return nil, err
 	}

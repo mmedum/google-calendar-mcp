@@ -3,6 +3,62 @@
   "sdk_version": "v1.7.0",
   "tools": [
     {
+      "name": "cancel_event",
+      "description": "Cancel an event, or one occurrence of a repeating one. A whole event is deleted; one occurrence is marked cancelled, which is how a single date leaves a series — the result says which of the two happened. Google keeps the record either way, and list_events with show_cancelled still shows it. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. With `this_and_following` the series simply ends before this occurrence, which is one call rather than the two an update takes. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organisation, `all` emails every guest. `none` is refused outright when a guest is outside your organisation, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Read that rule twice here: cancelling with no notification removes the meeting from YOUR calendar and leaves it on your guests'. They will still turn up. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar the event is on.",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "Report what would be cancelled and who would be emailed, without writing.",
+            "type": "boolean"
+          },
+          "etag": {
+            "description": "The etag from the get_event you decided on.",
+            "type": "string"
+          },
+          "event_id": {
+            "description": "The event id, or the series id when original_start names the occurrence.",
+            "type": "string"
+          },
+          "force": {
+            "description": "Cancel with If-Match: * rather than being refused if somebody changed it first.",
+            "type": "boolean"
+          },
+          "notify": {
+            "description": "Who Google is asked to email: none, external_only or all. Required when the event has guests — with none, the guests keep the meeting.",
+            "type": "string"
+          },
+          "original_start": {
+            "description": "The occurrence's SCHEDULED start, from list_instances.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Required when the event repeats: instance, series or this_and_following.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA zone to read original_start and show the times in.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar",
+          "event_id"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "check_availability",
       "description": "When people are busy, and when they are free, in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. This asks Google's free/busy service rather than listing events, which matters: it sees busy time on calendars whose events you cannot read, and it respects events marked \"free\", so a list of events is not the same answer. A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to use. Working hours are not applied: pass a narrower window if you only want office hours. Calendars are asked in batches of 50, and the result says how many requests that took.",
       "input_schema": {
@@ -45,6 +101,87 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": true
+      }
+    },
+    {
+      "name": "create_event",
+      "description": "Create an event. `start` and `end` are either two yyyy-mm-dd dates for an all-day event, where `end` is the LAST day and is included, or two RFC3339 timestamps for a timed one — never one of each, because a date is not a time. Times are written in `time_zone` if you pass one, otherwise the calendar's own zone; the result says which it used, and the zone is always sent alongside the timestamp so a repeating event keeps its wall-clock time across a daylight-saving change. `recurrence` takes RFC 5545 lines such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organisation, `all` emails every guest. `none` is refused outright when a guest is outside your organisation, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar id or title to create it on. Defaults to the account's primary calendar.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Longer text on the event.",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "Report what would be created and who would be emailed, without writing.",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "End: for an all-day event the LAST day, included; for a timed one an RFC3339 timestamp. Must be the same kind as start. Required.",
+            "type": "string"
+          },
+          "free_not_busy": {
+            "description": "Mark the time as free rather than busy, so it does not block availability.",
+            "type": "boolean"
+          },
+          "guests": {
+            "description": "Email addresses to invite. Passing any of these makes notify required.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "location": {
+            "description": "Where it is.",
+            "type": "string"
+          },
+          "notify": {
+            "description": "Who Google is asked to email: none, external_only or all. Required when the event has guests.",
+            "type": "string"
+          },
+          "recurrence": {
+            "description": "RFC 5545 lines, such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "start": {
+            "description": "Start: yyyy-mm-dd for an all-day event, or RFC3339 for a timed one. Required.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA zone the times are written in, such as Europe/Copenhagen. Defaults to the calendar's own.",
+            "type": "string"
+          },
+          "title": {
+            "description": "What the event is called. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
       }
     },
     {
@@ -241,6 +378,124 @@
       }
     },
     {
+      "name": "move_event",
+      "description": "Move an event to another calendar, which changes who organises it. The event keeps its id but is addressed on the new calendar from then on. This does NOT change the time — use update_event for that. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is not available here: there is nothing to split when the event is simply changing calendars. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organisation, `all` emails every guest. `none` is refused outright when a guest is outside your organisation, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. This is the ONE write that is not made under If-Match — events.move is not a patch — so it takes no etag and is not refused if somebody changed the event since you read it. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar the event is on now.",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "Report what would move and who would be emailed, without writing.",
+            "type": "boolean"
+          },
+          "event_id": {
+            "description": "The event id.",
+            "type": "string"
+          },
+          "notify": {
+            "description": "Who Google is asked to email: none, external_only or all. Required when the event has guests.",
+            "type": "string"
+          },
+          "original_start": {
+            "description": "The occurrence's SCHEDULED start, when moving one occurrence of a series.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Required when the event repeats: instance or series.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA zone to show the times in.",
+            "type": "string"
+          },
+          "to_calendar": {
+            "description": "The calendar id or title to move it to. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar",
+          "event_id",
+          "to_calendar"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "respond_to_event",
+      "description": "Answer an invitation: accepted, declined or tentative, with an optional comment. This changes only THIS account's response and nothing else on the event — which is why it is a separate tool rather than an update. Do not RSVP by patching the guest list; that overwrites everybody else's answer. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is not available here: answering some occurrences and not others would mean rewriting somebody else's series. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organisation, `all` emails every guest. `none` is refused outright when a guest is outside your organisation, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar the invitation is on.",
+            "type": "string"
+          },
+          "comment": {
+            "description": "A note that goes alongside the answer.",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "Report what would change and who would be emailed, without writing.",
+            "type": "boolean"
+          },
+          "etag": {
+            "description": "The etag from the get_event you decided on.",
+            "type": "string"
+          },
+          "event_id": {
+            "description": "The event id, or the series id when original_start names the occurrence.",
+            "type": "string"
+          },
+          "force": {
+            "description": "Answer with If-Match: * rather than being refused if somebody changed it first.",
+            "type": "boolean"
+          },
+          "notify": {
+            "description": "Who Google is asked to email: none, external_only or all. Required when the event has guests.",
+            "type": "string"
+          },
+          "original_start": {
+            "description": "The occurrence's SCHEDULED start, when answering for one occurrence.",
+            "type": "string"
+          },
+          "response": {
+            "description": "accepted, declined or tentative. Required.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "Required when the event repeats: instance or series.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA zone to show the times in.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar",
+          "event_id",
+          "response"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "search_events",
       "description": "Find events matching free text in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Important: Google's event search is undocumented free text with no field scoping — you cannot search \"attendee:someone\" or restrict it to titles, and Google does not say which fields it reads. Treat an empty result as \"this search found nothing\", not as \"there is no such event\", and fall back to list_events over the window when you need certainty. Searching several calendars costs one request each.",
       "input_schema": {
@@ -292,6 +547,128 @@
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": true
+      }
+    },
+    {
+      "name": "update_event",
+      "description": "Change an event. Only the fields you pass are touched; everything else is left exactly as it is, so this can never drop a guest list or flatten a series the way a whole-resource write does. Guests are added and removed one at a time with `add_guests` and `remove_guests`, applied to the list as it is read, so somebody else's RSVP arriving in between is reported rather than overwritten. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is two calls: the original series is ended before this occurrence and a NEW series starts at it with a new id, and any exception after this occurrence is reset. The result says so. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organisation, `all` emails every guest. `none` is refused outright when a guest is outside your organisation, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "add_guests": {
+            "description": "Email addresses to invite, added to the guests already there.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "calendar": {
+            "description": "The calendar the event is on. An event id is unique per calendar, not globally.",
+            "type": "string"
+          },
+          "description": {
+            "description": "New description. Omit to leave it; pass an empty string to clear it.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "dry_run": {
+            "description": "Report what would change and who would be emailed, without writing.",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "New end. For an all-day event this is the last day, included.",
+            "type": "string"
+          },
+          "etag": {
+            "description": "The etag from the get_event you decided on. The write is refused as stale if it moved since.",
+            "type": "string"
+          },
+          "event_id": {
+            "description": "The event id, or the series id when original_start names the occurrence.",
+            "type": "string"
+          },
+          "force": {
+            "description": "Write with If-Match: * — overwrite whatever it says now, rather than being refused if somebody changed it.",
+            "type": "boolean"
+          },
+          "free_not_busy": {
+            "description": "Mark the time free rather than busy.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "location": {
+            "description": "New location. Omit to leave it; pass an empty string to clear it.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "notify": {
+            "description": "Who Google is asked to email: none, external_only or all. Required when the event has guests.",
+            "type": "string"
+          },
+          "original_start": {
+            "description": "The occurrence's SCHEDULED start, from list_instances. Use it with the series id to name one occurrence.",
+            "type": "string"
+          },
+          "recurrence": {
+            "description": "New RFC 5545 lines. An empty list stops the event repeating.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "remove_guests": {
+            "description": "Email addresses to uninvite.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "scope": {
+            "description": "Required when the event repeats: instance, series or this_and_following.",
+            "type": "string"
+          },
+          "start": {
+            "description": "New start: yyyy-mm-dd or RFC3339, matching what the event already is.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA zone the new times are written in.",
+            "type": "string"
+          },
+          "title": {
+            "description": "New title. Omit to leave it; pass an empty string to clear it.",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "calendar",
+          "event_id"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
       }
     }
   ]

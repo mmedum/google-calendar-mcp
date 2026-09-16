@@ -7,7 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The write path: `create_event`, `update_event`, `cancel_event`,
+  `move_event` and `respond_to_event`, taking the surface to thirteen
+  tools. `GCAL_READONLY=true` registers the first eight and requests only
+  read scopes.
+
+  Three rules run through all five, and none of them has a default.
+  **`notify`** is required whenever the write can reach another person,
+  and `none` is refused outright when a guest is outside the organiser's
+  domain — such a guest may have no Google Calendar for the event to
+  appear in, so email is the only way they can learn of it. **`scope`**
+  is required when the event repeats: `instance`, `series` or
+  `this_and_following`, because the same words mean three different
+  operations. And **every write is a patch under `If-Match`**, refused as
+  `[stale]` rather than overwriting somebody who changed it first.
+
+  `dry_run: true` on any of them reports what would change and how many
+  guests would be emailed, without writing. A result says what the server
+  ASKED Google to send, never what anybody received: the API reports
+  nothing about delivery.
+- `create_event` generates the event id itself, so a retry after a
+  failure nobody saw the answer to collides with a 409 rather than
+  creating a second meeting. When the answer never arrived, the failure
+  is `[ambiguous_outcome]` naming the id to read.
+- `cancel_event` deletes a whole event and marks one occurrence
+  cancelled, and the result says which of the two happened. It is not
+  behind `GCAL_ENABLE_DESTRUCTIVE` — a gate everybody turns on protects
+  nobody — but it is annotated destructive, so a client can still decide
+  to ask. With `notify: none` the result says the guests keep the
+  meeting, because deleting quietly removes it from your calendar and
+  leaves it on theirs.
+- `update_event` with `scope: this_and_following` performs the two-call
+  pattern Google has no operation for: the original series is ended
+  before the target occurrence and a new one starts at it. The result
+  says both rules, that it was two calls, and that exceptions after the
+  target were reset — which Google does and no caller expects.
+- An occurrence can be addressed as the series id plus `original_start`,
+  its scheduled start. That address survives somebody moving the
+  occurrence, which its own id does not tell you.
+
 ### Fixed
+
+- `move_event` applied the recurrence scope to the wrong event.
+  `scope: series` on an occurrence id moved that one occurrence while the
+  result said it had moved the series, and `scope: instance` on a series
+  id moved every occurrence. `respond_to_event` had the matching gap: it
+  would have answered for a whole series when told to answer for one
+  occurrence. Choosing a scope and applying it now have one owner.
+- An event's end was compared to its start as text. Either side of a
+  daylight-saving change two timestamps carry different offsets, so a
+  45-minute event across the autumn fold was refused as ending before it
+  began, while one that genuinely did was accepted and sent to Google.
+  They are compared as instants.
+- Passing an `etag` together with `scope: series` was refused as
+  `[stale]` every time, and re-reading returned the same etag it had just
+  rejected. The etag is a statement about the event you read; the write
+  may land on that event's series, and those are now two different
+  checks.
+- `notify: none` was refused for a colleague on any shared calendar. Such
+  an event is organised by the calendar rather than by a person, and its
+  id has a domain of its own, so everybody counted as outside the
+  organisation.
+- A write refused because somebody else had edited the event was reported
+  as the event being already cancelled, sending the caller to look for
+  something deleted instead of re-reading and trying again.
+- `dry_run` on `update_event` and `cancel_event` showed the event
+  unchanged where it should show what the change would make of it — a
+  cancellation showed the event alive under the words "Deleted the
+  event".
+- `api_requests` did not count what a call spent resolving the calendar
+  and the time zone, so a create reported one request and made four, and
+  a dry run reported none while making three.
+- The first of the two writes behind `scope: this_and_following` — the
+  one that removes the later occurrences from everybody's calendar — was
+  sent with no notification choice at all, while the result reported the
+  choice the second one carried.
+- A `this_and_following` split dropped the conference link from the new
+  series without saying so. It still drops it, because this server does
+  not write conference data yet, but the result now says it did.
+- The in-memory Calendar used by tests now resolves Google's `primary`
+  alias. It never did, and nothing noticed because the fixture gave a
+  calendar the literal id `primary` — which no real account has, since a
+  primary calendar's id is the account's email address. The first write
+  test against a realistic fixture failed with "no calendar with that
+  id". The same fixture used event ids containing hyphens, which
+  base32hex forbids, so an occurrence address could not be exercised
+  against it at all.
 
 - The plaintext token fallback is restricted on Windows, where it never
   was. Go's file modes do not map to Windows ACLs, so a file written

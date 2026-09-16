@@ -91,6 +91,20 @@ func (s Set) Reach(start when.Zoned, limit int) string {
 		return "this event does not repeat"
 	}
 	occ, err := s.ExpandTimes(start, when.Zoned{}, when.Zoned{}, limit)
+	return s.reachOf(occ, err)
+}
+
+// ReachDates is Reach for an all-day series, which has dates and no
+// instants (§4.1).
+func (s Set) ReachDates(start when.Date, limit int) string {
+	if s.Rule == nil {
+		return "this event does not repeat"
+	}
+	occ, err := s.ExpandDates(start, when.Date{}, when.Date{}, limit)
+	return s.reachOf(occ, err)
+}
+
+func (s Set) reachOf(occ Occurrences, err error) string {
 	if err != nil {
 		return "this server cannot count the occurrences of this rule; list_instances asks Google for them"
 	}
@@ -102,26 +116,31 @@ func (s Set) Reach(start when.Zoned, limit int) string {
 	case occ.Count() == 1:
 		return "this series has one occurrence"
 	default:
-		last := occ.Times[len(occ.Times)-1]
-		return fmt.Sprintf("this series has %d occurrences, the last on %s", occ.Count(), last.Date())
+		return fmt.Sprintf("this series has %d occurrences, the last on %s", occ.Count(), lastOf(occ))
 	}
 }
 
-// Split computes the two rules a this_and_following write needs (§2.8).
+// lastOf names the final occurrence, from whichever half of Occurrences
+// the expansion filled.
+func lastOf(occ Occurrences) string {
+	if n := len(occ.Dates); n > 0 {
+		return occ.Dates[n-1].String()
+	}
+	if n := len(occ.Times); n > 0 {
+		return occ.Times[n-1].Date().String()
+	}
+	return ""
+}
+
+// Split computes the two rules a this_and_following write needs (§2.8),
+// for a timed series.
 //
 // Google has no server-side "this and following": the pattern is to end
 // the original series before the target and insert a new one starting at
 // it. This returns the RRULE line for each half and nothing else — the
 // two API calls, the exception reset and the wording belong to the write
 // path, which is where a caller can be told what happened.
-//
-// The truncation keeps COUNT as a COUNT rather than converting it to an
-// UNTIL. Both are legal, and a count that stays a count cannot be moved
-// by an hour when somebody's zone rules change.
 func (s Set) Split(start, target when.Zoned) (before, after string, err error) {
-	if err := s.expandable(); err != nil {
-		return "", "", err
-	}
 	if start.Loc == nil || target.IsZero() {
 		return "", "", fmt.Errorf("%w: splitting a series needs its start and the target occurrence", ErrInvalid)
 	}
@@ -129,36 +148,66 @@ func (s Set) Split(start, target when.Zoned) (before, after string, err error) {
 		return "", "", fmt.Errorf("%w: the target occurrence %s is not after the series start %s; "+
 			"a this_and_following write at the first occurrence is a series write", ErrInvalid, target, start)
 	}
+	return s.splitAt(target.String(), func(rule Set) (Occurrences, error) {
+		return rule.ExpandTimes(start, when.Zoned{}, target, 0)
+	})
+}
 
-	// How many occurrences the RULE generates before the target: that is
-	// what the original series keeps.
-	//
-	// The rule alone, not the series as a caller sees it. A COUNT counts
-	// what the rule produces, and Google applies EXDATE and RDATE on top
-	// of it — so counting visible occurrences wrote a COUNT that was too
-	// small when a date had been excluded, losing an occurrence from the
-	// original series, and too large when an RDATE had been added,
-	// running the truncated original past the split target and
-	// overlapping the new series.
-	ruleOnly := Set{Lines: s.Lines, Rule: s.Rule}
-	head, err := ruleOnly.ExpandTimes(start, when.Zoned{}, target, 0)
+// SplitDates is Split for an all-day series, where the occurrences are
+// dates and there is no instant to compare (§4.1).
+//
+// The two front-ends differ only in which expansion counts the head, so
+// the arithmetic — and the COUNT rule that was wrong twice — lives once
+// in splitAt.
+func (s Set) SplitDates(start, target when.Date) (before, after string, err error) {
+	if start.IsZero() || target.IsZero() {
+		return "", "", fmt.Errorf("%w: splitting a series needs its start and the target occurrence", ErrInvalid)
+	}
+	if !target.After(start) {
+		return "", "", fmt.Errorf("%w: the target occurrence %s is not after the series start %s; "+
+			"a this_and_following write at the first occurrence is a series write", ErrInvalid, target, start)
+	}
+	return s.splitAt(target.String(), func(rule Set) (Occurrences, error) {
+		return rule.ExpandDates(start, when.Date{}, target, 0)
+	})
+}
+
+// splitAt truncates the original rule to the occurrences before the
+// target and returns the rule the new series carries.
+//
+// head counts what the RULE generates before the target — the rule
+// alone, not the series as a caller sees it. A COUNT counts what the
+// rule produces, and Google applies EXDATE and RDATE on top of it, so
+// counting visible occurrences wrote a COUNT that was too small when a
+// date had been excluded, losing an occurrence from the original series,
+// and too large when an RDATE had been added, running the truncated
+// original past the split target and overlapping the new series.
+//
+// The truncation keeps COUNT as a COUNT rather than converting it to an
+// UNTIL. Both are legal, and a count that stays a count cannot be moved
+// by an hour when somebody's zone rules change.
+func (s Set) splitAt(target string, head func(Set) (Occurrences, error)) (before, after string, err error) {
+	if err := s.expandable(); err != nil {
+		return "", "", err
+	}
+	occ, err := head(Set{Lines: s.Lines, Rule: s.Rule})
 	if err != nil {
 		return "", "", err
 	}
-	if head.Truncated {
+	if occ.Truncated {
 		return "", "", fmt.Errorf("%w: this series has too many occurrences before %s to split reliably",
 			ErrInvalid, target)
 	}
-	if head.Count() == 0 {
+	if occ.Count() == 0 {
 		return "", "", fmt.Errorf("%w: no occurrence falls before %s, so there is nothing to truncate",
 			ErrInvalid, target)
 	}
 
 	r := *s.Rule
-	before = r.with("COUNT", fmt.Sprintf("%d", head.Count()), "UNTIL")
+	before = r.with("COUNT", fmt.Sprintf("%d", occ.Count()), "UNTIL")
 	switch {
 	case r.Count > 0:
-		remaining := r.Count - head.Count()
+		remaining := r.Count - occ.Count()
 		if remaining < 1 {
 			return "", "", fmt.Errorf("%w: every occurrence of this series falls before %s", ErrInvalid, target)
 		}

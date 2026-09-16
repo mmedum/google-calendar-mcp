@@ -1,11 +1,14 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 1 complete; phase 2 is unblocked (2026-09-16).** Phase 0
-— the scaffolding, the gates, the time model and the six read tools — and
-phase 1 — `internal/recur`, `list_instances` and `check_availability` —
-are built, verified live and committed. The read surface is eight tools;
-`make check` is green across nineteen targets; the live driver runs 33
-steps.
+**Status: phase 2 is built and NOT yet run live (2026-09-16).** Phase 0
+— the scaffolding, the gates, the time model and the six read tools —
+and phase 1 — `internal/recur`, `list_instances` and
+`check_availability` — are built, verified live and committed. Phase 2 —
+`internal/plan`, the five event writes, `If-Match`, the client-generated
+id and `dry_run` — is built and every gate is green, which §13 says is
+not the same as done. The surface is thirteen tools; `make check` is
+green across nineteen targets; the live driver has 47 steps and has not
+been run against a real account since the writes were added.
 
 **Every spike except one is answered (§15).** A, B, C, D, E, F, H and I.
 That matters because §16's phase 2 says its refusal wording waits on A,
@@ -25,7 +28,8 @@ longer withdraw. Nine of §18's forty-four rows were written or rewritten
 on 2026-09-16, four of them correcting something this document had
 asserted earlier the same day.
 
-**Still owed:** spike G's negative half, and **CI has never run on macOS
+**Still owed:** **phase 2's live run** — the first thing the next
+session should do — spike G's negative half, and **CI has never run on macOS
 or Windows** — the workflow covers all three platforms and the branch
 has never been pushed. Both platforms cross-compile clean, including the
 tagged tests, so a first run is unlikely to fail on compilation; the
@@ -442,6 +446,14 @@ written.
   a read-modify-write on the array, never a replacement of it, so an RSVP
   that arrived between the read and the write is reported as `[stale]`
   rather than overwritten.
+- **`events.move` is the one exception, and it is named rather than
+  quiet.** It is not a patch — a POST with the destination in the query
+  string and no body — and whether Google honours `If-Match` on it is
+  undocumented and unprobed. Sending one would be adopting a convention
+  rule 13 forbids adopting unverified; sending `*` would be calling
+  something concurrency control that is not. So `move_event` takes no
+  etag, its description says it is the one write without the protection,
+  and its result repeats it. Probing it is a spike phase 3 can afford.
 
 ### 4.5 Every read states its window, its zone and its completeness
 
@@ -516,16 +528,19 @@ standard's "derive the package map, or delete it".
   what the server must reason about locally, and the three scopes of
   §4.2.
 - `internal/model/` the server's view of a calendar, an event and a busy
-  interval; `internal/render/` text output; `internal/plan/` (phase 2) typed write
-  ops and the guards; `internal/service/` orchestration and policy;
+  interval; `internal/render/` text output; `internal/plan/` the typed
+  write ops and the guards of §4.2, §4.3 and §4.4 — no network, no
+  client, so every guard is testable on its own;
+  `internal/service/` orchestration and policy;
   `internal/tools/` the MCP tools; `internal/server/` SDK wiring and the
   schema dump.
 - `internal/redact/` the log and transcript redactor.
 - `scripts/gates/` the repository's own checks, as Go; `scripts/livecal/`
   the live driver, which also carries the live probes of §15;
   `scripts/evals/` (phase 4) the model-facing scoring harness.
-- `testdata/` synthetic fixtures, renderer goldens, and the API surface
-  snapshot and coverage record of §8a.
+- `testdata/` synthetic fixtures, renderer goldens, the API surface
+  snapshot and coverage records of §8a and §8b, and the recorded
+  tool-schema baseline.
 
 ## 6. Addressing
 
@@ -963,6 +978,16 @@ than double-book.
 
 `events.move` is a POST that is not idempotent and is not retried.
 
+**`events.patch` IS retried, and the cost is a duplicate notification.**
+A patch is a stated end state, so a retry lands in the same place — but
+it carries `sendUpdates`, so a retry after a 429 or a 503 can ask Google
+to mail the guest list a second time. The alternative is failing a write
+that would have succeeded, on a transient error, and leaving the caller
+to decide whether it landed. A second invitation is an annoyance; a
+write reported failed that actually succeeded is the `ambiguous_outcome`
+this design works hardest to avoid. So the retry stays, and this
+paragraph exists so it is a decision rather than an accident.
+
 **Rate limiting.** 600 requests per user per minute on a sliding window
 (§2.14). The fan-out tools — `search_events` across calendars,
 `check_availability` across batches — are where a single tool call can
@@ -1378,31 +1403,158 @@ than lost:
   differ, not that both should be configurable. One more knob whose
   right value is the API's own limit is a knob nobody should turn.
 
-**Phase 2 — writing events (v0.2.0).** The write path: `plan` and its
-guards, `If-Match`, the client-generated id, `dry_run`. `create_event`,
-`update_event`, `cancel_event`, `move_event`, `respond_to_event`.
-`internal/plan` is an empty directory today. The three declared-but-unemitted
-error classes are all this phase's: `blocked`, `ambiguous_outcome` and
-`unsupported`, so the class gate says when the phase is done.
+**Phase 2 — writing events (v0.2.0). Built 2026-09-16; NOT yet run
+live.** `internal/plan` — the typed draft, the patch body and the three
+guards — plus `create_event`, `update_event`, `cancel_event`,
+`move_event` and `respond_to_event`, taking the surface to thirteen
+tools. The three declared-but-unemitted error classes are all emitted
+now, so `gapi.Planned` is empty and the class gate holds all twelve from
+both sides for the first time.
 
-**Its four spikes are answered, and each one decided something.**
-A: `externalOnly` follows the organiser's domain, and a result reports
-what was asked for rather than what arrived. B: `none` is refused, not
-warned about, when a guest is outside the domain — such a guest may have
-no calendar for the event to land in, so mail is the only channel and
-`none` removes it. E: "this and following" resets exceptions after the
-target, so the result must say so, and `Set.Split` in `internal/recur`
-is confirmed against Google. F: a duplicate client-generated id was
-caught with a 409, which does not retire `ambiguous_outcome` because the
-API declines to guarantee it and a retry after a transport failure is
-the other half of the class.
+**What the phase decided, beyond building what §7.4 listed.**
 
-Still the phase that needs the most live work, and the one where the
-transcript matters most. Two cautions from phase 1's runs: the
-calendar-creation quota is spent by creating, not refunded by deleting
-(§18 row 36), so use `-keep` and let runs adopt the scratch calendar;
-and a write that carries guests is cleaned up with a cancellation, never
-a silent delete (§18 row 43).
+- **`gcal.EventPatch`, with every field a pointer.** `Event`'s own
+  `omitempty` strings cannot tell "leave it" from "clear it", so a patch
+  built from `Event` makes "remove the location" unsayable while looking
+  like it worked. A nil field is absent from the JSON; a non-nil field
+  pointing at an empty value clears it.
+- **An all-day `end` is the LAST day, inclusive, on the way in.** Google's
+  wire end is exclusive and the renderer has always shown it inclusive,
+  so taking it inclusive here is what makes the value a caller reads the
+  value a caller writes. The conversion is in one place and the tool
+  descriptions say it.
+- **`unsupported` is emitted where THIS server cannot build the
+  operation, not where Google is guessed at.** §2.8 says there is no
+  server-side "this and following": the only way to have one is to
+  truncate the original series and insert a new one, which takes the
+  right to rewrite the series. An attendee answering an invitation has no
+  such right and a move between calendars has nothing to split, so for
+  those two the operation does not exist. That is a fact about this
+  construction rather than an unverified claim about the API, which is
+  what rule 13 asks for.
+- **`Set.Split` was refactored rather than copied** for the all-day path.
+  §16's phase-1 note said the generic version was worth doing when phase
+  2 gave the all-day path its first caller; it did, so `splitAt` now owns
+  the COUNT arithmetic that was wrong twice, and `Split` and `SplitDates`
+  are two ways of counting the head. `Reach` and `ReachDates` went the
+  same way.
+- **`cancel_event` is its own tool Kind.** It registers without
+  `GCAL_ENABLE_DESTRUCTIVE` — §9's argument stands — but its annotation
+  says destructive, because a client deciding whether to ask a person
+  deserves the truthful hint. The flag and the hint are different
+  questions and the code now treats them that way.
+- **The insert is ambiguous only when the answer is.** A 400 or a 403
+  definitely did not land. A transport failure or a 5xx may have, so
+  those become `[ambiguous_outcome]` naming the id to read. A
+  `this_and_following` write that truncates and then fails to insert gets
+  the same class with a sharper sentence: the later occurrences are gone
+  until somebody recreates them.
+
+**What the fake was hiding, which is the phase's own lesson.**
+`caltest` did not resolve Google's `primary` alias, and nothing noticed
+because `Seed` gave a calendar the literal id `primary`. No real account
+has one — a primary calendar's id is the account's email address, which
+is also what §4.3.5 splits the guest count on. The first write test
+against a realistic fixture failed with "no calendar with that id". A
+second fixture problem was the same shape: `Seed`'s event ids contain
+hyphens, which base32hex forbids, so an occurrence address — series id,
+underscore, scheduled start — could not be exercised against it at all.
+Both are fixed, and both are the §13 point restated: a fake that is
+easier than the API makes a whole path untestable while every test is
+green.
+
+**Still owed, and it is the important line: this phase has NOT had its
+live run.** §13 says green gates are not done, and every gate here is
+green. The driver has the steps — 47 of them now, covering all thirteen
+tools — including the two-call split, the stale etag, the occurrence
+address, the guard refusals and a dry run whose absence is then checked
+by a read. It needs an operator with credentials, and the transcript
+needs reading, before any of this counts. The write steps also need a
+second scratch calendar for `move_event`, which spends one more of the
+creation quota of §18 row 36, once, and is adopted on every run after.
+
+**What the reviews found, and it is the argument for running them.**
+Every gate was green before they started, and `/simplify` and
+`/code-review high` between them turned up seventeen defects, two of
+which were live bugs in the tool surface.
+
+The two bugs share a shape: **choosing a scope and applying it are two
+decisions, and only the first had an owner.** `plan.Scope` parsed the
+caller's word, and then each operation wrote out "which event does that
+actually mean" by hand. `move_event` had no version of it at all — so
+`scope:series` on an occurrence id moved one occurrence while the result
+printed `scope: series`, and `scope:instance` on a series id moved the
+whole series. `respond_to_event` was missing the refusal, so
+`scope:instance` against a series id would have patched the whole
+series' attendee array, which is the exact thing its own description
+says it exists to prevent; only a fixture with no guests on the parent
+hid it. `plan.Target` owns it now, and all four operations go through
+one service helper.
+
+Five more that mattered, each fixed with the reproduction as a test:
+
+- **An RFC3339 string was compared as a string.** `end <= start` on
+  formatted timestamps, and either side of a daylight-saving fold the two
+  carry different offsets — so a valid 45-minute event across the
+  Copenhagen fall-back was refused and a genuinely backwards one was
+  accepted and sent. §4.1's argument for carrying a zone rather than an
+  offset, failing inside the guard written to enforce it. They are
+  compared as instants now.
+- **`api_requests` was a field incremented by hand**, so it missed
+  everything the shared setup spent: a create reported 1 and made 4, and
+  a **dry run reported 0 while spending three**. It is read off a counter
+  in the context that the client increments, so it counts the retries of
+  §11 too and cannot drift. A test asserts reported equals served for
+  every write. The read path still hand-counts, and §11 now says so
+  rather than a comment implying otherwise.
+- **An etag plus `scope:series` was refused every time.** The caller's
+  etag came from the occurrence they read; the write was redirected to
+  the parent and compared against the parent's. Unrecoverable, too —
+  re-reading the occurrence returns the same etag that was just rejected.
+  The caller's etag is now checked against the event they addressed, and
+  `If-Match` carries the etag of the event actually written.
+- **`notify:none` was refused for a colleague** on any secondary
+  calendar. Such an event is organised by the CALENDAR, whose id is an
+  address with a domain of its own, so every guest counted as outside the
+  organisation and §4.3.4 fired with a sentence that was simply false.
+  The organiser is now taken as a person only when it is not the calendar
+  being written.
+- **A 412 on a delete was reported as "already gone".** `classify` maps
+  410 and 412 to the same class and the handler matched on the class, so
+  a write refused *because somebody had edited the event* told the caller
+  their meeting no longer existed. It matches on the status now.
+
+And the smaller ones, which are the ordinary yield: a dry run on update
+and cancel printed the event unchanged while the change list said
+otherwise — cancel printed it alive under the words "Deleted the event";
+the truncate half of a `this_and_following` write sent no `sendUpdates`
+while the result said all guests had been notified; the note quoted the
+computed rule rather than the one the new series carries; a split
+silently dropped the conference link, because Google ignores
+`conferenceData` without `conferenceDataVersion=1`; a misspelled `scope`
+was accepted in silence on a non-repeating event; a one-sided time change
+was never crossed against the end that stays; the live driver could
+address the operator's own primary calendar when its second scratch
+calendar failed to appear, which §9.1 forbids structurally; and the fake
+read its event map outside its own mutex.
+
+The duplication `/simplify` found is worth one line each, because the
+cost is always the same: the `EventPatch` fold was written out in the
+service AND in the fake, so a field added to one would have made a test
+green over behaviour that never happened; "who counts as a guest" — the
+rule §4.3.2 refuses on — had a definition in `model` and another in
+`plan`, so one result could have quoted two guest counts; the recur
+sentinel was hand-wrapped at four sites, two of which stripped the
+package prefix and two of which did not; and the dry-run verb was
+assigned at eight sites, of which three said "nothing was sent" and five
+forgot. Each now has one owner.
+
+**Not taken:** a generic wrapper around the five tool handlers, which
+would have saved fifteen lines at the cost of making the write
+registrations read differently from the read ones; and dropping the
+instance read on a series-scoped write, which costs one request and is
+what produces the refusal that tells a caller their `original_start`
+named no occurrence.
 
 **Phase 3 — calendars and sharing (v0.3.0).** `create_calendar`,
 `manage_calendar`, `list_sharing`, `share_calendar`,

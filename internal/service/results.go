@@ -6,6 +6,7 @@ import (
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/model"
+	"github.com/mmedum/google-calendar-mcp/internal/plan"
 	"github.com/mmedum/google-calendar-mcp/internal/render"
 	"github.com/mmedum/google-calendar-mcp/internal/when"
 )
@@ -455,4 +456,62 @@ func interval(start, end when.Zoned) IntervalOut {
 		Start: start.String(), End: end.String(),
 		Minutes: int(end.T.Sub(start.T).Minutes()),
 	}
+}
+
+// WriteResult is what every write tool returns (§4.9).
+//
+// What the resource looked like before, what changed, what it looks like
+// now, what the server asked Google to send, and the new etag. A write
+// result that says only "ok" is a defect: a caller cannot tell a patch
+// that changed one field from one that changed five, and cannot tell
+// whether anybody was emailed.
+type WriteResult struct {
+	// Action is the verb in the past tense, or the conditional one under
+	// DryRun, so the two halves of the result cannot disagree about
+	// whether anything happened. Both come from one table in
+	// internal/render, keyed on what the write does.
+	Action   string `json:"action"`
+	DryRun   bool   `json:"dry_run,omitempty"`
+	Calendar string `json:"calendar"`
+	// Scope is the recurrence decision, absent when the event does not
+	// repeat (§4.2).
+	Scope string `json:"scope,omitempty"`
+	// Before is absent on a create; Event is absent on a delete.
+	Before  *EventOut     `json:"before,omitempty"`
+	Event   *EventOut     `json:"event,omitempty"`
+	Changes []plan.Change `json:"changes,omitempty"`
+	// Notification says what was ASKED FOR. Never what arrived: §2.6
+	// says `none` is not silence, and spike A watched one invitation
+	// reach one of two guests with nothing different in the request.
+	Notification string   `json:"notification"`
+	TimeZone     string   `json:"time_zone"`
+	ZoneSource   string   `json:"time_zone_source"`
+	Notes        []string `json:"notes,omitempty"`
+	ETag         string   `json:"etag,omitempty"`
+	Requests     int      `json:"api_requests"`
+
+	text string
+}
+
+// Render implements Rendered.
+func (r WriteResult) Render() string { return r.text }
+
+// NewWriteResult builds the reply.
+func NewWriteResult(w render.WriteReport) WriteResult {
+	out := WriteResult{
+		Action: w.Said(), DryRun: w.DryRun, Calendar: w.Calendar, Scope: w.Scope,
+		Changes: w.Changes, Notification: w.Notify,
+		TimeZone: w.Zone.Name(), ZoneSource: string(w.Zone.Source),
+		Notes: w.Notes, Requests: w.Requests,
+		text: w.Text(),
+	}
+	if w.Before != nil {
+		before := NewEventOut(*w.Before)
+		out.Before = &before
+	}
+	if w.After != nil {
+		after := NewEventOut(*w.After)
+		out.Event, out.ETag = &after, after.ETag
+	}
+	return out
 }

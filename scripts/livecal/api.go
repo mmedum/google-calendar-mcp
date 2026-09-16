@@ -56,6 +56,20 @@ var (
 	cancelledID = "livecalcancelledprobe" + runSuffix
 )
 
+// destTitle is the second scratch calendar, and it exists for one tool.
+//
+// move_event changes which calendar an event lives on, so driving it
+// needs somewhere to move to — and that somewhere may not be the
+// operator's own calendar, because §9.1 says this driver writes only on
+// a calendar it created. So it creates a second one, adopts it on every
+// later run exactly as it adopts the first, and moves the event there
+// and straight back, leaving the scratch calendar as it found it.
+//
+// It costs one more of the calendar-creation quota §18 row 36 is about,
+// once. That is the price of driving the write path rather than
+// exempting it, and §13 is explicit that green gates are not done.
+const destTitle = scratchTitle + " destination"
+
 const apiBase = "https://www.googleapis.com/calendar/v3"
 
 // liveAPI does the driver's own setup and teardown, directly against
@@ -143,12 +157,12 @@ func (a *liveAPI) do(ctx context.Context, method, path string, body, out any) er
 	return nil
 }
 
-func (a *liveAPI) createScratchCalendar(ctx context.Context) (string, error) {
+func (a *liveAPI) createScratchCalendar(ctx context.Context, title string) (string, error) {
 	var out struct {
 		ID string `json:"id"`
 	}
 	err := a.do(ctx, http.MethodPost, "/calendars", map[string]any{
-		"summary":     scratchTitle,
+		"summary":     title,
 		"description": "Created by the google-calendar-mcp live driver. Safe to delete.",
 		"timeZone":    scratchZone,
 	}, &out)
@@ -174,8 +188,8 @@ func (a *liveAPI) createScratchCalendar(ctx context.Context) (string, error) {
 // this driver looks past what it wrote. It matches its own title and
 // returns an id; nothing from the list is printed, and §9.1's rule about
 // the transcript is enforced separately, on what steps may show.
-func (a *liveAPI) ensureScratchCalendar(ctx context.Context) (id string, created bool, err error) {
-	found, err := a.findScratchCalendar(ctx)
+func (a *liveAPI) ensureScratchCalendar(ctx context.Context, title string) (id string, created bool, err error) {
+	found, err := a.findScratchCalendar(ctx, title)
 	if err != nil {
 		return "", false, err
 	}
@@ -187,13 +201,13 @@ func (a *liveAPI) ensureScratchCalendar(ctx context.Context) (id string, created
 		}
 		return found, false, nil
 	}
-	id, err = a.createScratchCalendar(ctx)
+	id, err = a.createScratchCalendar(ctx, title)
 	return id, true, err
 }
 
 // findScratchCalendar returns the id of a calendar this driver made, or
 // an empty string.
-func (a *liveAPI) findScratchCalendar(ctx context.Context) (string, error) {
+func (a *liveAPI) findScratchCalendar(ctx context.Context, title string) (string, error) {
 	var out struct {
 		Items []struct {
 			ID      string `json:"id"`
@@ -208,7 +222,7 @@ func (a *liveAPI) findScratchCalendar(ctx context.Context) (string, error) {
 			return "", err
 		}
 		for _, it := range out.Items {
-			if it.Summary == scratchTitle {
+			if it.Summary == title {
 				return it.ID, nil
 			}
 		}
@@ -422,6 +436,30 @@ func (a *liveAPI) seed(ctx context.Context, cal string) error {
 		}
 	}
 	return nil
+}
+
+// primaryAddress is the signed-in account's own calendar id, which is
+// its email address (§6.1).
+//
+// tokeninfo cannot supply it: it returns an email only when an email
+// scope was granted, and this server asks for none — which is what phase
+// 0's `login` reported as a field that could never populate (§18). The
+// primary calendar's id is the same fact, from a scope this server
+// already has.
+//
+// It reaches the transcript only through the redactor, which matches an
+// address by shape.
+func (a *liveAPI) primaryAddress(ctx context.Context) (string, error) {
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := a.do(ctx, http.MethodGet, "/calendars/primary", nil, &out); err != nil {
+		return "", err
+	}
+	if out.ID == "" {
+		return "", fmt.Errorf("Google returned a primary calendar with no id")
+	}
+	return out.ID, nil
 }
 
 // liveScopes asks Google what the current access token actually carries.
