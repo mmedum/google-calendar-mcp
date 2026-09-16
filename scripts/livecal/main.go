@@ -73,7 +73,18 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 
 	scratch, err := api.createScratchCalendar(ctx)
 	if err != nil {
-		out.Printf("could not create the scratch calendar: %v\n", err)
+		out.Printf("could not create the scratch calendar: %v\n", redact.String(err.Error()))
+		// The one failure here that is not a bug and not a setup
+		// mistake, so it gets its own sentence rather than a raw 403.
+		if strings.Contains(err.Error(), "quotaExceeded") ||
+			strings.Contains(err.Error(), "usage limits") {
+			out.Printf("\nThis account's calendar-creation quota is spent (§18 row 36). The limit " +
+				"counts\ncalendars created, and deleting them does not refund it, so the driver " +
+				"cannot make\nthe scratch calendar it reads. Wait for Google to reset it and run " +
+				"again.\n")
+			out.Printf("`-spike-ceiling` spends this quota 51 at a time; that is why it is off by " +
+				"default.\n")
+		}
 		return 2
 	}
 	out.Printf("scratch calendar %s created\n", redact.ID(scratch))

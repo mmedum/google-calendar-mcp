@@ -59,6 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Which steps are safe is derived from each step's own arguments against
   the ids the driver invented, not set by hand: the first draft carried
   a per-step flag and missed `get_settings` the same day it was written.
+- Spike I's readable half is built, behind `-spike-ceiling`, and answers
+  with the reason it cannot answer: Google refuses to create more than 38
+  calendars on an account (403 `quotaExceeded`), so a free/busy query of
+  51 readable calendars cannot be assembled. The flag stays off by
+  default — the limit counts creations and deleting them does not refund
+  it, so running the probe spends the quota the driver's own scratch
+  calendar needs.
 - Spike I stated a verdict it had not established, twice. It sent one
   calendar id 51 times, and Google deduplicated the response to one
   entry, which the spike called a silent truncation at the ceiling. Its

@@ -148,10 +148,15 @@ func spikeI(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	// than an unanswered question if this crashes halfway.
 	if spikeCeiling {
 		v, note := ceilingWithReadableCalendars(ctx, out, api)
-		if v != undetermined {
-			return v, note
+		switch v {
+		case pass:
+			return pass, note
+		default:
+			// Blocked or undetermined: say so and fall through to the
+			// verdict the unreadable half did establish, rather than
+			// losing it.
+			out.Printf("      readable half: %s\n", note)
 		}
-		out.Printf("      readable half: %s\n", note)
 	}
 
 	switch {
@@ -215,6 +220,18 @@ func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api 
 		out.Printf("      %d filler calendars deleted\n", len(ids))
 	}()
 	if err != nil {
+		// The quota refusal is not a failed spike, it is the answer to a
+		// question nobody asked: an account cannot hold enough calendars
+		// to reach the ceiling. Reported as its own finding, because
+		// phase 3's create_calendar meets the same 403 (§18 row 36).
+		if strings.Contains(err.Error(), "quotaExceeded") ||
+			strings.Contains(err.Error(), "usage limits") {
+			return fail, fmt.Sprintf("BLOCKED, and the blocker is the finding: Google refused to "+
+				"create more than %d calendars — 403 quotaExceeded, \"Calendar usage limits "+
+				"exceeded\". The readable half of this spike cannot be run on an account at all, "+
+				"so §2.10's ceiling stays unsettled for readable calendars by decision rather than "+
+				"by neglect", len(ids))
+		}
 		return undetermined, fmt.Sprintf("could only create %d of %d calendars: %s",
 			len(ids), want, redact.String(err.Error()))
 	}
