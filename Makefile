@@ -113,8 +113,12 @@ schemas: build ## Dump the tool schemas
 	$(BIN) --dump-schemas > schemas.json
 
 .PHONY: schema-diff
-schema-diff: build gates ## Diff the tool schemas against the last tag
+schema-diff: build gates ## Diff the tool schemas against the last tag, else the recorded baseline
 	@$(GATES) schema-diff $(BIN)
+
+.PHONY: schema-baseline
+schema-baseline: build gates ## Record the current tool surface as the baseline (deliberate; manual)
+	@$(GATES) schema-baseline $(BIN)
 
 .PHONY: smoke
 smoke: build gates ## Drive the binary over stdio

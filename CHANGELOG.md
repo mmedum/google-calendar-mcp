@@ -144,6 +144,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The live driver no longer mails anyone unless asked. Spikes A and B
+  sent four real invitations on every run with guest addresses
+  configured, which a phase that runs the driver dozens of times would
+  have turned into dozens of invitations to a colleague. They need
+  `-spike-notify` per run, like `-spike-ceiling`, so a variable left in
+  a shell profile cannot do it by accident.
+- `schema-diff` has a baseline before the first tag. It compared the
+  tool surface against the last git tag and there is no tag, so it
+  printed "no previous tag" and passed on every run since the project
+  started — inert through exactly the phases that add the most tools. It
+  now falls back to `testdata/schema-baseline.json`, written by
+  `make schema-baseline`.
 - Spike A is answered: `externalOnly` follows the organiser's domain,
   and `sendUpdates=none` mailed nobody on insert. The second does not
   soften §4.3 rule 3 — Google warns mail "might still be sent", so one

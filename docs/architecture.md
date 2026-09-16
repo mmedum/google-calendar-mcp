@@ -985,6 +985,17 @@ terminal first.
 `leaks`, `transcript`, `live-cover`, `parity`, `pins`, `schema-diff`,
 `smoke`, `staleness` — nineteen targets.
 
+`schema-diff` compares the built tool surface against the last tag, and
+against `testdata/schema-baseline.json` when there is no tag. The
+fallback exists because there was no tag: the gate reported "no previous
+tag" on every run from the first commit onwards, which is the whole
+stretch where the surface changes most — inert exactly when it was most
+needed. `make schema-baseline` records the current surface, and
+refreshing it is the deliberate act of saying the change has been looked
+at, which is what tagging says at a larger scale. The gate reports and
+never fails: removing a tool is sometimes right, and the definition of
+done says a person reads this one.
+
 `mcpb`, the bundle manifest gate, is the one this list named before it
 existed. It arrives with the bundle in phase 4; until then it is in §16
 as owed rather than here as done. Three gates were named here while

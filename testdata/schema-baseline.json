@@ -1,0 +1,298 @@
+{
+  "server": "google-calendar-mcp",
+  "sdk_version": "v1.7.0",
+  "tools": [
+    {
+      "name": "check_availability",
+      "description": "When people are busy, and when they are free, in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. This asks Google's free/busy service rather than listing events, which matters: it sees busy time on calendars whose events you cannot read, and it respects events marked \"free\", so a list of events is not the same answer. A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to use. Working hours are not applied: pass a narrower window if you only want office hours. Calendars are asked in batches of 50, and the result says how many requests that took.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendars": {
+            "description": "Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "from": {
+            "description": "Start of the window: yyyy-mm-dd or RFC3339. Required.",
+            "type": "string"
+          },
+          "min_minutes": {
+            "description": "Ignore free gaps shorter than this many minutes.",
+            "type": "integer"
+          },
+          "time_zone": {
+            "description": "IANA zone to read the window and show the times in.",
+            "type": "string"
+          },
+          "to": {
+            "description": "End of the window: yyyy-mm-dd or RFC3339. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_calendar",
+      "description": "One calendar in full: its description, time zone, your access level, and who else it is shared with. Use list_calendars to see every calendar; use this when you need the sharing list or are checking whether you may write somewhere.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar id, its title, or \"primary\" for the account's own calendar.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_event",
+      "description": "One event in full, including its guests and their responses, its recurrence rule if it has one, and its etag. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. An event id is unique per calendar and not globally, so `calendar` is required alongside it. Ids come from list_events or search_events.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar the event is on. An event id is unique per calendar, not globally.",
+            "type": "string"
+          },
+          "event_id": {
+            "description": "The event id, from list_events or search_events.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA zone to show the times in.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar",
+          "event_id"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "get_settings",
+      "description": "The account's own Calendar settings: its time zone, which day the week starts on, and the colour palette. The time zone here is the last fallback for every other tool, so read it when you need to know what \"today\" or \"9am\" means for this person.",
+      "input_schema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_calendars",
+      "description": "List the calendars this account can see, with each one's id, time zone and your access level. Start here: every other tool takes a calendar, the ids come from this list, and the time zone it reports is what dates and times elsewhere are read against. It is cheap. Use get_calendar for one calendar's description and who it is shared with.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "include_hidden": {
+            "description": "Include calendars hidden in the Calendar UI.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_events",
+      "description": "Read a schedule: the events on one or more calendars in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. `expand` decides which shape you get, and the two are genuinely different: with expand=true (the default) a repeating event appears as each of its occurrences, which is what you want to answer \"what is on this week\". With expand=false it appears once, as a series with its recurrence rule, which is what you want before changing the whole series. Cancelled events are hidden unless show_cancelled is set. Use search_events to find an event by text; use check_availability to find free time, because a list of events is not the same as being free.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendars": {
+            "description": "Calendar ids or titles. Defaults to the account's primary calendar.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "from": {
+            "description": "Start of the window: yyyy-mm-dd or RFC3339. Required.",
+            "type": "string"
+          },
+          "max_events": {
+            "description": "Cap on events returned. The server has its own budget and says when it truncated.",
+            "type": "integer"
+          },
+          "no_expand": {
+            "description": "Return repeating events once as a series with its rule, instead of as each occurrence.",
+            "type": "boolean"
+          },
+          "page_token": {
+            "description": "Continue a truncated read, from next_page_token.",
+            "type": "string"
+          },
+          "show_cancelled": {
+            "description": "Include cancelled events, which are hidden by default.",
+            "type": "boolean"
+          },
+          "time_zone": {
+            "description": "IANA zone to read the window and show the times in, such as Europe/Copenhagen.",
+            "type": "string"
+          },
+          "to": {
+            "description": "End of the window: yyyy-mm-dd or RFC3339. Required. A bare date means the end of that day.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "list_instances",
+      "description": "The occurrences of one repeating event. `event_id` is the SERIES id, which list_events reports as series_id on each occurrence — an occurrence's own id is not a series id. Pass both from and to for a window, or neither for the whole series. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. Each occurrence reports its own id, and says when it was moved from its scheduled time. Cancelled occurrences are hidden unless show_cancelled is set, and a cancelled occurrence is how one date is removed from a series — so pass it when you need to know which dates are gone. Use get_event on the series id to see the recurrence rule itself.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar the series is on.",
+            "type": "string"
+          },
+          "event_id": {
+            "description": "The repeating event's id. On an occurrence from list_events this is its series_id, not its own id.",
+            "type": "string"
+          },
+          "from": {
+            "description": "Start of the window: yyyy-mm-dd or RFC3339. Pass both from and to, or neither.",
+            "type": "string"
+          },
+          "max_events": {
+            "description": "Cap on occurrences returned. The server has its own budget and says when it truncated.",
+            "type": "integer"
+          },
+          "page_token": {
+            "description": "Continue a truncated read, from next_page_token.",
+            "type": "string"
+          },
+          "show_cancelled": {
+            "description": "Include occurrences that were cancelled, which is how single dates are removed from a series.",
+            "type": "boolean"
+          },
+          "time_zone": {
+            "description": "IANA zone to show the occurrences in.",
+            "type": "string"
+          },
+          "to": {
+            "description": "End of the window: yyyy-mm-dd or RFC3339. Pass both from and to, or neither.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar",
+          "event_id"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    },
+    {
+      "name": "search_events",
+      "description": "Find events matching free text in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Important: Google's event search is undocumented free text with no field scoping — you cannot search \"attendee:someone\" or restrict it to titles, and Google does not say which fields it reads. Treat an empty result as \"this search found nothing\", not as \"there is no such event\", and fall back to list_events over the window when you need certainty. Searching several calendars costs one request each.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendars": {
+            "description": "Calendar ids or titles. Defaults to the primary calendar.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "from": {
+            "description": "Start of the window: yyyy-mm-dd or RFC3339. Required.",
+            "type": "string"
+          },
+          "max_events": {
+            "description": "Cap on events returned.",
+            "type": "integer"
+          },
+          "page_token": {
+            "description": "Continue a truncated search, from next_page_token.",
+            "type": "string"
+          },
+          "query": {
+            "description": "Free text. Google decides which fields this matches; there is no field syntax.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA zone to read the window and show the times in.",
+            "type": "string"
+          },
+          "to": {
+            "description": "End of the window: yyyy-mm-dd or RFC3339. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    }
+  ]
+}

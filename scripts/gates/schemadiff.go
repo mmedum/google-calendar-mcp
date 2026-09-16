@@ -24,18 +24,18 @@ func schemaDiff(bin string) error {
 		return fmt.Errorf("the binary published %d tools; that is not the surface", len(current))
 	}
 
-	tag, err := lastTag()
-	if err != nil || tag == "" {
-		// Deliberately not an error: a first release has nothing to diff
-		// against, and failing here would block the very commit that
-		// creates the baseline.
-		fmt.Printf("  no previous tag; %d tools in the baseline\n", len(current))
-		return nil //nolint:nilerr // no baseline yet is a pass, not a failure
-	}
-
-	previous, err := dumpFromTag(tag)
+	// A tag is the best baseline, and a committed snapshot is the one
+	// that exists during a phased build. Without the fallback this gate
+	// reported "no previous tag" on every run from the first commit to
+	// the first release — which is exactly the stretch where the tool
+	// surface changes most, so it was inert when it was most needed.
+	previous, against, err := baseline(current)
 	if err != nil {
-		fmt.Printf("  could not read the surface at %s (%v); %d tools now\n", tag, err, len(current))
+		return err
+	}
+	if previous == nil {
+		fmt.Printf("  no baseline yet; %d tools in the current surface. "+
+			"`make schema-baseline` records it\n", len(current))
 		return nil
 	}
 
@@ -60,7 +60,7 @@ func schemaDiff(bin string) error {
 	sort.Strings(changed)
 	sort.Strings(added)
 
-	fmt.Printf("  against %s: %d added, %d changed, %d removed\n", tag, len(added), len(changed), len(removed))
+	fmt.Printf("  against %s: %d added, %d changed, %d removed\n", against, len(added), len(changed), len(removed))
 	for _, n := range added {
 		fmt.Printf("    + %s\n", n)
 	}
@@ -130,4 +130,53 @@ func dumpFromTag(tag string) (map[string]string, error) {
 		return nil, fmt.Errorf("build %s: %w: %s", tag, err, out)
 	}
 	return dumpFrom(bin)
+}
+
+// baselineFile is the recorded tool surface, used when no tag exists.
+const baselineFile = "testdata/schema-baseline.json"
+
+// baseline returns the surface to diff against and what to call it.
+//
+// The tag wins when there is one: it is the surface that actually
+// shipped. Otherwise the committed snapshot stands in, and refreshing it
+// is the deliberate act of saying the change has been looked at — which
+// is the same thing tagging says, at a smaller scale.
+func baseline(current map[string]string) (map[string]string, string, error) {
+	if tag, err := lastTag(); err == nil && tag != "" {
+		previous, derr := dumpFromTag(tag)
+		if derr != nil {
+			fmt.Printf("  could not read the surface at %s (%v); falling back to %s\n",
+				tag, derr, baselineFile)
+		} else {
+			return previous, tag, nil
+		}
+	}
+	data, err := os.ReadFile(baselineFile)
+	if os.IsNotExist(err) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("read %s: %w", baselineFile, err)
+	}
+	previous, err := parseDump(data)
+	if err != nil {
+		return nil, "", fmt.Errorf("parse %s: %w", baselineFile, err)
+	}
+	return previous, baselineFile, nil
+}
+
+// writeBaseline records the binary's current surface as the baseline.
+func writeBaseline(bin string) error {
+	out, err := exec.Command(bin, "--dump-schemas").Output()
+	if err != nil {
+		return fmt.Errorf("run %s --dump-schemas: %w", bin, err)
+	}
+	if _, err := parseDump(out); err != nil {
+		return fmt.Errorf("the binary did not produce a readable surface: %w", err)
+	}
+	if err := os.WriteFile(baselineFile, out, 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("  recorded %s\n", baselineFile)
+	return nil
 }

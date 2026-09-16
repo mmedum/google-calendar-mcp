@@ -123,8 +123,8 @@ and Drive APIs.
 - `scripts/gates/` the repository's own checks, as Go; `scripts/livecal/`
   the live driver; `scripts/evals/` the model-facing scoring harness;
   `scripts/spikes/` the live probes of §15.
-- `testdata/` synthetic fixtures, renderer goldens, and the API surface
-  snapshot and coverage records.
+- `testdata/` synthetic fixtures, renderer goldens, the API surface
+  snapshot and coverage records, and the recorded tool-schema baseline.
 
 ## Definition of done
 

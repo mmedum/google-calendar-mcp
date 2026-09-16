@@ -82,6 +82,10 @@ func (g guests) describe() string {
 // would be scoring the insert, not the notification — which is the
 // failure §15 opens by naming.
 func spikeA(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
+	if !spikeNotify {
+		return undetermined, "not armed: this spike mails real people, so it needs -spike-notify. " +
+			"Its verdict is already recorded in §18 rows 40 and 41"
+	}
 	g := guestsFromEnv()
 	if !g.any() {
 		return undetermined, fmt.Sprintf("no guests configured; set %s, %s and %s to run it "+
@@ -127,6 +131,9 @@ func spikeA(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 // arriving in the guest's calendar, which only the guest can see. The
 // insert succeeds either way.
 func spikeB(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
+	if !spikeNotify {
+		return undetermined, "not armed: this spike mails real people, so it needs -spike-notify"
+	}
 	g := guestsFromEnv()
 	if !g.any() {
 		return undetermined, "no guests configured; see spike A"

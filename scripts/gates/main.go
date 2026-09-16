@@ -36,6 +36,7 @@ func main() {
 	if len(os.Args) < 2 {
 		fail("usage: gates coverage PROFILE MIN | classes | api-coverage | api-fields | api-diff | " +
 			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
+			"schema-baseline BIN | " +
 			"staleness BIN")
 	}
 	root, err := repoRoot()
@@ -75,6 +76,8 @@ func main() {
 		check(smoke(binArg()), "stdio smoke")
 	case "schema-diff":
 		check(schemaDiff(binArg()), "schema diff")
+	case "schema-baseline":
+		check(writeBaseline(binArg()), "schema baseline")
 	case "staleness":
 		check(staleness(binArg()), "staleness")
 	default:

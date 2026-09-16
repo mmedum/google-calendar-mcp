@@ -51,9 +51,17 @@ func main() {
 	// so it is asked for rather than assumed.
 	ceiling := flag.Bool("spike-ceiling", false,
 		"spike I: also probe the free/busy ceiling with 51 REAL calendars, created and deleted")
+	// Spikes A and B mail real people. Arming them per run rather than
+	// per environment means a phase that runs this driver dozens of
+	// times does not send dozens of invitations to a colleague, and
+	// setting the guest variables in a shell profile cannot do it by
+	// accident.
+	notify := flag.Bool("spike-notify", false,
+		"spikes A and B: send REAL invitations to the configured guests")
 	flag.Parse()
 
 	spikeCeiling = *ceiling
+	spikeNotify = *notify
 
 	showFilter = *show
 
@@ -140,13 +148,15 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	}
 	defer sess.close()
 
-	// Spikes A and B are the only things here that can mail a person, and
-	// they only do it when addresses are configured. Saying so before
-	// they run means nobody discovers it in a colleague's inbox.
-	if g := guestsFromEnv(); g.any() {
-		out.Printf("guests are configured, so spikes A and B WILL send real invitations: %s\n",
-			g.describe())
-		out.Printf("run with -keep if you want the events left in place to inspect\n\n")
+	// Spikes A and B are the only things here that can reach another
+	// person. Saying so before they run means nobody discovers it in a
+	// colleague's inbox.
+	if spikeNotify {
+		if g := guestsFromEnv(); g.any() {
+			out.Printf("-spike-notify is set: spikes A and B WILL send real invitations to %s\n",
+				g.describe())
+			out.Printf("run with -keep if you want the events left in place to inspect\n\n")
+		}
 	}
 
 	r := &results{out: out, invented: map[string]bool{
@@ -203,6 +213,10 @@ var showFilter string
 
 // spikeCeiling arms the half of spike I that creates real calendars.
 var spikeCeiling bool
+
+// spikeNotify arms spikes A and B, which are the only things here that
+// can reach another person.
+var spikeNotify bool
 
 // results tallies and prints, through the redactor only.
 type results struct {
