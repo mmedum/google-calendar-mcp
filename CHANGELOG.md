@@ -9,14 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- `externalOnly` does not mean "outside your organisation". Google
-  documents it as "notifications are sent to non-Google Calendar guests
-  only", so the axis is the guest's calendar system and not their
-  domain. §4.3 said `dry_run` would report "internal versus external",
-  which would have mislabelled exactly the guests the parameter treats
-  differently, and §15's spike A asked for two guests where only a
-  third — one not on Google Calendar — can exercise that value. Both are
-  corrected before the write path is built on them.
+- `dry_run` no longer promises to split its notification count, because
+  nobody yet knows the axis to split it on. Google documents
+  `externalOnly` as "notifications are sent to non-Google Calendar
+  guests only" — then spike A mailed a consumer Gmail address under
+  exactly that value. A guest on Gmail uses Google Calendar by
+  definition, so the description is wrong about its own parameter.
+  Labelling guests on a guess would mislabel precisely the people the
+  parameter treats differently, so the count stands unsplit until the
+  spike's remaining half settles it (§18 row 40).
 
 - `list_instances` refuses an occurrence id instead of answering with an
   empty series. It used to explain the mistake only when Google returned
