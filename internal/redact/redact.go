@@ -33,7 +33,21 @@ var (
 	eventLinkRe = regexp.MustCompile(`https://[A-Za-z0-9.\-]*google\.com/calendar/[^\s"]*`)
 	// A Meet link is a credential in URL form: anybody holding it can
 	// walk into the meeting.
-	meetRe = regexp.MustCompile(`https://meet\.google\.com/[A-Za-z0-9\-]+`)
+	//
+	// DELIBERATELY UNANCHORED, and CodeQL's go/regex/missing-regexp-anchor
+	// is wrong about this line. That rule is written for a regex used to
+	// VALIDATE a URL, where matching anywhere lets an attacker embed an
+	// allowed host in a longer string and bypass the check. This one
+	// REDACTS: it has to find a link wherever it appears, and anchoring
+	// it would stop it matching a link in the middle of a sentence —
+	// which is where every link in a transcript appears.
+	//
+	// The real risk here is the opposite one, under-matching, and the
+	// first version had three of those: it missed an upper-case URL,
+	// missed http://, and stopped at the first slash so
+	// `meet.google.com/lookup/<code>` was redacted down to the code
+	// itself. All three leaked a joinable meeting into a transcript.
+	meetRe = regexp.MustCompile(`(?i)https?://meet\.google\.com/[^\s"'<>)\]]*`)
 	// A refresh token's literal prefix.
 	tokenRe = regexp.MustCompile(`\b1//[0-9A-Za-z_\-]{10,}\b`)
 	// An OAuth client id.

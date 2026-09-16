@@ -126,3 +126,30 @@ func TestSyncAndPageTokensAreRedacted(t *testing.T) {
 		t.Log("prose with no token after the label is left alone")
 	}
 }
+
+// A Meet link is joinable by anybody holding it, so the redactor's job
+// is to miss none. These are the three it used to miss — found when
+// CodeQL flagged the line for over-matching and the opposite turned out
+// to be true.
+func TestMeetLinksAreRedactedInEveryFormTheyTake(t *testing.T) {
+	cases := []struct{ name, in string }{
+		{"in the middle of a sentence", "join at https://meet.google.com/abc-defg-hij today"},
+		{"a lookup path", "https://meet.google.com/lookup/abcdefghij"},
+		{"upper case", "HTTPS://MEET.GOOGLE.COM/abc-defg-hij"},
+		{"plain http", "http://meet.google.com/abc-defg-hij"},
+		{"with a query", "https://meet.google.com/abc-defg-hij?authuser=1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redact.String(tc.in)
+			for _, leak := range []string{"abc-defg-hij", "abcdefghij", "ABC-DEFG-HIJ"} {
+				if strings.Contains(got, leak) {
+					t.Fatalf("the meeting code survived redaction: %q", got)
+				}
+			}
+			if !strings.Contains(got, "[meet-url]") {
+				t.Fatalf("nothing was redacted: %q", got)
+			}
+		})
+	}
+}

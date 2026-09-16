@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   token ever came back, on any calendar with a deletion history. An
   incremental read still stops at the budget, because there every row is
   a change the caller has not seen.
+- The transcript redactor missed a Meet link three ways: an upper-case
+  URL, a plain `http://` one, and `meet.google.com/lookup/<code>`, where
+  it stopped at the second slash and redacted the host while printing
+  the meeting code. A Meet link is joinable by anybody holding it, so
+  each of those put a live meeting into a transcript. Found because
+  CodeQL flagged the line for the opposite problem — it reads the rule
+  as validating a URL, where matching anywhere is a bypass, and this one
+  redacts, where matching anywhere is the entire point (§18 row 75).
 - The transcript redactor masks sync and page tokens. A cursor grants
   nothing, but it is account state with the entropy of a secret, and a
   transcript gets pasted into issues. It has no shape to anchor a rule
