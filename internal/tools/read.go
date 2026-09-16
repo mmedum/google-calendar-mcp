@@ -138,6 +138,32 @@ func registerRead(s *mcp.Server, d Deps) {
 		},
 	})
 
+	add(s, d, Def[listChangesIn, service.ChangesResult]{
+		Name: "list_changes",
+		Description: "What changed on a calendar since you last looked. " +
+			"This is the only read that reports DELETIONS: a deleted event stops matching a window, so " +
+			"list_events cannot tell you it is gone, and this returns its id under deleted. " +
+			"Call it once with no sync_token to get a baseline and a token; pass that token next time and " +
+			"you get only what has changed since. " +
+			"The token comes back with the LAST page only, so a truncated read has none — continue with " +
+			"page_token until it arrives, and do not store a token you did not get. " +
+			"It takes no window, no search and no ordering: Google forbids all of them alongside a sync " +
+			"token, and deleted events are always included. " +
+			"If the token has expired the call fails [stale]; ask again with no sync_token and start over.",
+		Kind: Read,
+		Handle: func(ctx context.Context, in listChangesIn) (service.ChangesResult, error) {
+			out, err := d.Service.ListChanges(ctx, service.ChangesOptions{
+				Calendar: in.Calendar, SyncToken: in.SyncToken,
+				PageToken: in.PageToken, TimeZone: in.TimeZone,
+				MaxEvents: in.MaxEvents,
+			})
+			if err != nil {
+				return service.ChangesResult{}, err
+			}
+			return service.NewChangesResult(out), nil
+		},
+	})
+
 	add(s, d, Def[checkAvailabilityIn, service.AvailabilityResult]{
 		Name: "check_availability",
 		Description: "When people are busy, and when they are free, in a window. " + windowHelp + " " + zoneHelp + " " +
@@ -228,6 +254,14 @@ type listInstancesIn struct {
 	ShowCancelled bool   `json:"show_cancelled,omitempty" jsonschema:"Include occurrences that were cancelled, which is how single dates are removed from a series."`
 	MaxEvents     int    `json:"max_events,omitempty" jsonschema:"Cap on occurrences returned. The server has its own budget and says when it truncated."`
 	PageToken     string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+}
+
+type listChangesIn struct {
+	Calendar  string `json:"calendar" jsonschema:"The calendar to check for changes."`
+	SyncToken string `json:"sync_token,omitempty" jsonschema:"A token from a previous call's sync_token. Leave it out the first time to get a baseline and a token. Opaque: never build or edit one."`
+	PageToken string `json:"page_token,omitempty" jsonschema:"Continue a read that did not finish, from next_page_token. The sync token arrives with the last page."`
+	TimeZone  string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the changed events in."`
+	MaxEvents int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
 }
 
 type checkAvailabilityIn struct {

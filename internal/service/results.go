@@ -695,3 +695,62 @@ func NewSharingResult(s render.SharingReport) SharingResult {
 	_, out.Public = model.PublicRule(s.After)
 	return out
 }
+
+// ChangesResult is what `list_changes` hands back (§17.1).
+type ChangesResult struct {
+	CalendarID   string `json:"calendar_id"`
+	CalendarName string `json:"calendar_name,omitempty"`
+	TimeZone     string `json:"time_zone"`
+	ZoneSource   string `json:"time_zone_source"`
+
+	// Baseline says no token was supplied, so this is the starting
+	// point rather than a report of changes.
+	Baseline bool       `json:"baseline"`
+	Changed  []EventOut `json:"changed"`
+	// Deleted carries ids only. Google's answer for a deleted event has
+	// no title and no times, and inventing them would be this server
+	// claiming to know what it does not.
+	//
+	// On a BASELINE these are the events already cancelled on the
+	// calendar rather than ones deleted since a point in time: there was
+	// no such point yet. `baseline` distinguishes the two, and the text
+	// half labels them differently.
+	Deleted []string `json:"deleted"`
+
+	// Complete says the last page was reached. SyncToken is set only
+	// then, because Google issues it with the last page alone — so an
+	// incomplete read has none, and a caller storing one anyway would
+	// skip everything it had not read.
+	Complete      bool   `json:"complete"`
+	SyncToken     string `json:"sync_token,omitempty"`
+	NextPageToken string `json:"next_page_token,omitempty"`
+	Requests      int    `json:"api_requests"`
+
+	text string
+}
+
+// Render is the human half.
+func (r ChangesResult) Render() string { return r.text }
+
+// NewChangesResult builds the result from the rendered view.
+func NewChangesResult(in render.Changes) ChangesResult {
+	out := ChangesResult{
+		CalendarID: in.CalendarID, CalendarName: in.CalendarName,
+		TimeZone: in.Zone.Name(), ZoneSource: string(in.Zone.Source),
+		Baseline: in.Baseline, Complete: in.Complete,
+		SyncToken: in.SyncToken, NextPageToken: in.NextPageToken,
+		Requests: in.Requests,
+		Deleted:  in.Deleted,
+		text:     in.Text(),
+	}
+	for _, e := range in.Changed {
+		out.Changed = append(out.Changed, NewEventOut(e))
+	}
+	if out.Changed == nil {
+		out.Changed = []EventOut{}
+	}
+	if out.Deleted == nil {
+		out.Deleted = []string{}
+	}
+	return out
+}

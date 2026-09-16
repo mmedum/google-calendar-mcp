@@ -85,10 +85,24 @@ type Server struct {
 	// first time `make check` ran the fan-out test.
 	Requests []string
 
+	// SyncTokenExpired makes the next sync request answer 410, which is
+	// the one thing a caller holding a token has to survive: Google
+	// discards tokens and the only cure is a full read with none.
+	SyncTokenExpired bool
+
 	mu sync.Mutex
 	// revs counts patches per event, so an etag moves on every write and
 	// a stale If-Match is refused the way Google refuses it.
 	revs map[string]int
+	// syncSeq is a change counter per calendar, and changed records the
+	// LATEST state of every event that has moved since the calendar was
+	// seeded — a cancelled stub for one that was deleted outright.
+	//
+	// A deleted event is removed from Events entirely, so without this
+	// a sync could not report it, and reporting deletions is the whole
+	// reason sync exists rather than a second way to list.
+	syncSeq map[string]int
+	changed map[string]map[string]syncChange
 
 	// ACLScopeRequired makes acl.list refuse, which is how §2.15 is
 	// exercised offline: calendar.readonly does not cover it.
@@ -356,6 +370,7 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 		s.Events[calID] = map[string]*gcal.Event{}
 	}
 	s.Events[calID][e.ID] = &e
+	s.bumpSync(calID, e)
 	s.mu.Unlock()
 	writeJSON(w, e)
 }
@@ -397,6 +412,7 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 	s.revs[eventID]++
 	next.ETag = etag(eventID, s.revs[eventID]+1)
 	s.Events[calID][eventID] = &next
+	s.bumpSync(calID, next)
 	s.mu.Unlock()
 	writeJSON(w, next)
 }
@@ -417,6 +433,10 @@ func (s *Server) deleteEvent(w http.ResponseWriter, r *http.Request, calID, even
 	}
 	s.mu.Lock()
 	delete(s.Events[calID], eventID)
+	// Gone from the calendar, but sync still owes the caller a
+	// tombstone: that is how a client learns the event was deleted
+	// rather than simply stopped matching a window.
+	s.bumpSync(calID, gcal.Event{ID: eventID, Status: gcal.StatusCancelled})
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1032,6 +1052,14 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 	showDeleted := q.Get("showDeleted") == "true"
 	search := strings.ToLower(q.Get("q"))
 
+	// A sync request is a different question from a list, so it is
+	// answered before any of the filtering below: it asks what CHANGED,
+	// and the answer includes events that no longer exist.
+	if token := q.Get("syncToken"); token != "" {
+		s.syncPage(w, r, calID, token)
+		return
+	}
+
 	var items []gcal.Event
 	for _, e := range s.Events[calID] {
 		// §2.9: singleEvents decides which of the two shapes comes back.
@@ -1074,11 +1102,80 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 
 	page, next := s.paginate(len(items), q.Get("pageToken"), q.Get("maxResults"))
 	cal := s.Calendars[calID]
-	writeJSON(w, gcal.EventList{
+	out := gcal.EventList{
 		Summary: cal.Summary, TimeZone: cal.TimeZone,
 		AccessRole: s.Entries[calID].AccessRole,
 		Items:      items[page[0]:page[1]], NextPageToken: next,
-	})
+	}
+	// "Token obtained from the nextSyncToken field returned on the LAST
+	// page of results" — so a truncated read carries no token, and a
+	// caller that stored one from a middle page would be storing
+	// nothing. The fake has to withhold it for the server to be held to
+	// that.
+	if next == "" {
+		out.NextSyncToken = syncTokenFor(s.currentSeq(calID))
+	}
+	writeJSON(w, out)
+}
+
+// syncPage answers events.list?syncToken=…
+//
+// Three rules from the discovery document, each of which a fake that
+// simply filtered by time would let a caller get wrong:
+// deletions are ALWAYS in the result, showDeleted=false is refused
+// outright, and a token the server has discarded is a 410 rather than an
+// empty page.
+func (s *Server) syncPage(w http.ResponseWriter, r *http.Request, calID, token string) {
+	q := r.URL.Query()
+	if s.SyncTokenExpired {
+		writeErr(w, http.StatusGone, "fullSyncRequired",
+			"Sync token is no longer valid, a full sync is required.")
+		return
+	}
+	if q.Get("showDeleted") == "false" {
+		writeErr(w, http.StatusBadRequest, "invalid",
+			"showDeleted must not be false when syncToken is set")
+		return
+	}
+	for _, forbidden := range []string{"timeMin", "timeMax", "q", "orderBy", "updatedMin",
+		"iCalUID", "privateExtendedProperty", "sharedExtendedProperty"} {
+		if q.Get(forbidden) != "" {
+			writeErr(w, http.StatusBadRequest, "invalid",
+				"cannot specify "+forbidden+" together with syncToken")
+			return
+		}
+	}
+	seq, ok := seqFromSyncToken(token)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "invalid", "malformed syncToken")
+		return
+	}
+
+	items := s.syncSince(calID, seq)
+	page, next := s.paginate(len(items), q.Get("pageToken"), q.Get("maxResults"))
+	cal := s.Calendars[calID]
+	out := gcal.EventList{
+		Summary: cal.Summary, TimeZone: cal.TimeZone,
+		AccessRole: s.Entries[calID].AccessRole,
+		Items:      items[page[0]:page[1]], NextPageToken: next,
+	}
+	if next == "" {
+		out.NextSyncToken = syncTokenFor(s.currentSeq(calID))
+	}
+	writeJSON(w, out)
+}
+
+// syncTokenFor and seqFromSyncToken keep the token opaque to the server,
+// which is the point: it is Google's to mint and the caller's to hand
+// back, and nothing in this repository may read meaning out of one.
+func syncTokenFor(seq int) string { return fmt.Sprintf("caltest-sync-%d", seq) }
+
+func seqFromSyncToken(token string) (int, bool) {
+	var seq int
+	if _, err := fmt.Sscanf(token, "caltest-sync-%d", &seq); err != nil {
+		return 0, false
+	}
+	return seq, true
 }
 
 func (s *Server) listInstances(w http.ResponseWriter, r *http.Request, calID, eventID string) {
@@ -1432,4 +1529,88 @@ func conferenceReady(current json.RawMessage) json.RawMessage {
 		return current
 	}
 	return out
+}
+
+// syncChange is one event's latest state and when it changed.
+type syncChange struct {
+	seq   int
+	event gcal.Event
+}
+
+// bumpSync records that an event changed. The caller holds mu.
+func (s *Server) bumpSync(calID string, e gcal.Event) {
+	if s.syncSeq == nil {
+		s.syncSeq = map[string]int{}
+		s.changed = map[string]map[string]syncChange{}
+	}
+	if s.changed[calID] == nil {
+		s.changed[calID] = map[string]syncChange{}
+	}
+	s.syncSeq[calID]++
+	s.changed[calID][e.ID] = syncChange{seq: s.syncSeq[calID], event: e}
+}
+
+// syncSince returns the events that changed after seq, oldest first.
+func (s *Server) syncSince(calID string, seq int) []gcal.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []syncChange
+	for _, c := range s.changed[calID] {
+		if c.seq > seq {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].seq < out[j].seq })
+	events := make([]gcal.Event, 0, len(out))
+	for _, c := range out {
+		events = append(events, c.event)
+	}
+	return events
+}
+
+// currentSeq is the token a sync request hands back.
+func (s *Server) currentSeq(calID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.syncSeq[calID]
+}
+
+// Touch records that an event changed, the way a write through the API
+// would, so a test can make something for a sync to find without going
+// through the write path's own guards.
+func (s *Server) Touch(calID, eventID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.Events[calID][eventID]
+	if !ok {
+		return
+	}
+	s.bumpSync(calID, *e)
+}
+
+// Remove deletes an event and leaves the tombstone sync owes, which is
+// what makes a deletion reportable at all.
+func (s *Server) Remove(calID, eventID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.Events[calID], eventID)
+	s.bumpSync(calID, gcal.Event{ID: eventID, Status: gcal.StatusCancelled})
+}
+
+// AnyEventID returns some event id on a calendar, for a test that needs
+// one and does not care which.
+func (s *Server) AnyEventID(calID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.Events[calID]))
+	for id, e := range s.Events[calID] {
+		if e.Status != gcal.StatusCancelled && e.RecurringEventID == "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
 }

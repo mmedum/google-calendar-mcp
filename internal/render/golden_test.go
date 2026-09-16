@@ -438,3 +438,46 @@ func TestGoldenSharingPublic(t *testing.T) {
 	}
 	golden(t, "sharing-public", s.Text())
 }
+
+// Tokens that read as invented, deliberately. A fixture shaped like a
+// real Google token is a string with the entropy of a credential sitting
+// in the repository — the leak gate refuses one, and rightly: §9.1 says
+// fixtures are generated, never recorded, and "it is only a test" is how
+// a real one gets committed one day.
+const (
+	syntheticSyncToken = "example-sync-token-not-a-real-one"
+	syntheticPageToken = "example-page-token-not-a-real-one"
+)
+
+// Incremental sync (§17.1). Two goldens, because the interesting half is
+// what the result says when it has no token to give.
+func TestGoldenChanges(t *testing.T) {
+	z := goldenZone(t)
+	moved := goldenEvent(t, "ev-standup", "Standup",
+		"2026-03-17T14:00:00+01:00", "2026-03-17T15:00:00+01:00")
+
+	c := render.Changes{
+		CalendarID: "primary", CalendarName: "Work", Zone: z,
+		Changed: []model.Event{moved},
+		Deleted: []string{"ev-gone-1", "ev-gone-2"},
+		// A finished read: the token is the point of the whole call.
+		Complete: true, SyncToken: syntheticSyncToken, Requests: 1,
+	}
+	golden(t, "changes", c.Text())
+}
+
+func TestGoldenChangesUnfinished(t *testing.T) {
+	z := goldenZone(t)
+	moved := goldenEvent(t, "ev-standup", "Standup",
+		"2026-03-17T14:00:00+01:00", "2026-03-17T15:00:00+01:00")
+
+	// Google issues the sync token with the last page only, so a read
+	// that stopped early has none — and this is the result that has to
+	// say so rather than leaving the caller to notice.
+	c := render.Changes{
+		CalendarID: "primary", CalendarName: "Work", Zone: z,
+		Changed:  []model.Event{moved},
+		Complete: false, NextPageToken: syntheticPageToken, Requests: 2,
+	}
+	golden(t, "changes-unfinished", c.Text())
+}

@@ -625,6 +625,11 @@ const (
 var liveUncovered = map[string]string{}
 
 func steps(scratch string, state seedState) []step {
+	// The sync token the baseline step issues, read by the step after
+	// it. seedState arrives by value, so it cannot carry something one
+	// step learns and the next one needs.
+	var syncToken string
+
 	window := map[string]any{"from": "2026-03-15", "to": "2026-03-31"}
 	cal := func(extra map[string]any) map[string]any {
 		out := map[string]any{"calendars": []string{scratch}}
@@ -944,6 +949,57 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
+			// §17.1. Two calls, because the claim worth driving live is
+			// not "it lists" but "the token round-trips": the baseline
+			// hands one back, and passing it returns a quiet answer
+			// rather than the whole calendar again.
+			name: "list_changes baseline and round-trip",
+			tool: "list_changes",
+			args: map[string]any{"calendar": scratch},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "Baseline for") {
+					return fail, "a call with no token did not report itself as a baseline"
+				}
+				token := afterLabel(r.text, "Next sync token: ")
+				if token == "" {
+					return fail, "the baseline handed back no sync token, so nothing can follow it"
+				}
+				syncToken = token
+				return pass, "baseline read, sync token issued"
+			},
+		},
+		{
+			name: "list_changes with the token",
+			tool: "list_changes",
+			argsFn: func() map[string]any {
+				return map[string]any{"calendar": scratch, "sync_token": syncToken}
+			},
+			skip: func() string {
+				if syncToken == "" {
+					return "the baseline step issued no token"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if strings.Contains(r.text, "Baseline for") {
+					return fail, "a call WITH a token still reported a baseline"
+				}
+				if !strings.Contains(r.text, "Changes on") {
+					return fail, "the result does not report itself as a change list"
+				}
+				if afterLabel(r.text, "Next sync token: ") == "" {
+					return fail, "the incremental read handed back no new token, so the chain stops here"
+				}
+				return pass, "token accepted, a new one issued"
+			},
+		},
+		{
 			name: "list_instances whole series",
 			tool: "list_instances",
 			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
@@ -1223,4 +1279,16 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 	}
+}
+
+// afterLabel returns the rest of the line following a label, trimmed.
+// The driver reads values out of rendered text, so a label that moves is
+// a step that reports nothing rather than one that passes wrongly.
+func afterLabel(text, label string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), label); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }

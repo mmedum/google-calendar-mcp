@@ -43,7 +43,7 @@ calendar	events.get	used	gapi.GetEvent, behind get_event
 calendar	events.import	out	carries a private copy of an event between systems, preserving iCalUID and organiser: a migration tool, not a scheduling one, with different failure modes (§1)
 calendar	events.insert	used	gapi.InsertEvent, behind create_event and the second half of a this_and_following update, with a client-generated id (§2.11)
 calendar	events.instances	used	gapi.ListInstances, behind list_instances
-calendar	events.list	used	gapi.ListEvents, behind list_events and search_events
+calendar	events.list	used	gapi.ListEvents, behind list_events, search_events and list_changes
 calendar	events.move	used	gapi.MoveEvent, behind move_event
 calendar	events.patch	used	gapi.PatchEvent, behind update_event, cancel_event on one occurrence, and respond_to_event; §4.4 patches always
 calendar	events.quickAdd	out	parses a natural-language string, but gives no control over the time zone and does not report which fields it set; the model calling this server is a better parser (§17.4)

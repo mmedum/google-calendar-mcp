@@ -63,12 +63,14 @@ func names(ts []*mcp.Tool) map[string]*mcp.Tool {
 	return out
 }
 
-// readTools is the eight of §8's first block: everything read-only mode
-// keeps, and everything that asks for only the read scopes.
+// readTools is §8's first block: everything read-only mode keeps, and
+// everything that asks for only the read scopes. `list_changes` is one
+// of them — incremental sync reads, and the token it hands back is the
+// caller's to keep (§17.1).
 var readTools = []string{
 	"list_calendars", "get_calendar", "list_events",
 	"search_events", "get_event", "list_instances",
-	"check_availability", "get_settings",
+	"check_availability", "get_settings", "list_changes",
 }
 
 // writeTools is phase 2's block: the five event writes.

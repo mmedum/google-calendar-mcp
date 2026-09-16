@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `list_changes` — what changed on a calendar since you last looked,
+  and the last open decision in §17 closed. It is the only read that
+  reports a **deletion**: a deleted event stops matching a window, so
+  its absence from `list_events` is indistinguishable from never having
+  existed, and sync answers with a tombstone instead. The surface is
+  twenty-one tools.
+
+  The caller holds the sync token and the server stores nothing —
+  a page token's contract, opaque and handed back. Storing it would make
+  the server stateful about *since when?*, which is the asker's question
+  rather than the process's.
+
+  Four rules come from the discovery document and are enforced before
+  the call rather than left to Google's 400. Deletions are always
+  included and `showDeleted` may not be false, so the read forces it
+  true — which means a baseline also picks up what is **already**
+  cancelled, labelled as that rather than as a deletion, because there
+  was no "since" yet. A window, a search, an ordering and `updatedMin`
+  cannot accompany a token, so the tool offers none of them. And the
+  token arrives on the **last page only**: a read that stops at its
+  budget has none, and the result says so in words rather than handing
+  over a token that would skip every page it never read.
+
+  An expired token is `[stale]` with the only cure that works — ask
+  again with no token — rather than the generic "read again and retry",
+  which here loops forever.
 - The release itself: `.goreleaser.yaml` and
   `.github/workflows/release.yml`. Six platform archives,
   `checksums.txt`, an SBOM per archive, a keyless cosign signature over

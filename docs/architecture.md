@@ -1,6 +1,6 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 5 is built and rehearsed (2026-09-16).** Phases 0 to 4 —
+**Status: phase 6 is built; v1.0.0 is being cut (2026-09-17).** Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
 writes, `If-Match`, the client-generated id and `dry_run`; the two calendar
@@ -9,8 +9,9 @@ resources, the working-hours mask, the conference parameter, the attendee
 warning, `scripts/evals` and the `.mcpb` bundle — are built, verified live
 and committed. Phase 5 is the release those four had nowhere to ship in:
 `.goreleaser.yaml`, `.github/workflows/release.yml`, the `release` gate
-that holds one against the other, and `gates release-notes`. The tool
-surface is unchanged at **twenty tools and three resources**; `make check`
+that holds one against the other, and `gates release-notes`. Phase 6 is
+`list_changes` and §17.1, the last open decision, now closed. The surface
+is **twenty-one tools and three resources**; `make check`
 is green across **twenty-two** targets; the live driver's last run was 85
 steps against a real account with none failing.
 
@@ -61,14 +62,12 @@ phase 0 entry claims goreleaser and a release workflow that **never
 existed**, so the bundle this phase built is packed by hand rather than
 by a signed release (§18 row 62).
 
-**Still owed**, said here rather than left implied: **a tag**, which is
-the only thing that exercises signing, provenance and the upload; the
-**MCP registry entry**, which §12 puts last and which needs a
-`server.json` and a publisher identity this repository does not have yet;
-a second MCP client and the bundle installed from a real desktop, both
-deferred by decision; spike G's negative half, from phase 0; and §17.1,
-incremental sync, which stays open. §17.2, §17.3 and §17.5 are decided
-and built.
+**Still owed**, said here rather than left implied: a second MCP client
+and the bundle installed from a real desktop, both deferred by decision,
+and spike G's negative half from phase 0. **§17 is closed** — every
+decision in it is decided and built. `list_changes` has unit tests and a
+live-driver step but has **not been driven against a real account yet**,
+which is the one thing phase 6 owes.
 
 **What phase 3's live runs cost and taught. Three runs, and the second is
 the one worth reading.** The first failed two steps and both came from
@@ -2255,6 +2254,39 @@ that only a real workflow run has, so `goreleaser check` and a full local
 snapshot both pass while that step is untested. The standard says to
 watch the first run after any change to it, which is what is owed next.
 
+**Phase 6 — incremental sync (v1.0.0). Built 2026-09-17.** `list_changes`,
+which closes §17.1, the last open decision. The surface is **twenty-one
+tools and three resources**; the read block is nine, and `GCAL_READONLY`
+keeps it.
+
+**It exists for one thing a list cannot do: report a deletion.** A
+deleted event stops matching a window, so its absence from `list_events`
+is indistinguishable from never having existed. Sync answers with a
+cancelled tombstone. Everything else the tool does — a token in, a token
+out — is in service of that.
+
+**The caller holds the token, and the server stores nothing.** §1 says no
+replica, and storing a token would make the server stateful about *since
+when?*, a question belonging to whoever asked rather than to the process.
+The contract is a page token's: opaque, handed back, passed in.
+
+**What the discovery document settled, and what it cost.** `showDeleted`
+may not be false alongside a token, so the read forces it true — which
+means a BASELINE also picks up whatever is already cancelled, and those
+are labelled "already cancelled" rather than "deleted", because there was
+no "since" yet. A window, a search, an ordering and `updatedMin` are all
+refused alongside a token, so the tool offers none of them. And
+`nextSyncToken` arrives on the **last page only**, which collides with
+§4.7's budget: a read that stops early has no token, and handing one over
+would skip every page it never read. The result says so in words (§18
+row 72).
+
+**The invalidation story §17.1 was waiting for.** 410 was already mapped
+to `[stale]` in phase 0, with a comment naming this section. What phase 0
+could not know is that `[stale]`'s generic advice — read again and retry
+— is wrong here and loops. The tool replaces the message: ask again with
+no token, and treat what you were holding as unreliable rather than old.
+
 ### 16a. Found by review, and fixed
 
 Five defects the phase 1 review turned up in code phases 0 and 1 had
@@ -2312,7 +2344,44 @@ because the shape of the mistake is the useful part.
    replica and this server has none (§1). But a "what changed since I
    last looked" tool is genuinely useful and the token is the only
    correct way to build it. Deferred to a phase that can carry the
-   invalidation story (410, §2) honestly. **Open.**
+   invalidation story (410, §2) honestly.
+
+   **Decided in phase 6: `list_changes`, and the caller holds the
+   token.** The server stores nothing. The token goes back to whoever
+   asked and comes in on the next call, exactly as a page token does —
+   it is Google's to mint and opaque to everything here. Storing it
+   would make the server stateful about a question whose answer belongs
+   to the asker: *since when?* Two people sharing one server do not
+   share a "last looked".
+
+   **Why it earns a tool rather than a flag on `list_events`.** A list
+   cannot report a DELETION. A deleted event stops matching the window,
+   so it is absent from the answer in exactly the way an event that was
+   never there is absent, and no caller can tell those apart. Sync
+   returns a cancelled tombstone, and that is the whole difference.
+
+   Four rules come from the discovery document (revision 20260826) and
+   each is enforced before the call rather than left to Google's 400:
+   deletions are always included and **`showDeleted` may not be false**,
+   so the read forces it true; a window, a search, an ordering or
+   `updatedMin` cannot accompany a token, so the tool **offers none of
+   them**; the other parameters must match the initial read, which is
+   why a baseline uses the same `showDeleted` and therefore picks up
+   what is ALREADY cancelled — labelled as that rather than as a
+   deletion, because there was no "since" yet; and **`nextSyncToken`
+   arrives on the last page only**.
+
+   That last one is the interesting one, because it collides with §4.7.
+   A read that stops at its budget has **no token**, and handing one
+   over anyway would skip every page it never read. So an unfinished
+   result says, in the text, that there is no token and why. §18 row 72.
+
+   **The invalidation story, which is what §17.1 was waiting for.** An
+   expired token is 410, which phase 0 already mapped to `[stale]`. The
+   generic message there — "read again and retry" — is wrong here and
+   would send the caller round the same loop, so the tool replaces it:
+   ask again with **no** token, and treat what you were holding as
+   unreliable rather than merely old. **Decided.**
 2. **Working hours.** There is no working-hours field in the API; the
    `workingLocation` event type is adjacent but not the same thing. Free
    gaps at 03:00 are technically correct and useless. Whether the server
@@ -2487,6 +2556,7 @@ what §15 exists to settle, and they are marked.
 | 69 | The tool-pin half of `make pins` checks what its comment says | **Probed, 2026-09-16** | **Refuted twice over, in the first version written.** It split steps by indentation and then read EVERY line of a step for the input, so a `version:` under `env:` satisfied the goreleaser pin — and `version` is the most collidable input name there is. It also understood block sequences only, so a workflow written in flow style produced no steps, no installers and **no problems**: "looked at nothing" printing the sentence "found nothing", which is the one failure `scripts/gates` exists to refuse, committed inside the gate written to refuse it. Both were found by running the code rather than reading it. There is one workflow reader now, a YAML parse in `scripts/gates/workflow.go`, shared with the release gate; both failures are regression cases, and `pinGate` asserts a floor on how many installers it SAW rather than only on how many were wrong |
 | 70 | Deriving the documented-path roots from the repository's own top-level entries is the general fix for an allow-list of them | **Tried and reverted, 2026-09-16** | **Refuted: it is circular, and weaker than the list it replaced.** `checkPaths` treats a backticked token as a path only if its first segment is a root the repository has — so a file that does NOT exist has no such root, is filed as prose, and excuses itself. The motivating case proves it: `.goreleaser.yaml` named in the docs while no such file existed would be skipped rather than flagged, which is exactly how §16 could call the release built for four phases. A probe caught it immediately, having watched the shape-based version flag the same token. The rule is therefore SHAPE, never existence — a path under a source directory, or a root file with one of the extensions a root file here actually has. `.txt` and `.json` are excluded by name because `checksums.txt` and `manifest.json` are documented and live in a release archive and a bundle rather than in this repository |
 | 71 | A universal binary is named by the `binary` of the build it joins | **Probed with the two renamed apart, 2026-09-17** | **Refuted: it is named by `universal_binaries[].name_template`, which defaults to the PROJECT name.** A snapshot with `binary: gcal-probe` wrote `gcal-probe` into every ordinary target's directory and `google-calendar-mcp` into `..._darwin_all`. The release gate took that name from the build, so it was right only while `project_name` and `binary` happened to be the same string: renaming the project alone would have moved the macOS file, left the gate green and failed `mcpb-pack` at tag time — the same failure as row 64, reached through the gate written to prevent it. Found by `/code-review high`, which reasoned it out, and settled by the probe rather than by the reasoning |
+| 72 | `nextSyncToken` comes back on every page of a sync read | **Discovery document, `events.list.syncToken`, revision 20260826** | **Refuted: "the LAST page of results".** So a read that stops at §4.7's budget has no token at all, and a server that handed one over anyway would give the caller a token covering pages it never saw — silent, permanent data loss from the caller's point of view, and exactly the shape this repository exists to refuse. `list_changes` therefore reports "there is NO sync token yet" in the text and clears the field, rather than treating a missing token as an empty one. The same paragraph settles three more: deletions are always in the result and `showDeleted` may not be false; `iCalUID`, `orderBy`, `privateExtendedProperty`, `q`, `sharedExtendedProperty`, `timeMin`, `timeMax` and `updatedMin` are all refused alongside a token, so the tool offers none of them; and "all other query parameters should be the same as for the initial synchronization", which is why a baseline reads with `showDeleted` true and labels what it finds "already cancelled" rather than "deleted" |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |

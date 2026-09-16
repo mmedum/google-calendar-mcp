@@ -268,6 +268,13 @@ type EventsListOptions struct {
 	EventTypes   []string
 	ICalUID      string
 	UpdatedMin   string
+	// SyncToken asks for only what changed since the token was issued
+	// (§17.1). The discovery document forbids it alongside iCalUID,
+	// orderBy, privateExtendedProperty, q, sharedExtendedProperty,
+	// timeMin, timeMax and updatedMin, and forbids showDeleted=false
+	// with it; the service refuses those combinations before the call
+	// rather than letting Google answer 400.
+	SyncToken string
 }
 
 // ListEvents returns one page of events.
@@ -281,6 +288,9 @@ func (c *Client) ListEvents(ctx context.Context, calendarID string, o EventsList
 	}
 	if o.SingleEvents {
 		q.Set("singleEvents", "true")
+	}
+	if o.SyncToken != "" {
+		q.Set("syncToken", o.SyncToken)
 	}
 	if o.OrderBy != "" {
 		q.Set("orderBy", o.OrderBy)
