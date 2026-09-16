@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/mmedum/google-calendar-mcp/internal/gapi"
@@ -347,7 +348,7 @@ func (s *Service) unsubscribe(ctx context.Context, cal model.Calendar, dryRun bo
 			return render.CalendarReport{}, notInYourList(err, cal)
 		}
 		if err := s.API.DeleteCalendarListEntry(ctx, cal.ID, etag); err != nil {
-			return render.CalendarReport{}, err
+			return render.CalendarReport{}, cannotUnsubscribe(err, cal)
 		}
 		s.forgetCalendar(cal.ID)
 	}
@@ -527,6 +528,32 @@ func notSubscribed(err error, cal model.Calendar) error {
 	return gapi.Errf(gapi.ClassNotFound,
 		"%q is not in your calendar list, and the colour, the name you give it and the notifications are "+
 			"settings ON that list entry. Pass subscribe:true in the same call to add it first", cal.Title)
+}
+
+// cannotUnsubscribe translates the refusal the live run found.
+//
+// **A calendar's data owner cannot remove it from their own list.**
+// Google answers 403 "The data owner of a calendar cannot remove such a
+// calendar from their calendar list", which is a rule nothing published
+// says and this server had no idea about — manage_calendar offered an
+// operation that could not work on a calendar you made.
+//
+// Not pre-empted, and the distinction is Google's own: the `owner` ACL
+// role is not the same as the data owner, which is a single account per
+// calendar and lives in a field §8b writes off for being an address
+// nothing here needs. So the API stays the authority on who that is, and
+// this translates its answer into the two things a caller can actually
+// do instead.
+func cannotUnsubscribe(err error, cal model.Calendar) error {
+	var e *gapi.Error
+	if !errors.As(err, &e) || e.Status != http.StatusForbidden ||
+		!strings.Contains(e.Message, "data owner") {
+		return err
+	}
+	return gapi.Wrap(gapi.ClassUnsupported, err,
+		"%q is a calendar this account owns, and Google does not let an owner remove their own calendar "+
+			"from their list. The two things that do work: hidden:true keeps it out of your way, and "+
+			"delete_calendar removes it for everybody", cal.Title)
 }
 
 // notInYourList is the same failure from the other direction: asked to

@@ -42,9 +42,12 @@ func (d CalendarDraft) Empty() bool {
 
 // Patch builds the calendars.patch body and lists what it changes.
 //
-// A field whose new value equals the old one is not sent and not listed:
-// a patch that rewrites a field to itself still moves the etag under
-// everybody else holding one.
+// A field whose new value equals the old one is not sent and not listed.
+// The reason is the change list rather than the etag: a result that said
+// it changed the title to the title it already had would be reporting a
+// write that did not happen. (The etag argument this used to give was
+// refuted live — Google left a calendar's etag alone when a patch wrote
+// the value already there, §18 row 58.)
 func (d CalendarDraft) Patch(before gcal.Calendar) (gcal.CalendarPatch, []Change, error) {
 	var p gcal.CalendarPatch
 	var changes []Change
@@ -144,9 +147,8 @@ func (d ListDraft) Patch(before gcal.CalendarListEntry) (gcal.CalendarListPatch,
 }
 
 // setField and setFlag apply one field of a patch: nothing is sent and
-// nothing is listed when the value is already what was asked for,
-// because a patch that rewrites a field to itself still moves the etag
-// under everybody else holding one.
+// nothing is listed when the value is already what was asked for, so the
+// change list says what the write actually did (§18 row 58).
 //
 // Both drafts go through them, which is what keeps the change list and
 // the request body describing the same write. The four copies this

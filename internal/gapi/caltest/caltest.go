@@ -56,6 +56,11 @@ type Server struct {
 	// Fail makes the next matching request fail. Key is "METHOD /path"
 	// prefix; value is the status.
 	Fail map[string]int
+	// FailMessage is the message that failure carries, for the refusals
+	// this server translates by what Google SAYS rather than by status
+	// alone — "the data owner of a calendar cannot remove such a
+	// calendar" is a 403 like any other until you read it.
+	FailMessage map[string]string
 	// Writes records every write served: the method, the path, and the
 	// sendUpdates the caller asked for. §4.3 has no default, so a test
 	// has to be able to assert that the server sent what the caller
@@ -93,6 +98,7 @@ func New() *Server {
 		FreeBusyErrors: map[string]string{},
 		FreeBusyOmit:   map[string]bool{},
 		Fail:           map[string]int{},
+		FailMessage:    map[string]string{},
 	}
 }
 
@@ -885,7 +891,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 	for prefix, status := range s.Fail {
 		if strings.HasPrefix(r.Method+" "+path, prefix) {
-			writeErr(w, status, "forced", "forced failure from caltest")
+			message := "forced failure from caltest"
+			if m, ok := s.FailMessage[prefix]; ok {
+				message = m
+			}
+			writeErr(w, status, "forced", message)
 			return
 		}
 	}

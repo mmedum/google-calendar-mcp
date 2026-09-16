@@ -95,8 +95,10 @@ type Change struct {
 // was read, and lists what it changes.
 //
 // A field whose new value equals the old one is not sent and is not
-// listed: a patch that rewrites a field to itself still bumps the etag
-// under everybody else holding one.
+// listed, so the change list describes the write rather than the
+// request. Whether such a no-op would ALSO move the etag under everybody
+// else holding one is unprobed for events: it was assumed here, and the
+// live run refuted it for calendars (§18 row 58).
 func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 	var p gcal.EventPatch
 	var changes []Change
@@ -171,8 +173,8 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 
 	if len(changes) == 0 {
 		return gcal.EventPatch{}, nil, fmt.Errorf(
-			"%w: nothing to change — every field given already holds that value. "+
-				"A write that rewrites a field to itself still moves the etag under everybody else holding one",
+			"%w: nothing to change — every field given already holds that value, so there is no write to "+
+				"make and nothing a result could report having changed",
 			ErrInvalid)
 	}
 	return p, changes, nil

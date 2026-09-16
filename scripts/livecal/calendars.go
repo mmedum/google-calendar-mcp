@@ -152,25 +152,44 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
-			// Unsubscribing and subscribing again, on a calendar this
-			// account owns: the list entry goes and comes back, and the
-			// calendar is untouched throughout.
-			name:   "manage_calendar unsubscribe",
+			// **Unsubscribing from a calendar you own is refused by
+			// Google**, and the live run is how that was found: 403,
+			// "The data owner of a calendar cannot remove such a
+			// calendar from their calendar list". Nothing published says
+			// so, and this driver had been written expecting it to work.
+			//
+			// So the step holds the translation rather than the
+			// operation. Every calendar this driver has is one it made,
+			// which means the working path — unsubscribing from somebody
+			// else's calendar — cannot be driven here at all without
+			// reading past what the driver wrote (§9.1). It is covered
+			// offline against the fake instead, and §16 says so.
+			name:   "manage_calendar unsubscribe is refused for an owner",
 			tool:   "manage_calendar",
 			argsFn: args(map[string]any{"unsubscribe": true}),
 			skip:   c.needProbe,
 			check: func(r callResult) (verdict, string) {
-				if r.isError {
-					return fail, "returned an error: " + truncate(r.text, 300)
+				if !r.isError {
+					return fail, "Google let the data owner unsubscribe from their own calendar, which it " +
+						"refused on 2026-09-16 — §18 row 55 needs revisiting"
 				}
-				if !strings.Contains(r.text, "untouched") {
-					return fail, "the result does not say the calendar itself survives"
+				if !strings.Contains(r.text, "[unsupported]") {
+					return fail, "the refusal is not classified unsupported: " + truncate(r.text, 200)
 				}
-				return pass, "removed from this account's list, with the calendar left alone"
+				for _, want := range []string{"hidden:true", "delete_calendar"} {
+					if !strings.Contains(r.text, want) {
+						return fail, "the refusal does not offer " + want + ", which is what does work"
+					}
+				}
+				return pass, "refused with [unsupported], naming the two things that do work"
 			},
 		},
 		{
-			name:   "manage_calendar subscribe",
+			// The calendar is still subscribed, because the step above
+			// could not remove it. What this holds is the other half of
+			// subscribe: asked for something already in the list, it
+			// writes nothing and says so.
+			name:   "manage_calendar subscribe is a no-op when already there",
 			tool:   "manage_calendar",
 			argsFn: args(map[string]any{"subscribe": true}),
 			skip:   c.needProbe,
@@ -178,10 +197,10 @@ func calendarSteps(c *calendarState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				if !strings.Contains(r.text, "grants no access") {
-					return fail, "the result does not say subscribing grants nothing"
+				if !strings.Contains(r.text, "Already in your calendar list") {
+					return fail, "the result does not say it was already subscribed"
 				}
-				return pass, "back in this account's list"
+				return pass, "nothing was added, and the result says why"
 			},
 		},
 		{

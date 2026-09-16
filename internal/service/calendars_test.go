@@ -858,3 +858,27 @@ func TestADryRunShowsBothHalvesOfWhatItWouldDo(t *testing.T) {
 		t.Fatalf("colour shown is %q, want the one it would set", got.Calendar.ColorID)
 	}
 }
+
+// Google refuses to let a calendar's data owner remove it from their own
+// list — 403, "The data owner of a calendar cannot remove such a
+// calendar from their calendar list" — which the live run found and
+// nothing published says. The refusal is translated into the two things
+// that do work, rather than passed through as somebody else's sentence.
+func TestUnsubscribingFromYourOwnCalendarSaysWhatDoesWork(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	fake.Fail["DELETE /users/me/calendarList/"] = 403
+	fake.FailMessage["DELETE /users/me/calendarList/"] =
+		"The data owner of a calendar cannot remove such a calendar from their calendar list."
+
+	_, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
+		Calendar: "team@group.calendar.example.test", Unsubscribe: true,
+	})
+	if cls := classOf(t, err); cls != gapi.ClassUnsupported {
+		t.Fatalf("class %s, want unsupported", cls)
+	}
+	for _, want := range []string{"hidden:true", "delete_calendar"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal does not offer %q: %v", want, err)
+		}
+	}
+}

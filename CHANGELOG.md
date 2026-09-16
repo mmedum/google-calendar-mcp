@@ -123,6 +123,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   failed, telling the caller to pass `subscribe: true`, which they had.
 - A dry run showed the calendar's old title above a change list saying
   the title changed. Both halves describe the same plan now.
+- `manage_calendar` offered an unsubscribe that could not work on a
+  calendar you made. Google refuses to let a calendar's data owner
+  remove it from their own list, which nothing published says and the
+  first live run found. The refusal now names the two things that do
+  work: `hidden: true` keeps it out of your way, `delete_calendar`
+  removes it for everybody.
 - Being refused the sharing rules because you do not own the calendar
   was reported as a missing OAuth scope, with advice to log in again
   that could not have helped. A missing scope and a refusal are

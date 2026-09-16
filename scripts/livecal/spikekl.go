@@ -126,8 +126,16 @@ func spikeL(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	// Move the etag on, so the one held above is genuinely out of date.
 	// The description is the driver's own text and changes nothing a
 	// reader of this repository could not already see.
+	//
+	// It carries the run's own mark, and that is not decoration: the
+	// first draft wrote one fixed string, so the SECOND run patched the
+	// description to the value it already held, Google did not move the
+	// etag, and the spike could not build a stale one — it reported
+	// undetermined on a question it had answered the day before (§18 row
+	// 58). A probe that works once is not a probe.
 	if err := api.patchCalendar(ctx, scratch, map[string]any{
-		"description": "Created by the google-calendar-mcp live driver. Safe to delete. (etag probe)",
+		"description": "Created by the google-calendar-mcp live driver. Safe to delete. " +
+			"(etag probe " + runMark + ")",
 	}); err != nil {
 		return undetermined, "could not patch the scratch calendar: " + redact.String(err.Error())
 	}
