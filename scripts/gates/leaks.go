@@ -94,6 +94,19 @@ func leakRules() []leakRule {
 				// The project's own contact points.
 				regexp.MustCompile(`@users\.noreply\.github\.com$`),
 				regexp.MustCompile(`@noreply\.anthropic\.com$`),
+				// The commit-attribution address, which is the other
+				// shape: noreply@anthropic.com, not @noreply.anthropic.com.
+				// The entry above anticipated this and spelled it wrong,
+				// so `leaks-history` failed on every commit message in
+				// the repository — and nobody knew, because it is the one
+				// gate `make check` does not run.
+				//
+				// Argued rather than widened (§9.1): it is a vendor's
+				// non-routable no-reply address in a Co-Authored-By
+				// trailer, structurally identical to the GitHub noreply
+				// above, and it says nothing about a deployer, an
+				// organisation or a person's calendar.
+				regexp.MustCompile(`^noreply@anthropic\.com$`),
 			},
 		},
 		{
