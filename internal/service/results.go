@@ -42,6 +42,14 @@ type CalendarOut struct {
 	Selected  bool   `json:"selected"`
 	Hidden    bool   `json:"hidden,omitempty"`
 	CanWrite  bool   `json:"can_write"`
+	// ColorID is this user's own colour for the calendar, which
+	// manage_calendar sets. The palette is in get_settings.
+	//
+	// No etag here, unlike an event: a calendar is two resources with
+	// two of them, no calendar tool takes one back, and publishing one
+	// on every list_calendars row would be offering a value with nothing
+	// to do (§7.5).
+	ColorID string `json:"color_id,omitempty"`
 }
 
 // Render implements Rendered.
@@ -60,11 +68,33 @@ func (r CalendarsResult) Render() string {
 func NewCalendarsResult(cals []model.Calendar) CalendarsResult {
 	out := CalendarsResult{Count: len(cals)}
 	for _, c := range cals {
-		out.Calendars = append(out.Calendars, CalendarOut{
-			ID: c.ID, Title: c.Title, Original: c.Original, TimeZone: c.TimeZone,
-			Role: c.Role, RoleMeans: gcal.RoleMeans(c.Role), Primary: c.Primary,
-			Selected: c.Selected, Hidden: c.Hidden, CanWrite: c.CanWrite(),
-		})
+		out.Calendars = append(out.Calendars, newCalendarOut(c))
+	}
+	return out
+}
+
+// newCalendarOut is the one place a calendar becomes a structured row.
+func newCalendarOut(c model.Calendar) CalendarOut {
+	return CalendarOut{
+		ID: c.ID, Title: c.Title, Original: c.Original, TimeZone: c.TimeZone,
+		Role: c.Role, RoleMeans: gcal.RoleMeans(c.Role), Primary: c.Primary,
+		Selected: c.Selected, Hidden: c.Hidden, CanWrite: c.CanWrite(),
+		ColorID: c.ColorID,
+	}
+}
+
+// newSharingOut is the one place an ACL rule becomes a structured row.
+func newSharingOut(r model.Sharing) SharingOut {
+	return SharingOut{
+		RuleID: r.RuleID, Who: r.Who(), ScopeType: r.ScopeType, Value: r.Value,
+		Role: r.Role, RoleMeans: r.RoleMeans(), Public: r.Public(),
+	}
+}
+
+func sharingOut(rules []model.Sharing) []SharingOut {
+	out := make([]SharingOut, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, newSharingOut(r))
 	}
 	return out
 }
@@ -82,7 +112,14 @@ type CalendarResult struct {
 
 // SharingOut is one ACL rule.
 type SharingOut struct {
+	// RuleID is Google's own id for the rule. It is reported rather than
+	// built: unshare_calendar takes `who` and finds the rule itself, so
+	// nothing here has to construct an id from a scope.
+	RuleID string `json:"rule_id,omitempty"`
+	// Who is the audience in words; Value is the raw address or domain,
+	// empty on a public rule.
 	Who       string `json:"who"`
+	Value     string `json:"value,omitempty"`
 	ScopeType string `json:"scope_type"`
 	Role      string `json:"role"`
 	RoleMeans string `json:"role_means"`
@@ -105,22 +142,28 @@ func (r CalendarResult) Render() string {
 		fmt.Fprintf(&b, "  %s\n", r.Description)
 	}
 	b.WriteString("\n")
-	switch {
-	case r.Note != "":
+	if r.Note != "" {
 		b.WriteString(r.Note + "\n")
-	case len(r.Sharing) == 0:
-		b.WriteString("Shared with nobody else.\n")
-	default:
-		fmt.Fprintf(&b, "Shared with %d:\n", len(r.Sharing))
-		for _, s := range r.Sharing {
-			if s.Public {
-				fmt.Fprintf(&b, "  ANYONE with the link — %s (%s)\n", s.Role, s.RoleMeans)
-				continue
-			}
-			fmt.Fprintf(&b, "  %s — %s (%s)\n", s.Who, s.Role, s.RoleMeans)
-		}
+		return b.String()
 	}
+	b.WriteString("who can see it:\n")
+	// The same renderer list_sharing and a share result use. Three
+	// printings of "who can see this calendar" is how one result comes to
+	// contradict another.
+	b.WriteString(render.Exposure(sharingModel(r.Sharing)))
 	return b.String()
+}
+
+// sharingModel turns the structured rows back into the model the
+// renderer reads, as CalendarsResult.Render does for calendars.
+func sharingModel(rows []SharingOut) []model.Sharing {
+	out := make([]model.Sharing, 0, len(rows))
+	for _, s := range rows {
+		out = append(out, model.Sharing{
+			RuleID: s.RuleID, ScopeType: s.ScopeType, Value: s.Value, Role: s.Role,
+		})
+	}
+	return out
 }
 
 // ScheduleResult is list_events and search_events.
@@ -309,6 +352,10 @@ type SettingsResult struct {
 	Format24Hour string            `json:"format_24_hour,omitempty"`
 	Locale       string            `json:"locale,omitempty"`
 	EventColors  map[string]string `json:"event_colors,omitempty"`
+	// CalendarColors is the other palette Google publishes, and the two
+	// are not interchangeable: an event colour id means nothing to
+	// manage_calendar's color_id, which indexes this one.
+	CalendarColors map[string]string `json:"calendar_colors,omitempty"`
 
 	text string
 }
@@ -513,5 +560,92 @@ func NewWriteResult(w render.WriteReport) WriteResult {
 		after := NewEventOut(*w.After)
 		out.Event, out.ETag = &after, after.ETag
 	}
+	return out
+}
+
+// CalendarWriteResult is what create_calendar, manage_calendar and the
+// two gated tools return (§4.9).
+//
+// Same shape as a write to an event: what it looked like before, what
+// changed, what it looks like now, and the notes that say what the write
+// did NOT do — because the mistakes §7.5 is about are all of that kind.
+// Unsubscribing deletes nothing; renaming a shared calendar renames it
+// for the team; a colour is yours alone.
+type CalendarWriteResult struct {
+	// Action is the verb in the past tense, or the conditional under
+	// DryRun, from the same table every other write uses.
+	Action   string        `json:"action"`
+	DryRun   bool          `json:"dry_run,omitempty"`
+	Calendar CalendarOut   `json:"calendar"`
+	Before   *CalendarOut  `json:"before,omitempty"`
+	Changes  []plan.Change `json:"changes,omitempty"`
+	Notes    []string      `json:"notes,omitempty"`
+	Requests int           `json:"api_requests"`
+
+	text string
+}
+
+// Render implements Rendered.
+func (r CalendarWriteResult) Render() string { return r.text }
+
+// NewCalendarWriteResult builds the reply.
+func NewCalendarWriteResult(c render.CalendarReport) CalendarWriteResult {
+	out := CalendarWriteResult{
+		Action: c.Said(), DryRun: c.DryRun, Calendar: newCalendarOut(c.Calendar),
+		Changes: c.Changes, Notes: c.Notes, Requests: c.Requests,
+		text: c.Text(),
+	}
+	if c.Before != nil {
+		before := newCalendarOut(*c.Before)
+		out.Before = &before
+	}
+	return out
+}
+
+// SharingResult is what list_sharing, share_calendar and
+// unshare_calendar return.
+//
+// Sharing is the whole exposure, not the rule that changed, and Before
+// carries what it was: §7.6's rule is that a share result answers "who
+// can see this now", which a single changed rule does not.
+type SharingResult struct {
+	// Action is empty on list_sharing, which changes nothing.
+	Action     string       `json:"action,omitempty"`
+	DryRun     bool         `json:"dry_run,omitempty"`
+	CalendarID string       `json:"calendar_id"`
+	Sharing    []SharingOut `json:"sharing"`
+	Before     []SharingOut `json:"sharing_before,omitempty"`
+	Changed    *SharingOut  `json:"changed,omitempty"`
+	// Public is the one fact worth a field of its own: a calendar
+	// anybody can read is a different kind of thing from a shared one.
+	Public bool `json:"public"`
+	// Notification says what was ASKED FOR, never what arrived — and on
+	// an unshare it says that Google offers no notification at all.
+	Notification string   `json:"notification,omitempty"`
+	Notes        []string `json:"notes,omitempty"`
+	Requests     int      `json:"api_requests"`
+
+	text string
+}
+
+// Render implements Rendered.
+func (r SharingResult) Render() string { return r.text }
+
+// NewSharingResult builds the reply.
+func NewSharingResult(s render.SharingReport) SharingResult {
+	out := SharingResult{
+		DryRun: s.DryRun, CalendarID: s.CalendarID,
+		Sharing: sharingOut(s.After), Before: sharingOut(s.Before),
+		Notification: s.Notify, Notes: s.Notes, Requests: s.Requests,
+		text: s.Text(),
+	}
+	if s.Verb != "" {
+		out.Action = s.Said()
+	}
+	if s.Changed != nil {
+		changed := newSharingOut(*s.Changed)
+		out.Changed = &changed
+	}
+	_, out.Public = model.PublicRule(s.After)
 	return out
 }

@@ -37,7 +37,17 @@ func startServer(ctx context.Context, bin, profile string) (*session, error) {
 	cmd := exec.CommandContext(ctx, bin)
 	// The server must read the same login the driver set up with, or the
 	// two halves of the run would be looking at different accounts.
-	cmd.Env = append(cmd.Environ(), "GCAL_LOG_LEVEL=error", "GCAL_PROFILE="+profile)
+	//
+	// The destructive flag is set here and nowhere else. delete_calendar
+	// and clear_calendar do not REGISTER without it (§9), so a driver
+	// that left it unset could not drive them at all and would leave the
+	// probe calendar behind on every run. What makes arming it safe is
+	// not care: every step that could reach one names a calendar this
+	// driver created, and a step whose calendar was never created is
+	// SKIPPED rather than called — because a tool call naming no
+	// calendar resolves to the account's primary one.
+	cmd.Env = append(cmd.Environ(),
+		"GCAL_LOG_LEVEL=error", "GCAL_PROFILE="+profile, "GCAL_ENABLE_DESTRUCTIVE=true")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

@@ -221,6 +221,26 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		r.run(ctx, sess, st)
 	}
 
+	// Phase 3, on a calendar of its own that create_calendar makes and
+	// delete_calendar removes. It is registered as the driver's own as
+	// soon as it exists, so §9.1 lets its bodies be printed; a run that
+	// fails before the delete step leaves it behind, so the deferred
+	// sweep below removes it.
+	cals := &calendarState{remember: func(id string) { r.invented[id] = true }}
+	defer func() {
+		if cals.probe == "" {
+			return
+		}
+		// Best effort, and silent when it is already gone: the delete
+		// step removes it in an ordinary run and this is the net for the
+		// runs that stop early. A calendar left behind costs the next
+		// run a creation from a quota that is not refunded (§18 row 36).
+		_ = api.deleteCalendar(context.Background(), cals.probe)
+	}()
+	for _, st := range calendarSteps(cals) {
+		r.run(ctx, sess, st)
+	}
+
 	// The spikes that do not go through the tool surface. Each asks
 	// something about the API itself — what a grant allows, what Google
 	// does with a recurrence carrying no zone, where the free/busy
@@ -237,6 +257,8 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike F: duplicate insert", spikeF},
 		{"spike I: 50 vs 51 calendars", spikeI},
 		{"spike J: move under If-Match", spikeJ},
+		{"spike K: clear on a secondary", spikeK},
+		{"spike L: calendar and acl If-Match", spikeL},
 	} {
 		r.total++
 		v, note := sp.run(ctx, out, api, scratch)
@@ -369,6 +391,13 @@ func readsOnlyInvented(args map[string]any, invented map[string]bool) bool {
 
 func (r *results) run(ctx context.Context, s *session, st step) {
 	r.total++
+	if st.skip != nil {
+		if why := st.skip(); why != "" {
+			r.undetermined++
+			r.out.Printf("?     %-28s %s\n", st.name, why)
+			return
+		}
+	}
 	args := st.arguments()
 	res, err := s.call(ctx, st.tool, args)
 	if err != nil {
@@ -411,7 +440,17 @@ type step struct {
 	// set. A write step's target is usually something an earlier step
 	// created, so its id does not exist when the list is built.
 	argsFn func() map[string]any
-	check  func(callResult) (verdict, string)
+	// skip returns a reason this step cannot run, or an empty string.
+	// Checked BEFORE the call, and that is the point rather than a
+	// nicety: a step whose target an earlier step failed to create would
+	// otherwise be called with no calendar named, and a calendar
+	// reference this server cannot resolve is the PRIMARY one. A driver
+	// that may not read past what it wrote (§9.1) must not be able to
+	// write past it either, and "the tool refuses without confirm" is
+	// care rather than structure — it is also the last guard in the
+	// chain rather than the first.
+	skip  func() string
+	check func(callResult) (verdict, string)
 }
 
 // arguments resolves the step's arguments, late if it has to.

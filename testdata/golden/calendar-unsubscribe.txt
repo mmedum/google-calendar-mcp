@@ -1,0 +1,10 @@
+Unsubscribed from "Sample Team".
+
+Sample Team
+  id: team@group.calendar.example.test
+  time zone: Europe/Copenhagen
+  your access: reader — can see events; private events show without their details
+
+This removes the calendar from YOUR list. The calendar itself is untouched, every event on it stays, and nobody else sees any difference. Subscribe again with subscribe:true and the id above.
+
+(2 API requests)

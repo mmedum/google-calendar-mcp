@@ -57,6 +57,34 @@ Anything touching the write path or an API response shape gets a live run
 before it counts, and **the transcript is read**. A sibling's driver
 twice reported success while its results were wrong.
 
+```
+make live                     # every step, against the logged-in account
+make live && read the output  # the part that matters
+```
+
+What it does to the account, so nothing is a surprise:
+
+- It creates a scratch calendar, or **adopts and empties** one an earlier
+  run left, and creates a second for the move steps. Calendar creation is
+  quota-counted and deleting one does not refund it, so `-keep` leaves
+  them for the next run: `go run -tags=live ./scripts/livecal -bin
+  ./google-calendar-mcp -keep`.
+- The calendar and sharing steps make a third calendar through
+  `create_calendar` and remove it through `delete_calendar`, which costs
+  one creation per run and is the only way to drive those two tools at
+  all. The driver starts the server with `GCAL_ENABLE_DESTRUCTIVE=true`
+  for them; every step that could reach a destructive tool names a
+  calendar the driver created, and a step whose calendar was never
+  created is skipped rather than called.
+- **Nothing reaches another person unless you ask for it.** Every event
+  the driver writes has no guests but the account itself, and the one
+  address it shares a calendar with is in `example.test`, which cannot
+  resolve. `-spike-notify` is what arms the steps and spikes that mail a
+  real person, and they say so before they run.
+- `-show <substring>` prints the redacted body of every step whose name
+  contains it. A pass/fail line cannot show a result that is confidently
+  wrong, which is how the last three phases each found a defect.
+
 ## Adding a tool
 
 1. Add the handler in `internal/tools`, with a `Kind` that decides its

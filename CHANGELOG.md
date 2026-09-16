@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Calendars and sharing: `create_calendar`, `manage_calendar`,
+  `list_sharing`, `share_calendar`, `unshare_calendar`, and the two
+  gated tools `delete_calendar` and `clear_calendar`. The surface is
+  twenty tools. `GCAL_SHARING=off` removes the three sharing tools, the
+  read among them.
+
+  `manage_calendar` covers what the API splits across two resources and
+  people do not. **The calendar** — its title, description, location and
+  time zone — is what everybody it is shared with sees; **your
+  subscription** to it — the colour, the name you give it, whether it is
+  hidden, what you are emailed about — is yours alone. The result says
+  which of the two it changed, every time. Unsubscribing removes it from
+  your list: it deletes nothing, touches no events, and nobody else
+  notices.
+
+  It takes no `etag`, deliberately. Those two halves are two resources
+  with two etags, so one parameter could stand for only one of them
+  while appearing to protect both; each patch is made under the etag of
+  the read that produced it.
+- Sharing shows exposure **before and after**, because "shared with
+  somebody" is not an answer to "who can see this". Roles are explained
+  rather than echoed — `writerWithoutPrivateAccess` and `freeBusyReader`
+  do not say what they mean — and a public rule is shouted and listed
+  first.
+
+  `notify` is required on every share and has no default. Google's own
+  default here is to EMAIL, the opposite of its default on an event, and
+  `external_only` is refused as `[unsupported]`: the ACL notification is
+  a single switch with no internal/external split, and rounding it
+  either way would email the wrong set of people.
+
+  Sharing with "anyone" publishes the calendar to the whole internet and
+  needs `allow_public: true`. Removing the rule afterwards stops new
+  readers and takes nothing back from whoever already looked, and the
+  result says so both ways.
+- `unshare_calendar` takes no `notify`, and the result says why: Google
+  publishes no way to ask for a notification on access removal and sends
+  none. The person is not told — they find the calendar gone.
+- `delete_calendar` refuses the primary calendar, which Google does not
+  delete, and `clear_calendar` refuses anything but the primary, which
+  is what Google documents it for. Both are unregistered without
+  `GCAL_ENABLE_DESTRUCTIVE=true` and both still need `confirm: true` on
+  the call — and the refusal for a missing `confirm` names what would be
+  destroyed, which is why `confirm` is not a schema-required field.
+- `get_settings` reports the **calendar** colour palette alongside the
+  event one. They are different sets of ids, and `manage_calendar`'s
+  `color_id` indexes the calendar one, which had no published source
+  before.
+
 - The write path: `create_event`, `update_event`, `cancel_event`,
   `move_event` and `respond_to_event`, taking the surface to thirteen
   tools. `GCAL_READONLY=true` registers the first eight and requests only
@@ -50,6 +99,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `delete_calendar` would have been refused on every call. A calendar is
+  two resources with two etags — the calendar and your subscription to
+  it — and one field carried whichever of them the last read produced, so
+  the wrong one went out under `If-Match` and came back 412, which the
+  caller reads as somebody else having edited it. The two are separate
+  fields now, and each write reads the version it is held to immediately
+  before making it.
+- Renaming a calendar you had renamed for yourself erased your own name
+  for it, and the result said "you renamed this; others see" followed by
+  the same words twice. The name you give a calendar is a different field
+  from its title and survives a rename of the calendar.
+- A calendar created in a session could not be found by its name for the
+  rest of that session. `create_calendar` did not add it to the cached
+  calendar list, so resolving it by the title the same call had just
+  given it answered "no calendar called that".
+- A `manage_calendar` call that changed the calendar and then failed to
+  change your own view of it returned a bare error. It says which change
+  already stands, because there is no rollback and a retry would
+  otherwise redo it.
 - A successful `move_event` reported the event as cancelled. Google's
   move answers with `status: cancelled` while the event sits confirmed on
   its new calendar, so the result said the opposite of what had happened

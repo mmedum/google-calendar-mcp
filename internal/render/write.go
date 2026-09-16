@@ -51,16 +51,24 @@ type WriteReport struct {
 }
 
 // verbs are the past tense and the conditional for each write. One
-// table, so the pair can never disagree.
+// table, so the pair can never disagree — and one table for every write
+// in the server, so a calendar write cannot grow a second vocabulary
+// that says "Would delete" where an event write says "Deleted".
 var verbs = map[string][2]string{
-	VerbCreate: {"Created", "Would create"},
-	VerbUpdate: {"Updated", "Would update"},
-	VerbCancel: {"Cancelled", "Would cancel"},
-	VerbMove:   {"Moved", "Would move"},
-	VerbAnswer: {"Answered", "Would answer"},
+	VerbCreate:      {"Created", "Would create"},
+	VerbUpdate:      {"Updated", "Would update"},
+	VerbCancel:      {"Cancelled", "Would cancel"},
+	VerbMove:        {"Moved", "Would move"},
+	VerbAnswer:      {"Answered", "Would answer"},
+	VerbSubscribe:   {"Subscribed to", "Would subscribe to"},
+	VerbUnsubscribe: {"Unsubscribed from", "Would unsubscribe from"},
+	VerbDelete:      {"Deleted", "Would delete"},
+	VerbClear:       {"Cleared", "Would clear"},
+	VerbShare:       {"Shared", "Would share"},
+	VerbUnshare:     {"Stopped sharing", "Would stop sharing"},
 }
 
-// The five writes.
+// The five event writes.
 const (
 	VerbCreate = "create"
 	VerbUpdate = "update"
@@ -69,17 +77,31 @@ const (
 	VerbAnswer = "answer"
 )
 
+// The calendar and sharing writes (§7.5, §7.6).
+const (
+	VerbSubscribe   = "subscribe"
+	VerbUnsubscribe = "unsubscribe"
+	VerbDelete      = "delete"
+	VerbClear       = "clear"
+	VerbShare       = "share"
+	VerbUnshare     = "unshare"
+)
+
+// said is the word a write is reported with: the past tense, or the
+// conditional under a dry run.
+func said(verb string, dryRun bool) string {
+	pair := verbs[verb]
+	if dryRun {
+		return pair[1]
+	}
+	return pair[0]
+}
+
 // Said is the word this write is reported with: the past tense, or the
 // conditional under a dry run. The structured half quotes it too, so a
 // caller reading only that cannot be told something happened when it
 // did not.
-func (w WriteReport) Said() string {
-	verb := verbs[w.Verb]
-	if w.DryRun {
-		return verb[1]
-	}
-	return verb[0]
-}
+func (w WriteReport) Said() string { return said(w.Verb, w.DryRun) }
 
 // Text renders a write.
 func (w WriteReport) Text() string {

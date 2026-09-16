@@ -1,0 +1,7 @@
+Who can see "Sample Team":
+
+  ANYONE, signed in or not — freeBusyReader (can see only whether the time is busy, never what the event is)
+  owner@example.test — owner (can see and change everything, including who else has access)
+  everybody in example.test — reader (can see events; private events show without their details)
+
+This calendar is PUBLIC: anybody at all can see only whether the time is busy, never what the event is. unshare_calendar with who:anyone removes that rule — which stops new readers and takes nothing back from whoever has already looked.

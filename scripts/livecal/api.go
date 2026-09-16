@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/internal/auth"
 	"github.com/mmedum/google-calendar-mcp/internal/credentials"
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/internal/redact"
 	"github.com/mmedum/google-calendar-mcp/internal/userconfig"
 )
 
@@ -657,4 +659,89 @@ func (a *liveAPI) removeOneOccurrence(ctx context.Context, cal string) (string, 
 		return "", fmt.Errorf("the cancelled occurrence carried no start date")
 	}
 	return target.Start.DateTime[:10], nil
+}
+
+// ------------------------------------------------- phase 3's own calls
+
+// countEvents is how spike K tells "cleared" from "accepted and did
+// nothing". A 2xx on its own says neither.
+func (a *liveAPI) countEvents(ctx context.Context, cal string) (int, error) {
+	var out struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := a.do(ctx, http.MethodGet,
+		"/calendars/"+cal+"/events?maxResults=250&showDeleted=false", nil, &out); err != nil {
+		return 0, err
+	}
+	return len(out.Items), nil
+}
+
+// calendarETag reads the calendar resource's own etag, which is not the
+// list entry's: two resources, two etags, and using one where the other
+// belongs is a 412 that reads as somebody else's edit.
+func (a *liveAPI) calendarETag(ctx context.Context, cal string) (string, error) {
+	var out struct {
+		ETag string `json:"etag"`
+	}
+	if err := a.do(ctx, http.MethodGet, "/calendars/"+cal, nil, &out); err != nil {
+		return "", err
+	}
+	return out.ETag, nil
+}
+
+func (a *liveAPI) patchCalendar(ctx context.Context, cal string, body map[string]any) error {
+	return a.do(ctx, http.MethodPatch, "/calendars/"+cal, body, nil)
+}
+
+// probeACLIfMatch asks whether acl.patch honours a stale If-Match.
+//
+// It creates a rule, moves its etag with a role change, and then patches
+// again with the etag it read before that. The rule names an address in
+// a domain that cannot resolve and is inserted with
+// sendNotifications=false, so nothing is sent and nobody can receive it;
+// the rule is removed at the end whatever happens.
+//
+// Returns the status of the stale write, or a reason it could not be
+// asked.
+func (a *liveAPI) probeACLIfMatch(ctx context.Context, cal string) (int, string) {
+	var rule struct {
+		ID   string `json:"id"`
+		ETag string `json:"etag"`
+	}
+	err := a.do(ctx, http.MethodPost, "/calendars/"+cal+"/acl?sendNotifications=false",
+		map[string]any{
+			"role":  "reader",
+			"scope": map[string]any{"type": "user", "value": probeGuest},
+		}, &rule)
+	if err != nil {
+		return 0, "the probe rule could not be created: " + redact.String(err.Error())
+	}
+	defer func() {
+		_ = a.do(context.Background(), http.MethodDelete,
+			"/calendars/"+cal+"/acl/"+url.PathEscape(rule.ID), nil, nil)
+	}()
+	if rule.ETag == "" {
+		return 0, "Google returned no etag on the new rule, so there is nothing to go stale"
+	}
+	stale := rule.ETag
+
+	// Move the etag on.
+	var fresh struct {
+		ETag string `json:"etag"`
+	}
+	if err := a.do(ctx, http.MethodPatch,
+		"/calendars/"+cal+"/acl/"+url.PathEscape(rule.ID)+"?sendNotifications=false",
+		map[string]any{"role": "writer"}, &fresh); err != nil {
+		return 0, "the probe rule could not be patched: " + redact.String(err.Error())
+	}
+	if fresh.ETag == stale {
+		return 0, "the rule's etag did not move after a patch, so a stale one cannot be built"
+	}
+
+	status, _ := a.status(ctx, http.MethodPatch,
+		"/calendars/"+cal+"/acl/"+url.PathEscape(rule.ID)+"?sendNotifications=false",
+		stale, map[string]any{"role": "reader"}, nil)
+	return status, ""
 }

@@ -161,7 +161,7 @@ func TestCalendarResultWithNoSharing(t *testing.T) {
 	res := service.CalendarResult{
 		Calendar: service.CalendarOut{ID: "primary", Title: "Mine", Role: gcal.RoleOwner},
 	}
-	if !strings.Contains(res.Render(), "Shared with nobody") {
+	if !strings.Contains(res.Render(), "nobody else") {
 		t.Fatalf("an unshared calendar does not say so:\n%s", res.Render())
 	}
 }

@@ -309,3 +309,94 @@ func TestGoldenWriteDryRun(t *testing.T) {
 	}
 	golden(t, "write-dry-run", w.Text())
 }
+
+// The calendar write report, which carries the distinction §7.5 is
+// about: what changed on the calendar everybody sees, and what changed
+// only for this account.
+func TestGoldenCalendarWrite(t *testing.T) {
+	before := model.Calendar{
+		ID: "team@group.calendar.example.test", Title: "Sample Team",
+		TimeZone: "Europe/Copenhagen", Role: gcal.RoleOwner, Selected: true,
+	}
+	after := before
+	after.Title = "Sample Team — planning"
+	after.ETag = `"team-2"`
+
+	c := render.CalendarReport{
+		Verb: render.VerbUpdate, Calendar: after, Before: &before,
+		Changes: []plan.Change{
+			{Field: "title", From: "Sample Team", To: "Sample Team — planning"},
+			{Field: "color_id", From: "3", To: "7"},
+		},
+		Notes: []string{
+			"That changes the calendar for everybody it is shared with, not only for you. " +
+				"To change only your own view of it, pass my_name rather than title.",
+			"Those are your own settings for this calendar. Nobody else sees any of them change.",
+		},
+		Requests: 4,
+	}
+	golden(t, "calendar-update", c.Text())
+}
+
+// Unsubscribing is the result most likely to be misread, so the golden
+// holds the sentence that says what it did not do.
+func TestGoldenCalendarUnsubscribe(t *testing.T) {
+	cal := model.Calendar{
+		ID: "team@group.calendar.example.test", Title: "Sample Team",
+		TimeZone: "Europe/Copenhagen", Role: gcal.RoleReader, Selected: true,
+	}
+	c := render.CalendarReport{
+		Verb: render.VerbUnsubscribe, Calendar: cal,
+		Notes: []string{
+			"This removes the calendar from YOUR list. The calendar itself is untouched, every event on it " +
+				"stays, and nobody else sees any difference. Subscribe again with subscribe:true and the id above.",
+		},
+		Requests: 2,
+	}
+	golden(t, "calendar-unsubscribe", c.Text())
+}
+
+// A share, with exposure on both sides: §7.6's rule is that the result
+// answers "who can see this now", and the golden is how a change to that
+// answer arrives as a diff.
+func TestGoldenSharing(t *testing.T) {
+	before := []model.Sharing{
+		{RuleID: "user:owner@example.test", ScopeType: gcal.ScopeTypeUser,
+			Value: "owner@example.test", Role: gcal.RoleOwner},
+	}
+	added := model.Sharing{
+		RuleID: "user:colleague@example.test", ScopeType: gcal.ScopeTypeUser,
+		Value: "colleague@example.test", Role: gcal.RoleReader,
+	}
+	s := render.SharingReport{
+		Verb: render.VerbShare, CalendarID: "team@group.calendar.example.test", Title: "Sample Team",
+		Before: before, After: append(append([]model.Sharing{}, before...), added), Changed: &added,
+		Notify: "Asked Google to email the person this rule names about the change. That is what was asked " +
+			"for, not what arrived: the API reports nothing about delivery.",
+		Requests: 2,
+	}
+	golden(t, "sharing-share", s.Text())
+}
+
+// A public calendar, listed: the public rule comes first and is shouted,
+// because a reader scanning addresses will not notice a word in the
+// middle of the list.
+func TestGoldenSharingPublic(t *testing.T) {
+	rules := []model.Sharing{
+		{RuleID: "user:owner@example.test", ScopeType: gcal.ScopeTypeUser,
+			Value: "owner@example.test", Role: gcal.RoleOwner},
+		{RuleID: "default", ScopeType: gcal.ScopeTypeDefault, Role: gcal.RoleFreeBusyReader},
+		{RuleID: "domain:example.test", ScopeType: gcal.ScopeTypeDomain,
+			Value: "example.test", Role: gcal.RoleReader},
+	}
+	s := render.SharingReport{
+		CalendarID: "team@group.calendar.example.test", Title: "Sample Team", After: rules,
+		Notes: []string{
+			"This calendar is PUBLIC: anybody at all can see only whether the time is busy, never what the " +
+				"event is. unshare_calendar with who:anyone removes that rule — which stops new readers and " +
+				"takes nothing back from whoever has already looked.",
+		},
+		Requests: 1,
+	}
+	golden(t, "sharing-public", s.Text())
+}

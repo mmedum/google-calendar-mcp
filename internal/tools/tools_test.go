@@ -76,9 +76,23 @@ var writeTools = []string{
 	"create_event", "update_event", "cancel_event", "move_event", "respond_to_event",
 }
 
-func TestTheSurfaceIsTheEightReadsAndTheFiveWrites(t *testing.T) {
+// calendarTools is phase 3's, minus the ones behind a gate: creating a
+// calendar and managing it register wherever a write does.
+var calendarTools = []string{"create_calendar", "manage_calendar"}
+
+// sharingTools is what GCAL_SHARING=off removes, the read among them
+// (§7.6).
+var sharingTools = []string{"list_sharing", "share_calendar", "unshare_calendar"}
+
+// gatedTools need GCAL_ENABLE_DESTRUCTIVE to register at all, and
+// confirm:true on the call besides (§9).
+var gatedTools = []string{"delete_calendar", "clear_calendar"}
+
+func TestTheDefaultSurfaceIsEverythingButTheGatedTools(t *testing.T) {
 	got := names(listTools(t, baseConfig()))
 	want := append(append([]string{}, readTools...), writeTools...)
+	want = append(want, calendarTools...)
+	want = append(want, sharingTools...)
 	for _, n := range want {
 		if _, ok := got[n]; !ok {
 			t.Fatalf("tool %q is not registered", n)
@@ -96,7 +110,8 @@ func TestReadOnlyModeDropsEveryWrite(t *testing.T) {
 	cfg := baseConfig()
 	cfg.ReadOnly = true
 	got := names(listTools(t, cfg))
-	for _, n := range writeTools {
+	for _, n := range append(append(append([]string{}, writeTools...), calendarTools...),
+		append(sharingTools, gatedTools...)...) {
 		if _, ok := got[n]; ok {
 			t.Fatalf("read-only mode registered %q", n)
 		}
@@ -484,7 +499,7 @@ func TestEveryToolAnswers(t *testing.T) {
 	}{
 		{"list_calendars", nil, "Sample Primary"},
 		{"list_calendars", map[string]any{"include_hidden": true}, "Sample Primary"},
-		{"get_calendar", map[string]any{"calendar": "primary"}, "Shared with"},
+		{"get_calendar", map[string]any{"calendar": "primary"}, "who can see it"},
 		{"get_settings", nil, "Europe/Copenhagen"},
 		{"list_events", map[string]any{"from": "2026-03-16", "to": "2026-03-17"}, "Morning sync"},
 		{"list_events", map[string]any{

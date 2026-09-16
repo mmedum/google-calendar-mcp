@@ -109,9 +109,23 @@ Every setting is in `docs/configuration.md`.
 | `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
 | `move_event` | Move an event to another calendar, which changes who organises it. |
 | `respond_to_event` | Answer an invitation: accepted, declined or tentative. |
+| `create_calendar` | Create a calendar of your own. |
+| `manage_calendar` | Rename or re-zone a calendar, set your own colour and name for it, or add and remove it from your list. |
+| `list_sharing` | Who can see a calendar, and what each of them can see. |
+| `share_calendar` | Give somebody access, or change the access they have. |
+| `unshare_calendar` | Take somebody's access away. |
+| `delete_calendar` | Delete a calendar and every event on it. Gated. |
+| `clear_calendar` | Delete every event on your primary calendar. Gated. |
 
 `GCAL_READONLY=true` registers the first eight and requests only read
 scopes, so the API itself refuses a write.
+
+`manage_calendar` covers what the API splits across two resources and
+people do not: **the calendar** — its title, description, location and
+time zone — is what everybody it is shared with sees, while **your
+subscription** to it — the colour, the name you give it, whether it is
+hidden, what you are emailed about — is yours alone. Unsubscribing
+removes it from your list; it deletes nothing and nobody else notices.
 
 Three rules run through every write, and each exists because guessing is
 what the surveyed servers do:
@@ -134,17 +148,24 @@ guests would be emailed, without writing.
 ## Safety
 
 - The two tools that remove something Calendar cannot bring back —
-  deleting a calendar, and clearing every event from one — arrive in a
-  later phase and will be unregistered unless
-  `GCAL_ENABLE_DESTRUCTIVE=true`, and will still need `confirm` on the
-  call. `cancel_event` is deliberately not behind that flag: cancelling a
-  meeting is what a calendar is for, Google keeps the record, and a gate
-  everybody turns on protects nobody. `docs/architecture.md` §9 argues
-  it. What guards it instead is the required `scope` and the required
-  `notify`.
+  `delete_calendar` and `clear_calendar` — are not registered at all
+  unless `GCAL_ENABLE_DESTRUCTIVE=true`, and each still needs
+  `confirm: true` on the call. `cancel_event` is deliberately not behind
+  that flag: cancelling a meeting is what a calendar is for, Google keeps
+  the record, and a gate everybody turns on protects nobody.
+  `docs/architecture.md` §9 argues it. What guards it instead is the
+  required `scope` and the required `notify`.
 - A cancellation with `notify: none` removes the meeting from your
   calendar and leaves it on your guests'. The result says so every time.
-- `GCAL_SHARING=off` removes the sharing tools entirely.
+- Sharing is the one act here whose effect leaves your account, so
+  `share_calendar` requires `notify` like every other write — and here
+  Google's own default is to email, the opposite of its default on an
+  event. Sharing with "anyone" publishes the calendar to the whole
+  internet and needs `allow_public: true`; removing the rule afterwards
+  stops new readers and takes nothing back from whoever already looked.
+  Removing access notifies nobody, because Google offers no way to ask
+  for it: they are not told, they find the calendar gone.
+- `GCAL_SHARING=off` removes the three sharing tools entirely.
 - Logs carry the method, tool, outcome, duration and a truncated calendar
   id. Never an email address, event title, description, location or
   search term. A debug log is safe to paste into a bug report by

@@ -221,7 +221,7 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 		if g == "" {
 			continue
 		}
-		if err := validAddress(g); err != nil {
+		if err := validAddress(g, "a guest"); err != nil {
 			return gcal.Event{}, err
 		}
 		e.Attendees = append(e.Attendees, gcal.EventAttendee{Email: g})
@@ -440,7 +440,7 @@ func guestList(before []gcal.EventAttendee, add, remove []string, truncated bool
 		if r == "" {
 			continue
 		}
-		if err := validAddress(r); err != nil {
+		if err := validAddress(r, "a guest"); err != nil {
 			return nil, nil, err
 		}
 		drop[strings.ToLower(r)] = true
@@ -461,7 +461,7 @@ func guestList(before []gcal.EventAttendee, add, remove []string, truncated bool
 		if g == "" {
 			continue
 		}
-		if err := validAddress(g); err != nil {
+		if err := validAddress(g, "a guest"); err != nil {
 			return nil, nil, err
 		}
 		if have[strings.ToLower(g)] {
@@ -483,11 +483,15 @@ func guestList(before []gcal.EventAttendee, add, remove []string, truncated bool
 }
 
 // validAddress refuses something that is not an address before it
-// becomes a guest nobody can reach.
-func validAddress(v string) error {
+// becomes a guest nobody can reach — or a sharing rule naming nobody.
+//
+// what names what the address would have been, because the same check
+// serves two tools and "so it cannot be a guest" is a puzzling thing to
+// read from share_calendar, which has none.
+func validAddress(v, what string) error {
 	at := strings.LastIndex(v, "@")
 	if at <= 0 || at == len(v)-1 || strings.ContainsAny(v, " \t\r\n") || !strings.Contains(v[at:], ".") {
-		return fmt.Errorf("%w: %q is not an email address, so it cannot be a guest", ErrInvalid, v)
+		return fmt.Errorf("%w: %q is not an email address, so it cannot be %s", ErrInvalid, v, what)
 	}
 	return nil
 }

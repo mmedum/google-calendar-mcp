@@ -1,15 +1,18 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 2 is built, run live and green (2026-09-16).** Phase 0 —
-the scaffolding, the gates, the time model and the six read tools —
-phase 1 — `internal/recur`, `list_instances` and `check_availability` —
-and phase 2 — `internal/plan`, the five event writes, `If-Match`, the
-client-generated id and `dry_run` — are built, verified live and
-committed. The surface is thirteen tools; `make check` is green across
-nineteen targets; the live driver runs **60 steps against a real account
-with none failing** — 7 undetermined by default, being the five that
-reach a real person and spikes A and B, all of which need
-`-spike-notify` and a configured guest.
+**Status: phase 3 is built and green offline, and has NOT been run live
+(2026-09-16).** Phase 0 — the scaffolding, the gates, the time model and
+the six read tools — phase 1 — `internal/recur`, `list_instances` and
+`check_availability` — and phase 2 — `internal/plan`, the five event
+writes, `If-Match`, the client-generated id and `dry_run` — are built,
+verified live and committed. Phase 3 — the two calendar tools, the three
+sharing tools and the two gated ones — is built, tested against the fake
+and green across the same nineteen `make check` targets, and **§13 does
+not call that done**: anything touching the write path gets a live run
+whose transcript is read, and this one has had neither. The surface is
+twenty tools; the live driver has a step for every one of them and runs
+**67 steps**, of which phase 3's fifteen and spikes K and L have never
+executed.
 
 **What phase 2's live runs cost and taught.** Six runs. The first failed
 five steps: three were the driver's own assertions, which grepped a whole
@@ -28,11 +31,16 @@ disclaimer: **`events.move` does honour `If-Match`** (§18 row 49), so
 §4.4 has no exception and `move_event` takes an etag like everything
 else.
 
-**Every spike except one is answered (§15).** A, B, C, D, E, F, H and I.
-That matters because §16's phase 2 says its refusal wording waits on A,
-B, E and F, and it no longer does. Spike G's negative half is still
-owed, and phase 3 builds the `GCAL_SHARING=off` path it needs, so it
-stops being a separate errand there.
+**Eight spikes are answered and three are not (§15).** A, B, C, D, E, F,
+H, I and J have run. Spike G's negative half is still owed, and phase 3
+has now built the `GCAL_SHARING=off` path it needs, so it stops being a
+separate errand. **K and L are new with phase 3 and have not run**: K
+asks what `calendars.clear` does when handed a secondary calendar —
+refuse, clear, or accept and do nothing, which are three different tools
+— and L asks whether the calendar and sharing writes honour `If-Match`,
+which is spike J's question one resource over. Both are written, both
+run inside `make live`, and both are the reason phase 3's guards
+currently rest on a method description rather than on an observation.
 
 **What the live work cost and taught, in one line each.** The first run
 failed one step and was quietly wrong about two that passed. Spike I
@@ -46,11 +54,17 @@ longer withdraw. Nine of §18's forty-four rows were written or rewritten
 on 2026-09-16, four of them correcting something this document had
 asserted earlier the same day.
 
-**Still owed:** spike A's `externalOnly` arm and spike B, which need an
+**Still owed:** **phase 3's live run**, which is the next thing anybody
+picking this up should do — `make live` with
+`GCAL_ENABLE_DESTRUCTIVE=true`, and then read the transcript rather than
+the count; spikes K and L, which run inside it and ask what `clear` does
+to a secondary calendar and whether the calendar and ACL writes honour
+`If-Match`; spike A's `externalOnly` arm and spike B, which need an
 out-of-domain guest and a non-Google one and cannot be scored by any
-driver (§15); spike G's negative half; and **CI has never run on macOS
-or Windows** — the workflow covers all three platforms and the branch
-has never been pushed. Both platforms cross-compile clean, including the
+driver (§15); spike G's negative half, whose `GCAL_SHARING=off` path
+phase 3 has now built; and **CI has never run on macOS or Windows** —
+the workflow covers all three platforms and the branch has never been
+pushed. Both platforms cross-compile clean, including the
 tagged tests, so a first run is unlikely to fail on compilation; the
 keyring, the file fallback's permissions and path handling are untested.
 
@@ -107,11 +121,13 @@ preamble says to expect.
 
 **Everything here was checked against the Calendar API v3 discovery
 document** (`www.googleapis.com/discovery/v1/apis/calendar/v3/rest`,
-revision 20260826, fetched 2026-09-15), the Calendar guides, and the
-public MCP calendar servers named in §1. §18 is the evidence log. Eleven
-of its thirty-two rows refute an assumption this design started out
-holding, and one of them reversed the single most consequential
-decision in it — §4.3, where the maintainer's own proposed default
+revision 20260826, fetched 2026-09-15 and refetched unchanged
+2026-09-16), the Calendar guides, and the public MCP calendar servers
+named in §1. §18 is the evidence log, 54 rows. More than a third of them
+refute an assumption this design started out holding; phase 3 added four
+before it wrote any code, one of which removed a parameter rather than
+adding one; and one reversed the single most consequential decision in
+this document — §4.3, where the maintainer's own proposed default
 turned out to be the thing Google warns in writing can lose a user's
 events.
 
@@ -438,7 +454,21 @@ Five supporting rules:
    counted (§9).
 
 The ACL tools carry the same parameter with the same requirement, which
-is what makes the two consistent where Google's defaults are not.
+is what makes the two consistent where Google's defaults are not — but
+**not the same vocabulary, and phase 3 found out why.** `acl.insert` and
+`acl.patch` take `sendNotifications`, a boolean, so `external_only` has
+nothing to map to: it is refused as `[unsupported]` rather than rounded
+to one of the two, because rounding it would email either more people or
+fewer than the caller asked for (§18 row 52). And `acl.delete` publishes
+no such parameter at all — Google sends nothing when access is removed,
+so `unshare_calendar` takes no `notify` and says in its result that
+nobody is told (§18 row 51).
+
+There is also no "reaches nobody" exemption on a sharing change, and
+that is the honest position rather than an oversight: a group address
+expands to people this server cannot count, a domain rule covers
+everybody in it, and the public scope covers the internet. The reach is
+not knowable here, so the choice is always the caller's.
 
 ### 4.4 A write never destroys what it cannot see
 
@@ -512,6 +542,16 @@ writes (§2.8), an availability query across more than 50 calendars is
 one request per batch (§2.10), and a cross-calendar search is one request
 per calendar (§2, *no search across calendars*). Each of those says in
 its result how many requests it made.
+
+**The calendar and sharing writes are two to four requests each, and the
+reason is the same in every case: a write is preceded by the read that
+produces its etag and its before-state.** `manage_calendar` is one patch
+per axis it touches; `share_calendar` reads the ACL first, because §7.6's
+before-and-after is the answer the caller asked for; the destructive two
+read the calendar for the version they are held to. The counts are
+pinned by a test that compares what the result reports with what the fake
+served, because the number in a result was kept by hand once and drifted
+to 2 while the call spent 168.
 
 ### 4.8 Own wire types, raw REST
 
@@ -750,6 +790,24 @@ The tool description names the distinction that matters:
 **unsubscribing removes it from your list; it does not delete it or
 affect anybody else.** Deleting is `delete_calendar`, gated (§9).
 
+**`manage_calendar` takes no `etag`, and the reason is the API's shape.**
+An event is one resource with one etag, so §4.4's round trip — read it,
+decide, write under the version you read — has one thing to hold. A
+calendar is two, each with its own etag and its own method, so a single
+`etag` parameter could stand for only one of them while appearing to
+protect both. Each patch carries the etag of the read that produced it,
+made immediately before, and the result shows before and after for every
+field it changed, so a value the caller did not expect is visible rather
+than silently overwritten.
+
+**`delete_calendar` refuses the account's primary calendar**, because
+Google's own description is "Deletes a secondary calendar"; and
+**`clear_calendar` refuses anything but the primary**, because Google's
+is "Clears a primary calendar". Neither refusal is invented: both quote
+the method's published description, and spike K asks what `clear`
+actually does with a secondary calendar rather than leaving the
+narrower guard to stand on prose alone (§18 row 53).
+
 ### 7.6 Sharing
 
 `list_sharing`, `share_calendar`, `unshare_calendar` over the ACL
@@ -761,7 +819,23 @@ hazard is identical.
 - **`notify` is required** (§4.3) — and here Google's default is *true*
   (§2.5), so the requirement is what stops a quiet reshare from becoming
   a surprise email, and equally what stops a deliberate one from being
-  silently suppressed.
+  silently suppressed. It is `all` or `none`: the ACL parameter is a
+  boolean, so `external_only` is refused as `[unsupported]` rather than
+  rounded (§18 row 52). It is required on every call, with no "reaches
+  nobody" exemption, because the reach of a sharing change is not
+  countable from here — a group address expands to people this server
+  cannot see, and a domain rule covers everybody in one.
+- **Removing access notifies nobody, and the result says so.**
+  `acl.delete` publishes no `sendNotifications`, and `acl.patch`'s own
+  description says there are no notifications on access removal. So
+  `unshare_calendar` takes no `notify` at all and tells the caller that
+  the person is not informed — they find the calendar gone (§18 row 51).
+- **A share reads the rules before it writes.** That is what makes the
+  before-and-after possible, and it also decides the scope type of an
+  address the calendar already knows: "user" and "group" are the same
+  shape, so an existing rule is Google's own answer to a question the
+  server would otherwise guess at. When it does guess, the result says
+  it guessed.
 - **A public calendar needs an explicit flag.** `scope.type: default`
   means "anyone", and it is the one ACL value that cannot be undone from
   the other side. It requires `allow_public: true` on the call.
@@ -1225,7 +1299,39 @@ states its question and its verdict separately.
   committed once already.
 - **Spike G — ACL scopes.** Confirm §2.15: that `acl.list` fails under
   `calendar.readonly` alone. It is a scope-set decision and a 403 weeks
-  later if wrong.
+  later if wrong. The positive half is answered; the negative half needs
+  a profile granted WITHOUT the ACL scopes, and phase 3 finishes the path
+  it takes: the login's scope set is derived from the configuration, so
+
+  ```
+  GCAL_SHARING=off google-calendar-mcp login --profile=noacl
+  make live   # with -profile=noacl
+  ```
+
+  produces exactly that grant. The spike reads the token's own scopes
+  rather than the recorded list, because a later authorization asking for
+  fewer does not revoke what was already given.
+- **Spike K — does `calendars.clear` work on a secondary calendar?**
+  Google's description is "Clears a primary calendar", and says nothing
+  about any other. Three answers are possible and each changes the tool:
+  refused, which makes `clear_calendar`'s refusal the API's rule rather
+  than this server's caution; cleared, which means the refusal should be
+  lifted; or **accepted and did nothing**, a call that reports success
+  and leaves every event in place, which is the answer worth finding.
+
+  It runs against the driver's destination calendar with an event it put
+  there itself, and counts before and after — a 2xx alone would settle
+  nothing, which is spike I's mistake. It is never run against the
+  account's primary calendar, and never against the scratch one, which
+  holds the events spikes A and B leave for a person to read.
+  **Not yet run.**
+- **Spike L — is `If-Match` honoured on the calendar and sharing
+  writes?** §2.4 says ETags are supported across this API and §4.4 puts
+  every write under one, but spike J showed that "the general rule" and
+  "this method" are different questions. The server sends the header on
+  `calendars.patch`, `calendars.delete`, `acl.patch` and `acl.delete`;
+  this asks whether Google enforces it, with a STALE etag, which is the
+  only discriminator that can. **Not yet run.**
 - **Spike H — free/busy on an unreadable calendar.** Query a calendar the
   user cannot read and confirm the per-calendar error shape §4.6 depends
   on. **Confirmed, 2026-09-15.** The query succeeds; the unreadable
@@ -1641,9 +1747,158 @@ instance read on a series-scoped write, which costs one request and is
 what produces the refusal that tells a caller their `original_start`
 named no occurrence.
 
-**Phase 3 — calendars and sharing (v0.3.0).** `create_calendar`,
-`manage_calendar`, `list_sharing`, `share_calendar`,
-`unshare_calendar`, and the two gated tools. `GCAL_SHARING=off`.
+**Phase 3 — calendars and sharing (v0.3.0). Built 2026-09-16; NOT yet
+run live.** `create_calendar`, `manage_calendar`, `list_sharing`,
+`share_calendar`, `unshare_calendar`, `delete_calendar` and
+`clear_calendar`, taking the surface to twenty. `GCAL_SHARING=off`
+removes the three sharing tools, the read among them.
+
+**Four things the discovery document settled before any code was
+written**, which is rule 13 working as intended: three of them changed
+the tool surface and one of them removed a parameter.
+
+- **`acl.delete` publishes no `sendNotifications`**, and `acl.patch`'s
+  own description says there are no notifications on access removal. So
+  `unshare_calendar` has no `notify` and says nobody is told (§18 row
+  51). A `notify` parameter there would have been a choice with no
+  effect, reported as though it had one.
+- **The ACL notification is a boolean**, so `external_only` is refused as
+  `[unsupported]` (§18 row 52). Rounding it either way emails the wrong
+  set of people.
+- **`calendars.clear` is documented for the primary calendar and
+  `calendars.delete` for a secondary one**, which is where both guards
+  come from (§18 row 53).
+- **`CalendarNotification.method` has exactly one published value**, so
+  `manage_calendar` takes notification TYPES and fills the method in
+  rather than offering a choice with one option (§18 row 54).
+
+**What the phase decided.**
+
+- **No `etag` on `manage_calendar`.** §7.5 has the argument: one
+  parameter cannot honestly stand for two resources' etags. Each patch
+  carries the etag of the read that produced it.
+- **`list_sharing` is its own Kind.** It reads, so its annotations say
+  read-only; `GCAL_SHARING=off` removes it with the other two, because a
+  deployment that turned sharing off turned off the surface rather than
+  the writes. Read-only mode drops it too, which keeps §8's "the first
+  eight" true rather than "the first eight plus a judgement call".
+- **`confirm` is not required in the tool schema**, on either gated
+  tool. The SDK validates a required field before the handler runs, so
+  the caller would have received "missing properties: [confirm]" instead
+  of the sentence naming what would be destroyed — which is the whole
+  point of asking. `notify` is schema-optional for the same reason.
+- **Access is checked before the confirmation.** "Pass confirm" is
+  useless advice to somebody whose access would have refused the call
+  anyway.
+- **Two role thresholds, each where the evidence puts it.** Sharing
+  needs owner, because Google's role description says owner is the one
+  that can "modify access levels of other users". Changing the calendar
+  itself needs writer, which is the strongest claim the documentation
+  supports: a reader plainly cannot, and whether a writer may rename a
+  calendar is not documented either way, so that half is left to Google
+  to answer rather than guessed at here. The first draft used owner for
+  both, and `unparam` caught it — a linter finding an unargued
+  constraint.
+- **The per-user half needs no access at all.** The colour, the name you
+  give a calendar and what you are emailed about work on a calendar you
+  can only read, so `prepare`'s write guard would have been wrong here.
+- **A write that changes the calendar list drops the cached list.** The
+  cache is what keeps a resolution from costing a request (§7.1), and a
+  stale one answers the next tool call with a name that no longer
+  exists.
+- **The exposure after a share is computed, not re-read.** The rule
+  Google returned is folded into the list that was read before it, so
+  "after" is what Google stored rather than what was asked for, and the
+  result costs one request rather than two.
+
+**What the reviews found, and it is the argument for running them.**
+`make check` was green before they started. `/simplify`'s four passes and
+the phase's own re-read turned up six things that mattered, three of them
+defects a caller would have met:
+
+- **A rename wiped the caller's own name for the calendar.**
+  `mergeCalendar` wrote a second copy of `model.FromCalendarList`'s
+  rename rule and inverted it, so renaming a shared calendar you had
+  renamed for yourself printed `Team planning (you renamed this; others
+  see "Team planning")` — a line that contradicts itself, with the user's
+  own name gone. One rule, one owner: the merge defers to the model's.
+- **`model.Calendar.ETag` stood for two resources.** It held the
+  subscription's etag when the calendar came from the list, which is
+  nearly always, and the calendar's when it came from `calendars.get` —
+  so `calendars.delete` was sent the wrong one and would have been
+  refused **on every call**, reported to the caller as somebody else's
+  edit. The field is two fields now, each set only by the read that
+  produced it, and the fake gives a calendar and its subscription
+  different etags so the mistake fails a test instead of passing one.
+  The three writes with no read of their own make one, because these
+  tools have no `force` and a cached etag would be a `[stale]` nobody
+  could get past.
+- **A calendar created in a session could not be found by its name.**
+  `create_calendar` left the cached calendar list untouched, so
+  resolving the calendar by the title the same call had just given it
+  answered "no calendar called that" — for the life of the process, with
+  no way for the caller to recover. The cache is corrected by every write
+  now rather than emptied, which also stopped each write making the next
+  tool call pay for a whole list read.
+- **The result told callers to pass an etag no tool accepts.** The line
+  was copied from the event renderer, where `update_event` takes the
+  value back. Removed rather than special-cased: the first fix was a
+  verb-exception table, which is the same mistake one level up.
+- **Two notification sentences were written in the service**, and both
+  made the flat promise "Nobody was emailed" that `plan.ShareReport`
+  exists to avoid making (§2.6). All four now come from one function that
+  takes the outcome.
+- **A failure after a landed change said nothing about it.**
+  `manage_calendar` can be two patches; the second failing left the first
+  in place and returned a bare error, so a caller could not tell that
+  half the write was done and a retry would redo it. There is no
+  rollback to offer, so the refusal names what already stands.
+
+**And one in the live driver, which had not run yet.** Every phase 3 step
+addressed the probe calendar through arguments built at run time — and
+when `create_calendar` failed, those arguments were EMPTY. A tool call
+naming no calendar resolves to the account's **primary** one, so a run on
+an account whose calendar-creation quota was spent (§18 row 36, an
+ordinary occurrence) would have pointed `manage_calendar`,
+`unshare_calendar` and `clear_calendar` at the operator's own calendar.
+The confirmation guard would have caught the last one, which is luck
+rather than design. A step now declares why it cannot run and is skipped
+before the call, which is §9.1's "structural rather than careful" applied
+to writing rather than to printing.
+
+**Considered and not taken**, recorded rather than lost:
+
+- **Splitting `tools.Kind` into an effect and a gate.** The enum encodes
+  both what a tool does to the world, which decides its annotations, and
+  which flag it registers behind — and two of its seven values exist only
+  because those disagree (`Cancelling`, `SharingRead`). `Def{Effect,
+  Gate}` would remove the vocabulary, and the argument for doing it now
+  rather than at three values is a fair one. Not in this phase: it
+  restructures phase 0's registration at the end of a long phase, and the
+  two switches are held by tests that assert every combination.
+- **The structured results' round trip.** `CalendarDetail` holds
+  `[]model.Sharing`, converts it to the output rows, and the renderer
+  converts back so it can recompute two derived strings.
+  `CalendarsResult` has done the same since phase 0. The new results take
+  the other convention — they carry rendered text — and unifying them is
+  worth doing, but it moves phase 0's own tests and is not phase 3's to
+  do.
+
+**Still owed, and the phase is not done without it: a live run.** §13
+says green gates are not done and that anything touching the write path
+gets a live run whose transcript is READ. Phase 3 has neither yet. The
+driver is written and the gate holds all twenty tools to having a step:
+the calendar steps create a probe calendar through `create_calendar`,
+rename it, set the per-user overrides, unsubscribe and subscribe again,
+share it with an address in a domain that cannot resolve, change that
+rule's role, unshare it, and delete it through `delete_calendar` —
+having first been refused for want of `confirm`. Spikes K and L are
+written and unrun.
+
+The probe calendar costs one creation from the quota of §18 row 36 per
+run, which is the price of driving `create_calendar` and
+`delete_calendar` at all, and a run that stops early leaves it behind —
+so the driver sweeps it on the way out.
 
 **Phase 4 — the model's experience (v1.0.0).** Resources; the evals of
 §13 with the three tasks named there; a second MCP client; the `.mcpb`
@@ -1806,6 +2061,10 @@ what §15 exists to settle, and they are marked.
 | 48 | `events.move` returns the moved event, so its response describes where the event landed | **Live, 2026-09-16** | **Refuted, and it made a successful move read as a cancellation.** A move that worked answered with `status: cancelled`, so the result rendered `[cancelled]` next to an event that had just been moved — the one word a caller would act on, and the exact opposite of what happened. Reading the event on the DESTINATION immediately afterwards showed it confirmed and intact, which is how the response was caught lying rather than the move. `move_event` reads the event back from the destination now and owns the extra request in its count. Every gate was green; only the transcript showed it, which is §13's whole claim about green gates |
 | 49 | `events.move` cannot carry `If-Match`, because it is a POST with no body and nothing documents the header | **Spike J live, 2026-09-16** | **Refuted: it is HONOURED.** A stale etag on a move is refused with **412**. The server had been sending none and saying in the result that this was the one write without the protection — an assumption stated honestly and still wrong. §4.4 has no exception now, `move_event` takes an etag and a `force` flag like every other write, and the fake refuses a stale one so the behaviour is held offline. The lesson is narrow and repeatable: "the documentation does not say" is a question, not an answer, and asking cost one probe |
 | 50 | Google's `self` flag marks the signed-in account on its own attendee row | **Live, 2026-09-16** | **Refuted on a secondary calendar, and it made a write that reached nobody demand a notification decision.** The driver put the account on its own event, on a calendar that account owns, and the attendee came back WITHOUT `self` — so §4.3.2's "a write that reaches nobody does not ask" counted the caller as their own guest and `respond_to_event` was refused with "this write reaches 1 guest". The flag appears to be relative to the calendar in the request rather than to the authenticated user, and a secondary calendar is not a person; that mechanism is a reading of one observation and the fix does not rest on it. `model.Event.Guests` takes the account's own address and excludes it whatever the flag says |
+| 51 | `acl.delete` takes a `sendNotifications` like the other ACL writes, so `unshare_calendar` needs a `notify` | Discovery document, `calendar.acl.delete` and `calendar.acl.patch`, revision 20260826, refetched 2026-09-16 | **Refuted, and it removed a parameter rather than adding one.** `acl.delete` publishes no `sendNotifications` at all, and `acl.patch`'s own description says it plainly: "Note that there are no notifications on access removal." So there is no choice to offer. `unshare_calendar` takes no `notify`, and its result says what the API's silence means for a person: they are not told, they find the calendar gone. A `notify` parameter there would have been a switch wired to nothing, reported as though it had done something — the same failure as reporting `none` as silence (§4.3 rule 3), with the wire empty instead of ambiguous |
+| 52 | §4.3's three choices carry over to the ACL tools unchanged | Discovery document, `calendar.acl.insert.sendNotifications`, revision 20260826 | **Half refuted: the requirement carries, the vocabulary does not.** `sendUpdates` on an event is an enum of three; `sendNotifications` on a rule is a **boolean**, so `external_only` has nothing to map to. It is refused as `[unsupported]` rather than rounded, because rounding it emails either more people or fewer than the caller asked for, and neither is the thing they said. The requirement itself carries and is stricter here: there is no "reaches nobody" exemption, because a group address expands to people this server cannot count and a domain rule covers everybody in one — the reach of a sharing change is not knowable from here, so the choice is always the caller's (§4.3) |
+| 53 | `calendars.clear` empties any calendar and `calendars.delete` removes any calendar | Discovery document, method descriptions, revision 20260826 | **Refuted by the methods' own descriptions, and both guards come from them.** `clear` is "Clears a **primary** calendar"; `delete` is "Deletes a **secondary** calendar. Use calendars.clear for clearing all events on primary calendars." So `delete_calendar` refuses the primary naming `clear_calendar`, and `clear_calendar` refuses anything else naming `delete_calendar`. What the documentation does NOT say is what `clear` does when handed a secondary calendar, and the three possibilities differ: refused, cleared, or accepted-and-did-nothing. Spike K asks, against a calendar the driver filled itself, counting events on both sides — because a 2xx alone would settle nothing, which is the mistake spike I made once. **Unrun**, so the narrower guard stands on the description until it has an answer |
+| 54 | A calendar notification has a delivery method worth exposing as a choice | Discovery document, `CalendarNotification.method`, revision 20260826 | **Refuted: there is exactly one.** "The possible value is: 'email'." So `manage_calendar` takes notification TYPES — creation, change, cancellation, response, agenda — and fills the method in, rather than offering a parameter with one option and letting a caller wonder what the others are. The same reading settled the other half: `notificationSettings` is written whole, so the tool replaces the list rather than adding to it, and an empty list turns every notification off |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |

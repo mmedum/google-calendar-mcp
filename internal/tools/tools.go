@@ -42,6 +42,17 @@ const (
 	// because widening access is the one act here whose blast radius
 	// leaves the account.
 	Sharing
+	// SharingRead reads who can see a calendar. It changes nothing, so
+	// its annotations say read-only — but GCAL_SHARING=off removes it
+	// with the other two, because a deployment that has turned sharing
+	// off has turned off the surface, not merely the writes.
+	//
+	// Read-only mode drops it as well. §8 registers the eight read tools
+	// there and this is not one of them: get_calendar already reports a
+	// calendar's exposure, so nothing is unreachable, and the read-only
+	// surface stays the list §8 names rather than the list minus a
+	// judgement call.
+	SharingRead
 	// Cancelling removes a meeting. It is its own Kind for one reason:
 	// its annotation has to say DESTRUCTIVE while it still registers
 	// without the destructive flag.
@@ -76,6 +87,7 @@ func Register(s *mcp.Server, d Deps) {
 	}
 	registerRead(s, d)
 	registerWrite(s, d)
+	registerCalendars(s, d)
 }
 
 // Def is one tool.
@@ -148,7 +160,7 @@ func allowed(k Kind, cfg config.Config) bool {
 		return true
 	case Destructive:
 		return cfg.EnableDestructive && !cfg.ReadOnly
-	case Sharing:
+	case Sharing, SharingRead:
 		return cfg.Sharing && !cfg.ReadOnly
 	default:
 		return !cfg.ReadOnly
@@ -158,7 +170,7 @@ func allowed(k Kind, cfg config.Config) bool {
 func annotationsFor(k Kind) *mcp.ToolAnnotations {
 	no, yes := ptr(false), ptr(true)
 	switch k {
-	case Read:
+	case Read, SharingRead:
 		return &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: no}
 	case IdempotentWrite:
 		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: no, OpenWorldHint: no}

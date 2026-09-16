@@ -14,6 +14,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -529,6 +530,170 @@ func (c *Client) MoveEvent(ctx context.Context, calendarID, eventID, destination
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ------------------------------------------- calendars and the ACL
+
+// The calendar and sharing writes. Three rules run through them, and
+// only the third is new:
+//
+//   - If-Match carries the etag from the read that produced the plan,
+//     exactly as on an event. Whether Google honours it here is spike K:
+//     until that is answered, the result says the header was sent and
+//     does not claim it protected anything.
+//   - sendNotifications is sent on EVERY acl.insert and acl.patch, true
+//     or false, never left out. Google's default is true (§2.5), so
+//     omitting it is a decision to email somebody.
+//   - acl.delete takes no sendNotifications at all, and the discovery
+//     document says there are no notifications on access removal. The
+//     result says so rather than implying a choice existed.
+
+// InsertCalendar creates a secondary calendar (calendars.insert).
+//
+// Never retried: it creates, and unlike events.insert there is no
+// client-supplied id to make a repeat collide rather than duplicate. A
+// failure nobody saw the answer to becomes [ambiguous_outcome] naming
+// the title to look for.
+func (c *Client) InsertCalendar(ctx context.Context, cal *gcal.Calendar) (*gcal.Calendar, error) {
+	var out gcal.Calendar
+	if err := c.do(ctx, request{
+		method: http.MethodPost, path: "/calendars", body: cal, idempotent: false,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PatchCalendar changes the calendar itself: what everybody subscribed
+// to it sees. calendars.update is a PUT and is never called (§4.4).
+func (c *Client) PatchCalendar(ctx context.Context, calendarID string, p *gcal.CalendarPatch, etag string) (*gcal.Calendar, error) {
+	var out gcal.Calendar
+	if err := c.do(ctx, request{
+		method: http.MethodPatch, path: "/calendars/" + esc(calendarID),
+		body: p, etag: etag, idempotent: true,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteCalendar removes a secondary calendar and everything on it.
+//
+// Google's own description is "Deletes a secondary calendar": the
+// primary cannot be deleted, and calendars.clear is what empties one.
+func (c *Client) DeleteCalendar(ctx context.Context, calendarID, etag string) error {
+	return c.do(ctx, request{
+		method: http.MethodDelete, path: "/calendars/" + esc(calendarID),
+		etag: etag, idempotent: true,
+	}, nil)
+}
+
+// ClearCalendar deletes every event on a calendar (calendars.clear).
+//
+// Retried, and the reason is the end state rather than the verb: a
+// repeat of a clear that already landed clears a calendar that is
+// already empty, which removes nothing a first call had not. That makes
+// it safe in the way a second events.insert is not.
+func (c *Client) ClearCalendar(ctx context.Context, calendarID, etag string) error {
+	return c.do(ctx, request{
+		method: http.MethodPost, path: "/calendars/" + esc(calendarID) + "/clear",
+		etag: etag, idempotent: true,
+	}, nil)
+}
+
+// InsertCalendarListEntry subscribes this user to an existing calendar.
+//
+// It adds the calendar to one person's list. It does not create a
+// calendar and it grants nobody access: an account that cannot read the
+// calendar gets a subscription it cannot use.
+func (c *Client) InsertCalendarListEntry(ctx context.Context, e *gcal.CalendarListEntry) (*gcal.CalendarListEntry, error) {
+	var out gcal.CalendarListEntry
+	if err := c.do(ctx, request{
+		method: http.MethodPost, path: "/users/me/calendarList", body: e, idempotent: false,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PatchCalendarListEntry changes this user's own overrides.
+//
+// No colorRgbFormat, and that is the whole decision about colour on the
+// wire: the parameter tells Google to read backgroundColor and
+// foregroundColor instead of the indexed colorId, and this server writes
+// the indexed one. Sending it would ask Google to read two fields this
+// patch never sets.
+func (c *Client) PatchCalendarListEntry(ctx context.Context, calendarID string, p *gcal.CalendarListPatch, etag string) (*gcal.CalendarListEntry, error) {
+	var out gcal.CalendarListEntry
+	if err := c.do(ctx, request{
+		method: http.MethodPatch, path: "/users/me/calendarList/" + esc(calendarID),
+		body: p, etag: etag, idempotent: true,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteCalendarListEntry unsubscribes this user from a calendar. The
+// calendar itself is untouched and nobody else notices.
+func (c *Client) DeleteCalendarListEntry(ctx context.Context, calendarID, etag string) error {
+	return c.do(ctx, request{
+		method: http.MethodDelete, path: "/users/me/calendarList/" + esc(calendarID),
+		etag: etag, idempotent: true,
+	}, nil)
+}
+
+// InsertACL grants access to a calendar (acl.insert).
+//
+// sendNotifications is always sent. Google documents its default as
+// true, which means a sharing change emails somebody unless this server
+// says otherwise — the opposite of the events default, from the same API
+// (§2.5). That inconsistency is why §4.3 makes the choice the caller's.
+func (c *Client) InsertACL(ctx context.Context, calendarID string, rule *gcal.AclRule, sendNotifications bool) (*gcal.AclRule, error) {
+	q := url.Values{}
+	q.Set("sendNotifications", strconv.FormatBool(sendNotifications))
+	var out gcal.AclRule
+	if err := c.do(ctx, request{
+		method: http.MethodPost, path: "/calendars/" + esc(calendarID) + "/acl",
+		query: q, body: rule, idempotent: false,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PatchACL changes an existing rule's role (acl.patch).
+//
+// acl.update is a PUT and would replace the rule, scope included, so it
+// is never called (§4.4).
+func (c *Client) PatchACL(ctx context.Context, calendarID, ruleID string, p *gcal.AclPatch,
+	sendNotifications bool, etag string,
+) (*gcal.AclRule, error) {
+	q := url.Values{}
+	q.Set("sendNotifications", strconv.FormatBool(sendNotifications))
+	var out gcal.AclRule
+	if err := c.do(ctx, request{
+		method: http.MethodPatch,
+		path:   "/calendars/" + esc(calendarID) + "/acl/" + esc(ruleID),
+		query:  q, body: p, etag: etag, idempotent: true,
+	}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteACL removes a rule, taking that access away (acl.delete).
+//
+// It takes no sendNotifications, and that is not an omission here: the
+// method publishes no such parameter, and acl.patch's own description
+// says there are no notifications on access removal. Nobody is told they
+// lost access; they discover it.
+func (c *Client) DeleteACL(ctx context.Context, calendarID, ruleID, etag string) error {
+	return c.do(ctx, request{
+		method: http.MethodDelete,
+		path:   "/calendars/" + esc(calendarID) + "/acl/" + esc(ruleID),
+		etag:   etag, idempotent: true,
+	}, nil)
 }
 
 // esc escapes one path segment. A calendar id is an email address for a

@@ -99,10 +99,13 @@ func (s *Service) prepare(ctx context.Context, calRef, tz string) (context.Conte
 	if err != nil {
 		return ctx, nil, err
 	}
-	if c.Role != "" && !c.CanWrite() {
-		return ctx, nil, gapi.Errf(gapi.ClassForbidden,
-			"this account's access to %q is %s, which %s. A write needs at least writer access; "+
-				"ask whoever owns the calendar for it", c.Title, c.Role, gcal.RoleMeans(c.Role))
+	// Through needRole, which is the one place the "role known and too
+	// weak" refusal is written. The copy this replaced misstated its own
+	// threshold — it said "at least writer access" while checking
+	// CanWrite, which is writerWithoutPrivateAccess — because a sentence
+	// and the check beneath it were separate things to keep true.
+	if err := needRole(c, gcal.RoleWriterWithoutPrivateData, "writing an event"); err != nil {
+		return ctx, nil, err
 	}
 	zone, err := s.Zone(ctx, tz, c.TimeZone)
 	if err != nil {
@@ -371,16 +374,32 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	return report, nil
 }
 
-// insertError is the one place [ambiguous_outcome] is produced (§2.11).
+// maybeLanded is the boundary of the ambiguous_outcome class (§2.11): a
+// 4xx definitely did not land, while a failure that never reached Google
+// or one Google answered with a 5xx may have.
 //
-// A 400 or a 403 definitely did not land. A failure that never reached
-// Google, or one Google answered with a 5xx, may have: the event can
-// exist with the id this call chose while the caller was told the write
-// failed. Retrying that blindly is how a meeting gets created twice, so
-// the class says "go and look" and names the id to look for.
-func insertError(err error, id, calendarID string) error {
+// One predicate, because it IS the class rather than a detail of one
+// tool. Two copies would let an event insert tell a caller to go and
+// look while a calendar insert told them to retry, under the same
+// failure, and the closed-class gate checks that the classes exist
+// rather than that they are reached under the same conditions.
+func maybeLanded(err error) (*gapi.Error, bool) {
 	var e *gapi.Error
 	if !errors.As(err, &e) || (e.Status != 0 && e.Status < 500) {
+		return nil, false
+	}
+	return e, true
+}
+
+// insertError produces [ambiguous_outcome] for an event insert (§2.11).
+//
+// The event can exist with the id this call chose while the caller was
+// told the write failed. Retrying that blindly is how a meeting gets
+// created twice, so the class says "go and look" and names the id to
+// look for.
+func insertError(err error, id, calendarID string) error {
+	e, maybe := maybeLanded(err)
+	if !maybe {
 		return err
 	}
 	return gapi.Wrap(gapi.ClassAmbiguousOutcome, err,
@@ -1121,10 +1140,8 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 			"the event is already on %q. move_event changes the calendar; use update_event to change the time",
 			dest.Title)
 	}
-	if dest.Role != "" && !dest.CanWrite() {
-		return render.WriteReport{}, gapi.Errf(gapi.ClassForbidden,
-			"this account's access to %q is %s, which %s. Moving an event there needs writer access",
-			dest.Title, dest.Role, gcal.RoleMeans(dest.Role))
+	if err := needRole(dest, gcal.RoleWriterWithoutPrivateData, "moving an event there"); err != nil {
+		return render.WriteReport{}, err
 	}
 
 	id, note, err := address(o.EventID, o.OriginalStart)

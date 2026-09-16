@@ -28,7 +28,15 @@ type Calendar struct {
 	Hidden      bool
 	ColorID     string
 	Description string
-	ETag        string
+	// ETag is the CALENDAR resource's version, and EntryETag is this
+	// user's SUBSCRIPTION to it. They are separate fields because they
+	// are separate resources with separate etags, patched by separate
+	// methods — and one field carrying "whichever read produced it" is a
+	// 412 waiting to happen, reported to the caller as somebody else's
+	// edit. Each is set only by the read that produced it, so an empty
+	// one means "this was not read" rather than "this is current".
+	ETag      string
+	EntryETag string
 }
 
 // FromCalendarList converts one subscription entry.
@@ -36,7 +44,7 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 	c := Calendar{
 		ID: e.ID, Title: e.Summary, TimeZone: e.TimeZone, Role: e.AccessRole,
 		Primary: e.Primary, Selected: e.Selected, Hidden: e.Hidden,
-		ColorID: e.ColorID, Description: e.Description, ETag: e.ETag,
+		ColorID: e.ColorID, Description: e.Description, EntryETag: e.ETag,
 	}
 	// A rename is this user's alone: the same calendar has a different
 	// name for a colleague, so both are carried and the renderer says so.
@@ -250,6 +258,71 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		})
 	}
 	return out, nil
+}
+
+// Sharing is one ACL rule as this server presents it: who can see a
+// calendar, and what they can see (§7.6).
+//
+// One type, so that get_calendar's exposure block, list_sharing and the
+// before/after on a share are the same lines computed once. Two
+// renderings of "who can see this calendar" is how one result comes to
+// contradict another.
+type Sharing struct {
+	// RuleID is the rule's own address, which unshare_calendar deletes
+	// by. It is Google's, never built here.
+	RuleID string
+	// ScopeType is user, group, domain or default.
+	ScopeType string
+	// Value is the address or domain; empty for the public scope.
+	Value string
+	Role  string
+	ETag  string
+}
+
+// FromACL converts one wire rule.
+func FromACL(r gcal.AclRule) Sharing {
+	return Sharing{
+		RuleID: r.ID, ScopeType: r.Scope.Type, Value: r.Scope.Value,
+		Role: r.Role, ETag: r.ETag,
+	}
+}
+
+// Public reports whether this rule exposes the calendar to anybody at
+// all.
+func (s Sharing) Public() bool { return s.ScopeType == gcal.ScopeTypeDefault }
+
+// Who names the audience in the words a result uses.
+func (s Sharing) Who() string {
+	if s.Public() {
+		return "ANYONE, signed in or not"
+	}
+	if s.ScopeType == gcal.ScopeTypeDomain {
+		return "everybody in " + s.Value
+	}
+	return s.Value
+}
+
+// RoleMeans explains what this rule actually grants.
+func (s Sharing) RoleMeans() string { return gcal.RoleMeans(s.Role) }
+
+// Scope is the wire shape of this rule's audience.
+func (s Sharing) Scope() gcal.AclScope {
+	return gcal.AclScope{Type: s.ScopeType, Value: s.Value}
+}
+
+// PublicRule returns the rule that exposes a calendar to anybody at all,
+// if it has one.
+//
+// Here rather than in the renderer: "is this calendar public" is a
+// question about the calendar, and three callers ask it — one of them to
+// decide whether to warn, which is policy rather than presentation.
+func PublicRule(rules []Sharing) (Sharing, bool) {
+	for _, r := range rules {
+		if r.Public() {
+			return r, true
+		}
+	}
+	return Sharing{}, false
 }
 
 // Busy is one interval somebody is not free.

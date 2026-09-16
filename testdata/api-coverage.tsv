@@ -8,30 +8,32 @@
 # gate, a client call with no row fails, and a verdict for a method that
 # no longer exists fails.
 #
-# Phases 0 and 1 implement the reads. A row marked `used` whose client
-# method does not exist yet names the phase that builds it, and the gate
-# treats that as a promise rather than a lie — see planned= below.
+# Phases 0 and 1 implement the reads, phase 2 the event writes and
+# phase 3 the calendar and sharing ones. A row marked `used` whose client
+# method does not exist yet names the phase that builds it, as
+# `planned=N`, and the gate treats that as a promise rather than a lie.
+# Every row below now names a client method: there are no promises left.
 #
 # api	method	verdict	reason
-calendar	acl.delete	used	planned=3 unshare_calendar
+calendar	acl.delete	used	gapi.DeleteACL, behind unshare_calendar; it publishes no sendNotifications and Google sends none on a removal
 calendar	acl.get	out	acl.list returns every rule in one request; a single-rule read has no caller
-calendar	acl.insert	used	planned=3 share_calendar, new rule
+calendar	acl.insert	used	gapi.InsertACL, behind share_calendar for a new rule; sendNotifications is always sent, because Google defaults it to true (§2.5)
 calendar	acl.list	used	gapi.ListACL, behind list_sharing and get_calendar's exposure
-calendar	acl.patch	used	planned=3 share_calendar, role change
+calendar	acl.patch	used	gapi.PatchACL, behind share_calendar for a role change; §4.4 patches always
 calendar	acl.update	out	PUT: replaces the rule whole. §4.4 patches always
 calendar	acl.watch	out	needs a public HTTPS webhook; a stdio server has nowhere to put one (§1)
-calendar	calendarList.delete	used	planned=3 manage_calendar unsubscribe
+calendar	calendarList.delete	used	gapi.DeleteCalendarListEntry, behind manage_calendar unsubscribe: the list entry goes, the calendar stays
 calendar	calendarList.get	used	gapi.GetCalendarListEntry, behind get_calendar and calendar resolution
-calendar	calendarList.insert	used	planned=3 manage_calendar subscribe
+calendar	calendarList.insert	used	gapi.InsertCalendarListEntry, behind manage_calendar subscribe
 calendar	calendarList.list	used	gapi.ListCalendars, behind list_calendars
-calendar	calendarList.patch	used	planned=3 manage_calendar, colour and visibility
+calendar	calendarList.patch	used	gapi.PatchCalendarListEntry, behind manage_calendar for the per-user overrides: colour, hidden, selected, the name this user gave it, notifications
 calendar	calendarList.update	out	PUT: replaces the entry whole. §4.4
 calendar	calendarList.watch	out	needs a public HTTPS webhook (§1)
-calendar	calendars.clear	used	planned=3 clear_calendar, behind GCAL_ENABLE_DESTRUCTIVE and confirm
-calendar	calendars.delete	used	planned=3 delete_calendar, behind GCAL_ENABLE_DESTRUCTIVE and confirm
+calendar	calendars.clear	used	gapi.ClearCalendar, behind clear_calendar: gated by GCAL_ENABLE_DESTRUCTIVE and confirm, and refused on anything but the primary calendar, which is what Google documents it for
+calendar	calendars.delete	used	gapi.DeleteCalendar, behind delete_calendar: gated by GCAL_ENABLE_DESTRUCTIVE and confirm, and refused on the primary, which Google does not delete
 calendar	calendars.get	used	gapi.GetCalendar, behind get_calendar for a calendar not in the list
-calendar	calendars.insert	used	planned=3 create_calendar
-calendar	calendars.patch	used	planned=3 manage_calendar, title and time zone
+calendar	calendars.insert	used	gapi.InsertCalendar, behind create_calendar; never retried, because Google mints the id and a blind retry makes a second calendar
+calendar	calendars.patch	used	gapi.PatchCalendar, behind manage_calendar for the calendar itself: title, description, location and time zone, which everybody subscribed to it sees
 calendar	calendars.transferOwnership	out	requires a Workspace admin privilege and useAdminAccess=true; this server authenticates as one ordinary user and never requests admin access (§1)
 calendar	calendars.update	out	PUT: replaces the calendar whole. §4.4
 calendar	channels.stop	out	stops a push channel; there are none, because watch is out (§1)

@@ -110,11 +110,19 @@ func (s *Server) Close() {
 }
 
 // AddCalendar registers a calendar and this user's subscription to it.
+//
+// The two carry DIFFERENT etags, and that is the point rather than a
+// detail. A calendar is two resources — the calendar itself and one
+// user's subscription to it — patched by two methods, each holding its
+// own etag, and the server has to send the right one to each. When this
+// fake gave both the same value the mistake was invisible: a write
+// carrying the subscription's etag to calendars.patch passed every test
+// and would have been a 412 on every real call.
 func (s *Server) AddCalendar(id, summary, tz, role string, primary bool) {
 	s.Calendars[id] = &gcal.Calendar{ID: id, Summary: summary, TimeZone: tz, ETag: etag(id, 1)}
 	s.Entries[id] = &gcal.CalendarListEntry{
 		ID: id, Summary: summary, TimeZone: tz, AccessRole: role,
-		Primary: primary, Selected: true, ETag: etag(id, 1),
+		Primary: primary, Selected: true, ETag: etag(entryKey(id), 1),
 	}
 	if s.Events[id] == nil {
 		s.Events[id] = map[string]*gcal.Event{}
@@ -246,11 +254,19 @@ func Seed() *Server {
 
 // Write is one write this fake served.
 type Write struct {
-	Method      string
-	CalendarID  string
-	EventID     string
+	Method     string
+	CalendarID string
+	EventID    string
+	// RuleID is the ACL rule a sharing write addressed.
+	RuleID      string
 	SendUpdates string
-	IfMatch     string
+	// SendNotifications is the ACL half of §4.3, and a separate field
+	// because it is a separate parameter with the opposite default
+	// (§2.5). Recorded as the string that went over the wire — "true",
+	// "false" or "" — so a test can tell "the server chose false" from
+	// "the server sent nothing and let Google's true stand".
+	SendNotifications string
+	IfMatch           string
 }
 
 // Wrote returns a copy of the writes served so far.
@@ -418,6 +434,403 @@ func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventI
 	writeJSON(w, answer)
 }
 
+// ------------------------------------------- calendars and the ACL
+
+// underETag is the preamble five write handlers share: find the
+// resource, refuse if it is not there, record what was asked for, and
+// apply If-Match.
+//
+// One copy, because the five had it written out and the etag rule is
+// exactly the thing a fake must not get subtly different in one of them:
+// a handler that forgot the check would accept a stale write and make
+// the server's §4.4 promise untestable on that path. It returns false
+// having already answered the request.
+func underETag[T any](s *Server, w http.ResponseWriter, r *http.Request,
+	method, id string, find func() (T, bool), missing string,
+) (T, string, bool) {
+	cur, ok := find()
+	if !ok {
+		writeErr(w, http.StatusNotFound, "notFound", missing)
+		var zero T
+		return zero, "", false
+	}
+	match := r.Header.Get("If-Match")
+	s.recordWrite(Write{Method: method, CalendarID: id, IfMatch: match})
+	return cur, match, true
+}
+
+// aclScopeRefused answers the three ACL handlers when the grant is
+// missing, which is §2.15 exercised offline.
+func (s *Server) aclScopeRefused(w http.ResponseWriter) bool {
+	if !s.ACLScopeRequired {
+		return false
+	}
+	writeErr(w, http.StatusForbidden, "insufficientPermissions",
+		"Request had insufficient authentication scopes.")
+	return true
+}
+
+// insertCalendar is calendars.insert: a new secondary calendar.
+func (s *Server) insertCalendar(w http.ResponseWriter, r *http.Request) {
+	var c gcal.Calendar
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		writeErr(w, http.StatusBadRequest, "parseError", "bad calendar body")
+		return
+	}
+	if strings.TrimSpace(c.Summary) == "" {
+		writeErr(w, http.StatusBadRequest, "required", "Missing title.")
+		return
+	}
+	s.recordWrite(Write{Method: "calendars.insert", CalendarID: c.ID})
+
+	s.mu.Lock()
+	// Google mints the id, and it is not the title: a secondary
+	// calendar's id is an opaque address on a group domain. A fake that
+	// echoed the caller's id would make every test address a calendar by
+	// a name the API never returns.
+	c.ID = fmt.Sprintf("cal%d@group.calendar.example.test", len(s.Calendars)+1)
+	c.ETag = etag(c.ID, 1)
+	stored := c
+	s.Calendars[c.ID] = &stored
+	// Creating a calendar subscribes the creator to it, as Google does,
+	// and makes them its owner.
+	s.Entries[c.ID] = &gcal.CalendarListEntry{
+		ID: c.ID, Summary: c.Summary, Description: c.Description, Location: c.Location,
+		TimeZone: c.TimeZone, AccessRole: gcal.RoleOwner, Selected: true, ETag: etag(entryKey(c.ID), 1),
+	}
+	if s.Events[c.ID] == nil {
+		s.Events[c.ID] = map[string]*gcal.Event{}
+	}
+	s.mu.Unlock()
+	writeJSON(w, c)
+}
+
+// patchCalendar is calendars.patch, under If-Match.
+func (s *Server) patchCalendar(w http.ResponseWriter, r *http.Request, calID string) {
+	cur, match, ok := underETag(s, w, r, "calendars.patch", calID, s.calendar(calID),
+		"no calendar with that id")
+	if !ok {
+		return
+	}
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	var p gcal.CalendarPatch
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "parseError", "bad calendar patch body")
+		return
+	}
+	s.mu.Lock()
+	next := *cur
+	p.ApplyTo(&next)
+	s.bump(calID)
+	next.ETag = etag(calID, s.revs[calID]+1)
+	s.Calendars[calID] = &next
+	// The calendar's own title is what an unrenamed subscription shows,
+	// so the list entry follows it. A subscription that kept the old
+	// title would make list_calendars disagree with get_calendar.
+	if e, sub := s.Entries[calID]; sub {
+		entry := *e
+		entry.Summary = next.Summary
+		entry.Description, entry.Location, entry.TimeZone = next.Description, next.Location, next.TimeZone
+		s.Entries[calID] = &entry
+	}
+	s.mu.Unlock()
+	writeJSON(w, next)
+}
+
+// deleteCalendar is calendars.delete.
+//
+// Whether Google refuses this on a PRIMARY calendar is not modelled
+// here, and deliberately: its description says it deletes a secondary
+// calendar, but nobody is probing that live against a real account's own
+// calendar. The server refuses the primary itself, which is what the
+// tests exercise.
+func (s *Server) deleteCalendar(w http.ResponseWriter, r *http.Request, calID string) {
+	cur, match, ok := underETag(s, w, r, "calendars.delete", calID, s.calendar(calID),
+		"no calendar with that id")
+	if !ok {
+		return
+	}
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	s.mu.Lock()
+	delete(s.Calendars, calID)
+	delete(s.Entries, calID)
+	delete(s.Events, calID)
+	delete(s.ACL, calID)
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// clearCalendar is calendars.clear: every event gone, the calendar
+// itself untouched.
+func (s *Server) clearCalendar(w http.ResponseWriter, r *http.Request, calID string) {
+	cur, match, ok := underETag(s, w, r, "calendars.clear", calID, s.calendar(calID),
+		"no calendar with that id")
+	if !ok {
+		return
+	}
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	// Google's description says "Clears a primary calendar". Whether it
+	// also clears a secondary one is spike K, and this fake empties
+	// whichever it is given rather than inventing a refusal the API may
+	// not make.
+	s.mu.Lock()
+	s.Events[calID] = map[string]*gcal.Event{}
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// insertEntry is calendarList.insert: this user subscribes to a calendar
+// that already exists.
+func (s *Server) insertEntry(w http.ResponseWriter, r *http.Request) {
+	var e gcal.CalendarListEntry
+	if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
+		writeErr(w, http.StatusBadRequest, "parseError", "bad calendar list entry body")
+		return
+	}
+	id := s.primaryID(e.ID)
+	s.recordWrite(Write{Method: "calendarList.insert", CalendarID: id})
+	s.mu.Lock()
+	cal, ok := s.Calendars[id]
+	s.mu.Unlock()
+	if !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no calendar with that id")
+		return
+	}
+	s.mu.Lock()
+	entry := gcal.CalendarListEntry{
+		ID: id, Summary: cal.Summary, Description: cal.Description, Location: cal.Location,
+		TimeZone: cal.TimeZone, AccessRole: gcal.RoleReader, Selected: true,
+		ColorID: e.ColorID, SummaryOverride: e.SummaryOverride, ETag: etag(entryKey(id), 1),
+	}
+	if prev, sub := s.Entries[id]; sub {
+		// Already subscribed: keep what this user had rather than
+		// resetting their overrides. The server reads the list first and
+		// does not send this, so nothing depends on the choice.
+		entry = *prev
+	}
+	s.Entries[id] = &entry
+	s.mu.Unlock()
+	writeJSON(w, entry)
+}
+
+// patchEntry is calendarList.patch: this user's own overrides.
+func (s *Server) patchEntry(w http.ResponseWriter, r *http.Request, calID string) {
+	cur, match, ok := underETag(s, w, r, "calendarList.patch", calID, s.entry(calID),
+		"not subscribed to that calendar")
+	if !ok {
+		return
+	}
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	var p gcal.CalendarListPatch
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "parseError", "bad calendar list patch body")
+		return
+	}
+	s.mu.Lock()
+	next := *cur
+	p.ApplyTo(&next)
+	s.bump(entryKey(calID))
+	next.ETag = etag(entryKey(calID), s.revs[entryKey(calID)]+1)
+	s.Entries[calID] = &next
+	s.mu.Unlock()
+	writeJSON(w, next)
+}
+
+// deleteEntry is calendarList.delete: the subscription goes, the
+// calendar stays.
+func (s *Server) deleteEntry(w http.ResponseWriter, r *http.Request, calID string) {
+	cur, match, ok := underETag(s, w, r, "calendarList.delete", calID, s.entry(calID),
+		"not subscribed to that calendar")
+	if !ok {
+		return
+	}
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	s.mu.Lock()
+	delete(s.Entries, calID)
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// insertACL is acl.insert: a new sharing rule.
+func (s *Server) insertACL(w http.ResponseWriter, r *http.Request, calID string) {
+	if s.aclScopeRefused(w) {
+		return
+	}
+	var rule gcal.AclRule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		writeErr(w, http.StatusBadRequest, "parseError", "bad acl rule body")
+		return
+	}
+	send := r.URL.Query().Get("sendNotifications")
+	s.recordWrite(Write{Method: "acl.insert", CalendarID: calID, SendNotifications: send})
+	if _, ok := s.Calendars[calID]; !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no calendar with that id")
+		return
+	}
+	if rule.Role == "" || rule.Scope.Type == "" {
+		writeErr(w, http.StatusBadRequest, "required", "Missing role or scope type.")
+		return
+	}
+	rule.ID = aclRuleID(rule.Scope)
+	rule.ETag = etag(rule.ID, 1)
+
+	s.mu.Lock()
+	replaced := false
+	for i, existing := range s.ACL[calID] {
+		if gcal.SameScope(existing.Scope, rule.Scope) {
+			s.ACL[calID][i] = rule
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		s.ACL[calID] = append(s.ACL[calID], rule)
+	}
+	s.mu.Unlock()
+	writeJSON(w, rule)
+}
+
+// patchACL is acl.patch: a role change on a rule that exists.
+func (s *Server) patchACL(w http.ResponseWriter, r *http.Request, calID, ruleID string) {
+	if s.aclScopeRefused(w) {
+		return
+	}
+	send := r.URL.Query().Get("sendNotifications")
+	match := r.Header.Get("If-Match")
+	s.recordWrite(Write{Method: "acl.patch", CalendarID: calID, RuleID: ruleID,
+		SendNotifications: send, IfMatch: match})
+
+	idx, cur, ok := s.aclRule(calID, ruleID)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no acl rule with that id on that calendar")
+		return
+	}
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	var p gcal.AclPatch
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		writeErr(w, http.StatusBadRequest, "parseError", "bad acl patch body")
+		return
+	}
+	s.mu.Lock()
+	next := cur
+	if p.Role != nil {
+		next.Role = *p.Role
+	}
+	s.bump("acl:" + ruleID)
+	next.ETag = etag(ruleID, s.revs["acl:"+ruleID]+1)
+	s.ACL[calID][idx] = next
+	s.mu.Unlock()
+	writeJSON(w, next)
+}
+
+// deleteACL is acl.delete. It takes no sendNotifications: the method
+// publishes none, and nobody is told they lost access.
+func (s *Server) deleteACL(w http.ResponseWriter, r *http.Request, calID, ruleID string) {
+	if s.aclScopeRefused(w) {
+		return
+	}
+	match := r.Header.Get("If-Match")
+	s.recordWrite(Write{Method: "acl.delete", CalendarID: calID, RuleID: ruleID, IfMatch: match})
+
+	idx, cur, ok := s.aclRule(calID, ruleID)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "notFound", "no acl rule with that id on that calendar")
+		return
+	}
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
+	s.mu.Lock()
+	s.ACL[calID] = append(s.ACL[calID][:idx], s.ACL[calID][idx+1:]...)
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// aclRule finds one rule under the lock.
+func (s *Server) aclRule(calID, ruleID string) (int, gcal.AclRule, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, r := range s.ACL[calID] {
+		if r.ID == ruleID {
+			return i, aclDefaults(r), true
+		}
+	}
+	return 0, gcal.AclRule{}, false
+}
+
+// aclDefaults fills in what Google always sends.
+//
+// Every resource the API returns carries an etag, and a fixture written
+// without one makes the whole If-Match path untestable: the server sends
+// no header when the read carried no etag, so the write goes out
+// unprotected and the test passes. Applied to the read AND to the
+// lookup a write checks against, because the two disagreeing is the same
+// bug one layer down — the read hands out an etag the write then refuses.
+func aclDefaults(r gcal.AclRule) gcal.AclRule {
+	if r.ETag == "" {
+		r.ETag = etag(r.ID, 1)
+	}
+	return r
+}
+
+// aclRuleID is the id Google gives a rule: the scope type, a colon and
+// the address — and the bare type for the public scope, which has no
+// address.
+func aclRuleID(scope gcal.AclScope) string {
+	if scope.Type == gcal.ScopeTypeDefault {
+		return gcal.ScopeTypeDefault
+	}
+	return scope.Type + ":" + scope.Value
+}
+
+// bump moves a resource's revision under the caller's lock, so an etag
+// changes on every write and a stale If-Match is refused.
+func (s *Server) bump(key string) {
+	if s.revs == nil {
+		s.revs = map[string]int{}
+	}
+	s.revs[key]++
+}
+
+// calendar and entry are the two lookups underETag takes, each reading
+// its map under the lock the write handlers mutate it behind.
+func (s *Server) calendar(id string) func() (*gcal.Calendar, bool) {
+	return func() (*gcal.Calendar, bool) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		c, ok := s.Calendars[id]
+		return c, ok
+	}
+}
+
+func (s *Server) entry(id string) func() (*gcal.CalendarListEntry, bool) {
+	return func() (*gcal.CalendarListEntry, bool) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		e, ok := s.Entries[id]
+		return e, ok
+	}
+}
+
 // event reads one event under the lock.
 //
 // Under the lock because the write handlers mutate the same map: the
@@ -442,6 +855,10 @@ func etagOK(match, current string) bool {
 }
 
 func etag(seed string, rev int) string { return fmt.Sprintf(`"%s-%d"`, seed, rev) }
+
+// entryKey namespaces a subscription's etag away from its calendar's, so
+// the two can never come out equal by accident.
+func entryKey(calendarID string) string { return "entry:" + calendarID }
 
 // record notes a served request.
 func (s *Server) record(path string) {
@@ -506,6 +923,28 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(path, "/events/") && r.Method == http.MethodDelete:
 		cal, ev := s.splitEventPath(path)
 		s.deleteEvent(w, r, cal, ev)
+	case path == "/calendars" && r.Method == http.MethodPost:
+		s.insertCalendar(w, r)
+	case path == "/users/me/calendarList" && r.Method == http.MethodPost:
+		s.insertEntry(w, r)
+	case strings.HasPrefix(path, "/users/me/calendarList/") && r.Method == http.MethodPatch:
+		s.patchEntry(w, r, s.primaryID(trimID(path, "/users/me/calendarList/")))
+	case strings.HasPrefix(path, "/users/me/calendarList/") && r.Method == http.MethodDelete:
+		s.deleteEntry(w, r, s.primaryID(trimID(path, "/users/me/calendarList/")))
+	case strings.HasSuffix(path, "/acl") && r.Method == http.MethodPost:
+		s.insertACL(w, r, s.primaryID(trimID(strings.TrimSuffix(path, "/acl"), "/calendars/")))
+	case strings.Contains(path, "/acl/") && r.Method == http.MethodPatch:
+		cal, rule := s.splitACLPath(path)
+		s.patchACL(w, r, cal, rule)
+	case strings.Contains(path, "/acl/") && r.Method == http.MethodDelete:
+		cal, rule := s.splitACLPath(path)
+		s.deleteACL(w, r, cal, rule)
+	case strings.HasSuffix(path, "/clear") && r.Method == http.MethodPost:
+		s.clearCalendar(w, r, s.primaryID(trimID(strings.TrimSuffix(path, "/clear"), "/calendars/")))
+	case strings.HasPrefix(path, "/calendars/") && r.Method == http.MethodPatch:
+		s.patchCalendar(w, r, s.primaryID(trimID(path, "/calendars/")))
+	case strings.HasPrefix(path, "/calendars/") && r.Method == http.MethodDelete:
+		s.deleteCalendar(w, r, s.primaryID(trimID(path, "/calendars/")))
 	case strings.HasPrefix(path, "/calendars/") && r.Method == http.MethodGet:
 		s.getCalendar(w, s.primaryID(trimID(path, "/calendars/")))
 	default:
@@ -679,12 +1118,14 @@ func (s *Server) getEvent(w http.ResponseWriter, calID, eventID string) {
 func (s *Server) listACL(w http.ResponseWriter, calID string) {
 	// §2.15, offline: acl.list is not covered by calendar.readonly, and
 	// Google answers a missing scope with 403 insufficientPermissions.
-	if s.ACLScopeRequired {
-		writeErr(w, http.StatusForbidden, "insufficientPermissions",
-			"Request had insufficient authentication scopes.")
+	if s.aclScopeRefused(w) {
 		return
 	}
-	writeJSON(w, gcal.Acl{Items: s.ACL[calID]})
+	items := make([]gcal.AclRule, 0, len(s.ACL[calID]))
+	for _, r := range s.ACL[calID] {
+		items = append(items, aclDefaults(r))
+	}
+	writeJSON(w, gcal.Acl{Items: items})
 }
 
 func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
@@ -818,6 +1259,20 @@ func trimID(path, prefix string) string {
 		return unesc
 	}
 	return id
+}
+
+// splitACLPath separates the calendar from the rule id. A rule id
+// carries a colon and an address — "user:someone@example.test" — so it
+// is escaped on the way out and has to be unescaped here.
+func (s *Server) splitACLPath(path string) (calID, ruleID string) {
+	rest := strings.TrimPrefix(path, "/calendars/")
+	i := strings.Index(rest, "/acl/")
+	if i < 0 {
+		return "", ""
+	}
+	cal, _ := decodeSegment(rest[:i])
+	rule, _ := decodeSegment(rest[i+len("/acl/"):])
+	return s.primaryID(cal), rule
 }
 
 func (s *Server) splitEventPath(path string) (calID, eventID string) {

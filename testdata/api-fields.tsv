@@ -73,7 +73,7 @@ Calendar	timeZone	modelled	the second source in the zone resolution order, and t
 CalendarListEntry	accessRole	modelled	what this user may do here, which decides whether a write is refused before it is attempted (§7.1)
 CalendarListEntry	autoAcceptInvitations	out	read-only here, and only meaningful on a resource calendar (§1)
 CalendarListEntry	backgroundColor	modelled	the colour actually shown, which colorId only indexes
-CalendarListEntry	colorId	modelled	a per-user override; planned=3 manage_calendar sets it (§7.5)
+CalendarListEntry	colorId	modelled	a per-user override, set by manage_calendar (§7.5); the ids come from the calendar palette in colors.get, which get_settings reports
 CalendarListEntry	conferenceProperties	out	as Calendar.conferenceProperties: §17.3
 CalendarListEntry	dataOwner	out	read-only, and an email address nothing here needs (§9)
 CalendarListEntry	defaultReminders	modelled	the calendar's default reminders, which an event inherits
@@ -85,7 +85,7 @@ CalendarListEntry	hidden	modelled	hidden in the Calendar UI; list_calendars says
 CalendarListEntry	id	modelled	the calendar this subscription is to
 CalendarListEntry	kind	out	a constant string naming the resource type
 CalendarListEntry	location	modelled	shown by get_calendar
-CalendarListEntry	notificationSettings	out	planned=3 manage_calendar's per-user notification settings (§7.5). Not modelled while no tool writes them, because a read that shows settings nothing can change invites a request this server would refuse
+CalendarListEntry	notificationSettings	modelled	manage_calendar writes them (§7.5): what THIS user is emailed about on this calendar. The list is replaced whole, because that is what Google does with the object, and the method is always email — the only value the discovery document publishes
 CalendarListEntry	primary	modelled	the account's own calendar, which sorts first and is what "primary" resolves to
 CalendarListEntry	selected	modelled	not shown in the UI, which is not the same as hidden and confuses people
 CalendarListEntry	summary	modelled	the calendar's own title, which is what a colleague sees

@@ -232,7 +232,11 @@ type CalendarListEntry struct {
 	DefaultReminders []EventReminder `json:"defaultReminders,omitempty"`
 	Primary          bool            `json:"primary,omitempty"`
 	Deleted          bool            `json:"deleted,omitempty"`
-	ETag             string          `json:"etag,omitempty"`
+	// NotificationSettings is what THIS user is emailed about on this
+	// calendar, and is a per-user override like the colour: changing it
+	// changes nothing for anybody else.
+	NotificationSettings *NotificationSettings `json:"notificationSettings,omitempty"`
+	ETag                 string                `json:"etag,omitempty"`
 }
 
 // CalendarList is the calendarList.list response.
@@ -294,6 +298,18 @@ type AclRule struct {
 	Role  string   `json:"role,omitempty"`
 	Scope AclScope `json:"scope"`
 	ETag  string   `json:"etag,omitempty"`
+}
+
+// AclPatch is the body of an acl.patch call: a role change on a rule
+// that already exists.
+//
+// Its own type rather than an AclRule with one field set, because
+// AclRule's Scope has no `omitempty` — it is required on insert — and a
+// patch carrying an empty scope object asks Google to read a field the
+// caller did not mean to send. acl.update, which replaces the rule whole
+// and could therefore move it to another person, is never called (§4.4).
+type AclPatch struct {
+	Role *string `json:"role,omitempty"`
 }
 
 // AclScope is who a rule applies to.
@@ -640,4 +656,170 @@ func OccurrenceID(series string, start EventDateTime) (string, error) {
 	default:
 		return "", fmt.Errorf("an occurrence needs a start: pass the scheduled date or timestamp")
 	}
+}
+
+// -------------------------------------------- calendar and ACL patches
+
+// CalendarPatch is the body of a calendars.patch call (§4.4).
+//
+// Pointers for the same reason EventPatch uses them: a nil field is
+// absent from the JSON and Google leaves it alone, while a non-nil field
+// pointing at an empty string clears it. calendars.update is a PUT and
+// is never called.
+//
+// This is the calendar ITSELF — what everybody subscribed to it sees.
+// The per-user overrides are CalendarListPatch below, and confusing the
+// two is how one person's colour change renames a shared calendar for
+// the whole team.
+type CalendarPatch struct {
+	Summary     *string `json:"summary,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Location    *string `json:"location,omitempty"`
+	TimeZone    *string `json:"timeZone,omitempty"`
+}
+
+// ApplyTo folds a patch into a calendar: what the resource looks like
+// once Google has applied it. Lives beside the type so the service and
+// the in-memory Calendar cannot drift, as EventPatch.ApplyTo does.
+func (p CalendarPatch) ApplyTo(c *Calendar) {
+	if p.Summary != nil {
+		c.Summary = *p.Summary
+	}
+	if p.Description != nil {
+		c.Description = *p.Description
+	}
+	if p.Location != nil {
+		c.Location = *p.Location
+	}
+	if p.TimeZone != nil {
+		c.TimeZone = *p.TimeZone
+	}
+}
+
+// CalendarListPatch is the body of a calendarList.patch call: the
+// overrides that belong to THIS user's subscription and nobody else's.
+type CalendarListPatch struct {
+	// SummaryOverride is the name this user gives the calendar. Google
+	// keeps the calendar's own title untouched, so a colleague sees no
+	// change at all.
+	SummaryOverride *string `json:"summaryOverride,omitempty"`
+	ColorID         *string `json:"colorId,omitempty"`
+	Hidden          *bool   `json:"hidden,omitempty"`
+	Selected        *bool   `json:"selected,omitempty"`
+	// NotificationSettings replaces the whole notification list, because
+	// that is what Google does with it: the object is written whole.
+	NotificationSettings *NotificationSettings `json:"notificationSettings,omitempty"`
+}
+
+// ApplyTo folds a patch into a subscription entry.
+func (p CalendarListPatch) ApplyTo(e *CalendarListEntry) {
+	if p.SummaryOverride != nil {
+		e.SummaryOverride = *p.SummaryOverride
+	}
+	if p.ColorID != nil {
+		e.ColorID = *p.ColorID
+	}
+	if p.Hidden != nil {
+		e.Hidden = *p.Hidden
+	}
+	if p.Selected != nil {
+		e.Selected = *p.Selected
+	}
+	if p.NotificationSettings != nil {
+		e.NotificationSettings = p.NotificationSettings
+	}
+}
+
+// NotificationSettings is what this user is emailed about on one
+// calendar.
+type NotificationSettings struct {
+	// Notifications is the whole list: Google replaces it rather than
+	// merging, so an empty non-nil slice turns them all off.
+	Notifications []CalendarNotification `json:"notifications"`
+}
+
+// CalendarNotification is one notification this user receives.
+type CalendarNotification struct {
+	Type string `json:"type,omitempty"`
+	// Method is always "email". The discovery document lists exactly one
+	// possible value, so a parameter for it would be a choice with one
+	// option — the server fills it in and says so.
+	Method string `json:"method,omitempty"`
+}
+
+// NotificationMethodEmail is the only delivery method Google publishes.
+const NotificationMethodEmail = "email"
+
+// The notification types, in the order a refusal lists them.
+const (
+	NotifyEventCreation     = "eventCreation"
+	NotifyEventChange       = "eventChange"
+	NotifyEventCancellation = "eventCancellation"
+	NotifyEventResponse     = "eventResponse"
+	NotifyAgenda            = "agenda"
+)
+
+// NotificationTypes is the published vocabulary.
+var NotificationTypes = []string{
+	NotifyEventCreation, NotifyEventChange, NotifyEventCancellation,
+	NotifyEventResponse, NotifyAgenda,
+}
+
+// NotificationMeans says what one notification type is, in the words a
+// person uses. Google's own names are camel-case API spellings.
+func NotificationMeans(t string) string {
+	switch t {
+	case NotifyEventCreation:
+		return "a new event is put on this calendar"
+	case NotifyEventChange:
+		return "an event on it changes"
+	case NotifyEventCancellation:
+		return "an event on it is cancelled"
+	case NotifyEventResponse:
+		return "a guest answers an invitation"
+	case NotifyAgenda:
+		return "the day's agenda, sent each morning"
+	default:
+		return "a notification type this server does not recognise"
+	}
+}
+
+// Roles is the ACL vocabulary, weakest first.
+var Roles = []string{
+	RoleFreeBusyReader, RoleReader, RoleWriterWithoutPrivateData, RoleWriter, RoleOwner,
+}
+
+// ScopeTypes is the ACL scope vocabulary.
+var ScopeTypes = []string{ScopeTypeUser, ScopeTypeGroup, ScopeTypeDomain, ScopeTypeDefault}
+
+// ScopeMeans says who a scope type covers.
+func ScopeMeans(t string) string {
+	switch t {
+	case ScopeTypeUser:
+		return "one person, by address"
+	case ScopeTypeGroup:
+		return "a group, by its address"
+	case ScopeTypeDomain:
+		return "everybody in a domain"
+	case ScopeTypeDefault:
+		return "anybody at all, signed in or not"
+	default:
+		return "a scope type this server does not recognise"
+	}
+}
+
+// SameScope reports whether two ACL scopes name the same audience.
+//
+// Addresses and domains are compared case-insensitively, because Google
+// returns them in whatever case the rule was written in and a caller
+// typing the other case means the same person. The public scope carries
+// no value, so its type alone decides.
+func SameScope(a, b AclScope) bool {
+	if !strings.EqualFold(a.Type, b.Type) {
+		return false
+	}
+	if a.Type == ScopeTypeDefault {
+		return true
+	}
+	return strings.EqualFold(a.Value, b.Value)
 }
