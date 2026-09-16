@@ -26,6 +26,7 @@
 //	go run ./scripts/gates mcpb-pack DIST VERSION OUT
 //	go run ./scripts/gates release
 //	go run ./scripts/gates release-notes VERSION [CHANGELOG]
+//	go run ./scripts/gates server-json VERSION CHECKSUMS
 package main
 
 import (
@@ -42,7 +43,7 @@ func main() {
 			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
 			"schema-baseline BIN | " +
 			"staleness BIN | mcpb | mcpb-pack DIST VERSION OUT | release | " +
-			"release-notes VERSION [CHANGELOG]")
+			"release-notes VERSION [CHANGELOG] | server-json VERSION CHECKSUMS")
 	}
 	root, err := repoRoot()
 	if err != nil {
@@ -89,6 +90,16 @@ func main() {
 		check(mcpbGate(), "bundle manifest")
 	case "release":
 		check(releaseGate(), "release wiring")
+	case "server-json":
+		// Release only, like mcpb-pack: it reads the checksums file a
+		// build produced, and writes the registry entry to stdout.
+		if len(os.Args) < 4 {
+			fail("usage: gates server-json VERSION CHECKSUMS")
+		}
+		if err := serverJSON(os.Args[2], os.Args[3], os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "server-json: %v\n", err)
+			os.Exit(1)
+		}
 	case "release-notes":
 		// Release only, and not a gate: it WRITES the release body
 		// rather than asserting anything, so it prints no "ok" line and

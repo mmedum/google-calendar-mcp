@@ -35,6 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   An expired token is `[stale]` with the only cure that works — ask
   again with no token — rather than the generic "read again and retry",
   which here loops forever.
+- The MCP registry entry, which §12 puts last. `gates server-json`
+  builds it from the release's **own `checksums.txt`**, so the hash
+  describes the bytes that were published rather than a rebuild of them
+  — and that hash is why this is not goreleaser's `mcp` block, whose
+  package entry has nowhere to put one while clients verify the bundle
+  before installing it. The namespace, repository and description are
+  derived from `go.mod` and the bundle manifest rather than typed
+  twice. A prerelease tag skips the step: an entry cannot be taken back.
 - The release itself: `.goreleaser.yaml` and
   `.github/workflows/release.yml`. Six platform archives,
   `checksums.txt`, an SBOM per archive, a keyless cosign signature over

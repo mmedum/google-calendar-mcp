@@ -129,9 +129,13 @@ Three things a rehearsal cannot tell you, so watch the first real run:
 - **Push tags one at a time.** GitHub drops tag events past the third in
   a single push, and the release simply never runs.
 
-The MCP registry entry is not wired up yet. §12 puts it last because the
-registry does a HEAD on the bundle's download URL before accepting an
-entry, so it needs a release to exist first.
+The MCP registry entry is the last step of the workflow, for the same
+reason §12 puts it last: the registry does a HEAD on the bundle's
+download URL before accepting an entry, so the release has to exist
+first. `gates server-json` builds the entry from the release's own
+`checksums.txt`, and a prerelease tag skips it — an entry cannot be taken
+back, so `v1.0.0-rc1` must not leave a row pointing at a bundle nobody
+should install.
 
 ## Adding a tool
 

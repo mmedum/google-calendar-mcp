@@ -86,6 +86,7 @@ type manifest struct {
 	Name            string `json:"name"`
 	Version         string `json:"version"`
 	License         string `json:"license"`
+	Description     string `json:"description"`
 	LongDescription string `json:"long_description"`
 	Server          struct {
 		Type       string `json:"type"`
