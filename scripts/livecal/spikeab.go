@@ -26,12 +26,15 @@ const (
 type guests struct {
 	// internal is inside the signed-in account's own domain.
 	internal string
-	// external is outside the domain but still on Google Calendar. It is
-	// "external" in the ordinary sense and NOT in `externalOnly`'s sense,
-	// which is the distinction §18 row 40 is about.
+	// external is outside the domain but still on Google Calendar, and is
+	// the guest `externalOnly` reaches: the axis is the organiser's
+	// Workspace domain, not the guest's calendar system, which took a
+	// live probe to establish against the documentation (§18 row 40).
 	external string
-	// nonGoogle is not on Google Calendar, and is the only guest that
-	// `externalOnly` actually reaches.
+	// nonGoogle is not on Google Calendar at all. It is out-of-domain too,
+	// so `externalOnly` should reach it as well; what it adds is a guest
+	// whose calendar is independent of Google's, which is what §2.7's
+	// "not syncing to external calendars" warning is about.
 	nonGoogle string
 }
 
@@ -115,11 +118,11 @@ func spikeA(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	}
 
 	note := "SET UP, not answered: three events exist, one per sendUpdates value. Read each guest's " +
-		"inbox and record who got what in §18. §2.6 says some mail goes out even with none, and that " +
-		"claim is what §4.3 rule 3 rests on"
-	if g.nonGoogle == "" {
-		note += ". NOTE: no non-Google guest is configured, so the externalOnly arm reaches nobody " +
-			"and that value is untested (§18 row 40)"
+		"inbox AND calendar and record what arrived in §18. The two together are what distinguishes " +
+		"a notification Google withheld from one that was filtered on the way"
+	if g.external == "" {
+		note += ". NOTE: no out-of-domain guest is configured, and that is the only one externalOnly " +
+			"reaches (§18 row 40), so that arm is untested"
 	}
 	return undetermined, note
 }
@@ -157,11 +160,13 @@ func spikeB(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	out.Printf("      created %q with sendUpdates=none and %d guest(s)\n", spikeBTitle, len(g.attendees()))
 
 	note := "SET UP, not answered: the insert succeeded, which it does whether or not the guests ever " +
-		"see it. Check each guest's CALENDAR, not their mail: §2.7 warns of events not syncing to " +
-		"external calendars or being lost altogether. If it reproduces, §4.3 refuses none on insert"
+		"see it. Check each guest's CALENDAR, not their mail: §2.7 warns of events not syncing or " +
+		"being lost altogether. If it reproduces, §4.3 refuses none on insert. Read it against the " +
+		"same guest's `all` event from spike A — an absence means nothing unless the control arrived"
 	if g.nonGoogle == "" {
-		note += ". NOTE: the warning is about calendars that are not Google Calendar, and no such " +
-			"guest is configured, so the case most likely to reproduce is not being tried (§18 row 40)"
+		note += ". NOTE: no non-Google guest is configured. A Google Calendar guest may only see the " +
+			"event once its invitation reaches them, which makes mail delivery and event delivery " +
+			"hard to tell apart on that side"
 	}
 	return undetermined, note
 }

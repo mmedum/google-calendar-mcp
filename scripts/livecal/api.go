@@ -229,18 +229,24 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 	for pass := 0; pass < 20; pass++ {
 		var out struct {
 			Items []struct {
-				ID string `json:"id"`
+				ID      string `json:"id"`
+				Summary string `json:"summary"`
 			} `json:"items"`
-			NextPageToken string `json:"nextPageToken"`
 		}
 		if err := a.do(ctx, http.MethodGet,
 			"/calendars/"+cal+"/events?maxResults=250&showDeleted=false", nil, &out); err != nil {
 			return err
 		}
-		if len(out.Items) == 0 {
-			return nil
-		}
+		deleted := 0
 		for _, it := range out.Items {
+			// Spike A and B events are evidence a person reads hours or
+			// days later, in their own inbox and calendar. The next run
+			// used to delete them, which destroyed the thing the spike
+			// existed to produce — silently, between a run and the
+			// reading of its result.
+			if strings.HasPrefix(it.Summary, spikeATitle) || strings.HasPrefix(it.Summary, spikeBTitle) {
+				continue
+			}
 			// A 410 means it is already gone, which is the state wanted.
 			if derr := a.do(ctx, http.MethodDelete,
 				"/calendars/"+cal+"/events/"+it.ID+"?sendUpdates=none", nil, nil); derr != nil &&
@@ -248,6 +254,11 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 				!strings.Contains(derr.Error(), "returned 404") {
 				return derr
 			}
+			deleted++
+		}
+		// Nothing left that this run may remove.
+		if deleted == 0 {
+			return nil
 		}
 	}
 	return fmt.Errorf("the scratch calendar still lists events after 20 passes; empty it by hand")
@@ -255,24 +266,17 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 
 // insertEvent posts one event and returns Google's answer.
 //
-// sendUpdates=none is correct for every event this driver writes: they
-// carry no guests, so nothing can be sent, and saying so keeps the
-// driver from ever mailing a real person (§9.1).
+// sendUpdates=none is correct for every event this driver writes except
+// spikes A and B: they carry no guests, so nothing can be sent, and
+// saying so keeps the driver from ever mailing a real person (§9.1).
 func (a *liveAPI) insertEvent(ctx context.Context, cal string, body map[string]any) error {
-	if id, ok := body["id"].(string); ok {
-		if err := gcal.ValidEventID(id); err != nil {
-			return err
-		}
-	}
-	return a.do(ctx, http.MethodPost, "/calendars/"+cal+"/events?sendUpdates=none", body, nil)
+	return a.insertWithUpdates(ctx, cal, body, "none")
 }
 
 // insertWithUpdates posts one event under an explicit sendUpdates value.
 //
-// The only place in this driver that may mail a real person, which is
-// why the value is a required argument rather than a default: every
-// other write goes through insertEvent, which hardcodes none because
-// those events have no guests at all.
+// The only path in this driver that may mail a real person, which is why
+// the value is a required argument rather than a default.
 func (a *liveAPI) insertWithUpdates(ctx context.Context, cal string, body map[string]any, updates string) error {
 	if id, ok := body["id"].(string); ok {
 		if err := gcal.ValidEventID(id); err != nil {
