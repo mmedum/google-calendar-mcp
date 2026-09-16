@@ -34,7 +34,8 @@ import (
 
 func main() {
 	bin := flag.String("bin", "./google-calendar-mcp", "the built binary to drive")
-	keep := flag.Bool("keep", false, "do not delete the scratch calendar (for debugging)")
+	keep := flag.Bool("keep", false,
+		"leave the scratch calendar behind; the next run adopts it and spends no calendar quota")
 	// A green count is not a read transcript. -show prints the redacted
 	// body of every step whose name contains the substring, because the
 	// defects this project keeps finding are the ones a pass/fail line
@@ -71,7 +72,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 2
 	}
 
-	scratch, err := api.createScratchCalendar(ctx)
+	scratch, created, err := api.ensureScratchCalendar(ctx)
 	if err != nil {
 		out.Printf("could not create the scratch calendar: %v\n", redact.String(err.Error()))
 		// The one failure here that is not a bug and not a setup
@@ -87,16 +88,31 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}
 		return 2
 	}
-	out.Printf("scratch calendar %s created\n", redact.ID(scratch))
-	if !keep {
+	if created {
+		out.Printf("scratch calendar %s created\n", redact.ID(scratch))
+	} else {
+		out.Printf("scratch calendar %s adopted and emptied; no calendar quota spent\n", redact.ID(scratch))
+	}
+	// Only a calendar this run created is deleted. One left by an earlier
+	// `-keep` is somebody's deliberate choice, and removing it would
+	// spend the quota again on the next run — which is the cost this
+	// adoption exists to avoid (§18 row 36).
+	if created && !keep {
 		defer func() {
 			if err := api.deleteCalendar(context.Background(), scratch); err != nil {
 				out.Printf("WARNING: could not delete the scratch calendar %s: %v\n",
-					redact.ID(scratch), err)
+					redact.ID(scratch), redact.String(err.Error()))
 				out.Printf("delete it by hand; this driver must leave nothing behind\n")
 				return
 			}
 			out.Printf("\nscratch calendar deleted\n")
+		}()
+	}
+	if !created || keep {
+		defer func() {
+			out.Printf("\nscratch calendar %s kept; the next run adopts and empties it, "+
+				"spending no calendar quota.\nIt stays until you delete it by hand: a run only "+
+				"removes a calendar it created itself.\n", redact.ID(scratch))
 		}()
 	}
 
@@ -143,6 +159,8 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	}{
 		{"spike G: acl scopes", spikeG},
 		{"spike C: unzoned series", spikeC},
+		{"spike E: this and following", spikeE},
+		{"spike F: duplicate insert", spikeF},
 		{"spike I: 50 vs 51 calendars", spikeI},
 	} {
 		r.total++

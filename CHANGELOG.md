@@ -135,6 +135,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Spikes E and F, and both are answered. **E**: "this and following"
+  resets exceptions after the target, confirmed on a real series — so
+  §4.2's warning is accurate and phase 2 must print it. The split came
+  from `Set.Split` in `internal/recur`, which makes this the first live check of
+  phase 1's scope arithmetic. **F**: two concurrent inserts of one
+  client-generated id gave one 200 and one 409, so the collision is
+  caught; `ambiguous_outcome` stays, because the API declines to
+  guarantee that and the class also covers a retry after a transport
+  failure.
+- The live driver reuses its scratch calendar. `-keep` leaves it and the
+  next run adopts and empties it, spending no calendar-creation quota —
+  which matters because that quota counts creations and is not refunded
+  by deleting. Event ids are generated per run, since a deleted event
+  does not release its id.
+
 - Phase 1: recurrence and availability.
 - `list_instances` — the occurrences of one repeating event, with the
   dates that were moved and, on request, the ones that were cancelled. A

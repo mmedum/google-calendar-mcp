@@ -813,9 +813,19 @@ Two structural rules, not matters of care:
 
 1. **Fixtures are generated, never recorded.** A fixture copied from a
    live response is itself the leak, whatever a scanner says about it.
-2. **The live driver reads only what it wrote**, on a calendar it created
-   for the run and deletes after — so the only content that can reach a
-   log, a golden or a test failure is content the driver invented.
+2. **The live driver reads only what it wrote**, on a scratch calendar it
+   created and **empties at the start of every run** — so the only
+   content that can reach a log, a golden or a test failure is content
+   the driver invented.
+
+   The emptying is what carries the guarantee, not the deleting. A run
+   deletes the calendar afterwards only if it created it; `-keep` leaves
+   it, and the next run adopts and empties it instead of making another.
+   That is not tidiness, it is §18 row 36: the calendar-creation quota
+   counts creations and is not refunded by deletion, so a phase with many
+   live runs cannot afford one calendar per run. Event ids are generated
+   per run for the same reason — a deleted event does not release its id,
+   and Google answers a re-insert with 409.
 
 The leak gate is an allow-list, and it is anchored on shapes the server's
 own generated fields cannot take — an `@` with a dot-suffixed domain, a
@@ -1020,11 +1030,27 @@ states its question and its verdict separately.
   This is §3's first row and the most common defect in the category.
 - **Spike E — "this and following".** Build the two-call pattern over a
   series that already has an exception after the target, and confirm the
-  exception is reset (§2.8), so §4.2's warning is accurate.
+  exception is reset (§2.8), so §4.2's warning is accurate. **Confirmed,
+  2026-09-16.** An eight-occurrence weekly series, the sixth occurrence
+  moved half an hour later, split at the fourth: the original kept
+  `COUNT=3`, the new series took `COUNT=5`, and the moved occurrence came
+  back at its **scheduled** time. The exception was reset, so §4.2's
+  warning is accurate and `this_and_following` must say so in its result.
+  The split came from `Set.Split` in `internal/recur` rather than from arithmetic
+  invented in the spike, so this also holds phase 1's implementation
+  against Google — a spike that computes the answer its own way tests
+  nothing the write path will do.
 - **Spike F — the duplicate insert.** Send the same client-generated id
   twice, concurrently, and see whether the collision is caught (§2.11).
   Determines whether `ambiguous_outcome` is the right class or an
-  over-cautious one.
+  over-cautious one. **Answered 2026-09-16: the collision WAS caught** —
+  one insert returned 200 and the other 409, from two requests in flight
+  together. That does not retire `ambiguous_outcome`, and the reason is
+  worth stating rather than assuming: §2.11 declines to *guarantee* this,
+  so one observation is not a promise; and the class is also for the
+  retry after a transport failure, where the caller never saw the first
+  answer at all and Google's 409 would arrive for an event the caller
+  itself created. The class stays, with one fewer reason to fear it.
 - **Spike G — ACL scopes.** Confirm §2.15: that `acl.list` fails under
   `calendar.readonly` alone. It is a scope-set decision and a 403 weeks
   later if wrong.
@@ -1398,6 +1424,9 @@ what §15 exists to settle, and they are marked.
 | 32 | `EXDATE` and `RDATE` carry a `TZID` parameter, or a `VALUE=DATE` form on an all-day series | RFC 5545 §3.8.5, and the shape Google returns in `recurrence` | **Asserted from the specification, not probed live. Tier 3.** `internal/recur` parses both and resolves a bare local time in the series' own zone. An all-day point stays a date and yields no instant, which is §4.1 again. A series carrying anything this package cannot expand — `EXRULE`, a second `RRULE`, a frequency below DAILY — is refused rather than expanded, because a count that is quietly too large is the number a caller would put in front of a user |
 | 26 | Redirecting the config directory and the environment isolates a test | Live, the hard way, 2026-09-15 | **Refuted, having been written down here first.** The OS keyring cannot be redirected by either, so `go test ./cmd/...` found the maintainer's real refresh token under the default profile, revoked the grant at Google and deleted it. `TestMain` now substitutes the keyring for the whole package, with a decoy test that fails if that is ever dropped. The sibling servers carry the same warning; having it in the source did not prevent it |
 | 36 | An account can hold as many calendars as a test needs | **Live, 2026-09-16** | **Refuted, and it closes a spike by making it unrunnable.** Spike I's readable half creates 51 calendars to ask whether the free/busy ceiling counts only calendars it can expand. Google refused the **39th**: HTTP 403, `reason: quotaExceeded`, "Calendar usage limits exceeded". So the readable half cannot be run on an account at all, and §2.10's ceiling stays unsettled for readable calendars by decision rather than by neglect. **Two consequences beyond the spike.** The limit is on *creation* and is not refunded by deleting — the 38 calendars were deleted and the quota stayed spent, so a later run can fail to create even its one scratch calendar until Google resets it. And phase 3's `create_calendar` meets this exact 403: `classify` already maps `quotaExceeded` to `[rate_limited]`, which is correct and retryable, but the message reads "Google is rate limiting this account", which invites an immediate retry of something that may not succeed for a day. Phase 3 owes that message a better sentence |
+| 37 | Deleting an event releases its id for reuse | **Live, 2026-09-16** | **Refuted.** A re-insert under a deleted event's id is answered 409. The live driver had fixed seed ids and emptied its scratch calendar before seeding; the emptying succeeded and the seed still failed. Ids are generated per run now — Go's `strconv.FormatInt(n, 32)` uses `0123456789abcdefghijklmnopqrstuv`, which is exactly base32hex's alphabet, so a formatted integer is a legal event id by construction rather than by inspection (row 21) |
+| 38 | "This and following" preserves exceptions after the target | Recurring-events guide; **spike E live, 2026-09-16** | **Refuted, as the guide says and §4.2 warns.** An eight-occurrence weekly series with its sixth occurrence moved 30 minutes later, split at the fourth: the original kept `COUNT=3`, the new series took `COUNT=5`, and the moved occurrence returned at its scheduled time. The exception was **reset**. `this_and_following` must say so in its result, because nobody expects it. The split was computed by `Set.Split` in `internal/recur`, so phase 1's arithmetic is confirmed against Google rather than against itself |
+| 39 | A duplicate client-generated id may pass undetected at creation (§2.11) | **Spike F live, 2026-09-16** | **Not reproduced, and the class stays anyway.** Two inserts of one id in flight together: one 200, one 409. The collision was caught. `ambiguous_outcome` is not retired, for two reasons worth keeping: the discovery document declines to *guarantee* detection, so a single observation is not a promise; and the class also covers the retry after a transport failure, where the caller never saw the first answer and Google's 409 would be reporting the caller's own event back at it. One fewer reason to fear the class, not a reason to drop it |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |

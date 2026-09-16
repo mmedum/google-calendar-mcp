@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -29,17 +31,29 @@ const (
 	weeklyTitle    = "Livecal weekly probe"
 	cancelledTitle = "Livecal cancelled probe"
 	searchTerm     = "Livecal"
+)
 
-	// Event ids are base32hex: lowercase a-v and the digits, 5 to 1024
-	// characters (§2.11). Not a-z — the letters w, x, y and z are NOT
-	// allowed, which is the kind of detail that reads as obvious and is
-	// not. The first run of this driver used "allday" and "weekly" and
-	// Google refused both with "Invalid resource id value", naming
-	// neither the field nor the rule.
-	timedID     = "livecaltimedprobe00000000000001"
-	allDayID    = "livecalfulldateprobe000000001"
-	weeklyID    = "livecalrepeatprobe0000000000001"
-	cancelledID = "livecalcancelledprobe000000001"
+// Event ids are base32hex: lowercase a-v and the digits, 5 to 1024
+// characters (§2.11). Not a-z — the letters w, x, y and z are NOT
+// allowed, which is the kind of detail that reads as obvious and is not.
+// The first run of this driver used "allday" and "weekly" and Google
+// refused both with "Invalid resource id value", naming neither the
+// field nor the rule; gcal.ValidEventID holds it now and caught
+// "following" in this file before a request was built.
+//
+// Generated per run, not fixed. Deleting an event does NOT release its
+// id — Google answers a re-insert with 409 — so a driver that reuses its
+// scratch calendar (which is how it stops spending calendar quota, §18
+// row 36) cannot reuse ids. Base 32 in Go's strconv is exactly
+// base32hex's alphabet, "0123456789abcdefghijklmnopqrstuv", so a
+// formatted integer is a legal id fragment by construction.
+var (
+	runSuffix = strconv.FormatInt(time.Now().UnixNano(), 32)
+
+	timedID     = "livecaltimedprobe" + runSuffix
+	allDayID    = "livecalfulldateprobe" + runSuffix
+	weeklyID    = "livecalrepeatprobe" + runSuffix
+	cancelledID = "livecalcancelledprobe" + runSuffix
 )
 
 const apiBase = "https://www.googleapis.com/calendar/v3"
@@ -145,6 +159,125 @@ func (a *liveAPI) createScratchCalendar(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("Google returned no calendar id")
 	}
 	return out.ID, nil
+}
+
+// ensureScratchCalendar adopts the driver's own scratch calendar if one
+// is already there, and creates one otherwise.
+//
+// Creating one per run is what phase 1 did, and it is what spent this
+// account's calendar quota: the limit counts calendars CREATED and
+// deleting them does not refund it (§18 row 36). Phase 2 needs the most
+// live runs of any phase, so a run that can reuse `-keep`'s leftover
+// costs the quota nothing.
+//
+// The lookup reads the account's calendar list, which is the one place
+// this driver looks past what it wrote. It matches its own title and
+// returns an id; nothing from the list is printed, and §9.1's rule about
+// the transcript is enforced separately, on what steps may show.
+func (a *liveAPI) ensureScratchCalendar(ctx context.Context) (id string, created bool, err error) {
+	found, err := a.findScratchCalendar(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if found != "" {
+		// Somebody else's run left it, so it may still hold their
+		// events, and the seed ids are fixed: a duplicate id is a 409.
+		if err := a.clearEvents(ctx, found); err != nil {
+			return "", false, fmt.Errorf("adopting the scratch calendar: %w", err)
+		}
+		return found, false, nil
+	}
+	id, err = a.createScratchCalendar(ctx)
+	return id, true, err
+}
+
+// findScratchCalendar returns the id of a calendar this driver made, or
+// an empty string.
+func (a *liveAPI) findScratchCalendar(ctx context.Context) (string, error) {
+	var out struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Summary string `json:"summary"`
+		} `json:"items"`
+		NextPageToken string `json:"nextPageToken"`
+	}
+	path := "/users/me/calendarList?maxResults=250&showHidden=true"
+	for {
+		out.Items, out.NextPageToken = nil, ""
+		if err := a.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+			return "", err
+		}
+		for _, it := range out.Items {
+			if it.Summary == scratchTitle {
+				return it.ID, nil
+			}
+		}
+		if out.NextPageToken == "" {
+			return "", nil
+		}
+		path = "/users/me/calendarList?maxResults=250&showHidden=true&pageToken=" + out.NextPageToken
+	}
+}
+
+// clearEvents empties a calendar this driver owns, so an adopted one
+// seeds as cleanly as a fresh one. calendars.clear is not usable here:
+// it only works on the primary calendar, which this driver never writes.
+func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
+	// Bounded, because the exit condition depends on Google agreeing
+	// that what was deleted is gone. A driver that spins forever on a
+	// calendar it cannot empty is worse than one that says so.
+	for pass := 0; pass < 20; pass++ {
+		var out struct {
+			Items []struct {
+				ID string `json:"id"`
+			} `json:"items"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if err := a.do(ctx, http.MethodGet,
+			"/calendars/"+cal+"/events?maxResults=250&showDeleted=false", nil, &out); err != nil {
+			return err
+		}
+		if len(out.Items) == 0 {
+			return nil
+		}
+		for _, it := range out.Items {
+			// A 410 means it is already gone, which is the state wanted.
+			if derr := a.do(ctx, http.MethodDelete,
+				"/calendars/"+cal+"/events/"+it.ID+"?sendUpdates=none", nil, nil); derr != nil &&
+				!strings.Contains(derr.Error(), "returned 410") &&
+				!strings.Contains(derr.Error(), "returned 404") {
+				return derr
+			}
+		}
+	}
+	return fmt.Errorf("the scratch calendar still lists events after 20 passes; empty it by hand")
+}
+
+// insertEvent posts one event and returns Google's answer.
+//
+// sendUpdates=none is correct for every event this driver writes: they
+// carry no guests, so nothing can be sent, and saying so keeps the
+// driver from ever mailing a real person (§9.1).
+func (a *liveAPI) insertEvent(ctx context.Context, cal string, body map[string]any) error {
+	if id, ok := body["id"].(string); ok {
+		if err := gcal.ValidEventID(id); err != nil {
+			return err
+		}
+	}
+	return a.do(ctx, http.MethodPost, "/calendars/"+cal+"/events?sendUpdates=none", body, nil)
+}
+
+// patchEvent patches one event. Patch, never PUT (§4.4).
+func (a *liveAPI) patchEvent(ctx context.Context, cal, id string, body map[string]any) error {
+	return a.do(ctx, http.MethodPatch,
+		"/calendars/"+cal+"/events/"+id+"?sendUpdates=none", body, nil)
+}
+
+// getEvent reads one event back.
+func (a *liveAPI) getEvent(ctx context.Context, cal, id string) (instanceRow, error) {
+	var row instanceRow
+	err := a.do(ctx, http.MethodGet, "/calendars/"+cal+"/events/"+id, nil, &row)
+	return row, err
 }
 
 func (a *liveAPI) deleteCalendar(ctx context.Context, id string) error {
@@ -279,14 +412,33 @@ func (a *liveAPI) listACL(ctx context.Context, cal string) error {
 
 // ---------------------------------------------------- phase 1 additions
 
-// Ids for the probes phase 1 adds. base32hex again: a-v and the digits,
-// never w, x, y or z (§2.11).
-const (
+// Ids for the probes phase 1 and 2 add, generated per run for the reason
+// the id block above gives: a deleted id is not released.
+var (
 	// unzonedID is spike C's negative half: a weekly series written with
 	// no timeZone alongside its dateTime.
-	unzonedID = "livecalnozoneprobe0000000000001"
-	// unzonedTitle is what it is called, so a step can find it.
+	unzonedID = "livecalnozoneprobe" + runSuffix
+	// Spike E's series: a weekly run long enough to have a target with
+	// occurrences on both sides of it, in May so it cannot collide with
+	// the March window every step reads.
+	spikeESeriesID = "livecaltrailingprobe" + runSuffix
+	spikeENewID    = "livecaltrailingsecond" + runSuffix
+	// Spike F's id: one client-generated id, sent twice at once.
+	spikeFID = "livecalduplicateprobe" + runSuffix
+)
+
+const (
+	// unzonedTitle is what spike C's series is called, so a step can
+	// find it.
 	unzonedTitle = "Livecal unzoned probe"
+
+	spikeETitle = "Livecal this-and-following probe"
+	spikeEStart = "2026-05-05T10:00:00+02:00"
+	spikeEEnd   = "2026-05-05T11:00:00+02:00"
+	spikeERule  = "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=8"
+
+	spikeFTitle = "Livecal duplicate-insert probe"
+
 	// noSuchCalendar is spike H's target: a calendar that cannot exist.
 	//
 	// The domain is .test, which RFC 2606 reserves and which can never
