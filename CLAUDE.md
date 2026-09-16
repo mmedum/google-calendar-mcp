@@ -109,6 +109,7 @@ and Drive APIs.
 - `cmd/google-calendar-mcp/` — subcommands and server wiring.
 - `internal/config/` env plus bound flags; `internal/credentials/`
   keyring → file → env; `internal/userconfig/` non-secret profile state;
+  `internal/fileperm/` restricting a file to the account that wrote it;
   `internal/auth/` loopback OAuth and the token source.
 - `internal/gcal/` wire types; `internal/gapi/` the raw REST client, with
   `caltest/` the in-memory Calendar used by tests.

@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/mmedum/google-calendar-mcp/internal/fileperm"
 )
 
 // AppDir is the directory name under the user's config directory.
@@ -145,7 +147,11 @@ func Save(profile string, c Config) error {
 	if err := os.Rename(tmp, p); err != nil {
 		return fmt.Errorf("userconfig: replace %s: %w", p, err)
 	}
-	return nil
+	// Not a secret — this holds which profile, which scopes and which
+	// account — but it does hold the account's address, and the 0600
+	// above means nothing on Windows (§18 row 47). One rule, one owner,
+	// applied after the rename because that is where the file is.
+	return fileperm.RestrictToOwner(p)
 }
 
 // Profiles lists every configured profile name, the default included.

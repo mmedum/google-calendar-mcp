@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/zalando/go-keyring"
+
+	"github.com/mmedum/google-calendar-mcp/internal/fileperm"
 )
 
 // ServiceName is the keyring service identifier.
@@ -105,7 +107,7 @@ type tokenFile struct {
 // false on Windows, where Go's modes do not map to ACLs and the file
 // landed readable by any account on the machine. The file is restricted
 // by an explicit ACL there now, and this says so (§18 row 47).
-func FileProtection() string { return fileProtection() }
+func FileProtection() string { return fileperm.Describe() }
 
 func (s *Store) warn(msg string) {
 	if s.Warn != nil {
@@ -239,7 +241,7 @@ func (s *Store) writeFile(token string) error {
 	// After the rename, not before: on Windows the access list is a
 	// property of the file at its final path, and a temporary file's
 	// list does not survive being moved into place.
-	return restrictToOwner(s.FilePath)
+	return fileperm.RestrictToOwner(s.FilePath)
 }
 
 func (s *Store) removeFile() error {

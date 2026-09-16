@@ -90,9 +90,9 @@ func TestSaveWritesOwnerOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if runtime.GOOS == "windows" {
-		// Windows does not carry POSIX modes; see §18 row 47. This file
-		// is non-secret profile state, so the consequence is smaller
-		// than for the token, but the assertion cannot hold here.
+		// A mode means nothing here. internal/fileperm restricts the
+		// file with an access list instead, and its own test reads that
+		// list back (§18 row 47).
 		return
 	}
 	if mode := fi.Mode().Perm(); mode&0o077 != 0 {
