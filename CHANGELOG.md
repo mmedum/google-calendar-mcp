@@ -9,15 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- `dry_run` no longer promises to split its notification count, because
-  nobody yet knows the axis to split it on. Google documents
-  `externalOnly` as "notifications are sent to non-Google Calendar
-  guests only" — then spike A mailed a consumer Gmail address under
-  exactly that value. A guest on Gmail uses Google Calendar by
-  definition, so the description is wrong about its own parameter.
-  Labelling guests on a guess would mislabel precisely the people the
-  parameter treats differently, so the count stands unsplit until the
-  spike's remaining half settles it (§18 row 40).
+- `externalOnly` splits on the organiser's Workspace domain, not on the
+  guest's calendar system, so `dry_run` reports how many guests are
+  outside that domain. Google documents the parameter as "notifications
+  are sent to non-Google Calendar guests only"; spike A gave one guest
+  inside the domain and one outside it, both on Google Calendar, and
+  `externalOnly` mailed the outside one and skipped the inside one. The
+  documentation is wrong about its own parameter, and the design said so
+  first (§18 row 40).
 
 - `list_instances` refuses an occurrence id instead of answering with an
   empty series. It used to explain the mistake only when Google returned
@@ -145,6 +144,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Spike A is answered: `externalOnly` follows the organiser's domain,
+  and `sendUpdates=none` mailed nobody on insert. The second does not
+  soften §4.3 rule 3 — Google warns mail "might still be sent", so one
+  silent run is not a promise of silence — but it does retire the fear
+  that `none` is routinely noisy (§18 rows 40 and 41).
 - Spikes A and B, which set up §15's notification questions and
   deliberately do not answer them: who received mail is visible in an
   inbox and nowhere in any API response, so the driver creates the

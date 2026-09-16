@@ -359,22 +359,22 @@ Four supporting rules:
    `none` says Google does not guarantee it (§2.6). The server will not
    make a promise the platform declines to make.
 4. **`dry_run` shows the blast radius before anything is sent**: how
-   many guests would be notified, and what the event would look like
-   afterwards.
+   many guests would be notified, how many of them are outside the
+   organiser's own domain and so are the ones `externalOnly` reaches, and
+   what the event would look like afterwards.
 
-   **It does not yet split that count, and the reason is worth keeping.**
-   This document first said "internal versus external". The discovery
-   document appeared to refute that — `externalOnly` is described as
-   "notifications are sent to non-Google Calendar guests only" — so the
-   wording was changed to split by calendar system. Then spike A mailed a
-   consumer Gmail address under `externalOnly`, which the description
-   says should have been skipped (§18 row 40).
+   **The axis is the organiser's Workspace domain, and it took a live
+   probe to establish that.** This document first said "internal versus
+   external"; the discovery document appeared to refute it, describing
+   `externalOnly` as "notifications are sent to non-Google Calendar
+   guests only", so the wording was changed to split by calendar system;
+   then spike A mailed the out-of-domain guest and skipped the
+   same-domain one, both of them on Google Calendar (§18 row 40). The
+   original wording was right and the documentation was wrong.
 
-   So the axis is not yet known, and a `dry_run` that labels guests on a
-   guess is worse than one that counts them: mislabelling exactly the
-   people a parameter treats differently is the one thing this rule
-   exists to prevent. The split lands when spike A's remaining half says
-   whether a same-domain guest is spared.
+   The count is computed from the organiser's primary calendar id, which
+   is the address, against each attendee's domain — never printed, only
+   counted (§9).
 
 The ACL tools carry the same parameter with the same requirement, which
 is what makes the two consistent where Google's defaults are not.
@@ -1042,13 +1042,17 @@ states its question and its verdict separately.
   hand. A spike that scored itself green on this would be scoring
   something else.
 
-  **First run, 2026-09-16, partial.** An out-of-domain Google Calendar
-  guest **received the `externalOnly` invitation**, which the discovery
-  document says should not happen and which is now §18 row 40. The two
-  observations still owed are small and decisive: whether a same-domain
-  guest was spared that same insert, and whether either guest received
-  anything from the two `none` arms — the second being what §4.3 rule 3
-  rests on.
+  **Answered 2026-09-16.** With one guest inside the organiser's domain
+  and one outside it on Gmail: `all` mailed the same-domain guest,
+  `externalOnly` mailed the out-of-domain guest and **not** the
+  same-domain one, and neither `none` arm mailed anybody. So
+  `externalOnly` splits on the Workspace domain rather than on the
+  guest's calendar system (§18 row 40), and §2.6's "some mail is sent
+  even with none" did not reproduce on insert (§18 row 41). One loose
+  end is recorded rather than smoothed over: the out-of-domain guest did
+  not receive the `all` invitation either, which it should have, so mail
+  was being filtered on that side and only the same-domain column is
+  clean evidence.
 - **Spike B — `sendUpdates: none` on insert.** Google warns it can lose
   events (§2.7). Reproduce or fail to reproduce. If it reproduces, §4.3
   may need to refuse `none` on insert outright.
@@ -1469,7 +1473,8 @@ what §15 exists to settle, and they are marked.
 | 37 | Deleting an event releases its id for reuse | **Live, 2026-09-16** | **Refuted.** A re-insert under a deleted event's id is answered 409. The live driver had fixed seed ids and emptied its scratch calendar before seeding; the emptying succeeded and the seed still failed. Ids are generated per run now — Go's `strconv.FormatInt(n, 32)` uses `0123456789abcdefghijklmnopqrstuv`, which is exactly base32hex's alphabet, so a formatted integer is a legal event id by construction rather than by inspection (row 21) |
 | 38 | "This and following" preserves exceptions after the target | Recurring-events guide; **spike E live, 2026-09-16** | **Refuted, as the guide says and §4.2 warns.** An eight-occurrence weekly series with its sixth occurrence moved 30 minutes later, split at the fourth: the original kept `COUNT=3`, the new series took `COUNT=5`, and the moved occurrence returned at its scheduled time. The exception was **reset**. `this_and_following` must say so in its result, because nobody expects it. The split was computed by `Set.Split` in `internal/recur`, so phase 1's arithmetic is confirmed against Google rather than against itself |
 | 39 | A duplicate client-generated id may pass undetected at creation (§2.11) | **Spike F live, 2026-09-16** | **Not reproduced, and the class stays anyway.** Two inserts of one id in flight together: one 200, one 409. The collision was caught. `ambiguous_outcome` is not retired, for two reasons worth keeping: the discovery document declines to *guarantee* detection, so a single observation is not a promise; and the class also covers the retry after a transport failure, where the caller never saw the first answer and Google's 409 would be reporting the caller's own event back at it. One fewer reason to fear the class, not a reason to drop it |
-| 40 | `externalOnly` means "guests outside your organisation" | Discovery document, `events.insert.sendUpdates`, revision 20260826; **then spike A live, 2026-09-16** | **The document says one thing and the API does another, and the live probe wins (hard rule 13).** The enum description is "Notifications are sent to **non-Google Calendar** guests only", so this document was corrected to split guests by calendar system rather than by domain. Then spike A ran: an `externalOnly` insert **mailed a consumer Gmail address**, delivered by Google Calendar's own notification sender and carrying the organiser's address as the From. That guest uses Google Calendar by definition, so the documented reading is wrong — the behaviour is consistent with *outside the organiser's Workspace domain*, which is the reading the description appears to deny. **Still open:** whether a same-domain guest is spared the same insert. That single observation decides between "outside the organiser's domain" and "behaves like `all`", and §4.3's `dry_run` cannot state a split until it is in. Recorded now because the evidence exists now, and because this is the second time in one phase that a parameter's own description has been the thing that misled |
+| 40 | `externalOnly` means "guests outside your organisation" | Discovery document, `events.insert.sendUpdates`, revision 20260826; **spike A live, 2026-09-16** | **Confirmed by the API and refuted by its own documentation — the probe wins (hard rule 13).** The enum description says "Notifications are sent to **non-Google Calendar** guests only", and this document was corrected to match it. Then spike A put one guest inside the organiser's Workspace domain and one outside it on a consumer Gmail account, and inserted the same event three times. Under `externalOnly` the **out-of-domain guest was mailed and the same-domain guest was not** — even though both demonstrably use Google Calendar, which is the axis the description names. The real axis is the organiser's Workspace domain. §4.3's `dry_run` can therefore split its count exactly, from the organiser's own primary calendar id, and does. **Two corrections in one day from one parameter description**: it is the second field in this phase whose published description was the misleading thing, after `showDeleted` (row 33) |
+| 41 | `none` still sends some mail (§2.6) | **Spike A live, 2026-09-16** | **Not reproduced, and the rule stands anyway.** Two inserts carrying `sendUpdates=none` with two guests mailed neither of them. Google's warning is that mail "might still be sent", not that it is, so one silent run is not a promise of silence — §4.3 rule 3 keeps its refusal to report `none` as silence for the same reason spike F did not retire `ambiguous_outcome` (row 39). What this does remove is the fear that `none` is routinely noisy: it is not, on this shape of write. **Caveat held deliberately:** the out-of-domain guest also did not receive the `all` invitation, which it should have, so something filtered mail on that side and the absence of the `none` mail there is not clean evidence. The same-domain observation is clean, because that guest did receive `all` |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |
