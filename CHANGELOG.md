@@ -377,6 +377,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Dependency and tool versions brought current before the release:
+  govulncheck to 1.8.0, the MCP SDK to 1.8.0, `x/sys` to 0.48.0 and
+  `x/sync` to 0.23.0. Everything else — every pinned action, goreleaser,
+  cosign, syft, golangci-lint, gitleaks, go-licenses — was already at
+  its latest release.
+
+  One bump was reverted. `segmentio/asm` 1.2.1 relicensed to **MIT No
+  Attribution**, which is more permissive than the MIT it replaced and
+  which `go-licenses` cannot classify, so the licence gate refused it
+  with an empty licence name. Nothing needed the bump and there is no
+  name to add to the allow-list, so the version the direct dependency
+  asks for stays (§18 row 76).
+
 - `check_availability` has its own ceiling of 100 calendars per call
   rather than `GCAL_MAX_CALENDARS`: free/busy answers for 50 calendars
   in one request where a schedule read spends one per calendar. The
