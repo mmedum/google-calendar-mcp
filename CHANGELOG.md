@@ -162,12 +162,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   started — inert through exactly the phases that add the most tools. It
   now falls back to `testdata/schema-baseline.json`, written by
   `make schema-baseline`.
-- Spike A found a second thing, and it changes a rule rather than a
-  parameter: `all` did not reach an out-of-domain guest in three runs,
-  while `externalOnly` reached them every time. The event carries both
-  guests, so the invitation was accepted and not delivered. §4.3 rule 3
-  now refuses to promise delivery for `all` exactly as it already
-  refused to promise silence for `none` (§18 row 42).
+- Spike B is answered, and §4.3 refuses `none` when a guest is outside
+  the organiser's domain. A non-Google guest invited with `none`
+  received nothing, in a run where the same address had just received
+  two other invitations — and such a guest has no Google Calendar for
+  the event to appear in, so mail was the only way they could learn of
+  it. The event exists with them attached and they cannot discover it
+  (§18 row 44).
+- A result says what the server asked for, never what a guest received.
+  `all` looked like it did not reach out-of-domain guests — three runs,
+  both orderings, the same answer. Putting a non-Google address on the
+  same events showed one send at two receivers: it arrived at one and
+  not the other, so Google sent it and the receiving provider dropped
+  it. Three consistent runs were consistent because the instrument was
+  (§18 row 42).
 - Spike A is answered: `externalOnly` follows the organiser's domain,
   and `sendUpdates=none` mailed nobody on insert. The second does not
   soften §4.3 rule 3 — Google warns mail "might still be sent", so one

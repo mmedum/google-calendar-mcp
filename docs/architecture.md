@@ -346,7 +346,7 @@ So: **`notify` is a required parameter on every write that can reach
 another person, and the server refuses the call if it is absent.** No
 default, in either direction. The refusal names who would be reached.
 
-Four supporting rules:
+Five supporting rules:
 
 1. **The refusal is specific.** `[invalid] this event has 4 guests; pass
    notify to say whether they are emailed` — with the count, never the
@@ -355,20 +355,30 @@ Four supporting rules:
    attendees on a calendar shared with nobody has no `notify` decision to
    make, and demanding one is friction with no safety in it. The
    parameter is required only when the write can actually reach a person.
-3. **Neither `none` nor `all` is reported as a promise.** Every result
-   that used `none` says Google does not guarantee silence (§2.6), and
-   every result that used `all` says it does not guarantee delivery. The
-   second half was added after spike A watched `all` fail to reach an
-   out-of-domain guest three times running while `externalOnly` reached
-   them every time (§18 row 42). The server will not make a promise the
-   platform declines to keep, in either direction.
+3. **A result says what the server asked for, never what a guest
+   received.** `none` is never reported as silence, because Google says
+   some mail may go out anyway (§2.6). `all` is never reported as
+   delivery, because a notification Google sends can still fail to
+   arrive: spike A watched one invitation reach one of its two guests
+   and not the other, the difference being the receiving provider and
+   nothing in the request (§18 row 42). The server knows what it asked
+   for; it does not know what landed, and will not say it does.
 
    **And `none` on a cancellation is worse than quiet — it is a lie.**
    Deleting an event with `none` leaves it on the guests' calendars
    while removing it from the organiser's (§18 row 43). `cancel_event`
    therefore says, in its result, that the guests still have the meeting
    unless they were notified.
-4. **`dry_run` shows the blast radius before anything is sent**: how
+4. **`none` is refused when a guest is outside the organiser's domain**,
+   not merely warned about. Such a guest may have no Google Calendar at
+   all, and then mail is the only channel that exists: spike B invited a
+   non-Google address with `none`, it received nothing, and there was no
+   calendar for the event to land in. The guest cannot discover the
+   event by any means, while the organiser's copy shows them invited.
+   That is §2.7's "lost altogether" with the mechanism visible, and it
+   is structural rather than a defect — so it earns a refusal rather
+   than a warning a caller can skim (§18 row 44).
+5. **`dry_run` shows the blast radius before anything is sent**: how
    many guests would be notified, how many of them are outside the
    organiser's own domain and so are the ones `externalOnly` reaches, and
    what the event would look like afterwards.
@@ -1063,27 +1073,43 @@ states its question and its verdict separately.
   hand. A spike that scored itself green on this would be scoring
   something else.
 
-  **Answered 2026-09-16.** With one guest inside the organiser's domain
-  and one outside it on Gmail: `all` mailed the same-domain guest,
-  `externalOnly` mailed the out-of-domain guest and **not** the
-  same-domain one, and neither `none` arm mailed anybody. So
-  `externalOnly` splits on the Workspace domain rather than on the
-  guest's calendar system (§18 row 40), and §2.6's "some mail is sent
-  even with none" did not reproduce on insert (§18 row 41). One loose
-  end is recorded rather than smoothed over: the out-of-domain guest did
-  not receive the `all` invitation either, which it should have, so mail
-  was being filtered on that side and only the same-domain column is
-  clean evidence.
+  **Answered 2026-09-16, over four runs, and the fourth is the one that
+  made the first three readable.** Three guests in the end: one inside
+  the organiser's domain, one outside it on Gmail, one outside it and
+  not on Google Calendar at all.
+
+  - `externalOnly` reached **both** out-of-domain guests and not the
+    same-domain one, whatever calendar system they use. The axis is the
+    Workspace domain, and the discovery document's "non-Google Calendar
+    guests only" is wrong about its own parameter (§18 row 40).
+  - `all` reached the same-domain guest and the non-Google guest, and
+    never the Gmail guest — across three runs and both orderings. That
+    looked like an API behaviour until the non-Google address was put on
+    the same events, at which point one send was visible at two
+    receivers and the difference turned out to be Gmail (§18 row 42).
+  - `none` reached nobody, in a run where every other arm demonstrably
+    did, so §2.6's "some mail is sent even with none" does not reproduce
+    on insert (§18 row 41).
+
+  **Three consistent runs were consistent because the instrument was.**
+  Repetition looked like evidence and was not; what settled it was a
+  second receiver on the same event, not a fourth attempt.
 - **Spike B — `sendUpdates: none` on insert.** Google warns it can lose
   events (§2.7). Reproduce or fail to reproduce. If it reproduces, §4.3
   may need to refuse `none` on insert outright.
 
-  The warning is that events may not sync "to external calendars", which
-  by row 40's reading means calendars that are not Google Calendar — so
-  the guest that can reproduce this is the non-Google one, not merely an
-  out-of-domain one. Like spike A, the outcome is visible in the guest's
-  calendar rather than in any response, so the driver sets it up and a
-  person reads the result.
+  **Confirmed 2026-09-16, and the mechanism is plainer than the warning.**
+  A non-Google address was invited to an event inserted with `none`. It
+  received nothing — in a run where the same address had just received
+  both `all` and `externalOnly`, so the channel was working. A guest
+  outside Google Calendar has no calendar for the event to appear in, so
+  mail is the only way they can learn of it, and `none` removes the only
+  way. The event exists with them attached and they cannot discover it.
+
+  So §4.3 refuses `none` when a guest is outside the organiser's domain
+  rather than warning about it (§18 row 44). The refusal is on the
+  domain rather than on the calendar system because the domain is what
+  the server can actually tell from an address.
 - **Spike C — daylight saving.** A weekly recurrence at 09:00 local,
   spanning a transition, written with a zone and written without one.
   Confirm the drift and confirm its absence. **Both halves answered,
@@ -1496,8 +1522,9 @@ what §15 exists to settle, and they are marked.
 | 39 | A duplicate client-generated id may pass undetected at creation (§2.11) | **Spike F live, 2026-09-16** | **Not reproduced, and the class stays anyway.** Two inserts of one id in flight together: one 200, one 409. The collision was caught. `ambiguous_outcome` is not retired, for two reasons worth keeping: the discovery document declines to *guarantee* detection, so a single observation is not a promise; and the class also covers the retry after a transport failure, where the caller never saw the first answer and Google's 409 would be reporting the caller's own event back at it. One fewer reason to fear the class, not a reason to drop it |
 | 40 | `externalOnly` means "guests outside your organisation" | Discovery document, `events.insert.sendUpdates`, revision 20260826; **spike A live, 2026-09-16** | **Confirmed by the API and refuted by its own documentation — the probe wins (hard rule 13).** The enum description says "Notifications are sent to **non-Google Calendar** guests only", and this document was corrected to match it. Then spike A put one guest inside the organiser's Workspace domain and one outside it on a consumer Gmail account, and inserted the same event three times. Under `externalOnly` the **out-of-domain guest was mailed and the same-domain guest was not** — even though both demonstrably use Google Calendar, which is the axis the description names. The real axis is the organiser's Workspace domain. §4.3's `dry_run` can therefore split its count exactly, from the organiser's own primary calendar id, and does. **Two corrections in one day from one parameter description**: it is the second field in this phase whose published description was the misleading thing, after `showDeleted` (row 33) |
 | 41 | `none` still sends some mail (§2.6) | **Spike A live, 2026-09-16** | **Not reproduced, and the rule stands anyway.** Two inserts carrying `sendUpdates=none` with two guests mailed neither of them. Google's warning is that mail "might still be sent", not that it is, so one silent run is not a promise of silence — §4.3 rule 3 keeps its refusal to report `none` as silence for the same reason spike F did not retire `ambiguous_outcome` (row 39). What this does remove is the fear that `none` is routinely noisy: it is not, on this shape of write. **Caveat held deliberately:** the out-of-domain guest also did not receive the `all` invitation, which it should have, so something filtered mail on that side and the absence of the `none` mail there is not clean evidence. The same-domain observation is clean, because that guest did receive `all` |
-| 42 | `all` notifies all guests | Discovery document, `events.insert.sendUpdates`; **spike A live, three runs, 2026-09-16** | **Not reproduced, and the failure is reproducible.** Across three runs, an out-of-domain Google Calendar guest received the `externalOnly` invitation every time and the `all` invitation **never**, while a same-domain guest received `all` and not `externalOnly`. The third run sent `all` first and twenty seconds earlier, to rule out the receiving side throttling a burst from an unknown sender; the result did not move. The `all` event *is* created with both guests attached — a screenshot of the same-domain guest's calendar shows the out-of-domain guest listed on it — so the API accepted the invitation and did not deliver it. Whether this is Google's behaviour or one Workspace domain's policy cannot be told from one domain, and that is the open half. **What it settles is the design half:** the server must not promise that `all` reaches everyone, exactly as §4.3 rule 3 already forbids promising that `none` reaches nobody. The two are the same rule, and until this run only one of them had evidence |
+| 42 | `all` notifies all guests | **Spike A live, four runs, 2026-09-16** | **Confirmed — and the three runs that seemed to refute it were measuring the receiver.** An out-of-domain Gmail guest received `externalOnly` every time and `all` never, across three runs and both orderings, which was recorded here as "the API accepted the invitation and did not deliver it". The fourth run put a **non-Google address on the same events as that Gmail address**, so one send could be watched at two receivers: the non-Google guest received **both** `all` and `externalOnly`; the Gmail guest received only `externalOnly`. Same event, same moment, one delivered and one not — so Google sent the `all` notification and Gmail did not surface it. **The correction matters more than the finding.** Three consistent runs were consistent because the instrument was, and repetition looked like evidence. What broke it was not a fourth run but a second receiver, which is the only thing that could separate sending from delivery |
 | 43 | Deleting an event removes it from the guests' calendars | **Live, 2026-09-16** | **Refuted when `sendUpdates=none`, and it is the sharpest argument §4.3 has.** An event created with two guests was deleted with `sendUpdates=none`. It is gone from the organiser's calendar — confirmed by listing that calendar, which now holds only later events — and it is **still on a guest's calendar**, showing both attendees and awaiting a response. The organiser believes the meeting is cancelled; the guest still has it. Found because the live driver was doing it: its own cleanup deleted guest-carrying probe events with `none` for a day and left them on two real calendars. The driver now cancels anything with attendees using `all`. For phase 2 this is `cancel_event` with `notify: none`, and §4.3's refusal to treat `none` as harmless now rests on a demonstration rather than on a warning in a document |
+| 44 | `sendUpdates=none` on insert can lose an event (§2.7) | **Spike B live, 2026-09-16** | **Confirmed, and it is structural rather than a defect.** A non-Google address was invited to an event inserted with `none`. It received nothing — in a run where the same address demonstrably did receive both `all` and `externalOnly` minutes earlier, so the channel was working. A guest outside Google Calendar has no calendar for the event to appear in, so mail is the only way they can learn of it, and `none` removes the only way. The event exists, with them attached, and they cannot discover it by any means. That is §2.7's "events being lost altogether for some users" with the mechanism visible. §4.3 refuses `none` when a guest is outside the organiser's domain rather than warning about it, because a warning is something a caller skims |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |
