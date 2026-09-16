@@ -206,7 +206,7 @@ func NewEventOut(e model.Event) EventOut {
 		Status: e.Status, EventType: e.Type, Location: e.Location,
 		Description: e.Description, Recurrence: e.Recurrence,
 		SeriesID: e.SeriesID, Transparent: e.Transparent,
-		GuestCount: e.GuestCount(), GuestsTruncated: e.AttendeesTruncated,
+		GuestCount: e.GuestCount(""), GuestsTruncated: e.AttendeesTruncated,
 		Organizer: e.Organizer, Link: e.Link, ETag: e.ETag,
 		AllDay: e.Start.AllDay,
 	}

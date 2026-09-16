@@ -122,39 +122,55 @@ func newAPI(ctx context.Context, profile string) (*liveAPI, error) {
 }
 
 func (a *liveAPI) do(ctx context.Context, method, path string, body, out any) error {
+	return a.doWithMatch(ctx, method, path, "", body, out)
+}
+
+// doWithMatch is do with an If-Match header, for the one spike that has
+// to ask whether a method honours it. It also returns the HTTP status,
+// because "which status" IS the answer there rather than a detail.
+func (a *liveAPI) doWithMatch(ctx context.Context, method, path, ifMatch string, body, out any) error {
+	_, err := a.status(ctx, method, path, ifMatch, body, out)
+	return err
+}
+
+func (a *liveAPI) status(ctx context.Context, method, path, ifMatch string, body, out any) (int, error) {
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		r = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, apiBase+path, r)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if ifMatch != "" {
+		req.Header.Set("If-Match", ifMatch)
+	}
 	resp, err := a.hc.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s failed", method, path)
+		return 0, fmt.Errorf("%s %s failed", method, path)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return err
+		return resp.StatusCode, err
 	}
 	if resp.StatusCode >= 300 {
 		// The body can carry the calendar's title; the caller prints
 		// through the redactor, which handles it.
-		return fmt.Errorf("%s %s returned %d: %s", method, path, resp.StatusCode, string(data))
+		return resp.StatusCode, fmt.Errorf("%s %s returned %d: %s",
+			method, path, resp.StatusCode, string(data))
 	}
 	if out != nil && len(data) > 0 {
-		return json.Unmarshal(data, out)
+		return resp.StatusCode, json.Unmarshal(data, out)
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 func (a *liveAPI) createScratchCalendar(ctx context.Context, title string) (string, error) {
@@ -551,6 +567,9 @@ type instanceRow struct {
 		TimeZone string `json:"timeZone"`
 	} `json:"start"`
 	Status string `json:"status"`
+	// ETag is what spike J needs a stale copy of, to ask whether
+	// events.move honours If-Match.
+	ETag string `json:"etag"`
 }
 
 // listInstances reads a series' occurrences directly, for the setup that

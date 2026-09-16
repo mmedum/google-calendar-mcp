@@ -98,8 +98,12 @@ func (r Reach) Any() bool { return r.Guests > 0 }
 // Who counts as a guest is model.Event.Guests' to say, not this
 // package's: it is the rule §4.3.2 decides a refusal on, and a second
 // copy here would let one result quote two different counts.
-func ReachOfEvent(organiser string, e model.Event) Reach {
-	guests := e.Guests()
+//
+// account is the signed-in account's own address, which is never a
+// guest — Google's `self` flag alone was not enough to establish that,
+// and the live run proved it (see model.Event.Guests).
+func ReachOfEvent(organiser, account string, e model.Event) Reach {
+	guests := e.Guests(account)
 	r := Reach{domain: domainOf(organiser), Guests: len(guests)}
 	for _, a := range guests {
 		if r.isExternal(a.Email) {
@@ -232,7 +236,12 @@ func (d Decision) SendUpdatesFor() string {
 // invitation reach one of two guests and not the other, the difference
 // being the receiving provider and nothing in the request (§18 row 42).
 func (d Decision) Report() string {
-	if !d.Asked {
+	// On the REACH, not on whether a choice was passed. A caller who
+	// passes notify:none on an event with no guests got "Asked Google to
+	// notify nobody, of 0 guests … this is not a promise of silence",
+	// which reads as a warning about nothing and invites a reader to
+	// wonder who the zero guests are.
+	if d.Reach.Guests == 0 {
 		return "Nobody to notify: this write reaches no guests, so no notification was requested."
 	}
 	switch d.Notify {

@@ -27,6 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/mmedum/google-calendar-mcp/internal/redact"
@@ -201,6 +202,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		r.invented[dest] = true
 	}
 
+	spikeDest = dest
 	writes := &writeState{dest: dest, self: self}
 	for _, st := range steps(scratch, state) {
 		r.run(ctx, sess, st)
@@ -227,6 +229,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike E: this and following", spikeE},
 		{"spike F: duplicate insert", spikeF},
 		{"spike I: 50 vs 51 calendars", spikeI},
+		{"spike J: move under If-Match", spikeJ},
 	} {
 		r.total++
 		v, note := sp.run(ctx, out, api, scratch)
@@ -400,6 +403,46 @@ func (st step) arguments() map[string]any {
 	return st.args
 }
 
+// linesWith returns the rendered rows that mention needle.
+//
+// Every assertion about one event's time or date goes through this, and
+// the live run is why: two of them grepped the whole result for a date
+// or a clock time, so an unrelated probe seeded on 19 March at 13:00
+// made "the all-day event moved to the previous day" and "the series
+// drifted to 13:00-14:00" both fire. Neither had. An assertion that can
+// be satisfied by a line it is not about is the failure §15 opens by
+// naming, pointed the other way.
+func linesWith(text, needle string) []string {
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, needle) {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	return out
+}
+
+// clockTime is HH:MM, which is what tells an occurrence row from a
+// heading that merely names the same event.
+var clockTime = regexp.MustCompile(`[0-9]{2}:[0-9]{2}`)
+
+// timedRows returns the rows for one event that actually carry a clock.
+//
+// list_instances prints the series title on a header line of its own and
+// then again on every occurrence, so a filter on the title alone picks
+// up a line with no time in it — and an assertion about drift fires on
+// the heading. That is the same mistake as the one linesWith fixed, one
+// level in.
+func timedRows(text, needle string) []string {
+	var out []string
+	for _, line := range linesWith(text, needle) {
+		if clockTime.MatchString(line) {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
 func truncate(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " | ")
 	if len(s) <= n {
@@ -535,14 +578,17 @@ func steps(scratch string, state seedState) []step {
 				if r.isError {
 					return fail, "returned an error"
 				}
-				if !strings.Contains(r.text, allDayDate) {
-					return fail, fmt.Sprintf("the all-day event is not on %s when read from Pacific/Honolulu", allDayDate)
+				rows := linesWith(r.text, allDayTitle)
+				if len(rows) == 0 {
+					return fail, "the all-day event is missing from a window that contains it"
 				}
-				if strings.Contains(r.text, "2026-03-19") {
-					return fail, "the all-day event moved to the previous day"
-				}
-				if !strings.Contains(r.text, "all day") {
-					return fail, "the all-day event did not render as all-day"
+				for _, row := range rows {
+					if !strings.Contains(row, allDayDate) {
+						return fail, "the all-day event moved when read from Pacific/Honolulu: " + row
+					}
+					if !strings.Contains(row, "all day") {
+						return fail, "the all-day event did not render as all-day: " + row
+					}
 				}
 				return pass, "stayed on " + allDayDate + " from a UTC-10 zone"
 			},
@@ -555,8 +601,14 @@ func steps(scratch string, state seedState) []step {
 				if r.isError {
 					return fail, "returned an error"
 				}
-				if !strings.Contains(r.text, allDayDate) {
-					return fail, "the all-day event moved when read from Pacific/Auckland"
+				rows := linesWith(r.text, allDayTitle)
+				if len(rows) == 0 {
+					return fail, "the all-day event is missing from a window that contains it"
+				}
+				for _, row := range rows {
+					if !strings.Contains(row, allDayDate) {
+						return fail, "the all-day event moved when read from Pacific/Auckland: " + row
+					}
 				}
 				return pass, "stayed on " + allDayDate + " from a UTC+13 zone"
 			},
@@ -575,18 +627,19 @@ func steps(scratch string, state seedState) []step {
 				if r.isError {
 					return fail, "returned an error"
 				}
-				before := strings.Count(r.text, "14:00-15:00")
-				if before < 2 {
+				rows := timedRows(r.text, weeklyTitle)
+				if len(rows) < 2 {
 					return undetermined, "fewer than two occurrences of the series came back; nothing to compare"
 				}
 				// A drifted series renders 13:00 or 15:00 after the
-				// transition. Neither may appear.
-				for _, drifted := range []string{"13:00-14:00", "15:00-16:00"} {
-					if strings.Contains(r.text, drifted) {
-						return fail, "the series drifted to " + drifted + " across the 29 March transition"
+				// transition. Asserted on the series' OWN rows, so no
+				// other event on the page can satisfy or break it.
+				for _, row := range rows {
+					if !strings.Contains(row, "14:00-15:00") {
+						return fail, "an occurrence drifted across the 29 March transition: " + row
 					}
 				}
-				return pass, fmt.Sprintf("%d occurrences all at 14:00 local, across the 29 March transition", before)
+				return pass, fmt.Sprintf("%d occurrences all at 14:00 local, across the 29 March transition", len(rows))
 			},
 		},
 		{
@@ -749,13 +802,14 @@ func steps(scratch string, state seedState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 200)
 				}
-				for _, drifted := range []string{"13:00-14:00", "15:00-16:00"} {
-					if strings.Contains(r.text, drifted) {
-						return fail, "an occurrence drifted to " + drifted
-					}
-				}
-				if n := strings.Count(r.text, "14:00-15:00"); n < 2 {
+				rows := timedRows(r.text, weeklyTitle)
+				if len(rows) < 2 {
 					return undetermined, "fewer than two occurrences came back; nothing to compare"
+				}
+				for _, row := range rows {
+					if !strings.Contains(row, "14:00-15:00") {
+						return fail, "an occurrence drifted: " + row
+					}
 				}
 				return pass, "every occurrence at 14:00 local, across the transition"
 			},

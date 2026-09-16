@@ -390,8 +390,15 @@ func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventI
 		writeErr(w, http.StatusNotFound, "notFound", "no destination calendar with that id")
 		return
 	}
+	match := r.Header.Get("If-Match")
 	s.recordWrite(Write{Method: "move", CalendarID: calID, EventID: eventID,
-		SendUpdates: r.URL.Query().Get("sendUpdates")})
+		SendUpdates: r.URL.Query().Get("sendUpdates"), IfMatch: match})
+	// events.move honours If-Match, which nothing Google publishes says
+	// and spike J established live (§18 row 49).
+	if !etagOK(match, cur.ETag) {
+		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
+		return
+	}
 	s.mu.Lock()
 	moved := *cur
 	delete(s.Events[calID], eventID)
@@ -400,7 +407,15 @@ func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventI
 	}
 	s.Events[dest][eventID] = &moved
 	s.mu.Unlock()
-	writeJSON(w, moved)
+
+	// The RESPONSE says cancelled; the stored event does not. That is
+	// what Google does, found live: a successful move answers with
+	// status:cancelled while the event sits confirmed on the destination
+	// (§18 row 48). A fake that answered with the destination's state
+	// would hide the reason the server reads the event back.
+	answer := moved
+	answer.Status = gcal.StatusCancelled
+	writeJSON(w, answer)
 }
 
 // event reads one event under the lock.

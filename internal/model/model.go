@@ -9,6 +9,7 @@ package model
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
@@ -174,14 +175,27 @@ func (e Event) Moved() bool {
 //
 // This is the one definition of "who a write can reach", which is what
 // §4.3.2 hangs on — a write that reaches nobody does not have to ask
-// about notification. It had two: the notification guard counted the
-// same filter again in its own package, so the rule that decides whether
-// a call is refused lived in two places and one result could have
-// quoted two different numbers.
-func (e Event) Guests() []Attendee {
+// about notification.
+//
+// account is the signed-in account's own address, and it is needed
+// because Google's `self` flag is NOT sufficient. The live driver put
+// the account on its own event, on a calendar the account owns, and the
+// attendee came back without `self` — so the caller counted as their own
+// guest and a write that reached nobody demanded a notification
+// decision. The flag appears to be relative to the calendar in the
+// request rather than to the authenticated user, and a secondary
+// calendar is not the user; that mechanism is a reading of one live
+// observation, so the fix does not depend on it being right.
+//
+// An empty account falls back to the flag alone, which is what a
+// renderer has: it is describing an event, not deciding a refusal.
+func (e Event) Guests(account string) []Attendee {
 	out := make([]Attendee, 0, len(e.Attendees))
 	for _, a := range e.Attendees {
 		if a.Self || a.Resource {
+			continue
+		}
+		if account != "" && strings.EqualFold(a.Email, account) {
 			continue
 		}
 		out = append(out, a)
@@ -191,7 +205,7 @@ func (e Event) Guests() []Attendee {
 
 // GuestCount is how many people would be reached. The count goes in a
 // refusal; the addresses never do (§9).
-func (e Event) GuestCount() int { return len(e.Guests()) }
+func (e Event) GuestCount(account string) int { return len(e.Guests(account)) }
 
 // Attendee is one guest.
 type Attendee struct {

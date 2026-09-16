@@ -432,7 +432,7 @@ func TestCancellingAWholeEventDeletesIt(t *testing.T) {
 	if len(w) != 1 || w[0].Method != "delete" {
 		t.Fatalf("got %+v, want one delete", w)
 	}
-	if !strings.Contains(out.Text(), "Deleted the event") {
+	if !strings.Contains(out.Text(), "deletes the event") {
 		t.Errorf("the result must say which of the two shapes happened:\n%s", out.Text())
 	}
 }
@@ -681,12 +681,16 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 			})
 			return err
 		}, "list, settings, read, delete"},
-		{"move", 4, func(s *service.Service) error {
+		// Five, not four: the event is read back from the destination,
+		// because a successful move answers with status:cancelled and
+		// the result would otherwise report a moved meeting as a
+		// cancelled one (§18 row 48).
+		{"move", 5, func(s *service.Service) error {
 			_, err := s.MoveEvent(context.Background(), service.MoveOptions{
 				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
 			})
 			return err
-		}, "list, settings, read, move"},
+		}, "list, settings, read, move, read back"},
 		{"respond", 4, func(s *service.Service) error {
 			_, err := s.RespondToEvent(context.Background(), service.RespondOptions{
 				Calendar: "primary", EventID: "evinvite001", Response: "accepted", Notify: "all",
@@ -1166,5 +1170,71 @@ func TestAConcurrentEditOnADeleteIsStaleNotGone(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "again") {
 		t.Fatalf("the refusal does not tell the caller to re-read: %v", err)
+	}
+}
+
+// §18 row 48, offline: a successful move answers with status:cancelled,
+// so the result must come from reading the destination rather than from
+// the move's own response. It reported a meeting that had just been
+// moved as one that had been called off — green in every gate, and
+// visible only in the live transcript.
+func TestAMovedEventIsNotReportedAsCancelled(t *testing.T) {
+	svc, _ := writeSeed(t)
+	out, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+		Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+	})
+	if err != nil {
+		t.Fatalf("MoveEvent: %v", err)
+	}
+	if out.After == nil {
+		t.Fatal("a move must report where the event landed")
+	}
+	if out.After.Cancelled() {
+		t.Fatalf("a moved event was reported cancelled: %+v", out.After)
+	}
+	if strings.Contains(out.Text(), "cancelled") {
+		t.Fatalf("the move result says cancelled:\n%s", out.Text())
+	}
+	if out.After.CalendarID != "team@group.calendar.example.test" {
+		t.Fatalf("reported on %q, want the destination", out.After.CalendarID)
+	}
+}
+
+// §18 row 49: events.move honours If-Match, which nothing Google
+// publishes says. The server sent none for a while and told callers the
+// protection was absent; spike J asked the API instead of the
+// documentation, and §4.4 turned out to have no exception.
+func TestMoveIsMadeUnderIfMatch(t *testing.T) {
+	svc, fake := writeSeed(t)
+	before, _, err := svc.GetEvent(context.Background(), "primary", "evsolo00001", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+		Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+	}); err != nil {
+		t.Fatalf("MoveEvent: %v", err)
+	}
+	w := fake.Wrote()
+	if len(w) == 0 || w[0].Method != "move" {
+		t.Fatalf("got %+v, want a move", w)
+	}
+	if w[0].IfMatch != before.ETag {
+		t.Fatalf("the move carried If-Match %q, want the etag the read produced (%q)",
+			w[0].IfMatch, before.ETag)
+	}
+}
+
+func TestMoveWithAnEtagThatMovedIsStale(t *testing.T) {
+	svc, fake := writeSeed(t)
+	_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+		Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		ETag: `"something-older"`,
+	})
+	if got := classOf(t, err); got != gapi.ClassStale {
+		t.Fatalf("got [%s], want [stale]: %v", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("a stale move must be refused before it is sent")
 	}
 }

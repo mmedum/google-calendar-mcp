@@ -1,14 +1,30 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 2 is built and NOT yet run live (2026-09-16).** Phase 0
-— the scaffolding, the gates, the time model and the six read tools —
-and phase 1 — `internal/recur`, `list_instances` and
-`check_availability` — are built, verified live and committed. Phase 2 —
-`internal/plan`, the five event writes, `If-Match`, the client-generated
-id and `dry_run` — is built and every gate is green, which §13 says is
-not the same as done. The surface is thirteen tools; `make check` is
-green across nineteen targets; the live driver has 47 steps and has not
-been run against a real account since the writes were added.
+**Status: phase 2 is built, run live and green (2026-09-16).** Phase 0 —
+the scaffolding, the gates, the time model and the six read tools —
+phase 1 — `internal/recur`, `list_instances` and `check_availability` —
+and phase 2 — `internal/plan`, the five event writes, `If-Match`, the
+client-generated id and `dry_run` — are built, verified live and
+committed. The surface is thirteen tools; `make check` is green across
+nineteen targets; the live driver runs 55 steps against a real account
+with none failing.
+
+**What phase 2's live runs cost and taught.** Six runs. The first failed
+five steps: three were the driver's own assertions, which grepped a whole
+rendered page for a date or a clock time and so were satisfied by a probe
+event that had nothing to do with them. One was a step that cancelled an
+occurrence the seed had already cancelled. The fifth was real — Google's
+`self` flag is not set on the account's own attendee row on a secondary
+calendar, so a write that reached nobody demanded a notification choice
+(§18 row 50). Then the transcript, read rather than counted, showed two
+more that every gate had passed: **a successful move reported itself as
+`[cancelled]`**, because `events.move` answers with that status while the
+event sits confirmed on the destination (§18 row 48); and a cancellation
+dry run said "Deleted the event" under the words "nothing was written".
+And spike J settled the one question phase 2 had left open with a
+disclaimer: **`events.move` does honour `If-Match`** (§18 row 49), so
+§4.4 has no exception and `move_event` takes an etag like everything
+else.
 
 **Every spike except one is answered (§15).** A, B, C, D, E, F, H and I.
 That matters because §16's phase 2 says its refusal wording waits on A,
@@ -28,8 +44,7 @@ longer withdraw. Nine of §18's forty-four rows were written or rewritten
 on 2026-09-16, four of them correcting something this document had
 asserted earlier the same day.
 
-**Still owed:** **phase 2's live run** — the first thing the next
-session should do — spike G's negative half, and **CI has never run on macOS
+**Still owed:** spike G's negative half, and **CI has never run on macOS
 or Windows** — the workflow covers all three platforms and the branch
 has never been pushed. Both platforms cross-compile clean, including the
 tagged tests, so a first run is unlikely to fail on compilation; the
@@ -446,14 +461,14 @@ written.
   a read-modify-write on the array, never a replacement of it, so an RSVP
   that arrived between the read and the write is reported as `[stale]`
   rather than overwritten.
-- **`events.move` is the one exception, and it is named rather than
-  quiet.** It is not a patch — a POST with the destination in the query
-  string and no body — and whether Google honours `If-Match` on it is
-  undocumented and unprobed. Sending one would be adopting a convention
-  rule 13 forbids adopting unverified; sending `*` would be calling
-  something concurrency control that is not. So `move_event` takes no
-  etag, its description says it is the one write without the protection,
-  and its result repeats it. Probing it is a spike phase 3 can afford.
+- **`events.move` carries `If-Match` too, and finding that out is the
+  argument for §15.** It is not a patch — a POST with the destination in
+  the query string and no body — and nothing Google publishes says the
+  header applies. So this server sent none and its result told callers
+  the protection was absent, which was honest about the uncertainty and
+  wrong about the API. Spike J sent a stale etag and got **412**, so the
+  rule has no exception: every write here is made under `If-Match`
+  (§18 row 49).
 
 ### 4.5 Every read states its window, its zone and its completeness
 
@@ -1188,6 +1203,22 @@ states its question and its verdict separately.
   retry after a transport failure, where the caller never saw the first
   answer at all and Google's 409 would arrive for an event the caller
   itself created. The class stays, with one fewer reason to fear it.
+- **Spike J — does `events.move` honour `If-Match`?** §4.4 puts every
+  write under it, and `events.move` was the one this server could not
+  place: a POST with no body, and neither the reference nor the discovery
+  document says whether the header applies. The server sent none and said
+  so in the result, which is an assumption wearing a disclaimer.
+
+  **Answered 2026-09-16: it is HONOURED.** A probe event was created, its
+  etag read, the event patched so that etag went stale, and the move sent
+  with the stale one: **412**. So the exception was a hole rather than a
+  fact, `move_event` takes an etag now, and §4.4 covers every write
+  without qualification.
+
+  The discriminator is the point. A CURRENT etag would have succeeded
+  whether the header is honoured or ignored and settled nothing — which
+  is the failure this section opens by naming, and which spike I
+  committed once already.
 - **Spike G — ACL scopes.** Confirm §2.15: that `acl.list` fails under
   `calendar.readonly` alone. It is a scope-set decision and a 403 weeks
   later if wrong.
@@ -1403,8 +1434,7 @@ than lost:
   differ, not that both should be configurable. One more knob whose
   right value is the API's own limit is a knob nobody should turn.
 
-**Phase 2 — writing events (v0.2.0). Built 2026-09-16; NOT yet run
-live.** `internal/plan` — the typed draft, the patch body and the three
+**Phase 2 — writing events (v0.2.0). Built and run live 2026-09-16.** `internal/plan` — the typed draft, the patch body and the three
 guards — plus `create_event`, `update_event`, `cancel_event`,
 `move_event` and `respond_to_event`, taking the surface to thirteen
 tools. The three declared-but-unemitted error classes are all emitted
@@ -1463,15 +1493,46 @@ Both are fixed, and both are the §13 point restated: a fake that is
 easier than the API makes a whole path untestable while every test is
 green.
 
-**Still owed, and it is the important line: this phase has NOT had its
-live run.** §13 says green gates are not done, and every gate here is
-green. The driver has the steps — 47 of them now, covering all thirteen
-tools — including the two-call split, the stale etag, the occurrence
-address, the guard refusals and a dry run whose absence is then checked
-by a read. It needs an operator with credentials, and the transcript
-needs reading, before any of this counts. The write steps also need a
-second scratch calendar for `move_event`, which spends one more of the
-creation quota of §18 row 36, once, and is adopted on every run after.
+**The live run, which is where three more defects came from.** Six runs,
+55 steps, and the last of them green. Three of the first run's five
+failures were the driver's own: an assertion that greps a whole rendered
+page for a date or a clock time can be satisfied by a line it is not
+about, and a probe seeded on 19 March at 13:00 satisfied two of them. An
+assertion now looks at the rows carrying the event's own title, and at
+those with a clock on them when it is asking about a clock. A fourth was
+a step cancelling an occurrence the seed had already cancelled.
+
+The fifth was real and is §18 row 50: **Google's `self` flag is not set
+on the account's own attendee row on a secondary calendar**, so §4.3.2's
+"a write that reaches nobody does not ask" counted the caller as their
+own guest and `respond_to_event` was refused for reaching one person —
+itself. `model.Event.Guests` takes the account's address now and
+excludes it whatever the flag says.
+
+Then the transcript, which is the part §13 insists on, showed three the
+count could not. **A successful move reported itself as `[cancelled]`**,
+because `events.move` answers with that status while the event sits
+confirmed on the destination (§18 row 48) — the one word a caller acts
+on, exactly inverted; and a cancellation dry run printed "Deleted the
+event" under "DRY RUN — nothing was written", a result contradicting
+itself in six lines. And `list_instances` returned its occurrences in
+whatever order Google sent them, which is not date order — a cancelled
+24 March after 7 April, in the list a caller reads to find out which
+dates are gone. They are sorted after the budget cut rather than before
+it, so which occurrences come back is unchanged and only the order
+differs; sorting first would keep a different set than the page token
+accounts for, which is phase 1's defect one tool over. The fake
+reproduces the move's answer now, so that one is held offline.
+
+And **spike J closed the question this phase had left open with a
+disclaimer.** `move_event` took no etag, because `events.move` is a POST
+with no body and nothing Google publishes says `If-Match` applies. A
+stale etag is refused with 412 (§18 row 49). The exception was a hole,
+not a fact; §4.4 covers every write now.
+
+The write steps need a second scratch calendar for `move_event`, which
+spends one more of the creation quota of §18 row 36, once, and is adopted
+on every run after.
 
 **What the reviews found, and it is the argument for running them.**
 Every gate was green before they started, and `/simplify` and
@@ -1718,6 +1779,9 @@ what §15 exists to settle, and they are marked.
 | 45 | `leaks-history` protects the repository before it goes public | **Run for the first time, 2026-09-16** | **It could never have passed.** The allow-list carried `@noreply.anthropic.com`; the address in every commit's attribution trailer is `noreply@anthropic.com`, the other shape. So the gate failed on fourteen of fifteen commit messages, and had done since the first commit — unnoticed because it is the one gate `make check` deliberately does not run, being reserved for "before going public". A gate nobody runs is a gate nobody knows is broken, which is the same lesson as the three gates phase 1 found named but absent, one level further out: that failure was a list claiming a gate existed, this one is a gate that exists and was never executed. The entry is added as §9.1 requires, argued rather than widened: a vendor's non-routable no-reply address in a Co-Authored-By trailer, structurally identical to the GitHub noreply already allowed, saying nothing about a deployer, an organisation or anyone's calendar |
 | 46 | `make check` passing locally means it passes on a fresh clone | **First CI run, 2026-09-16** | **Refuted twice in one run, and neither failure was platform-specific in the way "CI has never run on macOS or Windows" implied.** The `staleness` gate failed on **all three** platforms, Ubuntu included, because `internal/plan`, `scripts/evals` and a third under `scripts/` existed locally as **empty directories** and git does not carry those. The gate had been passing on a working tree that no clone could reproduce — including every contributor's. It also caught a real documentation error on the way: that third directory never existed at all — the live probes live in `scripts/livecal` — and both this document and CLAUDE.md had said otherwise since phase 0. The gate now accepts a path a later phase builds only when the text names that phase, so a plan and a stale reference are told apart by the author rather than guessed at. Separately, `gofmt` listed every `.go` file on Windows: git checked the tree out with CRLF and Go's tooling assumes LF, so a `.gitattributes` pins `eol=lf`. **The lesson is the empty directories**: a gate is only as honest as the tree it runs on, and a local tree is not the artifact anybody else gets |
 | 47 | The file fallback's 0600 protects the refresh token on every platform | **First CI run on Windows, 2026-09-16**; Go's `os` documentation; `golang.org/x/sys/windows` | **Refuted, and the warning was asserting it.** Go's file modes do not map to Windows ACLs — on Windows the mode only decides the read-only attribute — so the token file was written 0600 and landed at **0666**, readable by any account on the machine, while both warnings said "mode 0600" on every read and every save. A sentence a user would rely on, false on one of three supported platforms, and the same failure as promising `none` means silence (§4.3 rule 3): claiming a guarantee the platform declines to make. **Fixed rather than documented away.** The file is given an explicit DACL granting only the current user's SID, set with `PROTECTED_DACL_SECURITY_INFORMATION` so the entries inherited from the parent directory are replaced rather than added to — a grant without that flag widens access instead of restricting it. Administrators and SYSTEM are deliberately not named: they can take ownership regardless, so listing them would only make the list longer. The ACL is applied after the rename, because on Windows it belongs to the file at its final path. A Windows-only test reads the list back and asserts it is protected and holds exactly one entry, rather than trusting the call that set it |
+| 48 | `events.move` returns the moved event, so its response describes where the event landed | **Live, 2026-09-16** | **Refuted, and it made a successful move read as a cancellation.** A move that worked answered with `status: cancelled`, so the result rendered `[cancelled]` next to an event that had just been moved — the one word a caller would act on, and the exact opposite of what happened. Reading the event on the DESTINATION immediately afterwards showed it confirmed and intact, which is how the response was caught lying rather than the move. `move_event` reads the event back from the destination now and owns the extra request in its count. Every gate was green; only the transcript showed it, which is §13's whole claim about green gates |
+| 49 | `events.move` cannot carry `If-Match`, because it is a POST with no body and nothing documents the header | **Spike J live, 2026-09-16** | **Refuted: it is HONOURED.** A stale etag on a move is refused with **412**. The server had been sending none and saying in the result that this was the one write without the protection — an assumption stated honestly and still wrong. §4.4 has no exception now, `move_event` takes an etag and a `force` flag like every other write, and the fake refuses a stale one so the behaviour is held offline. The lesson is narrow and repeatable: "the documentation does not say" is a question, not an answer, and asking cost one probe |
+| 50 | Google's `self` flag marks the signed-in account on its own attendee row | **Live, 2026-09-16** | **Refuted on a secondary calendar, and it made a write that reached nobody demand a notification decision.** The driver put the account on its own event, on a calendar that account owns, and the attendee came back WITHOUT `self` — so §4.3.2's "a write that reaches nobody does not ask" counted the caller as their own guest and `respond_to_event` was refused with "this write reaches 1 guest". The flag appears to be relative to the calendar in the request rather than to the authenticated user, and a secondary calendar is not a person; that mechanism is a reading of one observation and the fix does not rest on it. `model.Event.Guests` takes the account's own address and excludes it whatever the flag says |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |

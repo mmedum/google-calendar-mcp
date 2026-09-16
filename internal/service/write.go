@@ -465,7 +465,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), env.organiser, targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -483,9 +483,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 		report.Notes = append(report.Notes, note)
 	}
 	if o.Force {
-		report.Notes = append(report.Notes,
-			"Written with If-Match: *, so a change somebody else made since this was read was overwritten "+
-				"rather than reported.")
+		report.Notes = append(report.Notes, forcedNote)
 	}
 	if o.DryRun {
 		after, perr := project(target, patch, env)
@@ -521,6 +519,11 @@ func project(before gcal.Event, patch gcal.EventPatch, env *writeEnv) (model.Eve
 	patch.ApplyTo(&after)
 	return model.FromEvent(env.cal.ID, after, &env.zone)
 }
+
+// forcedNote says a write went through with If-Match: *, which is §4.4's
+// explicit override and never a default.
+const forcedNote = "Written with If-Match: *, so a change somebody else made since this was read was " +
+	"overwritten rather than reported."
 
 // organiserOf is whose domain the guest count is split on (§4.3.5).
 //
@@ -612,7 +615,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(parent, env), parent))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(parent, env), env.organiser, parent))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -887,7 +890,7 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 		note = strings.TrimSpace(note + " " + aimed)
 	}
 
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), env.organiser, targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -939,8 +942,12 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 		if targetModel.IsSeries() {
 			what = "the whole series, every occurrence of it"
 		}
-		report.Notes = append(report.Notes, "Deleted "+what+
-			". Google keeps the record: it is still readable with show_cancelled.")
+		// Tense-neutral, because a dry run prints these notes too and
+		// "Deleted the event" under "DRY RUN — nothing was written" is
+		// the result contradicting itself in six lines.
+		report.Notes = append(report.Notes, "This deletes "+what+
+			" outright rather than marking it cancelled. Google keeps the record: it is still readable "+
+			"with show_cancelled.")
 		if o.DryRun {
 			// A delete leaves nothing behind, so After stays nil and the
 			// renderer says "(cancelled)" — the same line the real call
@@ -1068,15 +1075,12 @@ func alreadyGone(err error) error {
 
 // MoveOptions is what move_event takes.
 //
-// Note what is absent, because the absence is a decision: there is no
-// etag and no force. Every other write here is a patch under If-Match
-// (§4.4), and events.move is not a patch — it is a POST with the
-// destination in the query string and no body. Whether Google honours
-// If-Match on it is not documented and this server has not probed it,
-// so sending one would be adopting a convention rule 13 forbids
-// adopting unverified, and sending `*` would be calling something
-// concurrency control that is not. The tool says so rather than leaving
-// a caller to assume the protection is there.
+// It carries an etag like every other write, and for a while it did not:
+// events.move is a POST with no body and nothing Google publishes says
+// If-Match applies to it, so this server sent none and its result told
+// callers the protection was absent. Spike J asked the API instead of
+// the documentation — a stale etag is refused with 412 (§18 row 49) — so
+// §4.4 covers this too and the exception is gone.
 type MoveOptions struct {
 	Calendar      string
 	EventID       string
@@ -1085,6 +1089,8 @@ type MoveOptions struct {
 	Scope         string
 	TimeZone      string
 	Notify        string
+	ETag          string
+	Force         bool
 	DryRun        bool
 }
 
@@ -1138,9 +1144,14 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 		return render.WriteReport{}, err
 	}
 	note = strings.TrimSpace(note + " " + aimed)
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), env.organiser, targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
+	}
+
+	etag, err := ifMatch(raw.ETag, target.ETag, o.ETag, o.Force)
+	if err != nil {
+		return render.WriteReport{}, err
 	}
 
 	report := render.WriteReport{
@@ -1151,23 +1162,43 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 	if note != "" {
 		report.Notes = append(report.Notes, note)
 	}
+	if o.Force {
+		report.Notes = append(report.Notes, forcedNote)
+	}
 	report.Notes = append(report.Notes,
 		fmt.Sprintf("Moving an event changes its organiser to %q. Its id does not change, but the calendar "+
 			"it is addressed on does — read it on %s from now on.", dest.Title, dest.ID),
-		"This is the one write here that is not made under If-Match: events.move is not a patch, and "+
-			"whether Google honours the header on it is undocumented and unprobed. So a move is not "+
-			"refused when somebody changed the event since you read it. Read it again afterwards if "+
-			"that matters.")
+		"The move is made under If-Match, like every other write here, so it is refused rather than "+
+			"applied if somebody changed the event since it was read.")
 
 	if o.DryRun {
 		report.After, report.Requests = &targetModel, gapi.Requests(ctx)
 		return report, nil
 	}
-	moved, err := s.API.MoveEvent(ctx, env.cal.ID, target.ID, dest.ID, decision.SendUpdatesFor())
+	moved, err := s.API.MoveEvent(ctx, env.cal.ID, target.ID, dest.ID, decision.SendUpdatesFor(), etag)
 	if err != nil {
 		return render.WriteReport{}, err
 	}
-	after, err := model.FromEvent(dest.ID, *moved, &env.zone)
+	// The event is READ BACK from the destination rather than taken from
+	// the move's own response, and the live run is why: a successful
+	// move answers with `status: cancelled`, so the result reported a
+	// meeting that had just been moved as a meeting that had been
+	// called off. Reading the destination afterwards showed it
+	// confirmed and intact (§18 row 48).
+	//
+	// That costs one request, which §4.7 says a result must then own —
+	// api_requests counts it, and the note below says the move is two
+	// calls. It buys the difference between "moved" and "cancelled" in
+	// the one sentence a caller acts on.
+	landed := *moved
+	if fresh, rerr := s.API.GetEvent(ctx, dest.ID, moved.ID); rerr == nil {
+		landed = *fresh
+	} else {
+		report.Notes = append(report.Notes,
+			"The move succeeded, but reading the event back on its new calendar did not, so the state "+
+				"shown above is what the move call returned. Read it with get_event to be sure.")
+	}
+	after, err := model.FromEvent(dest.ID, landed, &env.zone)
 	if err != nil {
 		return render.WriteReport{}, err
 	}
@@ -1237,7 +1268,7 @@ func (s *Service) RespondToEvent(ctx context.Context, o RespondOptions) (render.
 	if err != nil {
 		return render.WriteReport{}, err
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), env.organiser, targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}

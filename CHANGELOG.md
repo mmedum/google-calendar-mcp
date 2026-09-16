@@ -50,6 +50,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A successful `move_event` reported the event as cancelled. Google's
+  move answers with `status: cancelled` while the event sits confirmed on
+  its new calendar, so the result said the opposite of what had happened
+  — in the one word a caller acts on. The event is read back from the
+  destination now.
+- `move_event` is made under `If-Match` like every other write. It was
+  not, because `events.move` is a POST with no body and nothing Google
+  publishes says the header applies; asking the API directly, a stale
+  etag is refused with 412. It takes `etag` and `force` now.
+- A write reaching only the signed-in account demanded a notification
+  choice. Google does not set its `self` flag on the account's own
+  attendee row on a secondary calendar, so the caller counted as their
+  own guest.
+- A cancellation `dry_run` said "Deleted the event" under the words
+  "nothing was written".
+- `list_instances` returned the occurrences in whatever order Google sent
+  them, which is not date order: a cancelled 24 March came back after
+  7 April. They are sorted now, after the budget cut rather than before
+  it, so which occurrences come back is unchanged and only their order
+  differs.
+- Passing `notify` on a write with no guests reported "Asked Google to
+  notify nobody, of 0 guests", which is a warning about nothing.
 - `move_event` applied the recurrence scope to the wrong event.
   `scope: series` on an occurrence id moved that one occurrence while the
   result said it had moved the series, and `scope: instance` on a series

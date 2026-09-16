@@ -70,8 +70,14 @@ func (a *liveAPI) seedRSVP(ctx context.Context, cal, self string) error {
 	// one copy too many for the invariant §9.1 rests on.
 	return a.insertEvent(ctx, cal, map[string]any{
 		"id": rsvpID, "summary": rsvpTitle,
-		"start":     map[string]any{"dateTime": "2026-03-19T13:00:00+01:00", "timeZone": scratchZone},
-		"end":       map[string]any{"dateTime": "2026-03-19T14:00:00+01:00", "timeZone": scratchZone},
+		// Deliberately OUTSIDE the read steps' window. It sat on
+		// 19 March at 13:00 and quietly broke two of them: one grepped
+		// the whole page for a date, the other for a clock time, and
+		// this probe satisfied both. Those assertions are tightened now,
+		// but a probe that is not in the window cannot be mistaken for
+		// one that is.
+		"start":     map[string]any{"dateTime": "2026-04-08T11:00:00+02:00", "timeZone": scratchZone},
+		"end":       map[string]any{"dateTime": "2026-04-08T12:00:00+02:00", "timeZone": scratchZone},
 		"attendees": []map[string]any{{"email": self}},
 	})
 }
@@ -313,10 +319,14 @@ func writeSteps(scratch string, w *writeState) []step {
 		{
 			// §6.2: an occurrence addressed by the series id and the
 			// start it was SCHEDULED for.
+			// 17 March, the FIRST occurrence, deliberately: the seed
+			// cancels the second one, and a step that changed a
+			// cancelled occurrence proved nothing and then made the
+			// next two steps unreadable.
 			name: "scope instance by start",
 			tool: "update_event",
 			args: on(map[string]any{
-				"event_id": weeklyID, "original_start": "2026-03-24T14:00:00+01:00",
+				"event_id": weeklyID, "original_start": "2026-03-17T14:00:00+01:00",
 				"scope": "instance", "location": "Room five",
 			}),
 			check: func(r callResult) (verdict, string) {
@@ -354,7 +364,11 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the original series was not truncated to its first two occurrences: " +
 						truncate(r.text, 300)
 				}
-				if !strings.Contains(r.text, "2 API requests") {
+				// The SENTENCE, not the request total. api_requests
+				// counts everything the call spent now — the setup reads
+				// included — so it is six here, and asserting on "2 API
+				// requests" was asserting on the old dishonest count.
+				if !strings.Contains(r.text, "is two calls") {
 					return fail, "the result does not say it was two calls (§4.7)"
 				}
 				return pass, "original truncated, new series started, reset stated"
@@ -376,11 +390,13 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the first occurrence went missing from the original series"
 				}
 				// The exception made BEFORE the target must survive: the
-				// reset is of what comes after.
+				// reset is of what comes after. It is on 17 March, which
+				// is still visible; the seed's cancelled occurrence is
+				// the second one and is hidden here by design.
 				if !strings.Contains(r.text, "Room five") {
-					return undetermined, "the 24 March exception is not visible here; check the transcript"
+					return fail, "the 17 March exception did not survive a split made after it"
 				}
-				return pass, "two occurrences left, and the earlier exception survived the split"
+				return pass, "the earlier exception survived the split, and nothing after it remains"
 			},
 		},
 		{
@@ -389,7 +405,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			name: "cancel one occurrence",
 			tool: "cancel_event",
 			args: on(map[string]any{
-				"event_id": weeklyID, "original_start": "2026-03-24T14:00:00+01:00",
+				"event_id": weeklyID, "original_start": "2026-03-17T14:00:00+01:00",
 				"scope": "instance",
 			}),
 			check: func(r callResult) (verdict, string) {
@@ -528,7 +544,7 @@ func writeSteps(scratch string, w *writeState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				if !strings.Contains(r.text, "Deleted the event") {
+				if !strings.Contains(r.text, "deletes the event") {
 					return fail, "the result does not say a whole event was deleted (§7.4)"
 				}
 				if !strings.Contains(r.text, "no guests") {

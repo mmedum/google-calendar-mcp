@@ -507,7 +507,14 @@ func (c *Client) DeleteEvent(ctx context.Context, calendarID, eventID, sendUpdat
 // A POST that is not idempotent and is not retried (§11): the second
 // call cannot tell "the move did not happen" from "the move happened and
 // the event is no longer here".
-func (c *Client) MoveEvent(ctx context.Context, calendarID, eventID, destination, sendUpdates string) (*gcal.Event, error) {
+//
+// It DOES carry If-Match. That is not obvious from anything Google
+// publishes — events.move is a POST with no body, and neither the
+// reference nor the discovery document says the header applies — so this
+// server sent none and told callers the protection was absent. Spike J
+// asked: a stale etag is refused with 412 (§18 row 49). §4.4 has no
+// exception after all.
+func (c *Client) MoveEvent(ctx context.Context, calendarID, eventID, destination, sendUpdates, etag string) (*gcal.Event, error) {
 	q := url.Values{}
 	q.Set("destination", destination)
 	if sendUpdates != "" {
@@ -517,7 +524,7 @@ func (c *Client) MoveEvent(ctx context.Context, calendarID, eventID, destination
 	if err := c.do(ctx, request{
 		method: http.MethodPost,
 		path:   "/calendars/" + esc(calendarID) + "/events/" + esc(eventID) + "/move",
-		query:  q, idempotent: false,
+		query:  q, etag: etag, idempotent: false,
 	}, &out); err != nil {
 		return nil, err
 	}

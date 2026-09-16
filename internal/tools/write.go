@@ -118,15 +118,13 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"The event keeps its id but is addressed on the new calendar from then on. This does NOT change " +
 			"the time — use update_event for that. " + scopeHelp + " " +
 			"`this_and_following` is not available here: there is nothing to split when the event is simply " +
-			"changing calendars. " + notifyHelp + " " +
-			"This is the ONE write that is not made under If-Match — events.move is not a patch — so it " +
-			"takes no etag and is not refused if somebody changed the event since you read it. " + dryRunHelp,
+			"changing calendars. " + notifyHelp + " " + etagHelp + " " + dryRunHelp,
 		Kind: Write,
 		Handle: func(ctx context.Context, in moveEventIn) (service.WriteResult, error) {
 			out, err := d.Service.MoveEvent(ctx, service.MoveOptions{
 				Calendar: in.Calendar, EventID: in.EventID, ToCalendar: in.ToCalendar,
 				OriginalStart: in.OriginalStart, Scope: in.Scope, TimeZone: in.TimeZone,
-				Notify: in.Notify, DryRun: in.DryRun,
+				Notify: in.Notify, ETag: in.ETag, Force: in.Force, DryRun: in.DryRun,
 			})
 			if err != nil {
 				return service.WriteResult{}, err
@@ -220,6 +218,8 @@ type moveEventIn struct {
 	Scope         string `json:"scope,omitempty" jsonschema:"Required when the event repeats: instance or series."`
 	TimeZone      string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the times in."`
 	Notify        string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests."`
+	ETag          string `json:"etag,omitempty" jsonschema:"The etag from the get_event you decided on. The move is refused as stale if it moved since."`
+	Force         bool   `json:"force,omitempty" jsonschema:"Move with If-Match: * rather than being refused if somebody changed it first."`
 	DryRun        bool   `json:"dry_run,omitempty" jsonschema:"Report what would move and who would be emailed, without writing."`
 }
 

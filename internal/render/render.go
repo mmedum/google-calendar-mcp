@@ -168,7 +168,7 @@ func commonTags(e model.Event) []string {
 	if e.EndInvented {
 		tags = append(tags, "no end time set")
 	}
-	if n := e.GuestCount(); n > 0 {
+	if n := e.GuestCount(""); n > 0 {
 		tags = append(tags, fmt.Sprintf("%d guest%s", n, plural(n)))
 	}
 	if e.AttendeesTruncated {

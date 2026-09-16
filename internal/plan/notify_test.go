@@ -142,9 +142,38 @@ func TestReachOfEventIgnoresResourcesAndSelf(t *testing.T) {
 		{Email: "colleague@example.test"},
 		{Email: "outside@elsewhere.test"},
 	}}
-	r := plan.ReachOfEvent("me@example.test", e)
+	r := plan.ReachOfEvent("me@example.test", "me@example.test", e)
 	if r.Guests != 2 || r.External != 1 {
 		t.Fatalf("got %+v, want 2 guests and 1 external", r)
+	}
+}
+
+// Google's `self` flag is not enough, and the live run is what
+// established it: the driver put the signed-in account on its own event,
+// on a calendar that account owns, and the attendee came back WITHOUT
+// self. The caller then counted as their own guest, and a write that
+// reached nobody demanded a notification decision (§4.3.2).
+func TestTheAccountIsNeverItsOwnGuestEvenWithoutTheSelfFlag(t *testing.T) {
+	e := model.Event{Attendees: []model.Attendee{
+		// Exactly what Google returned live: no Self, the account's own
+		// address, on a secondary calendar.
+		{Email: "me@example.test"},
+	}}
+	r := plan.ReachOfEvent("team@group.calendar.example.test", "me@example.test", e)
+	if r.Any() {
+		t.Fatalf("the signed-in account counted as a guest on its own event: %+v", r)
+	}
+	d, err := plan.Notification("", r)
+	if err != nil {
+		t.Fatalf("a write reaching only the caller must not demand notify: %v", err)
+	}
+	if d.Asked {
+		t.Fatal("nothing to ask about, so nothing should be sent as sendUpdates")
+	}
+	// And somebody else on the same event is still a guest.
+	e.Attendees = append(e.Attendees, model.Attendee{Email: "colleague@example.test"})
+	if got := plan.ReachOfEvent("team@group.calendar.example.test", "me@example.test", e); got.Guests != 1 {
+		t.Fatalf("got %+v, want exactly the one real guest", got)
 	}
 }
 
@@ -161,5 +190,28 @@ func TestAllIsReportedAsAskedForNotAsDelivered(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(report), "delivered") || strings.Contains(report, "were emailed") {
 		t.Errorf("the report claims delivery the API never reports: %q", report)
+	}
+}
+
+// A caller may pass notify on an event with no guests, and the report
+// must still say there was nobody. It used to read "Asked Google to
+// notify nobody, of 0 guests. Google says some mail may still be sent,
+// so this is not a promise of silence" — a warning about nothing, and an
+// invitation to wonder who the zero guests are.
+func TestAChoiceOnAWriteThatReachesNobodyStillReportsNobody(t *testing.T) {
+	d, err := plan.Notification("none", plan.ReachOfAddresses("me@example.test", nil))
+	if err != nil {
+		t.Fatalf("Notification: %v", err)
+	}
+	if !strings.Contains(d.Report(), "Nobody to notify") {
+		t.Fatalf("got %q", d.Report())
+	}
+	if strings.Contains(d.Report(), "0 guests") {
+		t.Fatalf("the report counts guests that are not there: %q", d.Report())
+	}
+	// The choice is still honoured on the wire — it costs nothing and it
+	// is what the caller asked for.
+	if d.SendUpdatesFor() != gcal.SendUpdatesNone {
+		t.Fatalf("the caller's choice was dropped: %q", d.SendUpdatesFor())
 	}
 }

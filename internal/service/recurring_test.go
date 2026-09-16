@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/internal/service"
 )
 
@@ -275,6 +276,50 @@ func TestInstancesPagingDoesNotSkipOccurrences(t *testing.T) {
 		if !seen[e.ID] {
 			t.Fatalf("paging one occurrence at a time never produced %s; %d of %d seen",
 				e.ID, len(seen), len(all.Events))
+		}
+	}
+}
+
+// Google does not return occurrences in date order: the live run got a
+// cancelled 24 March after 7 April, which reads badly for the question
+// this tool answers — which dates does this series have.
+//
+// The order is applied AFTER the budget cut, never before. Sorting first
+// would keep a different set than the page token accounts for, and the
+// dropped ones would be reachable from nowhere; that is the defect phase
+// 1 fixed in the schedule read, one tool over.
+func TestInstancesComeBackInDateOrder(t *testing.T) {
+	const tz = "Europe/Copenhagen"
+	fake := caltest.New()
+	fake.AddCalendar("primary", "Sample Primary", tz, gcal.RoleOwner, true)
+	fake.AddEvent("primary", caltest.Recurring("evorder0001", "Weekly",
+		"2026-03-17T14:00:00+01:00", "2026-03-17T15:00:00+01:00", tz,
+		"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"))
+	// Added last, dated first: the fake stores them in a map, so this
+	// asserts the server's order rather than the fixture's.
+	for _, c := range []struct{ id, start, end string }{
+		{"evorder0001_20260407T120000Z", "2026-04-07T14:00:00+02:00", "2026-04-07T15:00:00+02:00"},
+		{"evorder0001_20260331T120000Z", "2026-03-31T14:00:00+02:00", "2026-03-31T15:00:00+02:00"},
+		{"evorder0001_20260324T130000Z", "2026-03-24T14:00:00+01:00", "2026-03-24T15:00:00+01:00"},
+	} {
+		fake.AddEvent("primary", caltest.Instance(c.id, "evorder0001", "Weekly",
+			c.start, c.end, tz, c.start))
+	}
+	svc := newService(t, fake)
+
+	out, err := svc.Instances(context.Background(), service.InstanceOptions{
+		Calendar: "primary", EventID: "evorder0001", ShowCancelled: true,
+	})
+	if err != nil {
+		t.Fatalf("Instances: %v", err)
+	}
+	if len(out.Events) < 3 {
+		t.Fatalf("got %d occurrences, want at least 3", len(out.Events))
+	}
+	for i := 1; i < len(out.Events); i++ {
+		prev, cur := out.Events[i-1].Start.At, out.Events[i].Start.At
+		if cur.T.Before(prev.T) {
+			t.Fatalf("occurrence %d (%s) comes before %d (%s)", i, cur, i-1, prev)
 		}
 	}
 }

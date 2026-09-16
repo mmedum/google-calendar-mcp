@@ -923,6 +923,19 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	if len(out.Events) > budget {
 		out.Events = out.Events[:budget]
 	}
+	// Ordered AFTER the cut, never before.
+	//
+	// Google does not return occurrences in date order — the live run
+	// got a cancelled 24 March after 7 April — and a list of dates out
+	// of order is hard to read for the question this tool answers, which
+	// is "which dates does this series have". But sorting before the
+	// budget cut would keep a different SET than the page token accounts
+	// for, and the ones dropped would be reachable from nowhere. That is
+	// the defect phase 1 fixed in the schedule read; this is the same
+	// trap one tool over.
+	sort.Slice(out.Events, func(i, j int) bool {
+		return sortKey(out.Events[i]) < sortKey(out.Events[j])
+	})
 	// Truncated means the caller is not looking at the whole series:
 	// either the budget cut the list, or a page is still waiting.
 	out.Truncated = len(events) > budget || out.NextPageToken != ""
