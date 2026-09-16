@@ -225,6 +225,16 @@ func RoleChoices() string {
 // The reach of a sharing change is not knowable here, so the choice is
 // always the caller's.
 func ShareNotify(v string) (bool, error) {
+	if strings.TrimSpace(v) == "" {
+		// Its own refusal rather than ParseNotify's, which lists all
+		// three choices — including the one the next branch refuses as
+		// unsupported. A caller that followed the list would be refused
+		// twice for doing what it said.
+		return false, fmt.Errorf("%w: notify is required on a sharing change, and there is no default — "+
+			"Google's own is to EMAIL, the opposite of its default on an event. Pass:\n  all — emails the "+
+			"people this rule names\n  none — asks Google to email nobody, which is not a promise of "+
+			"silence and does not stop the access", ErrInvalid)
+	}
 	choice, err := ParseNotify(v)
 	if err != nil {
 		return false, err

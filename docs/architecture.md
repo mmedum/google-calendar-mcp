@@ -1866,6 +1866,45 @@ rather than design. A step now declares why it cannot run and is skipped
 before the call, which is §9.1's "structural rather than careful" applied
 to writing rather than to printing.
 
+**And what `/code-review high` found afterwards**, on a tree where every
+gate was green and `/simplify` had already run. Seven, of which four were
+defects a caller would have met and one was a regression the cleanup
+itself had introduced:
+
+- **The cache fix had made the calendar list a data race.** Keeping the
+  cached list correct rather than dropping it meant editing it in place —
+  and `allCalendars` hands that slice to its callers without copying,
+  while the SDK serves every tool call in its own goroutine. A
+  `list_events` resolving a calendar could read the array a
+  `manage_calendar` was compacting, and a compaction mid-iteration can
+  make a resolution miss a calendar or see one twice. The mutators build
+  a new slice and swap it, which is the invariant the whole-list drop had
+  for free and the cleanup took away.
+- **A dry run of "subscribe and set my colour" failed outright**, with
+  advice the caller had already followed: the entry does not exist yet,
+  so reading it answered 404 and the refusal said to pass
+  `subscribe: true`. The dry run supplies the entry it would be patching.
+- **A failed dry run reported a change as standing.** The partial-write
+  sentence did not check `dry_run`, so a dry run that stopped half way
+  said the subscription was in place and could not be rolled back.
+- **A dry run's two halves disagreed.** The calendar block was replaced
+  by the subscription read from before the calendar patch, so the header
+  showed the old title above a change list saying the title changed —
+  the same shape of contradiction phase 2 found on a cancellation, in a
+  different result.
+- **A plain 403 was reported as a missing scope.** `acl.list` needs owner
+  access, and `classify` already separates the two — a missing scope is
+  `[auth]`, a refusal is `[forbidden]` — so somebody who simply does not
+  own the calendar was told to log in again, which cannot help.
+- **The notify refusal offered a choice it then refused.** The empty case
+  fell through to the event vocabulary, which lists `external_only`; a
+  caller following the list would be refused twice.
+- **And the two etag fields were dead.** Splitting them made the misuse
+  impossible and left nothing reading either, because a write cannot use
+  a cached etag anyway — these tools have no `force`, so a version
+  minutes old is a `[stale]` with no way past it. `model.Calendar` has no
+  etag at all now, and each write holds the one it read as a local.
+
 **Considered and not taken**, recorded rather than lost:
 
 - **Splitting `tools.Kind` into an effect and a gate.** The enum encodes

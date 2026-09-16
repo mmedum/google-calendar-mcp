@@ -792,3 +792,69 @@ func TestAPartialManageCallSaysWhatAlreadyLanded(t *testing.T) {
 		t.Fatal("the test is not exercising a partial write: the first patch did not land")
 	}
 }
+
+// "Subscribe to this calendar and set my colour on it" is what the tool
+// description offers, and a dry run of it has to work: the entry does
+// not exist yet, so reading it 404s and the refusal tells the caller to
+// pass subscribe:true — which they did.
+func TestADryRunCanSubscribeAndSetYourOwnView(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	fake.Calendars["other@group.calendar.example.test"] = &gcal.Calendar{
+		ID: "other@group.calendar.example.test", Summary: "Somebody else's", TimeZone: "UTC",
+	}
+	colour := "7"
+
+	got, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
+		Calendar: "other@group.calendar.example.test", Subscribe: true, ColorID: &colour, DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("a dry run of subscribe plus a colour was refused: %v", err)
+	}
+	if len(got.Changes) != 1 || got.Changes[0].Field != "color_id" {
+		t.Fatalf("changes %+v, want the colour it would set", got.Changes)
+	}
+	for _, w := range fake.Wrote() {
+		t.Fatalf("a dry run wrote %s", w.Method)
+	}
+}
+
+// A dry run that fails half way through wrote nothing, so it must not
+// report anything as standing.
+func TestAFailedDryRunClaimsNothingLanded(t *testing.T) {
+	const id = "team@group.calendar.example.test"
+	svc, fake := calendarSeed(t)
+	fake.Fail["GET /users/me/calendarList/"] = 500
+	title, colour := "Renamed", "5"
+
+	_, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
+		Calendar: id, Title: &title, ColorID: &colour, DryRun: true,
+	})
+	if err == nil {
+		t.Fatal("the failing read reported success")
+	}
+	if strings.Contains(err.Error(), "that change stands") {
+		t.Fatalf("a dry run says a change stands:\n%v", err)
+	}
+}
+
+// Both halves of a dry run describe the same plan: the calendar block
+// cannot show the old title above a change list saying it changed.
+func TestADryRunShowsBothHalvesOfWhatItWouldDo(t *testing.T) {
+	const id = "team@group.calendar.example.test"
+	svc, _ := calendarSeed(t)
+	title, colour := "Renamed Team", "7"
+
+	got, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
+		Calendar: id, Title: &title, ColorID: &colour, DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Calendar.Title != title {
+		t.Fatalf("the calendar shown is titled %q while the change list says it becomes %q:\n%s",
+			got.Calendar.Title, title, got.Text())
+	}
+	if got.Calendar.ColorID != colour {
+		t.Fatalf("colour shown is %q, want the one it would set", got.Calendar.ColorID)
+	}
+}

@@ -302,7 +302,7 @@ func (s *Service) calendarByID(ctx context.Context, id string) (model.Calendar, 
 	}
 	return model.Calendar{
 		ID: cal.ID, Title: cal.Summary, TimeZone: cal.TimeZone,
-		Description: cal.Description, ETag: cal.ETag,
+		Description: cal.Description,
 	}, nil
 }
 

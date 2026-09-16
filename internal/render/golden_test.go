@@ -320,7 +320,6 @@ func TestGoldenCalendarWrite(t *testing.T) {
 	}
 	after := before
 	after.Title = "Sample Team — planning"
-	after.ETag = `"team-2"`
 
 	c := render.CalendarReport{
 		Verb: render.VerbUpdate, Calendar: after, Before: &before,

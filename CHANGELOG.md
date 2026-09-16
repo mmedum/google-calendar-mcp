@@ -117,7 +117,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A `manage_calendar` call that changed the calendar and then failed to
   change your own view of it returned a bare error. It says which change
   already stands, because there is no rollback and a retry would
-  otherwise redo it.
+  otherwise redo it — and never says it under `dry_run`, where nothing
+  landed.
+- A dry run of "subscribe to this calendar and set my colour on it"
+  failed, telling the caller to pass `subscribe: true`, which they had.
+- A dry run showed the calendar's old title above a change list saying
+  the title changed. Both halves describe the same plan now.
+- Being refused the sharing rules because you do not own the calendar
+  was reported as a missing OAuth scope, with advice to log in again
+  that could not have helped. A missing scope and a refusal are
+  different answers and now read differently.
 - A successful `move_event` reported the event as cancelled. Google's
   move answers with `status: cancelled` while the event sits confirmed on
   its new calendar, so the result said the opposite of what had happened

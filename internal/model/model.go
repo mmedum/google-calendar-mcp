@@ -28,15 +28,16 @@ type Calendar struct {
 	Hidden      bool
 	ColorID     string
 	Description string
-	// ETag is the CALENDAR resource's version, and EntryETag is this
-	// user's SUBSCRIPTION to it. They are separate fields because they
-	// are separate resources with separate etags, patched by separate
-	// methods — and one field carrying "whichever read produced it" is a
-	// 412 waiting to happen, reported to the caller as somebody else's
-	// edit. Each is set only by the read that produced it, so an empty
-	// one means "this was not read" rather than "this is current".
-	ETag      string
-	EntryETag string
+	// No etag, deliberately. A calendar is TWO resources — itself and
+	// this user's subscription to it — with an etag each, and a single
+	// field here carried whichever read had produced the value: the
+	// subscription's etag reached calendars.delete and was refused on
+	// every call, reported to the caller as somebody else's edit.
+	// Splitting it in two left two fields nothing read, because a write
+	// cannot use a cached etag anyway: these tools have no `force`, so a
+	// version minutes old would be a [stale] refusal with no way past
+	// it. Each write reads the etag it is held to, immediately before
+	// making the write, and holds it as a local.
 }
 
 // FromCalendarList converts one subscription entry.
@@ -44,7 +45,7 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 	c := Calendar{
 		ID: e.ID, Title: e.Summary, TimeZone: e.TimeZone, Role: e.AccessRole,
 		Primary: e.Primary, Selected: e.Selected, Hidden: e.Hidden,
-		ColorID: e.ColorID, Description: e.Description, EntryETag: e.ETag,
+		ColorID: e.ColorID, Description: e.Description,
 	}
 	// A rename is this user's alone: the same calendar has a different
 	// name for a colleague, so both are carried and the renderer says so.

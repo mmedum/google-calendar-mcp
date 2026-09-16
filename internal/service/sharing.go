@@ -63,21 +63,27 @@ const MissingACLScope = "could not read who this calendar is shared with. Readin
 	"calendar.acls — run `google-calendar-mcp login` again to grant them. This is not the same as the " +
 	"calendar being shared with nobody"
 
-// aclError names the scope when Google refuses the ACL read.
+// aclError names the scope when the ACL read was refused for want of
+// one.
+//
+// [auth] only, and the distinction is Google's rather than a nicety:
+// classify maps `insufficientPermissions` to [auth] and a plain 403 —
+// acl.list needs owner access — to [forbidden]. Wrapping both told
+// somebody who simply does not own the calendar to "run login again to
+// grant them", which cannot help and sends them round a loop.
 func aclError(err error) error {
-	cls, ok := gapi.ClassOf(err)
-	if !ok || (cls != gapi.ClassAuth && cls != gapi.ClassForbidden) {
+	if !missingACLScope(err) {
 		return err
 	}
-	return gapi.Wrap(cls, err, "%s", MissingACLScope)
+	return gapi.Wrap(gapi.ClassAuth, err, "%s", MissingACLScope)
 }
 
 // missingACLScope reports whether an error is that refusal, so a caller
 // that carries on without the sharing list can tell it from a real
-// failure.
+// failure — including from a 403 that no login will fix.
 func missingACLScope(err error) bool {
 	cls, ok := gapi.ClassOf(err)
-	return ok && (cls == gapi.ClassAuth || cls == gapi.ClassForbidden)
+	return ok && cls == gapi.ClassAuth
 }
 
 // ListSharing is list_sharing.
@@ -159,9 +165,14 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 			". Pass scope_type if that is not what you meant; a group address and a person's look the same.")
 	}
 	if audience.Scope.IsPublic() {
+		// Tense-neutral, because this same note prints under a dry run.
+		// "This calendar is now PUBLIC" beneath the words "nothing was
+		// written" is the contradiction phase 2 found on a cancellation,
+		// on the one note here that would frighten somebody.
 		report.Notes = append(report.Notes,
-			"This calendar is now PUBLIC. Removing the rule later stops new readers and takes nothing back "+
-				"from whoever already looked, so treat this as published rather than shared.")
+			"This rule makes the calendar PUBLIC: anybody at all, signed in or not, can see it. Removing it "+
+				"later stops new readers and takes nothing back from whoever already looked, so this is "+
+				"publishing rather than sharing.")
 	}
 	if role == gcal.RoleOwner {
 		report.Notes = append(report.Notes,
@@ -183,7 +194,7 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 		return report, nil
 	case had:
 		report.Notes = append(report.Notes,
-			"Their access changed from "+existing.Role+" to "+role+".")
+			"This rule changes their access from "+existing.Role+" to "+role+".")
 	}
 
 	if o.DryRun {
@@ -285,8 +296,8 @@ func (s *Service) UnshareCalendar(ctx context.Context, o UnshareOptions) (render
 	report.Notify = plan.ShareReport(plan.ShareRemoved, false, audience)
 	if rule.Public() {
 		report.Notes = append(report.Notes,
-			"The calendar is no longer public. That stops new readers and takes nothing back from anybody "+
-				"who already looked while it was.")
+			"This is the rule that made the calendar public. Removing it stops new readers and takes "+
+				"nothing back from anybody who already looked while it was.")
 	}
 	report.After = withoutRule(before, rule.RuleID)
 

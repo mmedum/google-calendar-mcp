@@ -404,3 +404,55 @@ func TestGetCalendarAndListSharingAgree(t *testing.T) {
 		}
 	}
 }
+
+// A dry run must not assert anything as done. The notes are the easy
+// place to get this wrong: they are written where the plan is made, and
+// they print under the words "nothing was written".
+func TestSharingDryRunNotesClaimNothingHappened(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+		gcal.AclRule{ID: "default", Role: gcal.RoleReader,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}})
+	ctx := context.Background()
+
+	shared, err := svc.ShareCalendar(ctx, service.ShareOptions{
+		Calendar: "team@group.calendar.example.test", Who: "anyone", Role: "writer",
+		Notify: "none", AllowPublic: true, DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unshared, err := svc.UnshareCalendar(ctx, service.UnshareOptions{
+		Calendar: "team@group.calendar.example.test", Who: "anyone", DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range []string{shared.Text(), unshared.Text()} {
+		if !strings.Contains(got, "DRY RUN") {
+			t.Fatalf("not a dry run:\n%s", got)
+		}
+		for _, claim := range []string{"is now PUBLIC", "no longer public", "access changed"} {
+			if strings.Contains(got, claim) {
+				t.Fatalf("a dry run says %q, under the words \"nothing was written\":\n%s", claim, got)
+			}
+		}
+	}
+}
+
+// Two different refusals, and only one of them is fixable by logging in
+// again. classify separates them — insufficientPermissions is [auth],
+// and a plain 403 from acl.list, which needs owner access, is
+// [forbidden] — so the scope advice must not be attached to both.
+func TestAPlainForbiddenIsNotReportedAsAMissingScope(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	fake.Fail["GET /calendars/"] = 403
+
+	_, err := svc.ListSharing(context.Background(), "team@group.calendar.example.test")
+	if cls := classOf(t, err); cls != gapi.ClassForbidden {
+		t.Fatalf("class %s, want forbidden", cls)
+	}
+	if strings.Contains(err.Error(), "login") {
+		t.Fatalf("a 403 that no login can fix tells the caller to log in again: %v", err)
+	}
+}

@@ -129,8 +129,8 @@ func (s *Service) CreateCalendar(ctx context.Context, o CreateCalendarOptions) (
 	}
 	report.Calendar = model.Calendar{
 		ID: created.ID, Title: created.Summary, TimeZone: created.TimeZone,
-		Description: created.Description, ETag: created.ETag,
-		Role: gcal.RoleOwner, Selected: true,
+		Description: created.Description,
+		Role:        gcal.RoleOwner, Selected: true,
 	}
 	// Google subscribes the creator, so the cached list is now missing a
 	// calendar the account has. Without this, resolving it by the title
@@ -258,6 +258,11 @@ func (s *Service) ManageCalendar(ctx context.Context, o ManageOptions) (render.C
 // rollback to offer — §2 has no transaction — so the honest thing is to
 // say which change is already made.
 func partly(err error, report render.CalendarReport) error {
+	if report.DryRun {
+		// Nothing landed, so there is nothing to say stands. A dry run
+		// that failed half way through is just a failure.
+		return err
+	}
 	var done []string
 	// A subscribe is not a field change and would otherwise vanish from
 	// this sentence, leaving a caller to unsubscribe by hand after a
@@ -398,7 +403,12 @@ func (s *Service) subscribe(ctx context.Context, cal model.Calendar,
 		return nil, nil
 	}
 	if report.DryRun {
-		return nil, nil
+		// The entry does not exist yet and a read of it would 404 — with
+		// "pass subscribe:true to add it first", which is advice the
+		// caller has already taken. What the per-user patch below needs
+		// is the state it would be patching, which for a calendar about
+		// to be subscribed is a fresh entry with nothing set on it.
+		return &gcal.CalendarListEntry{ID: cal.ID}, nil
 	}
 	entry, err := s.API.InsertCalendarListEntry(ctx, &gcal.CalendarListEntry{ID: cal.ID})
 	if err != nil {
@@ -491,7 +501,11 @@ func (s *Service) patchSubscription(ctx context.Context, cal model.Calendar,
 	if report.DryRun {
 		next := *current
 		patch.ApplyTo(&next)
-		report.Calendar = model.FromCalendarList(next)
+		// Merged, not replaced: this entry was read BEFORE the calendar
+		// patch that a dry run did not apply, so taking it wholesale
+		// printed the old title above a change list saying the title
+		// changed — the result contradicting itself in six lines.
+		report.Calendar = mergeEntry(report.Calendar, next)
 		return nil
 	}
 	updated, err := s.API.PatchCalendarListEntry(ctx, cal.ID, &patch, current.ETag)
@@ -528,6 +542,22 @@ func notInYourList(err error, cal model.Calendar) error {
 		cal.Title)
 }
 
+// mergeEntry folds a subscription into what the report already holds,
+// keeping what only the calendar resource carries — which on a dry run
+// is the other half of the same call's plan.
+func mergeEntry(have model.Calendar, e gcal.CalendarListEntry) model.Calendar {
+	from := model.FromCalendarList(e)
+	from.Title, from.Original = have.Title, have.Original
+	if e.SummaryOverride != "" {
+		// The name this user gives it wins over both, as it does on a
+		// read: that is what summaryOverride means.
+		from.Title = e.SummaryOverride
+		from.Original = have.Title
+	}
+	from.TimeZone, from.Description = have.TimeZone, have.Description
+	return from
+}
+
 // mergeCalendar folds a patched calendar resource into what the report
 // already holds, keeping the fields only the list entry carries.
 //
@@ -548,7 +578,6 @@ func mergeCalendar(have model.Calendar, c gcal.Calendar) model.Calendar {
 	have.ID = c.ID
 	have.Description = c.Description
 	have.TimeZone = c.TimeZone
-	have.ETag = c.ETag
 	if have.Original == "" {
 		// No override: the calendar's own title is what this user sees.
 		have.Title = c.Summary
@@ -574,20 +603,35 @@ func mergeCalendar(have model.Calendar, c gcal.Calendar) model.Calendar {
 // calendar by the title it had just been given answered "no calendar
 // called that" — for the life of the process, with no way for the caller
 // to recover.
+// Both build a NEW slice and swap it in rather than editing the one the
+// cache holds. allCalendars hands that slice to its callers without
+// copying it, and tool calls run concurrently — the SDK serves each in
+// its own goroutine — so rewriting an element or compacting in place is
+// a data race against a list_events resolving a calendar, and a
+// compaction mid-iteration can make a resolution miss one or see one
+// twice. Replacing the slice leaves every reader holding a stable array,
+// which is the invariant the whole-list drop had for free.
 func (s *Service) rememberCalendar(c model.Calendar) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.calendarsAt {
 		return
 	}
-	for i, have := range s.calendars {
+	out := make([]model.Calendar, 0, len(s.calendars)+1)
+	replaced := false
+	for _, have := range s.calendars {
 		if have.ID == c.ID {
-			s.calendars[i] = c
-			return
+			out = append(out, c)
+			replaced = true
+			continue
 		}
+		out = append(out, have)
 	}
-	s.calendars = append(s.calendars, c)
-	sortCalendars(s.calendars)
+	if !replaced {
+		out = append(out, c)
+	}
+	sortCalendars(out)
+	s.calendars = out
 }
 
 func (s *Service) forgetCalendar(id string) {
@@ -596,7 +640,7 @@ func (s *Service) forgetCalendar(id string) {
 	if !s.calendarsAt {
 		return
 	}
-	out := s.calendars[:0]
+	out := make([]model.Calendar, 0, len(s.calendars))
 	for _, have := range s.calendars {
 		if have.ID != id {
 			out = append(out, have)

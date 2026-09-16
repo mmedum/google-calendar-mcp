@@ -281,3 +281,21 @@ func TestShareReportCoversTheOutcomesThatSendNothing(t *testing.T) {
 		t.Fatalf("a removal claims silence it cannot promise: %q", removed)
 	}
 }
+
+// A refusal that lists a choice the next refusal rejects sends a caller
+// round a loop: ParseNotify's list names external_only, which sharing
+// then refuses as unsupported.
+func TestTheSharingNotifyRefusalOffersOnlyWhatItAccepts(t *testing.T) {
+	_, err := plan.ShareNotify("")
+	if !errors.Is(err, plan.ErrInvalid) {
+		t.Fatalf("error %v, want invalid", err)
+	}
+	if strings.Contains(err.Error(), "external_only") {
+		t.Fatalf("the refusal offers a choice it would refuse:\n%v", err)
+	}
+	for _, want := range []string{"all", "none"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal does not name %q:\n%v", want, err)
+		}
+	}
+}
