@@ -117,11 +117,40 @@ func TestHeadingsAreLiftedAndFencedCodeIsNot(t *testing.T) {
 	}
 }
 
-// The committed changelog has to be extractable, or the first tag is
-// where that is discovered.
-func TestTheCommittedChangelogHasAnUnreleasedSection(t *testing.T) {
-	if got := notes(t, "Unreleased", repoPath(t, changelogPath)); strings.TrimSpace(got) == "" {
-		t.Fatal("the committed changelog's Unreleased section is empty")
+// Every released version in the committed changelog must extract to
+// something, because that text IS the release page.
+//
+// Unreleased is exempt, deliberately: straight after a release it is
+// legitimately empty, and asserting otherwise would fail on the one
+// commit that cuts a version — exactly when nobody wants to be debugging
+// a gate.
+func TestEveryReleasedVersionHasNotes(t *testing.T) {
+	path := repoPath(t, changelogPath)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		name, ok := strings.CutPrefix(line, "## [")
+		if !ok {
+			continue
+		}
+		end := strings.Index(name, "]")
+		if end < 0 {
+			t.Errorf("malformed changelog heading: %q", line)
+			continue
+		}
+		if name = name[:end]; name == "Unreleased" {
+			continue
+		}
+		versions++
+		if got := notes(t, name, path); strings.TrimSpace(got) == "" {
+			t.Errorf("version %s has no notes, so its release page would be a footer and nothing else", name)
+		}
+	}
+	if versions == 0 {
+		t.Skip("nothing released yet")
 	}
 }
 

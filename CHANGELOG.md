@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-17
+
 ### Added
 
 - `list_changes` — what changed on a calendar since you last looked,
@@ -713,3 +715,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   refusal would mean revoking this server's access and logging in again
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
+
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/mmedum/google-calendar-mcp/releases/tag/v1.0.0
