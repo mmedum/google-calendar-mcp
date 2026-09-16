@@ -180,6 +180,28 @@ func commonTags(e model.Event) []string {
 	return tags
 }
 
+// ConferenceLine is how an event says where to join it, or that there
+// is nowhere to join it yet.
+//
+// A pending conference is said out loud rather than left blank: a blank
+// reads as "this meeting has no video link", and the difference between
+// that and "Google has not finished making it" is somebody sitting in
+// an empty room.
+func ConferenceLine(c gcal.Conference) string {
+	switch c.State() {
+	case gcal.NoConference:
+		return ""
+	case gcal.ConferenceReady:
+		return "join: " + c.URI
+	case gcal.ConferenceComing:
+		return "join: Google is still creating the meeting link — read this event again in a moment"
+	case gcal.ConferenceRefused:
+		return "join: the meeting link could not be created, and this event has none"
+	default:
+		return "join: this event has conference data with no video link in it"
+	}
+}
+
 // TimeRange renders an event's span.
 //
 // The all-day branch prints dates. It must never print a time: an
@@ -440,7 +462,12 @@ type AvailabilityReport struct {
 	// about (§4.6).
 	GapsFrom int
 	// MinGap is the shortest gap reported, zero when the caller set none.
-	MinGap   time.Duration
+	MinGap time.Duration
+	// Hours is the working-hours mask the gaps were filtered by, empty
+	// when the caller asked for none (§17.2). It is stated in the result
+	// because a gap list that silently hid the evenings would read as
+	// "nobody is free then", which is a different claim.
+	Hours    when.Hours
 	Requests int
 }
 
@@ -472,8 +499,22 @@ func (r AvailabilityReport) Text() string {
 			b.WriteString("  free for the whole window\n")
 		default:
 			for _, busy := range a.Busy {
-				fmt.Fprintf(&b, "  busy %s-%s\n",
-					busy.Start.T.Format("2006-01-02 15:04"), busy.End.T.Format("15:04"))
+				// A block crossing local midnight needs the end's date
+				// too. An all-day event comes back as a busy block from
+				// midnight to midnight, and printing the end time alone
+				// rendered it "2026-03-20 00:00-00:00" — which reads as
+				// a block of no length, on the one kind of event that
+				// occupies the whole day. The free gaps below already
+				// carried this rule; the busy list did not, and only a
+				// live transcript showed it.
+				if busy.End.Date() != busy.Start.Date() {
+					fmt.Fprintf(&b, "  busy %s %s to %s %s\n",
+						busy.Start.Date(), busy.Start.T.Format("15:04"),
+						busy.End.Date(), busy.End.T.Format("15:04"))
+					continue
+				}
+				fmt.Fprintf(&b, "  busy %s %s-%s\n",
+					busy.Start.Date(), busy.Start.T.Format("15:04"), busy.End.T.Format("15:04"))
 			}
 		}
 	}
@@ -499,14 +540,14 @@ func (r AvailabilityReport) gaps() string {
 		b.WriteString("No free time can be computed: not one of these calendars could be read.\n")
 		return b.String()
 	case len(r.Gaps) == 0 && r.MinGap > 0:
-		fmt.Fprintf(&b, "No free gap of %s or more in this window.\n", Duration(r.MinGap))
+		fmt.Fprintf(&b, "No free gap of %s or more %s.\n", Duration(r.MinGap), r.scope())
 	case len(r.Gaps) == 0:
-		b.WriteString("No free time in this window.\n")
+		fmt.Fprintf(&b, "No free time %s.\n", r.scope())
 	default:
 		if r.MinGap > 0 {
-			fmt.Fprintf(&b, "Free, %s or longer:\n", Duration(r.MinGap))
+			fmt.Fprintf(&b, "Free%s, %s or longer:\n", r.within(), Duration(r.MinGap))
 		} else {
-			b.WriteString("Free:\n")
+			fmt.Fprintf(&b, "Free%s:\n", r.within())
 		}
 		for _, g := range r.Gaps {
 			// A gap that crosses midnight needs the end's date too, or
@@ -524,6 +565,13 @@ func (r AvailabilityReport) gaps() string {
 		}
 	}
 
+	if r.Hours.Set() {
+		// Said after the list as well as in its heading: the gaps are
+		// the free time INSIDE the mask, so a caller reading only the
+		// rows would take an empty evening for a busy one.
+		fmt.Fprintf(&b, "\nOnly working hours are shown: %s, %s. "+
+			"Free time outside them is not listed.\n", r.Hours, r.Zone.Name())
+	}
 	if unknown > 0 {
 		// The gaps were computed from the calendars that answered, so
 		// they are an upper bound on free time rather than an answer.
@@ -531,6 +579,27 @@ func (r AvailabilityReport) gaps() string {
 			"so somebody may be busy in them.\n", len(r.Answers)-unknown, len(r.Answers), unknown)
 	}
 	return b.String()
+}
+
+// within names the mask in the heading over the free gaps, and nothing
+// when the caller asked for no mask.
+//
+// scope is the same fact for a sentence that must say what it was empty
+// OVER: "No free time in this window" is a different claim from "none
+// between 09:00 and 17:00", and a caller acts on the difference. One
+// derives from the other, so the mask is worded in one place.
+func (r AvailabilityReport) within() string {
+	if !r.Hours.Set() {
+		return ""
+	}
+	return " within " + r.Hours.String()
+}
+
+func (r AvailabilityReport) scope() string {
+	if within := r.within(); within != "" {
+		return strings.TrimPrefix(within, " ")
+	}
+	return "in this window"
 }
 
 func plural(n int) string {

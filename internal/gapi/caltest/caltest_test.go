@@ -1,6 +1,8 @@
 package caltest_test
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -153,5 +155,45 @@ func TestRecurringAndInstanceHelpers(t *testing.T) {
 	}
 	if inst.OriginalStartTime == nil {
 		t.Fatal("Instance has no originalStartTime; §6.2 addresses instances by it")
+	}
+}
+
+// TestConferenceDataIsIgnoredWithoutTheVersion holds the trap the fake
+// exists to reproduce: Google's conferenceDataVersion defaults to 0,
+// which "ignores conference data in the event's body". A server that
+// forgets the parameter gets a 200, an event, and no meeting link — and
+// a fake that accepted it would let that ship.
+func TestConferenceDataIsIgnoredWithoutTheVersion(t *testing.T) {
+	s := caltest.Seed()
+	base := s.Start()
+	defer s.Close()
+
+	body := `{"id":"abcdef0123456789","summary":"probe",` +
+		`"start":{"dateTime":"2026-03-16T09:00:00+01:00","timeZone":"Europe/Copenhagen"},` +
+		`"end":{"dateTime":"2026-03-16T10:00:00+01:00","timeZone":"Europe/Copenhagen"},` +
+		`"conferenceData":{"createRequest":{"requestId":"abcdef0123456789",` +
+		`"conferenceSolutionKey":{"type":"hangoutsMeet"}}}}`
+
+	post := func(query string) gcal.Event {
+		t.Helper()
+		resp, err := http.Post(base+"/calendars/primary/events"+query, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out gcal.Event
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	if got := post(""); len(got.ConferenceData) != 0 {
+		t.Fatalf("an insert with no conferenceDataVersion kept the conference: %s", got.ConferenceData)
+	}
+	s.Events["primary"] = nil
+	got := post("?conferenceDataVersion=1")
+	if c := gcal.ReadConference(got.ConferenceData); !c.Pending() {
+		t.Fatalf("an insert with the version did not come back pending: %+v", c)
 	}
 }

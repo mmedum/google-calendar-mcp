@@ -375,3 +375,36 @@ func TestAFreeGapAcrossMidnightShowsBothDates(t *testing.T) {
 		t.Fatalf("a gap across midnight does not show both dates:\n%s", got)
 	}
 }
+
+// TestAnAllDayBusyBlockDoesNotReadAsZeroLength: an all-day event comes
+// back from free/busy as midnight to midnight, and printing the end
+// time alone rendered it "00:00-00:00" — a block of no length, on the
+// one kind of event that occupies the whole day. Found by reading a
+// live transcript, which is the only place it showed.
+func TestAnAllDayBusyBlockDoesNotReadAsZeroLength(t *testing.T) {
+	loc, err := when.LoadLocation("Europe/Copenhagen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	zone := when.Zone{Loc: loc, Source: when.ZoneFromCalendar}
+	window, err := when.NewWindow(
+		when.Wall(2026, time.March, 20, 0, 0, loc),
+		when.Wall(2026, time.March, 21, 0, 0, loc), loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := render.AvailabilityReport{
+		Window: window, Zone: zone, GapsFrom: 1,
+		Answers: []model.Availability{{CalendarID: "primary", Busy: []model.Busy{{
+			Start: when.Wall(2026, time.March, 20, 0, 0, loc),
+			End:   when.Wall(2026, time.March, 21, 0, 0, loc),
+		}}}},
+	}
+	text := rep.Text()
+	if strings.Contains(text, "00:00-00:00") {
+		t.Fatalf("a whole-day busy block rendered as zero length:\n%s", text)
+	}
+	if !strings.Contains(text, "2026-03-20 00:00 to 2026-03-21 00:00") {
+		t.Fatalf("a busy block crossing midnight does not carry the end's date:\n%s", text)
+	}
+}

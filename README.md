@@ -102,9 +102,9 @@ Every setting is in `docs/configuration.md`.
 | `search_events` | Free-text search across a window. |
 | `get_event` | One event, with its guests and their responses. |
 | `list_instances` | The occurrences of one repeating event, with the dates that were moved or removed. |
-| `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. |
+| `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. Takes an optional working-hours mask. |
 | `get_settings` | The account's time zone, week start and colour palette. |
-| `create_event` | Create an event, one-off or repeating. |
+| `create_event` | Create an event, one-off or repeating, with a Google Meet link if you ask for one. |
 | `update_event` | Change an event. Only the fields you pass are touched. |
 | `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
 | `move_event` | Move an event to another calendar, which changes who organises it. |
@@ -145,6 +145,46 @@ what the surveyed servers do:
 `dry_run: true` on any of them reports what would change and how many
 guests would be emailed, without writing.
 
+Above 200 guests Google stops propagating individual responses, so every
+result about such an event says that the RSVPs it lists are incomplete.
+
+## Resources
+
+For clients that attach context rather than call tools, the same content
+is published as three resources:
+
+| URI | What it carries |
+|---|---|
+| `gcal://calendars` | The calendar list, as `list_calendars` returns it. |
+| `gcal://calendars/{calendar_id}` | One calendar, as `get_calendar` returns it. |
+| `gcal://calendars/{calendar_id}/events/{event_id}` | One event, as `get_event` returns it. |
+
+They carry no handles and take no arguments, which is why there is no
+resource for a schedule: a window and a zone are not optional here, and a
+URI with nowhere to state them would have to invent both.
+
+## Working hours
+
+`check_availability` answers over a window, and a window is one interval
+— so "next week, 09:00 to 17:00" cannot be asked for as one, and the
+longest gap in the answer is a fifteen-hour overnight one that passes any
+`min_minutes`. `working_from`, `working_to` and `working_days` mask the
+free gaps to a working week instead. There is no default: without them
+every hour of the window counts, and the result always says which was
+used. The mask is applied in the zone the answer is rendered in, day by
+local day, so 09:00 is still 09:00 on the Sunday the clocks change.
+
+## Meeting links
+
+`create_event` takes `conference: true` and asks Google for a Google Meet
+link. The link normally comes back with the event; Google documents the
+conference as generated asynchronously, so the result may instead say it
+is still being made, and then you read the event again for it. Either
+way the result says which, and never reports a link it does not have. A
+link can only be attached as the event is created; this server does not
+add one to an event that already exists, and says so rather than failing
+quietly.
+
 ## Safety
 
 - The two tools that remove something Calendar cannot bring back —
@@ -175,6 +215,15 @@ guests would be emailed, without writing.
 
 `make check` runs everything CI runs, and `make parity` asserts that
 those two lists are the same. See `CONTRIBUTING.md`.
+
+Two things are run by hand rather than by CI, because they reach outside
+this repository. `make live` drives the built binary against a real
+account, on a scratch calendar it creates and deletes. `make evals`
+scores whether a model can complete the three tasks of
+`docs/architecture.md` §3 through these tools, against the in-memory
+calendar, and needs an `ANTHROPIC_API_KEY`;
+`go run -tags=evals ./scripts/evals -self-check` exercises the harness
+without a key or a model.
 
 ## Licence
 

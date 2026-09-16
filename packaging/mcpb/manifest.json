@@ -1,0 +1,74 @@
+{
+  "manifest_version": "0.2",
+  "name": "google-calendar-mcp",
+  "display_name": "Google Calendar",
+  "version": "0.0.0-dev",
+  "description": "Google Calendar over MCP: calendars, events, recurrence and availability.",
+  "long_description": "Read and write Google Calendar from your own account: what is on a calendar, when people are free, and the writes that change it — with the time model this kind of server usually gets wrong. An all-day event stays a date, every timed event carries its IANA zone, a recurring write keeps its wall-clock time across a daylight-saving change, and availability comes from Google's free/busy service rather than from a list of events.\n\nTHIS BUNDLE DOES NOT LOG YOU IN, and cannot. Google requires each user to bring their own OAuth Desktop client, so before the tools work you need to create one in a Google Cloud project, enable the Calendar API, and run `google-calendar-mcp login` once in a terminal. The setup is documented at https://github.com/mmedum/google-calendar-mcp/blob/main/docs/gcp-setup.md. Installing this without that step produces a server that starts, lists its tools, and answers every call with \"not signed in\".",
+  "author": {
+    "name": "Mark Medum Bundgaard"
+  },
+  "homepage": "https://github.com/mmedum/google-calendar-mcp",
+  "documentation": "https://github.com/mmedum/google-calendar-mcp/blob/main/README.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mmedum/google-calendar-mcp"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["calendar", "google-calendar", "scheduling", "availability"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/google-calendar-mcp-darwin",
+    "mcp_config": {
+      "command": "${__dirname}/server/google-calendar-mcp-darwin",
+      "args": [],
+      "env": {
+        "GCAL_PROFILE": "${user_config.profile}",
+        "GCAL_READONLY": "${user_config.read_only}",
+        "GCAL_SHARING": "${user_config.sharing}",
+        "GCAL_CLIENT_SECRET": "${user_config.client_secret}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}/server/google-calendar-mcp.exe"
+        },
+        "linux": {
+          "command": "${__dirname}/server/launch-linux.sh"
+        }
+      }
+    }
+  },
+  "user_config": {
+    "client_secret": {
+      "type": "file",
+      "title": "OAuth client JSON",
+      "description": "The OAuth Desktop client you created in your own Google Cloud project. The bundle cannot log you in without it, and you still need to run `google-calendar-mcp login` once in a terminal.",
+      "required": false
+    },
+    "profile": {
+      "type": "string",
+      "title": "Profile",
+      "description": "Which stored login to use. Separate profiles keep separate tokens.",
+      "default": "default",
+      "required": false
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only",
+      "description": "Register only the read tools, and ask Google for read-only scopes so the API itself refuses a write.",
+      "default": false,
+      "required": false
+    },
+    "sharing": {
+      "type": "string",
+      "title": "Sharing tools",
+      "description": "\"on\" or \"off\". Off removes the three calendar sharing tools, the read among them.",
+      "default": "on",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"]
+  }
+}

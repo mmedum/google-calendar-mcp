@@ -226,12 +226,51 @@ func TestGoldenAvailability(t *testing.T) {
 	}
 	rep := render.AvailabilityReport{
 		Window: w, Zone: z, Answers: answers,
-		Gaps:     model.FreeGaps(w, all, 30*time.Minute),
+		Gaps:     model.FreeGaps(w, all, 30*time.Minute, when.Hours{}),
 		GapsFrom: 2,
 		MinGap:   30 * time.Minute,
 		Requests: 1,
 	}
 	golden(t, "availability", rep.Text())
+}
+
+// TestGoldenAvailabilityWorkingHours is the answer §17.2 is about: a
+// week asked about at once, with the nights and the weekend out of it.
+// Without the mask the longest gap in this answer is an overnight one,
+// which passes any min_minutes and is useless.
+func TestGoldenAvailabilityWorkingHours(t *testing.T) {
+	z := goldenZone(t)
+	w := goldenWindow(t, z, "2026-03-16T00:00:00+01:00", "2026-03-21T00:00:00+01:00")
+	busy := func(start, end string) model.Busy {
+		s, err := when.ParseZoned(start, z.Loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e, err := when.ParseZoned(end, z.Loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return model.Busy{Start: s, End: e}
+	}
+	answers := []model.Availability{
+		{CalendarID: "primary", Busy: []model.Busy{
+			busy("2026-03-16T09:00:00+01:00", "2026-03-16T17:00:00+01:00"),
+			busy("2026-03-17T09:00:00+01:00", "2026-03-17T12:00:00+01:00"),
+			busy("2026-03-18T14:00:00+01:00", "2026-03-18T17:00:00+01:00"),
+		}},
+	}
+	hours, err := when.ParseHours("09:00", "17:00", []string{"mon", "tue", "wed", "thu", "fri"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := render.AvailabilityReport{
+		Window: w, Zone: z, Answers: answers, Hours: hours,
+		Gaps:     model.FreeGaps(w, answers[0].Busy, 30*time.Minute, hours),
+		GapsFrom: 1,
+		MinGap:   30 * time.Minute,
+		Requests: 1,
+	}
+	golden(t, "availability-working-hours", rep.Text())
 }
 
 func TestGoldenAvailabilityAllUnknown(t *testing.T) {

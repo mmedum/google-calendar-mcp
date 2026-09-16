@@ -9,6 +9,10 @@ VERSION   ?= dev
 PKG        = github.com/mmedum/google-calendar-mcp
 LDFLAGS    = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
 COVER_MIN ?= 80
+# Where the release's binaries are, what version the bundle claims, and
+# where it lands. Only `mcpb-pack` reads them.
+DIST      ?= dist
+MCPB_OUT  ?= dist/google-calendar-mcp.mcpb
 # The gates are one binary. Building it once and running it saves a link
 # per gate, which is several seconds on every `make check`.
 GATES     ?= ./.gates$(EXE)
@@ -43,6 +47,7 @@ fmt: ## Fail if gofmt would change anything
 vet: ## go vet, including the tagged tests so they keep compiling
 	$(GO) vet ./...
 	$(GO) vet -tags=live ./...
+	$(GO) vet -tags=evals ./...
 
 .PHONY: lint
 lint:
@@ -132,6 +137,20 @@ staleness: build gates ## The docs must match the code
 transcript: gates ## The live driver prints only through its redactor
 	@$(GATES) transcript
 
+.PHONY: mcpb
+mcpb: gates ## The bundle manifest describes the bundle the packer builds
+	@$(GATES) mcpb
+
+# The other half of the bundle, and the reason there are two subcommands:
+# the gate above needs only the staged NAMES, which are static, so it
+# runs on every commit. This one needs the binaries, so it runs at
+# release time from goreleaser's universal-binary hook. It is deliberately
+# NOT in `check`, and therefore not in CI, which is why `parity` does not
+# see it.
+.PHONY: mcpb-pack
+mcpb-pack: gates ## Pack the .mcpb from a built dist tree (release; manual)
+	@$(GATES) mcpb-pack $(DIST) $(VERSION) $(MCPB_OUT)
+
 .PHONY: live-cover
 live-cover: build gates ## Every published tool has a step in the live driver
 	@$(GATES) live-cover $(BIN)
@@ -140,8 +159,23 @@ live-cover: build gates ## Every published tool has a step in the live driver
 live: build ## Drive the built binary against a real account (see docs/development.md)
 	$(GO) run -tags=live ./scripts/livecal -bin $(BIN)
 
+# Not in `check`, deliberately: it spends money and it is not
+# deterministic. Like `live`, it is run by hand and its transcript is
+# read — a failure here is usually a tool description.
+.PHONY: evals
+evals: ## Score a model against the tool surface (needs ANTHROPIC_API_KEY; manual)
+	$(GO) run -tags=evals ./scripts/evals $(EVAL_ARGS)
+
+# The half of the evals that IS deterministic, hermetic and free: it
+# builds each task's calendar, offers the tool list, and asserts every
+# task fails on a calendar nobody touched. A scorer that passes there is
+# scoring nothing, and without this it would be found by spending money.
+.PHONY: evals-check
+evals-check: ## The eval scorers discriminate, with no model and no key
+	@$(GO) run -tags=evals ./scripts/evals -self-check
+
 .PHONY: check
-check: fmt vet tidy lint cover vuln licenses secrets api-coverage api-fields classes leaks transcript live-cover parity pins schema-diff smoke staleness ## Everything CI runs
+check: fmt vet tidy lint cover vuln licenses secrets api-coverage api-fields classes evals-check leaks mcpb transcript live-cover parity pins schema-diff smoke staleness ## Everything CI runs
 
 .PHONY: clean
 clean:

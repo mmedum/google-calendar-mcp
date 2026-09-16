@@ -2,12 +2,14 @@ package service_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/mmedum/google-calendar-mcp/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/internal/plan"
 	"github.com/mmedum/google-calendar-mcp/internal/service"
 )
 
@@ -1236,5 +1238,281 @@ func TestMoveWithAnEtagThatMovedIsStale(t *testing.T) {
 	}
 	if len(fake.Wrote()) != 0 {
 		t.Error("a stale move must be refused before it is sent")
+	}
+}
+
+// TestCreateEventAsksForAMeetLinkAndSaysItIsNotThereYet is §17.3's
+// whole point: Google makes the conference asynchronously, so a result
+// that announced a link on the strength of having asked for one would
+// be wrong about the only thing the caller wanted.
+func TestCreateEventAsksForAMeetLinkAndSaysItIsNotThereYet(t *testing.T) {
+	svc, _ := writeSeed(t)
+	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "primary", Title: "With a link",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		Conference: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	// The conference survived the insert at all only because the client
+	// sent conferenceDataVersion=1; the fake drops it otherwise, the way
+	// Google does.
+	if !out.After.Conference.Pending() {
+		t.Fatalf("the created event's conference is %+v, want pending", out.After.Conference)
+	}
+	text := out.Text()
+	if !strings.Contains(text, "still making it") {
+		t.Fatalf("the result does not say the link is not ready:\n%s", text)
+	}
+	if strings.Contains(text, "meet.google.com") {
+		t.Fatalf("the result offered a link Google has not made:\n%s", text)
+	}
+
+	// And the link is there on the read that follows, which is what the
+	// result told the caller to do.
+	got, zone, err := svc.GetEvent(context.Background(), "primary", out.After.ID, "")
+	if err != nil {
+		t.Fatalf("GetEvent: %v", err)
+	}
+	if text := service.NewEventResult(got, zone).Render(); !strings.Contains(text, "join: https://meet.google.com/") {
+		t.Fatalf("the event does not show the link Google finished making:\n%s", text)
+	}
+}
+
+// TestCreateEventReportsAConferenceGoogleRefused: the event exists and
+// has no link, and a caller who is told nothing will promise one.
+func TestCreateEventReportsAConferenceGoogleRefused(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.ConferenceFails = true
+
+	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "primary", Title: "No link for you",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		Conference: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	if !strings.Contains(out.Text(), "could NOT be created") {
+		t.Fatalf("a failed conference was not reported:\n%s", out.Text())
+	}
+}
+
+// TestCreateEventRefusesAConferenceTheCalendarForbids: refused before
+// the write, because Google's own answer is a 200 with a failed request
+// and an event that exists.
+func TestCreateEventRefusesAConferenceTheCalendarForbids(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.Entries["team@group.calendar.example.test"].ConferenceProperties =
+		&gcal.ConferenceProperties{AllowedConferenceSolutionTypes: []string{"eventHangout"}}
+
+	_, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "team@group.calendar.example.test", Title: "Nope",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		Conference: true,
+	})
+	if got := classOf(t, err); got != gapi.ClassUnsupported {
+		t.Fatalf("got [%s], want [unsupported]: %v", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("the refusal must happen before anything is written")
+	}
+}
+
+// TestCreateEventDryRunDoesNotPromiseALink: a dry run cannot know what
+// Google will do, and says so rather than implying a link.
+func TestCreateEventDryRunDoesNotPromiseALink(t *testing.T) {
+	svc, fake := writeSeed(t)
+	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "primary", Title: "Maybe",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		Conference: true, DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	if !strings.Contains(out.Text(), "would be requested") {
+		t.Fatalf("the dry run does not mention the conference:\n%s", out.Text())
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("a dry run wrote something")
+	}
+}
+
+// TestACrowdedEventSaysItsRSVPsAreIncomplete is §17.5: above 200 guests
+// Google stops propagating response status, so the RSVPs this server
+// reports are not the RSVPs on the event.
+func TestACrowdedEventSaysItsRSVPsAreIncomplete(t *testing.T) {
+	svc, _ := writeSeed(t)
+	guests := make([]string, 0, plan.AttendeeLimit+1)
+	for i := range plan.AttendeeLimit + 1 {
+		guests = append(guests, fmt.Sprintf("guest%03d@example.test", i))
+	}
+
+	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "primary", Title: "All hands",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		Guests: guests, Notify: "all",
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	if !strings.Contains(out.Text(), "do not count acceptances off them") {
+		t.Fatalf("a crowded event did not warn about its RSVPs:\n%s", out.Text())
+	}
+	// Both halves carry it: a client showing only the structured block
+	// would otherwise drop the warning entirely.
+	res := service.NewWriteResult(out)
+	found := false
+	for _, n := range res.Notes {
+		if strings.Contains(n, "above Google's limit") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the structured result does not carry the warning: %+v", res.Notes)
+	}
+	// And the addresses are never in it (§9).
+	for _, n := range res.Notes {
+		if strings.Contains(n, "@example.test") {
+			t.Fatalf("a note names a guest: %q", n)
+		}
+	}
+}
+
+// TestAnOrdinaryEventDoesNotWarnAboutItsSize: the warning is for the
+// event Google cannot track, not for every meeting with guests.
+func TestAnOrdinaryEventDoesNotWarnAboutItsSize(t *testing.T) {
+	svc, _ := writeSeed(t)
+	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "primary", Title: "Three of us",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		Guests: []string{"colleague@example.test", "other@example.test"}, Notify: "all",
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	if strings.Contains(out.Text(), "above Google's limit") {
+		t.Fatalf("an ordinary event was warned about:\n%s", out.Text())
+	}
+}
+
+// TestAConferenceIsRefusedOnACalendarReachedByID: the guard reads the
+// calendar's published conference types, and a calendar the account is
+// not subscribed to is resolved through a different path — one that
+// used to build the model by hand and drop the field, so the refusal
+// silently did not fire for exactly the calendars it exists for.
+func TestAConferenceIsRefusedOnACalendarReachedByID(t *testing.T) {
+	fake := caltest.New()
+	fake.AddCalendar("me@example.test", "Mine", "Europe/Copenhagen", gcal.RoleOwner, true)
+	// A calendar that exists as a resource but is not in the list: the
+	// entry read 404s and the resource read answers.
+	fake.Calendars["nolist@group.calendar.example.test"] = &gcal.Calendar{
+		ID: "nolist@group.calendar.example.test", Summary: "Not subscribed",
+		TimeZone:             "Europe/Copenhagen",
+		ConferenceProperties: &gcal.ConferenceProperties{AllowedConferenceSolutionTypes: []string{"eventHangout"}},
+	}
+	svc := newService(t, fake)
+
+	_, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "nolist@group.calendar.example.test", Title: "No link here",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		Conference: true,
+	})
+	if got := classOf(t, err); got != gapi.ClassUnsupported {
+		t.Fatalf("got [%s], want [unsupported]: %v", got, err)
+	}
+}
+
+// TestACrowdedEventWarnsOnTheReadPathToo: get_event prints each guest's
+// response, and above the limit those responses are not the ones on the
+// event. §17.5 says any result describing such an event says so, not
+// only the write that made it.
+func TestACrowdedEventWarnsOnTheReadPathToo(t *testing.T) {
+	fake := caltest.Seed()
+	crowd := caltest.Timed("evcrowded01", "All hands",
+		"2026-03-16T09:00:00+01:00", "2026-03-16T10:00:00+01:00", "Europe/Copenhagen")
+	for i := range plan.AttendeeLimit + 1 {
+		crowd.Attendees = append(crowd.Attendees,
+			gcal.EventAttendee{Email: fmt.Sprintf("guest%03d@example.test", i)})
+	}
+	fake.AddEvent("primary", crowd)
+	svc := newService(t, fake)
+
+	e, zone, err := svc.GetEvent(context.Background(), "primary", "evcrowded01", "")
+	if err != nil {
+		t.Fatalf("GetEvent: %v", err)
+	}
+	text := service.NewEventResult(e, zone).Render()
+	if !strings.Contains(text, "above Google's limit") {
+		t.Fatalf("a crowded event read back without the warning:\n%s", text)
+	}
+}
+
+// TestTheCrowdWarningCountsWhatGoogleCounts: the threshold is Google's,
+// on Google's own attendees field, so the account's own row and the
+// rooms are on it. Counting only guests left an event at exactly the
+// limit plus two unqualified while printing "Guests (202)".
+func TestTheCrowdWarningCountsWhatGoogleCounts(t *testing.T) {
+	fake := caltest.Seed()
+	crowd := caltest.Timed("evcrowded02", "Company meeting",
+		"2026-03-16T09:00:00+01:00", "2026-03-16T10:00:00+01:00", "Europe/Copenhagen")
+	crowd.Attendees = []gcal.EventAttendee{
+		{Email: "me@example.test", Self: true, Organizer: true},
+		{Email: "room@resource.example.test", Resource: true},
+	}
+	for i := range plan.AttendeeLimit {
+		crowd.Attendees = append(crowd.Attendees,
+			gcal.EventAttendee{Email: fmt.Sprintf("guest%03d@example.test", i)})
+	}
+	fake.AddEvent("primary", crowd)
+	svc := newService(t, fake)
+
+	e, zone, err := svc.GetEvent(context.Background(), "primary", "evcrowded02", "")
+	if err != nil {
+		t.Fatalf("GetEvent: %v", err)
+	}
+	text := service.NewEventResult(e, zone).Render()
+	if !strings.Contains(text, "above Google's limit") {
+		t.Fatalf("an event of %d attendees was not warned about:\n%s", len(crowd.Attendees), text)
+	}
+	// And the two numbers in one result agree.
+	if !strings.Contains(text, fmt.Sprintf("This event has %d attendees", len(crowd.Attendees))) {
+		t.Fatalf("the warning quotes a different number from the guest list:\n%s", text)
+	}
+	if !strings.Contains(text, fmt.Sprintf("Guests (%d)", len(crowd.Attendees))) {
+		t.Fatalf("the guest list count is not the one warned about:\n%s", text)
+	}
+}
+
+// TestEveryForcedWriteSaysSo is §4.4's other half: a write made with
+// If-Match: * overwrote somebody's change without seeing it, and the
+// result has to say which. Two of the four writes that take `force`
+// were silent about it, cancel_event among them — the one where what
+// is overwritten is gone.
+func TestEveryForcedWriteSaysSo(t *testing.T) {
+	svc, _ := writeSeed(t)
+	ctx := context.Background()
+
+	cancelled, err := svc.CancelEvent(ctx, service.CancelOptions{
+		Calendar: "primary", EventID: "evsolo00001", Force: true, DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("CancelEvent: %v", err)
+	}
+	if !strings.Contains(cancelled.Text(), "If-Match: *") {
+		t.Fatalf("a forced cancel does not say it was forced:\n%s", cancelled.Text())
+	}
+
+	answered, err := svc.RespondToEvent(ctx, service.RespondOptions{
+		Calendar: "primary", EventID: "evguests001", Response: "accepted",
+		Notify: "all", Force: true, DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("RespondToEvent: %v", err)
+	}
+	if !strings.Contains(answered.Text(), "If-Match: *") {
+		t.Fatalf("a forced RSVP does not say it was forced:\n%s", answered.Text())
 	}
 }

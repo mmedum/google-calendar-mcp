@@ -173,3 +173,30 @@ func (s *session) call(ctx context.Context, tool string, args map[string]any) (c
 	}
 	return callResult{text: b.String(), isError: res.IsError}, nil
 }
+
+// readResource reads one resource, the way a client that attaches
+// rather than calls would (§8).
+//
+// A resource read answers with a protocol error rather than an error
+// result, so a refusal arrives here as a transport failure and is
+// turned into the same callResult shape a tool refusal takes — the
+// steps then read alike.
+func (s *session) readResource(ctx context.Context, uri string) (callResult, error) {
+	raw, err := s.request(ctx, "resources/read", map[string]any{"uri": uri})
+	if err != nil {
+		return callResult{text: err.Error(), isError: true}, nil
+	}
+	var res struct {
+		Contents []struct {
+			Text string `json:"text"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return callResult{}, err
+	}
+	var b strings.Builder
+	for _, c := range res.Contents {
+		b.WriteString(c.Text)
+	}
+	return callResult{text: b.String()}, nil
+}

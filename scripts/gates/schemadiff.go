@@ -65,7 +65,11 @@ func schemaDiff(bin string) error {
 		fmt.Printf("    + %s\n", n)
 	}
 	for _, n := range changed {
-		fmt.Printf("    ~ %s (input schema or description changed)\n", n)
+		what := "input schema or description changed"
+		if strings.HasPrefix(n, resourcePrefix) {
+			what = "description or type changed"
+		}
+		fmt.Printf("    ~ %s (%s)\n", n, what)
 	}
 	for _, n := range removed {
 		fmt.Printf("    - %s  BREAKING\n", n)
@@ -90,6 +94,13 @@ func parseDump(data []byte) (map[string]string, error) {
 			Description string          `json:"description"`
 			InputSchema json.RawMessage `json:"input_schema"`
 		} `json:"tools"`
+		Resources []struct {
+			Name        string `json:"name"`
+			URI         string `json:"uri"`
+			URITemplate string `json:"uri_template"`
+			MIMEType    string `json:"mime_type"`
+			Description string `json:"description"`
+		} `json:"resources"`
 	}
 	if err := json.Unmarshal(data, &dump); err != nil {
 		return nil, err
@@ -97,6 +108,17 @@ func parseDump(data []byte) (map[string]string, error) {
 	out := map[string]string{}
 	for _, t := range dump.Tools {
 		out[t.Name] = t.Description + "\x00" + string(t.InputSchema)
+	}
+	// Resources share the map, keyed by the URI a client would ask for.
+	// They are part of the surface: a resource whose URI changed breaks
+	// a client exactly as a renamed tool does, and a baseline that held
+	// only tools would not have said so.
+	for _, r := range dump.Resources {
+		uri := r.URI
+		if uri == "" {
+			uri = r.URITemplate
+		}
+		out[resourceKey(uri)] = r.Name + "\x00" + r.MIMEType + "\x00" + r.Description
 	}
 	return out, nil
 }
@@ -108,6 +130,19 @@ func lastTag() (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// resourcePrefix distinguishes a resource from a tool in the one map
+// both gates join on: the schema diff builds these keys and live-cover
+// matches them against the driver's steps. It is a constant because a
+// prefix edited in one of those two files does not make the gate go
+// quiet — live-cover then reports every resource as undriven AND as a
+// step for something the binary does not publish, which reads as a
+// broken driver rather than a broken gate.
+const resourcePrefix = "resource "
+
+// resourceKey is how a resource's URI or template appears in the
+// surface map.
+func resourceKey(uri string) string { return resourcePrefix + uri }
 
 // dumpFromTag builds the binary as it was at tag, into a temp directory.
 func dumpFromTag(tag string) (map[string]string, error) {

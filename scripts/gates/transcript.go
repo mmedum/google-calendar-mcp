@@ -76,13 +76,16 @@ func transcriptGate() error {
 // driverFiles are the packages that talk to a real account.
 func driverFiles() ([]string, error) {
 	var out []string
-	for _, dir := range []string{"scripts/livecal", "scripts/spikes", "scripts/evals"} {
+	// scripts/spikes was in this list and never existed: the live probes
+	// are in scripts/livecal (§18 row 46). It was invisible because a
+	// missing directory was skipped, so the list could name anything.
+	// A directory this gate is told to read and cannot find fails it
+	// now — the floor below counts files, and scripts/livecal alone
+	// clears it, so losing scripts/evals would otherwise be silent.
+	for _, dir := range []string{"scripts/livecal", "scripts/evals"} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
+			return nil, fmt.Errorf("read %s, which this gate is told to scan: %w", dir, err)
 		}
 		for _, e := range entries {
 			if strings.HasSuffix(e.Name(), ".go") {

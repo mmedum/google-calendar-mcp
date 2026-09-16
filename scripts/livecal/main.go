@@ -29,8 +29,10 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/internal/when"
 )
 
 func main() {
@@ -259,6 +261,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike J: move under If-Match", spikeJ},
 		{"spike K: clear on a secondary", spikeK},
 		{"spike L: calendar and acl If-Match", spikeL},
+		{"spike M: conference creation", spikeM},
 	} {
 		r.total++
 		v, note := sp.run(ctx, out, api, scratch)
@@ -398,8 +401,8 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 			return
 		}
 	}
-	args := st.arguments()
-	res, err := s.call(ctx, st.tool, args)
+	args := st.reads()
+	res, err := s.callFor(ctx, st, st.arguments())
 	if err != nil {
 		r.failed++
 		r.out.Printf("FAIL  %-28s transport: %v\n", st.name, err)
@@ -435,7 +438,14 @@ const (
 type step struct {
 	name string
 	tool string
-	args map[string]any
+	// resource names the published resource this step reads instead of
+	// calling a tool: the URI or template exactly as the surface
+	// publishes it, because that is the key `live-cover` matches. uriFn
+	// builds the concrete URI, which usually names something an earlier
+	// step created.
+	resource string
+	uriFn    func() string
+	args     map[string]any
 	// argsFn defers the arguments to run time, and wins over args when
 	// set. A write step's target is usually something an earlier step
 	// created, so its id does not exist when the list is built.
@@ -453,12 +463,101 @@ type step struct {
 	check func(callResult) (verdict, string)
 }
 
+// reads is what the §9.1 print decision is made from: the calendars
+// this step actually touches.
+//
+// For a tool call that is its arguments. For a resource read it is
+// derived from the URI the step READS, not from anything the step
+// declares — a declaration is a flag in an argument map's clothes, and
+// a uriFn edited to point somewhere else while the declaration still
+// said "scratch" would print a real calendar's body. The rule §9.1
+// requires is that the two cannot disagree, so there is only one of
+// them.
+func (st step) reads() map[string]any {
+	if st.resource == "" {
+		return st.arguments()
+	}
+	calendar, _ := splitResourceURI(st.uriFn())
+	if calendar == "" {
+		// Account-wide by construction: the calendar list resource names
+		// no calendar, so its body is withheld.
+		return nil
+	}
+	return map[string]any{"calendar": calendar}
+}
+
+// splitResourceURI takes the calendar and event ids out of a gcal://
+// URI, as internal/tools does for the server side.
+func splitResourceURI(uri string) (calendar, event string) {
+	rest, ok := strings.CutPrefix(uri, "gcal://calendars/")
+	if !ok {
+		return "", ""
+	}
+	parts := strings.Split(rest, "/")
+	switch {
+	case len(parts) == 1:
+		return parts[0], ""
+	case len(parts) == 3 && parts[1] == "events":
+		return parts[0], parts[2]
+	default:
+		return "", ""
+	}
+}
+
+// callFor runs the step: a tool call, or a resource read.
+func (s *session) callFor(ctx context.Context, st step, args map[string]any) (callResult, error) {
+	if st.resource != "" {
+		return s.readResource(ctx, st.uriFn())
+	}
+	return s.call(ctx, st.tool, args)
+}
+
 // arguments resolves the step's arguments, late if it has to.
 func (st step) arguments() map[string]any {
 	if st.argsFn != nil {
 		return st.argsFn()
 	}
 	return st.args
+}
+
+// gapRow matches one free gap as the renderer prints it, in both of its
+// forms: "2026-03-17 12:00-17:00 (5h)" and the cross-midnight
+// "2026-03-17 12:00 to 2026-03-18 09:00 (21h)".
+//
+// Both, because the second is what a mask that did NOT apply produces —
+// an overnight gap — so a pattern matching only the first would skip the
+// one row it exists to catch and pass on the heading alone.
+var gapRow = regexp.MustCompile(
+	`^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?:-(\d{2}:\d{2})| to (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})) \(`)
+
+// gapsOutside returns the free gaps that fall outside a working-hours
+// mask of from..to on weekdays — which is the assertion §17.2's step
+// needs, and it is about the ROWS rather than about the sentence over
+// them. A mask that said it applied and did not would otherwise pass on
+// its own heading.
+func gapsOutside(text, from, to string) []string {
+	var bad []string
+	for _, line := range strings.Split(text, "\n") {
+		m := gapRow.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		day, err := when.ParseDate(m[1])
+		if err != nil {
+			continue
+		}
+		// A gap that ends on another DAY is outside any working-hours
+		// mask by construction, whatever its clock times say.
+		if m[4] != "" {
+			bad = append(bad, strings.TrimSpace(line))
+			continue
+		}
+		weekend := day.Weekday() == time.Saturday || day.Weekday() == time.Sunday
+		if weekend || m[2] < from || m[3] > to {
+			bad = append(bad, strings.TrimSpace(line))
+		}
+	}
+	return bad
 }
 
 // linesWith returns the rendered rows that mention needle.
@@ -580,6 +679,59 @@ func steps(scratch string, state seedState) []step {
 					return fail, "no time zone reported"
 				}
 				return pass, "account time zone read"
+			},
+		},
+		{
+			// The three resources of §8, read the way a client that
+			// attaches rather than calls would. This one is account-wide
+			// by construction, so its body is withheld and the check
+			// says what it verified instead (§9.1).
+			name:     "resource: calendar list",
+			resource: "gcal://calendars",
+			uriFn:    func() string { return "gcal://calendars" },
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, scratchTitle) {
+					return fail, "the scratch calendar is missing from the resource"
+				}
+				return pass, "the calendar list read as a resource"
+			},
+		},
+		{
+			// A secondary calendar id is an address, so this URI carries
+			// an at sign written as itself — the form a model will
+			// write, and the one a template without reserved expansion
+			// silently fails to match.
+			name:     "resource: one calendar",
+			resource: "gcal://calendars/{+calendar_id}",
+			uriFn:    func() string { return "gcal://calendars/" + scratch },
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, scratchTitle) {
+					return fail, "the resource is not the scratch calendar"
+				}
+				return pass, "the calendar card read as a resource"
+			},
+		},
+		{
+			name:     "resource: one event",
+			resource: "gcal://calendars/{+calendar_id}/events/{+event_id}",
+			uriFn:    func() string { return "gcal://calendars/" + scratch + "/events/" + timedID },
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "id: "+timedID) {
+					return fail, "the resource is not the event that was asked for"
+				}
+				if !strings.Contains(r.text, timedTitle) {
+					return fail, "the event resource does not carry the event"
+				}
+				return pass, "one event read as a resource"
 			},
 		},
 		{
@@ -932,6 +1084,58 @@ func steps(scratch string, state seedState) []step {
 					return fail, "the result does not echo the filter it applied"
 				}
 				return pass, "gaps of 30 minutes or more"
+			},
+		},
+		{
+			// §17.2. A week asked about in one call: without the mask
+			// the answer's longest gap is an overnight one, which passes
+			// any min_minutes and is useless.
+			name: "availability, working hours",
+			tool: "check_availability",
+			args: map[string]any{
+				"calendars": []string{scratch},
+				"from":      "2026-03-16", "to": "2026-03-20",
+				"working_from": "09:00", "working_to": "17:00",
+				"working_days": []string{"mon", "tue", "wed", "thu", "fri"},
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "Only working hours are shown") {
+					return fail, "the result does not say the gaps were masked"
+				}
+				if !strings.Contains(r.text, "Free within 09:00-17:00") {
+					return fail, "the heading does not name the mask it applied"
+				}
+				// The assertion that matters, and it is about the rows
+				// rather than the sentence: no gap may begin before
+				// 09:00, end after 17:00, or fall at a weekend.
+				if bad := gapsOutside(r.text, "09:00", "17:00"); len(bad) > 0 {
+					return fail, "a gap outside the mask was reported: " + bad[0]
+				}
+				return pass, "gaps masked to the working week"
+			},
+		},
+		{
+			// The refusal, which has to be classified rather than
+			// falling through to [unavailable] — a caller told to retry
+			// an overnight mask would retry forever.
+			name: "overnight mask refused",
+			tool: "check_availability",
+			args: map[string]any{
+				"calendars": []string{scratch},
+				"from":      "2026-03-16", "to": "2026-03-20",
+				"working_from": "22:00", "working_to": "06:00",
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "a mask crossing midnight was accepted"
+				}
+				if !strings.Contains(r.text, "[invalid]") {
+					return fail, "the refusal is not classified invalid: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid]"
 			},
 		},
 		{

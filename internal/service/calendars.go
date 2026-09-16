@@ -128,11 +128,10 @@ func (s *Service) CreateCalendar(ctx context.Context, o CreateCalendarOptions) (
 	if err != nil {
 		return render.CalendarReport{}, createCalendarError(err, title)
 	}
-	report.Calendar = model.Calendar{
-		ID: created.ID, Title: created.Summary, TimeZone: created.TimeZone,
-		Description: created.Description,
-		Role:        gcal.RoleOwner, Selected: true,
-	}
+	report.Calendar = model.FromCalendar(*created)
+	// The creator owns what they just made, and Google subscribes them
+	// to it. Neither is on the calendar resource, so both are set here.
+	report.Calendar.Role, report.Calendar.Selected = gcal.RoleOwner, true
 	// Google subscribes the creator, so the cached list is now missing a
 	// calendar the account has. Without this, resolving it by the title
 	// this call just gave it answered "no calendar called that" for the
@@ -452,7 +451,6 @@ func (s *Service) patchCalendarItself(ctx context.Context, cal model.Calendar,
 	if err != nil {
 		return classifyPlan(err)
 	}
-	report.Changes = append(report.Changes, changes...)
 	if len(changes) == 0 {
 		report.Notes = append(report.Notes,
 			"The calendar itself already reads that way, so nothing was sent for it.")
@@ -464,6 +462,7 @@ func (s *Service) patchCalendarItself(ctx context.Context, cal model.Calendar,
 	if report.DryRun {
 		next := *current
 		patch.ApplyTo(&next)
+		report.Changes = append(report.Changes, changes...)
 		report.Calendar = mergeCalendar(report.Calendar, next)
 		return nil
 	}
@@ -471,6 +470,12 @@ func (s *Service) patchCalendarItself(ctx context.Context, cal model.Calendar,
 	if err != nil {
 		return err
 	}
+	// Listed only once it landed. manage_calendar writes two resources
+	// and says which of them stood when the second fails — and that
+	// sentence is built from this list, so a change recorded before its
+	// write told a caller a rename had happened when the 412 says it
+	// had not.
+	report.Changes = append(report.Changes, changes...)
 	report.Calendar = mergeCalendar(report.Calendar, *updated)
 	s.rememberCalendar(report.Calendar)
 	return nil
@@ -577,9 +582,16 @@ func mergeEntry(have model.Calendar, e gcal.CalendarListEntry) model.Calendar {
 	from.Title, from.Original = have.Title, have.Original
 	if e.SummaryOverride != "" {
 		// The name this user gives it wins over both, as it does on a
-		// read: that is what summaryOverride means.
+		// read: that is what summaryOverride means. What OTHERS see is
+		// the calendar's own summary, which the report already holds —
+		// taking have.Title instead printed the user's PREVIOUS private
+		// rename as the name everybody else sees, on a dry run changing
+		// both halves at once. have.Title is only the calendar's own
+		// name when there was no override before this call.
+		if from.Original == "" {
+			from.Original = have.Title
+		}
 		from.Title = e.SummaryOverride
-		from.Original = have.Title
 	}
 	from.TimeZone, from.Description = have.TimeZone, have.Description
 	return from

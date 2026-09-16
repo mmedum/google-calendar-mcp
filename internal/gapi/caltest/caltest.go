@@ -49,6 +49,16 @@ type Server struct {
 	// Settings the user has.
 	Settings []gcal.Setting
 
+	// ConferenceFails makes a conference create request come back
+	// failed instead of pending, which is the arm of §17.3 a caller has
+	// to be told about: the event exists and has no meeting link.
+	ConferenceFails bool
+	// ConferenceStaysPending keeps a pending conference pending however
+	// often it is read, so the "still being made" path can be tested.
+	// By default a pending conference is ready by the next read, which
+	// is what Google's asynchronous generation looks like from here.
+	ConferenceStaysPending bool
+
 	// PageSize forces paging when set, so a test can prove the client
 	// follows nextPageToken.
 	PageSize int
@@ -328,6 +338,17 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	}
 	if e.Status == "" {
 		e.Status = gcal.StatusConfirmed
+	}
+	if len(e.ConferenceData) > 0 {
+		// Version 0 — the default — "ignores conference data in the
+		// event's body", so the fake drops it exactly as Google does.
+		// A client that forgot the parameter otherwise passes its tests
+		// and creates events with no meeting link in production.
+		if r.URL.Query().Get("conferenceDataVersion") != "1" {
+			e.ConferenceData = nil
+		} else {
+			e.ConferenceData = conferenceAnswer(e.ConferenceData, s.ConferenceFails)
+		}
 	}
 	e.ETag = etag(e.ID, 1)
 	s.mu.Lock()
@@ -1117,12 +1138,28 @@ func (s *Server) listInstances(w http.ResponseWriter, r *http.Request, calID, ev
 }
 
 func (s *Server) getEvent(w http.ResponseWriter, calID, eventID string) {
+	// Under the lock from the lookup to the copy. This read MUTATES —
+	// Google generates the conference asynchronously, so the link an
+	// insert did not carry is there on a later read, and the fake
+	// models that rather than answering success at insert, which would
+	// hide the one thing create_event has to say about a conference it
+	// asked for. A lock around the assignment alone protected nothing a
+	// concurrent reader could see, and this server already fans out
+	// across calendars.
+	s.mu.Lock()
 	e, ok := s.Events[calID][eventID]
 	if !ok {
+		s.mu.Unlock()
 		writeErr(w, http.StatusNotFound, "notFound", "no event with that id on that calendar")
 		return
 	}
-	writeJSON(w, e)
+	if !s.ConferenceStaysPending {
+		e.ConferenceData = conferenceReady(e.ConferenceData)
+	}
+	out := *e
+	s.mu.Unlock()
+
+	writeJSON(w, out)
 }
 
 func (s *Server) listACL(w http.ResponseWriter, calID string) {
@@ -1328,4 +1365,71 @@ func palette() gcal.Colors {
 			"1": {Background: "#ac725e", Foreground: "#1d1d1d"},
 		},
 	}
+}
+
+// conferenceAnswer is what Google puts in an event whose insert asked
+// for a conference: the request echoed back with a status, and no entry
+// points yet.
+//
+// Generated, never recorded (§9.1): the meeting code below is made up
+// here, in the shape Meet uses, and no real one appears in this
+// repository.
+func conferenceAnswer(request json.RawMessage, fails bool) json.RawMessage {
+	var body struct {
+		CreateRequest struct {
+			RequestID             string `json:"requestId,omitempty"`
+			ConferenceSolutionKey struct {
+				Type string `json:"type,omitempty"`
+			} `json:"conferenceSolutionKey,omitempty"`
+			Status struct {
+				StatusCode string `json:"statusCode,omitempty"`
+			} `json:"status"`
+		} `json:"createRequest"`
+	}
+	if err := json.Unmarshal(request, &body); err != nil {
+		return request
+	}
+	body.CreateRequest.Status.StatusCode = gcal.ConferencePending
+	if fails {
+		body.CreateRequest.Status.StatusCode = gcal.ConferenceFailure
+	}
+	out, err := json.Marshal(body)
+	if err != nil {
+		return request
+	}
+	return out
+}
+
+// conferenceReady turns a pending conference into a finished one, the
+// way Google's asynchronous generation does between two reads.
+func conferenceReady(current json.RawMessage) json.RawMessage {
+	if len(current) == 0 {
+		return current
+	}
+	c := gcal.ReadConference(current)
+	if c.Status != gcal.ConferencePending {
+		return current
+	}
+	var body map[string]any
+	if err := json.Unmarshal(current, &body); err != nil {
+		return current
+	}
+	if cr, ok := body["createRequest"].(map[string]any); ok {
+		cr["status"] = map[string]any{"statusCode": gcal.ConferenceSuccess}
+	}
+	body["conferenceId"] = "abc-defg-hij"
+	body["conferenceSolution"] = map[string]any{
+		"key":  map[string]any{"type": gcal.ConferenceSolutionMeet},
+		"name": "Google Meet",
+	}
+	body["entryPoints"] = []any{map[string]any{
+		"entryPointType": "video",
+		"uri":            "https://meet.google.com/abc-defg-hij",
+		"label":          "meet.google.com/abc-defg-hij",
+	}}
+	out, err := json.Marshal(body)
+	if err != nil {
+		return current
+	}
+	return out
 }

@@ -28,6 +28,9 @@ type Calendar struct {
 	Hidden      bool
 	ColorID     string
 	Description string
+	// Conference is which conference types this calendar accepts, nil
+	// when Google said nothing about it — which is not a refusal (§17.3).
+	Conference *gcal.ConferenceProperties
 	// No etag, deliberately. A calendar is TWO resources — itself and
 	// this user's subscription to it — with an etag each, and a single
 	// field here carried whichever read had produced the value: the
@@ -46,6 +49,7 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 		ID: e.ID, Title: e.Summary, TimeZone: e.TimeZone, Role: e.AccessRole,
 		Primary: e.Primary, Selected: e.Selected, Hidden: e.Hidden,
 		ColorID: e.ColorID, Description: e.Description,
+		Conference: e.ConferenceProperties,
 	}
 	// A rename is this user's alone: the same calendar has a different
 	// name for a colleague, so both are carried and the renderer says so.
@@ -54,6 +58,22 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 		c.Original = e.Summary
 	}
 	return c
+}
+
+// FromCalendar converts the calendar RESOURCE, which is what a read by
+// id falls back to when the account is not subscribed to it.
+//
+// It exists because the hand-built literals it replaces were where a new
+// wire field went missing: `conferenceProperties` reached
+// FromCalendarList and not these, so a calendar resolved by id looked
+// like one that allows every conference type and the guard in §17.3
+// never fired for it. Two constructors, both here, is the shape that
+// makes the next field a one-line change rather than a hunt.
+func FromCalendar(c gcal.Calendar) Calendar {
+	return Calendar{
+		ID: c.ID, Title: c.Summary, TimeZone: c.TimeZone,
+		Description: c.Description, Conference: c.ConferenceProperties,
+	}
 }
 
 // CanWrite reports whether this user may change events here.
@@ -142,7 +162,10 @@ type Event struct {
 	OriginalStart When
 
 	Transparent bool
-	Attendees   []Attendee
+	// Conference is the event's video meeting, if it has one: the link
+	// to join, or the fact that Google is still making it (§17.3).
+	Conference gcal.Conference
+	Attendees  []Attendee
 	// AttendeesTruncated is Google's attendeesOmitted.
 	AttendeesTruncated bool
 	Organizer          string
@@ -236,6 +259,7 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		Recurrence: e.Recurrence, SeriesID: e.RecurringEventID,
 		EndInvented:        e.EndTimeUnspecified,
 		Transparent:        e.Transparency == gcal.TransparencyTransparent,
+		Conference:         gcal.ReadConference(e.ConferenceData),
 		AttendeesTruncated: e.AttendeesOmitted,
 	}
 	var err error
@@ -383,18 +407,21 @@ func Merge(busy []Busy) []Busy {
 // doing interval arithmetic over a list of busy blocks is how a meeting
 // gets booked at 02:00 (§7.3).
 //
-// min drops gaps shorter than a meeting worth having; a zero min keeps
-// them all. What this does NOT do is decide what counts as working
-// hours: the API has no such field, 09:00 is not 09:00 everywhere, and
-// §17.2 leaves that choice to the caller, who can narrow the window.
-func FreeGaps(w when.Window, busy []Busy, min time.Duration) []when.Window {
+// hours is the caller's working-hours mask, empty when they asked for
+// none: the API has no working-hours field, so this is the server's
+// (§17.2). min drops gaps shorter than a meeting worth having; a zero
+// min keeps them all.
+//
+// The order of the three steps is the whole reason they are one
+// function. Cut the busy time out, then apply the mask, then drop what
+// is too short: a 20-minute sliver left at the edge of the working day
+// is exactly what min_minutes exists to remove, and filtering before
+// the mask would report it.
+func FreeGaps(w when.Window, busy []Busy, min time.Duration, hours when.Hours) []when.Window {
 	var out []when.Window
 	cursor := w.Start
 	add := func(from, to when.Zoned) {
 		if !to.T.After(from.T) {
-			return
-		}
-		if to.T.Sub(from.T) < min {
 			return
 		}
 		out = append(out, when.Window{Start: from, End: to, Loc: w.Loc})
@@ -412,5 +439,18 @@ func FreeGaps(w when.Window, busy []Busy, min time.Duration) []when.Window {
 		}
 	}
 	add(cursor, w.End)
-	return out
+
+	if hours.Set() {
+		out = when.Intersect(out, hours.Windows(w))
+	}
+	if min <= 0 {
+		return out
+	}
+	kept := out[:0]
+	for _, g := range out {
+		if g.Duration() >= min {
+			kept = append(kept, g)
+		}
+	}
+	return kept
 }

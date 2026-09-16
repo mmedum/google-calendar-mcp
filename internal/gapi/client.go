@@ -452,6 +452,15 @@ func (c *Client) InsertEvent(ctx context.Context, calendarID string, e *gcal.Eve
 	if sendUpdates != "" {
 		q.Set("sendUpdates", sendUpdates)
 	}
+	if len(e.ConferenceData) > 0 {
+		// Without this the request succeeds and the conference is
+		// SILENTLY DROPPED: the discovery document says version 0 —
+		// the default — "ignores conference data in the event's body".
+		// So it is set here, from the body, rather than passed in by
+		// each caller: a 200 with no meeting link and no error is
+		// exactly the failure this server is built to refuse.
+		q.Set("conferenceDataVersion", "1")
+	}
 	var out gcal.Event
 	if err := c.do(ctx, request{
 		method: http.MethodPost, path: "/calendars/" + esc(calendarID) + "/events",

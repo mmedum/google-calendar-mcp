@@ -72,6 +72,12 @@ type Draft struct {
 
 	// Transparent marks the event as not making the person busy.
 	Transparent *bool
+
+	// Conference asks Google to attach a Google Meet link. It is only
+	// meaningful on an insert: Patch refuses it rather than dropping it
+	// silently, because adding a conference to an event that exists is
+	// a write this server does not make (§17.3).
+	Conference bool
 }
 
 // Empty reports whether this draft asks for nothing.
@@ -102,6 +108,12 @@ type Change struct {
 func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 	var p gcal.EventPatch
 	var changes []Change
+
+	if d.Conference {
+		return gcal.EventPatch{}, nil, fmt.Errorf("%w: a Google Meet link can only be attached when the "+
+			"event is created. This server does not add one to an event that already exists — create the "+
+			"event with conference: true, or add the link in Google Calendar", ErrUnsupported)
+	}
 
 	set := func(field, from, to string, dst **string) {
 		if from == to {
@@ -214,6 +226,15 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 			return gcal.Event{}, rerr
 		}
 		e.Recurrence = lines
+	}
+	if d.Conference {
+		// The request only asks: Google makes the conference
+		// asynchronously, so the insert's answer usually says pending
+		// and the caller is told to read the event for the link. The
+		// request id is the event id, so a retry of an insert whose
+		// answer was never seen (§2.11) cannot make a second
+		// conference — a repeated request id is ignored.
+		e.ConferenceData = gcal.NewConferenceRequest(id)
 	}
 	if len(d.RemoveGuests) > 0 {
 		return gcal.Event{}, fmt.Errorf("%w: a new event has no guests to remove", ErrInvalid)

@@ -882,3 +882,54 @@ func TestUnsubscribingFromYourOwnCalendarSaysWhatDoesWork(t *testing.T) {
 		}
 	}
 }
+
+// TestGetCalendarStillAnswersWhenSharingIsForbidden: acl.list needs
+// OWNER access, so a calendar somebody else owns answers 403 — and the
+// card is a successful read whatever the sharing list did. Refusing the
+// whole call told a caller who asked about a colleague's calendar
+// nothing at all.
+func TestGetCalendarStillAnswersWhenSharingIsForbidden(t *testing.T) {
+	svc, fake := seeded(t)
+	fake.Fail["GET /calendars/team@group.calendar.example.test/acl"] = 403
+	fake.FailMessage["GET /calendars/team@group.calendar.example.test/acl"] =
+		"The user must be an owner of the calendar."
+
+	out, err := svc.CalendarDetail(context.Background(), "team@group.calendar.example.test")
+	if err != nil {
+		t.Fatalf("CalendarDetail: %v", err)
+	}
+	text := out.Render()
+	if !strings.Contains(text, "Sample Team") {
+		t.Fatalf("the card was not rendered:\n%s", text)
+	}
+	if !strings.Contains(strings.ToLower(text), "owner") {
+		t.Fatalf("the note does not say why the sharing list is missing:\n%s", text)
+	}
+}
+
+// TestADryRunDoesNotPrintTheOldPrivateName: manage_calendar changing
+// both the shared title and this user's own name for it, on a calendar
+// the user had already renamed. What others see is the calendar's own
+// summary — the rename this call makes — and not the previous private
+// name, which nobody else ever saw.
+func TestADryRunDoesNotPrintTheOldPrivateName(t *testing.T) {
+	svc, fake := seeded(t)
+	entry := fake.Entries["team@group.calendar.example.test"]
+	entry.SummaryOverride = "My old private name"
+
+	out, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
+		Calendar: "team@group.calendar.example.test",
+		Title:    strptr("Shared new title"), MyName: strptr("My new private name"),
+		DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("ManageCalendar: %v", err)
+	}
+	text := out.Text()
+	if strings.Contains(text, "others see \"My old private name\"") {
+		t.Fatalf("the dry run says the old PRIVATE name is what others see:\n%s", text)
+	}
+	if !strings.Contains(text, "My new private name") {
+		t.Fatalf("the dry run does not show the new private name:\n%s", text)
+	}
+}

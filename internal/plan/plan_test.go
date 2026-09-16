@@ -377,3 +377,30 @@ func TestAMisspelledScopeIsRefusedEvenOnASingleEvent(t *testing.T) {
 		t.Fatalf("got %q, %v; a valid scope on a single event is ignored, not refused", got, err)
 	}
 }
+
+// TestAConferenceIsOnlyAttachedAtCreation: adding a Meet link to an
+// event that already exists is a write this server does not make, and
+// the refusal says so rather than the field being dropped in silence.
+func TestAConferenceIsOnlyAttachedAtCreation(t *testing.T) {
+	before := gcal.Event{ID: "abcdef0123456789", Summary: "Standing meeting"}
+	_, _, err := plan.Patch(before, plan.Draft{Conference: true})
+	if !errors.Is(err, plan.ErrUnsupported) {
+		t.Fatalf("Patch with a conference gave %v, want ErrUnsupported", err)
+	}
+
+	e, err := plan.Insert("abcdef0123456789", plan.Draft{
+		Title: ptr("Kickoff"), Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		Zone: zone(t), Conference: true,
+	})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if len(e.ConferenceData) == 0 {
+		t.Fatal("an insert that asked for a conference sent no conference data")
+	}
+	// The request id is the event id, so a retry cannot make a second
+	// conference: Google ignores a repeated request id.
+	if !strings.Contains(string(e.ConferenceData), `"requestId":"abcdef0123456789"`) {
+		t.Fatalf("the request does not carry the event id: %s", e.ConferenceData)
+	}
+}

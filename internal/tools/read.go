@@ -146,13 +146,18 @@ func registerRead(s *mcp.Server, d Deps) {
 			"events is not the same answer. " +
 			"A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. " +
 			"The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to " +
-			"use. Working hours are not applied: pass a narrower window if you only want office hours. " +
+			"use. " +
+			"working_from, working_to and working_days mask the gaps to a working week: a window is one " +
+			"interval, so \"next week, 09:00 to 17:00\" cannot be asked for as a window and would otherwise " +
+			"come back with a fifteen-hour gap every night. There is no default — without them every hour of " +
+			"the window counts, and the result always says which was used. " +
 			"Calendars are asked in batches of 50, and the result says how many requests that took.",
 		Kind: Read,
 		Handle: func(ctx context.Context, in checkAvailabilityIn) (service.AvailabilityResult, error) {
 			out, err := d.Service.Availability(ctx, service.AvailabilityOptions{
 				Calendars: in.Calendars, From: in.From, To: in.To,
 				TimeZone: in.TimeZone, MinMinutes: in.MinMinutes,
+				WorkingFrom: in.WorkingFrom, WorkingTo: in.WorkingTo, WorkingDays: in.WorkingDays,
 			})
 			if err != nil {
 				return service.AvailabilityResult{}, err
@@ -226,11 +231,14 @@ type listInstancesIn struct {
 }
 
 type checkAvailabilityIn struct {
-	Calendars  []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read."`
-	From       string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
-	To         string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
-	TimeZone   string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
-	MinMinutes int      `json:"min_minutes,omitempty" jsonschema:"Ignore free gaps shorter than this many minutes."`
+	Calendars   []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read."`
+	From        string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
+	To          string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
+	TimeZone    string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
+	MinMinutes  int      `json:"min_minutes,omitempty" jsonschema:"Ignore free gaps shorter than this many minutes."`
+	WorkingFrom string   `json:"working_from,omitempty" jsonschema:"Start of the working day as hh:mm local, e.g. 09:00. Pass it with working_to. No default: without it the whole window counts."`
+	WorkingTo   string   `json:"working_to,omitempty" jsonschema:"End of the working day as hh:mm local, e.g. 17:00. Must be later in the day than working_from; a shift crossing midnight is refused."`
+	WorkingDays []string `json:"working_days,omitempty" jsonschema:"Weekdays to keep, as mon tue wed thu fri sat sun. Empty means every day; the server does not assume anybody's working week."`
 }
 
 type getSettingsIn struct{}

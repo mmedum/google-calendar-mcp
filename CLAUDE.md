@@ -30,7 +30,8 @@ and Drive APIs.
 
    Two of these are structural rather than a matter of care, and must
    stay that way: **fixtures are generated, never recorded**, and the
-   **live driver reads only a calendar it created and filled itself**.
+   **live driver reads only a calendar it created and filled itself**;
+   the evals harness reads only the in-memory calendar of `caltest`.
    `docs/architecture.md` §9.1 is the full specification, including why
    every rule in the leak gate is an allow-list anchored on a shape the
    server's own generated fields cannot take.
@@ -116,14 +117,17 @@ and Drive APIs.
 - `internal/when/` dates, zoned times and windows, no network and no
   clock of its own; `internal/recur/` RRULEs, instance expansion and the
   three scopes; `internal/model/` the server's view of a calendar, event
-  and busy interval; `internal/render/` text output; `internal/plan/` (phase 2)
+  and busy interval; `internal/render/` text output; `internal/plan/`
   typed write ops and the guards; `internal/service/` orchestration and
   policy; `internal/tools/` the MCP tools; `internal/server/` SDK wiring
   and the schema dump; `internal/redact/` the log and transcript
   redactor.
 - `scripts/gates/` the repository's own checks, as Go; `scripts/livecal/`
   the live driver, which also carries the live probes of §15;
-  `scripts/evals/` (phase 4) the model-facing scoring harness.
+  `scripts/evals/` the model-facing scoring harness, run by hand.
+- `packaging/mcpb/` the Claude Desktop bundle: the manifest, which
+  carries a placeholder version, and the Linux launcher, whose binary
+  names the `mcpb` gate holds against the packer's.
 - `testdata/` synthetic fixtures, renderer goldens, the API surface
   snapshot and coverage records, and the recorded tool-schema baseline.
 
@@ -134,16 +138,20 @@ gofmt, `go vet` including the tagged tests, golangci-lint, race tests
 with an 80% floor per package, govulncheck, the licence allow-list,
 gitleaks, the API method and field coverage gates, the closed
 error-class gate, the leak scan, the transcript redaction gate, the live
-driver coverage gate, the bundle manifest gate, the workflow pin check, a
+driver coverage gate, the bundle manifest gate, the eval scorers'
+self-check, the workflow pin check, a
 stdio smoke test, the schema diff, and the staleness gate over README,
 `docs/` and CHANGELOG. Plus tests for new behaviour, `/simplify` and
 `/code-review high` with findings resolved or written down, and a look at
-the schema diff for anything breaking.
+the schema diff for anything breaking — which now covers the resources
+as well as the tools.
 
 Green gates are not done. Anything touching the write path or an API
 response shape gets a live run before it counts, and **the transcript is
 read** — a sibling's driver twice reported success while its results were
-wrong.
+wrong. `make evals` scores a model against the tool surface and is run
+by hand for the same reason; it needs an `ANTHROPIC_API_KEY`, and
+`-self-check` exercises the harness without one.
 
 ## Working across sessions
 

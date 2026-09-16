@@ -32,6 +32,7 @@ const (
 	allDayWrite  = "Livecal all-day write probe"
 	dryRunTitle  = "Livecal dry run that must not exist"
 	rsvpTitle    = "Livecal rsvp probe"
+	meetTitle    = "Livecal conference probe"
 	cancelTitle  = "Livecal cancel probe"
 	// The two that reach a real person. Armed by -spike-notify, like
 	// spikes A and B, because every other step in this file is written
@@ -62,6 +63,9 @@ type writeState struct {
 	dest      string
 	self      string
 	splitFrom string
+	// meeting is the event created with conference: true, so the step
+	// that reads the link back knows which event to ask for.
+	meeting string
 	// guest is a REAL person's address, from GCAL_LIVE_GUEST_INTERNAL,
 	// and it is empty unless -spike-notify armed the run. The steps that
 	// use it are the only ones here that put an event in somebody else's
@@ -176,6 +180,72 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "an all-day event rendered a time"
 				}
 				return pass, "one day, all day, on 2026-04-03"
+			},
+		},
+		{
+			// §17.3. The link is made asynchronously, so this step
+			// asserts what the answer SAYS rather than that a link
+			// arrived — a step that demanded a URI here would be
+			// asserting Google's timing.
+			name: "create_event with a Meet link",
+			tool: "create_event",
+			args: on(map[string]any{
+				"title": meetTitle,
+				"start": "2026-04-09T09:00:00+02:00", "end": "2026-04-09T10:00:00+02:00",
+				"conference": true, "notify": "none",
+			}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				w.meeting = field(r.text, "id: ")
+				if w.meeting == "" {
+					return fail, "the result does not report the id it created"
+				}
+				switch {
+				case strings.Contains(r.text, "Google Meet: https://meet.google.com/"):
+					return pass, "the link came back with the insert"
+				case strings.Contains(r.text, "still making it"):
+					return pass, "reported pending rather than promising a link"
+				case strings.Contains(r.text, "could NOT be created"):
+					return fail, "Google refused the conference on a calendar that allows it: " +
+						truncate(r.text, 300)
+				default:
+					return fail, "a conference was asked for and the result says nothing about one: " +
+						truncate(r.text, 300)
+				}
+			},
+		},
+		{
+			// The half the first step cannot assert: the link Google
+			// made after answering. This is also the read the result
+			// tells a caller to do, so a failure here means that advice
+			// is wrong.
+			name: "the Meet link arrives",
+			tool: "get_event",
+			skip: func() string {
+				if w.meeting == "" {
+					return "no conference event was created"
+				}
+				return ""
+			},
+			argsFn: func() map[string]any {
+				return map[string]any{"calendar": scratch, "event_id": w.meeting}
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				switch {
+				case strings.Contains(r.text, "join: https://meet.google.com/"):
+					return pass, "the event carries a link to join"
+				case strings.Contains(r.text, "still creating"):
+					return undetermined, "Google has not finished making the link; it is not this " +
+						"server's to hurry, and the event says so rather than claiming a link"
+				default:
+					return fail, "the event neither carries a link nor says one is coming: " +
+						truncate(r.text, 300)
+				}
 			},
 		},
 		{

@@ -31,6 +31,9 @@ var (
 	calendarRe = regexp.MustCompile(`\b[A-Za-z0-9]{20,}@group\.calendar\.google\.com\b`)
 	// An event link carries the event id in its eid.
 	eventLinkRe = regexp.MustCompile(`https://[A-Za-z0-9.\-]*google\.com/calendar/[^\s"]*`)
+	// A Meet link is a credential in URL form: anybody holding it can
+	// walk into the meeting.
+	meetRe = regexp.MustCompile(`https://meet\.google\.com/[A-Za-z0-9\-]+`)
 	// A refresh token's literal prefix.
 	tokenRe = regexp.MustCompile(`\b1//[0-9A-Za-z_\-]{10,}\b`)
 	// An OAuth client id.
@@ -43,6 +46,7 @@ func String(s string) string {
 	s = clientRe.ReplaceAllString(s, "[client-id]")
 	s = calendarRe.ReplaceAllString(s, "[calendar-id]")
 	s = eventLinkRe.ReplaceAllString(s, "[calendar-url]")
+	s = meetRe.ReplaceAllString(s, "[meet-url]")
 	s = emailRe.ReplaceAllStringFunc(s, maskEmail)
 	return s
 }

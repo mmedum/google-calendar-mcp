@@ -300,10 +300,7 @@ func (s *Service) calendarByID(ctx context.Context, id string) (model.Calendar, 
 	if err != nil {
 		return model.Calendar{}, err
 	}
-	return model.Calendar{
-		ID: cal.ID, Title: cal.Summary, TimeZone: cal.TimeZone,
-		Description: cal.Description,
-	}, nil
+	return model.FromCalendar(*cal), nil
 }
 
 // cachedPrimary returns the account's own calendar from the list this
@@ -676,7 +673,7 @@ func (s *Service) window(from, to string, zone when.Zone) (when.Window, error) {
 	}
 	w, err := when.NewWindow(start, end, zone.Loc)
 	if err != nil {
-		return when.Window{}, gapi.Wrap(gapi.ClassInvalid, err, "%s", err.Error())
+		return when.Window{}, classifyPlan(err)
 	}
 	return w, nil
 }
@@ -749,14 +746,15 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 	}
 	rules, err := s.sharingRules(ctx, c.ID)
 	if err != nil {
-		if !missingACLScope(err) {
+		note, ok := unreadableSharing(err)
+		if !ok {
 			return CalendarResult{}, err
 		}
 		// Reported as a note rather than as a failure: the rest of this
 		// card is a successful read, and an empty sharing list would say
 		// "shared with nobody", which is the wrong answer rather than a
-		// missing one. The sentence is the one list_sharing raises.
-		out.Note = render.Sentence(MissingACLScope)
+		// missing one.
+		out.Note = note
 		return out, nil
 	}
 	out.Sharing = sharingOut(rules)
@@ -1003,6 +1001,13 @@ type AvailabilityOptions struct {
 	TimeZone  string
 	// MinMinutes drops free gaps shorter than this. Zero keeps them all.
 	MinMinutes int
+	// WorkingFrom, WorkingTo and WorkingDays are the daily mask of
+	// §17.2, all optional and none with a default. They are the caller's
+	// own strings, parsed here, because "09:00" is a reading rather than
+	// a time and the zone that turns it into one is resolved below.
+	WorkingFrom string
+	WorkingTo   string
+	WorkingDays []string
 }
 
 // FreeBusyBatch is the API's ceiling on calendars per query (§2.10).
@@ -1044,9 +1049,13 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 	if err != nil {
 		return render.AvailabilityReport{}, err
 	}
+	hours, err := when.ParseHours(o.WorkingFrom, o.WorkingTo, o.WorkingDays)
+	if err != nil {
+		return render.AvailabilityReport{}, classifyPlan(err)
+	}
 
 	report := render.AvailabilityReport{
-		Window: win, Zone: zone,
+		Window: win, Zone: zone, Hours: hours,
 		MinGap: time.Duration(o.MinMinutes) * time.Minute,
 	}
 
@@ -1084,7 +1093,7 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 	// renderer, so the text and the structured half cannot disagree —
 	// they did, and the JSON was the one offering the window.
 	if report.GapsFrom > 0 {
-		report.Gaps = model.FreeGaps(win, busy, report.MinGap)
+		report.Gaps = model.FreeGaps(win, busy, report.MinGap, hours)
 	}
 	return report, nil
 }

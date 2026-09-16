@@ -88,6 +88,7 @@ func Register(s *mcp.Server, d Deps) {
 	registerRead(s, d)
 	registerWrite(s, d)
 	registerCalendars(s, d)
+	registerResources(s, d)
 }
 
 // Def is one tool.

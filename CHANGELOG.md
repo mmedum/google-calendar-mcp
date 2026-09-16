@@ -9,6 +9,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Resources, for clients that attach context rather than call tools:
+  `gcal://calendars`, `gcal://calendars/{calendar_id}` and
+  `gcal://calendars/{calendar_id}/events/{event_id}`. Each carries what
+  the matching tool returns, computed once — a resource that rendered a
+  calendar its own way would be a second description of the same thing,
+  drifting from the first.
+
+  The templates use RFC 6570's reserved expansion (`{+calendar_id}`),
+  which is not decoration: every secondary calendar id is an address, and
+  under plain expansion the obvious URI — the at sign written as itself —
+  matches nothing and comes back "not found" while the percent-encoded
+  form works.
+- `check_availability` takes a working-hours mask: `working_from`,
+  `working_to` and `working_days`. A window is one interval and a working
+  week is a daily one, so "next week, 09:00 to 17:00" could not be asked
+  for and the longest gap in the answer was a fifteen-hour overnight one
+  that passed any `min_minutes`.
+
+  No default in any of the three. Days left out means every day, because
+  a five-day Monday default would be a guess, and it is wrong in every
+  country whose week runs Sunday to Thursday. A mask that crosses
+  midnight is refused rather than guessed at. The mask is applied in the
+  zone the answer is rendered in, day by local day, so 09:00 is still
+  09:00 on the Sunday the clocks change, and the result says which mask
+  it used in both halves.
+- `create_event` takes `conference: true` and asks Google for a Google
+  Meet link. The link normally arrives with the event — a live run
+  watched it do so — and Google documents the conference as generated
+  asynchronously, so "still being made" is a published answer too. The
+  result says which, and never reports a link it does not have:
+  announcing one because it was asked for would be the same failure as
+  reporting `none` as silence. A link can only be attached as the event
+  is created; adding one to an event that exists is refused with what to
+  do instead.
+
+  Without `conferenceDataVersion=1` Google answers 200, creates the
+  event, and drops the conference in silence — confirmed live, and the
+  reason the client sets that parameter from the body rather than leaving
+  it to each caller.
+
+  The request id is the event id, so a retry of a create whose answer was
+  never seen cannot produce a second conference. The calendar's own
+  `conferenceProperties` are read first: a calendar that publishes a list
+  without Google Meet in it is refused before the write, because Google
+  answers that case with 200, a failed request and an event that exists.
+- Any result describing an event with more than 200 guests says that its
+  RSVPs are incomplete. Above that, Google stops propagating individual
+  responses, so a caller counting acceptances would be wrong with nothing
+  looking wrong. Where Google stops accepting guests altogether is not
+  published, and the warning says so rather than inventing a number.
+- `packaging/mcpb/` — the Claude Desktop bundle: the manifest, the Linux
+  launcher, a packer in Go, and the `mcpb` gate that holds the manifest
+  against the files the packer stages. The gate runs on every commit
+  because it needs only the staged NAMES, which are static; the packer
+  runs at release time, where the binaries exist.
+
+  All six referential checks of the standard, each watched failing: an
+  entry point nobody stages, a platform command nobody stages, an
+  `${user_config.x}` nobody declared, an override for a platform the
+  bundle does not claim, a platform running another platform's binary,
+  and a launcher choosing between names the packer does not write. A
+  schema catches none of them: each one produces a bundle that installs
+  and then does nothing.
+- `scripts/evals` — the model-facing harness. It gives a model the
+  server's own tool list over an in-memory session against the fake
+  calendar and scores the three failures of `docs/architecture.md` §3: an
+  all-day event created from a negative-offset zone, a weekly recurrence
+  that must carry its zone across a daylight-saving change, and an
+  invitation that must actually reach an external guest. The score reads
+  the calendar, never the model's account of what it did.
+
+  It is run by hand like the live driver and is not part of `make check`:
+  it costs money and it is not deterministic. `-self-check` runs
+  everything except the model, and asserts every task FAILS on a calendar
+  nobody touched — a scorer that passes there is scoring nothing.
+
 - Calendars and sharing: `create_calendar`, `manage_calendar`,
   `list_sharing`, `share_calendar`, `unshare_calendar`, and the two
   gated tools `delete_calendar` and `clear_calendar`. The surface is
@@ -99,6 +175,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `manage_calendar` could report a change it had not made. Both halves
+  listed their changes before sending them, and the sentence that says
+  what stood when the second half failed is built from that list — so a
+  rename refused as `[stale]` was reported as having landed, with no
+  rollback available for something that never happened.
+- `get_calendar` answered `[forbidden]` and nothing else for a calendar
+  this account does not own. Reading who a calendar is shared with needs
+  OWNER access, and only a missing SCOPE was being turned into a note.
+  The card is a successful read either way, and now says which of the two
+  kept the sharing list out of it.
+- A forced `cancel_event` or `respond_to_event` did not say it was
+  forced. Both take `force`, both then write under `If-Match: *`, and
+  only `update_event` and `move_event` carried the sentence saying a
+  change somebody else made was overwritten unseen.
+- A dry-run `create_event` with `conference: true` reported a conference
+  with no video link in its structured half. That is a real state an
+  event can be in — a phone-only or third-party conference — and not
+  this one: a dry run wrote nothing.
+- Above 200 guests the warning counted the wrong people. Google's limit
+  is on its own attendees field, which carries the organiser and the
+  rooms, so an event Google had already stopped tracking could go
+  unqualified while the same result printed a larger number beside it.
+- `gcal://calendars/{calendar_id}/events/` — an event URI with an empty
+  id — answered with the calendar card and its sharing list rather than
+  refusing. A client building a URI from an empty id got a different
+  resource back, with no error.
+- A dry-run `manage_calendar` changing both the shared title and your own
+  name for a calendar you had already renamed printed your PREVIOUS
+  private name as the one everybody else sees.
+- An all-day event made a calendar read `busy 2026-03-20 00:00-00:00` in
+  `check_availability` — a block of no length, on the one kind of event
+  that occupies the whole day. Free/busy reports such an event as
+  midnight to midnight, and the busy list printed the end time without
+  its date; the free gaps beside it already carried that rule. Found by
+  reading a live transcript, which is the only place it showed.
 - `delete_calendar` would have been refused on every call. A calendar is
   two resources with two etags — the calendar and your subscription to
   it — and one field carried whichever of them the last read produced, so

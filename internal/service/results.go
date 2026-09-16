@@ -215,7 +215,17 @@ type EventOut struct {
 	GuestsTruncated bool     `json:"guest_list_truncated,omitempty"`
 	Organizer       string   `json:"organizer,omitempty"`
 	Link            string   `json:"link,omitempty"`
-	ETag            string   `json:"etag,omitempty"`
+	// ConferenceURI is the video meeting to join, and
+	// ConferenceStatus is set when there is a conference without one:
+	// "pending" while Google is still making it, "failure" when it gave
+	// up, and "no_video_entry_point" for a conference this server cannot
+	// turn into a link — a phone-only one, or a third-party provider. An
+	// empty URI with no status means the event has no conference, and
+	// that fourth value exists so an event that HAS one is never
+	// reported as an event that does not.
+	ConferenceURI    string `json:"conference_uri,omitempty"`
+	ConferenceStatus string `json:"conference_status,omitempty"`
+	ETag             string `json:"etag,omitempty"`
 }
 
 // Render implements Rendered.
@@ -251,7 +261,21 @@ func NewEventOut(e model.Event) EventOut {
 		SeriesID: e.SeriesID, Transparent: e.Transparent,
 		GuestCount: e.GuestCount(""), GuestsTruncated: e.AttendeesTruncated,
 		Organizer: e.Organizer, Link: e.Link, ETag: e.ETag,
-		AllDay: e.Start.AllDay,
+		AllDay:        e.Start.AllDay,
+		ConferenceURI: e.Conference.URI,
+	}
+	// The same four states the text renders, so a client reading only
+	// this block reaches the same conclusion. "other" is a state rather
+	// than a blank: an event with a phone-only conference has one, and
+	// an empty uri with an empty status means it has none.
+	switch e.Conference.State() {
+	case gcal.NoConference, gcal.ConferenceReady:
+	case gcal.ConferenceComing:
+		o.ConferenceStatus = gcal.ConferencePending
+	case gcal.ConferenceRefused:
+		o.ConferenceStatus = gcal.ConferenceFailure
+	default:
+		o.ConferenceStatus = "no_video_entry_point"
 	}
 	if e.Start.AllDay {
 		o.StartDate = e.Start.Date.String()
@@ -312,8 +336,19 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 	fmt.Fprintf(&b, "%s\n", render.EventLine(e, z))
 	fmt.Fprintf(&b, "%s\n", z.Explain())
 	fmt.Fprintf(&b, "id: %s on calendar %s\n", e.ID, e.CalendarID)
+	if line := render.ConferenceLine(e.Conference); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
+	}
 	if e.Description != "" {
 		fmt.Fprintf(&b, "\n%s\n", e.Description)
+	}
+	if n := plan.CrowdWarning(len(e.Attendees)); n != "" {
+		// The read path carries §17.5's warning too, and it is the one
+		// that matters most: this is the result that prints each guest's
+		// response, and above the limit those responses are not the ones
+		// on the event. A warning only on writes would leave the wrong
+		// list unqualified.
+		fmt.Fprintf(&b, "\n%s\n", n)
 	}
 	if len(e.Attendees) > 0 {
 		fmt.Fprintf(&b, "\nGuests (%d):\n", len(e.Attendees))
@@ -443,6 +478,10 @@ type AvailabilityResult struct {
 	// MinMinutes echoes the filter, so a caller can tell an empty Free
 	// from one their own filter emptied.
 	MinMinutes int `json:"min_minutes,omitempty"`
+	// WorkingHours echoes the mask for the same reason, and matters
+	// more: Free outside it was removed, so a caller reading Free as
+	// "every free minute" would be wrong about the evenings (§17.2).
+	WorkingHours string `json:"working_hours,omitempty"`
 	// Unknown is how many calendars could not be read. A caller that
 	// reads Free without reading this is booking blind.
 	Unknown  int `json:"unknown_calendars"`
@@ -475,9 +514,10 @@ func NewAvailabilityResult(rep render.AvailabilityReport) AvailabilityResult {
 	out := AvailabilityResult{
 		Window:   WindowOut{From: rep.Window.Start.String(), To: rep.Window.End.String()},
 		TimeZone: rep.Zone.Name(), ZoneSource: string(rep.Zone.Source),
-		MinMinutes: int(rep.MinGap.Minutes()),
-		FreeFrom:   rep.GapsFrom,
-		Unknown:    rep.Unknown(), Requests: rep.Requests,
+		MinMinutes:   int(rep.MinGap.Minutes()),
+		WorkingHours: rep.Hours.String(),
+		FreeFrom:     rep.GapsFrom,
+		Unknown:      rep.Unknown(), Requests: rep.Requests,
 		text: rep.Text(),
 	}
 	for _, a := range rep.Answers {
@@ -551,6 +591,12 @@ func NewWriteResult(w render.WriteReport) WriteResult {
 		TimeZone: w.Zone.Name(), ZoneSource: string(w.Zone.Source),
 		Notes: w.Notes, Requests: w.Requests,
 		text: w.Text(),
+	}
+	if n := w.Crowded(); n != "" {
+		// Both halves carry it, from the one RULE: a client that shows
+		// only the structured block would otherwise drop the sentence
+		// saying the RSVPs it lists are incomplete (§17.5).
+		out.Notes = append(append([]string{}, out.Notes...), n)
 	}
 	if w.Before != nil {
 		before := NewEventOut(*w.Before)

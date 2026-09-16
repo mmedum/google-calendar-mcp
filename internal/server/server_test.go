@@ -109,21 +109,8 @@ func instructionsOf(t *testing.T, d server.Deps) string {
 	t.Helper()
 	// The SDK exposes instructions on initialize; drive a session to
 	// read them the way a client would, rather than reaching into the
-	// package.
-	ctx := context.Background()
-	srv := server.New(d)
-	ct, st := newTransports()
-	ss, err := srv.Connect(ctx, st, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = ss.Wait() }()
-	cs, err := newClient().Connect(ctx, ct, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = cs.Close() }()
-	return cs.InitializeResult().Instructions
+	// package. session is the one place that wiring lives.
+	return session(t, d).InitializeResult().Instructions
 }
 
 func TestLoggerOnlyAttachedAtDebug(t *testing.T) {

@@ -86,6 +86,31 @@ func missingACLScope(err error) bool {
 	return ok && cls == gapi.ClassAuth
 }
 
+// unreadableSharing says whether get_calendar can carry on without the
+// sharing list, and what to tell the caller.
+//
+// There are two ways to be unable to read it and they need different
+// sentences. A missing SCOPE is [auth] and a login fixes it. Not owning
+// the calendar is [forbidden] — `acl.list` needs owner access — and
+// nothing the caller does fixes that. Neither is a reason to refuse the
+// card: the calendar was read, and a caller who asked about a colleague's
+// calendar should get it rather than a 403.
+func unreadableSharing(err error) (string, bool) {
+	cls, ok := gapi.ClassOf(err)
+	if !ok {
+		return "", false
+	}
+	switch cls {
+	case gapi.ClassAuth:
+		return render.Sentence(MissingACLScope), true
+	case gapi.ClassForbidden:
+		return render.Sentence("Who this calendar is shared with could not be read: that needs OWNER " +
+			"access and this account does not have it. Everything else on this card was read."), true
+	default:
+		return "", false
+	}
+}
+
 // ListSharing is list_sharing.
 func (s *Service) ListSharing(ctx context.Context, ref string) (render.SharingReport, error) {
 	ctx, cal, err := s.openCalendar(ctx, ref)

@@ -147,6 +147,13 @@ func (w WriteReport) Text() string {
 	for _, n := range w.Notes {
 		fmt.Fprintf(&b, "\n%s\n", n)
 	}
+	if n := w.Crowded(); n != "" {
+		// Derived from the event this write produced rather than added
+		// by whichever write grew the guest list: every write that can
+		// leave an event with too many guests says so, including the
+		// ones that did not add them.
+		fmt.Fprintf(&b, "\n%s\n", n)
+	}
 	if w.DryRun {
 		b.WriteString("\nNothing was sent. Everything above is what a real call would do.\n")
 	}
@@ -164,6 +171,22 @@ func (w WriteReport) Text() string {
 		fmt.Fprintf(&b, "(%d API requests)\n", w.Requests)
 	}
 	return b.String()
+}
+
+// Crowded is §17.5's warning for the event this write produced, or ""
+// when there is nothing to warn about.
+//
+// It counts ATTENDEE ROWS, not guests, and the difference matters here
+// in the other direction from everywhere else. Google's threshold is on
+// its own attendees field — the account itself and the rooms are on it —
+// so counting guests would stay silent on an event Google had already
+// stopped tracking. It is also the number this result PRINTS beside the
+// warning, so the two cannot disagree.
+func (w WriteReport) Crowded() string {
+	if w.After == nil {
+		return ""
+	}
+	return plan.CrowdWarning(len(w.After.Attendees))
 }
 
 // dated renders one side of a write WITH its date.

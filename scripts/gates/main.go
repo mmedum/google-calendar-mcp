@@ -22,6 +22,8 @@
 //	go run ./scripts/gates smoke ./google-calendar-mcp
 //	go run ./scripts/gates schema-diff ./google-calendar-mcp
 //	go run ./scripts/gates staleness ./google-calendar-mcp
+//	go run ./scripts/gates mcpb
+//	go run ./scripts/gates mcpb-pack DIST VERSION OUT
 package main
 
 import (
@@ -37,7 +39,7 @@ func main() {
 		fail("usage: gates coverage PROFILE MIN | classes | api-coverage | api-fields | api-diff | " +
 			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
 			"schema-baseline BIN | " +
-			"staleness BIN")
+			"staleness BIN | mcpb | mcpb-pack DIST VERSION OUT")
 	}
 	root, err := repoRoot()
 	if err != nil {
@@ -80,6 +82,16 @@ func main() {
 		check(writeBaseline(binArg()), "schema baseline")
 	case "staleness":
 		check(staleness(binArg()), "staleness")
+	case "mcpb":
+		check(mcpbGate(), "bundle manifest")
+	case "mcpb-pack":
+		// Release only, and excused by name in the parity gate: this one
+		// needs binaries that exist after a build rather than names that
+		// exist in the repository.
+		if len(os.Args) < 5 {
+			fail("usage: gates mcpb-pack DIST VERSION OUT")
+		}
+		check(packMCPB(os.Args[2], os.Args[3], os.Args[4]), "bundle pack")
 	default:
 		fail("unknown gate %q", os.Args[1])
 	}

@@ -47,6 +47,10 @@ func classifyPlan(err error) error {
 		// and had four hand-written wrappings, two of which stripped the
 		// package prefix and two of which did not.
 		{recur.ErrInvalid, gapi.ClassInvalid},
+		// when's failures reach the read path directly: a window whose
+		// end is not after its start, and the working-hours mask of
+		// §17.2.
+		{when.ErrInvalid, gapi.ClassInvalid},
 	} {
 		if !errors.Is(err, m.sentinel) {
 			continue
@@ -294,8 +298,10 @@ type CreateOptions struct {
 	Guests      []string
 	Recurrence  []string
 	Transparent bool
-	Notify      string
-	DryRun      bool
+	// Conference asks for a Google Meet link on the new event (§17.3).
+	Conference bool
+	Notify     string
+	DryRun     bool
 }
 
 // CreateEvent inserts an event with a client-generated id (§2.11).
@@ -311,10 +317,21 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 		return render.WriteReport{}, err
 	}
 
+	if o.Conference && !env.cal.Conference.AllowsMeet() {
+		// Refused here rather than by Google, which answers a 200 and a
+		// failed create request: the event would exist without the link
+		// the caller asked for. An absent list is not a refusal, so this
+		// only fires when the calendar published its types and Meet is
+		// not among them.
+		return render.WriteReport{}, gapi.Errf(gapi.ClassUnsupported,
+			"this calendar does not allow Google Meet conferences, so the event was not created. "+
+				"Create it without conference, or use a calendar that allows them")
+	}
+
 	title := o.Title
 	draft := plan.Draft{
 		Title: &title, Start: o.Start, End: o.End, Zone: env.zone,
-		AddGuests: o.Guests,
+		AddGuests: o.Guests, Conference: o.Conference,
 	}
 	if o.Description != "" {
 		draft.Description = &o.Description
@@ -352,6 +369,11 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 		report.Notes = append(report.Notes,
 			"This is a series: "+render.Recurrence(body.Recurrence)+".")
 	}
+	if o.Conference && o.DryRun {
+		report.Notes = append(report.Notes,
+			"A Google Meet link would be requested. Nothing is written by a dry run, so there is "+
+				"no link to report here.")
+	}
 
 	if o.DryRun {
 		after, cerr := model.FromEvent(env.cal.ID, body, &env.zone)
@@ -370,8 +392,43 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, err
 	}
+	if note := conferenceNote(o.Conference, after); note != "" {
+		report.Notes = append(report.Notes, note)
+	}
 	report.After, report.Requests = &after, gapi.Requests(ctx)
 	return report, nil
+}
+
+// conferenceNote says what actually happened to a requested Meet link.
+//
+// A live run saw the link arrive with the insert (§18 row 60), and
+// Google documents the conference as generated asynchronously, so
+// "pending" with no entry point is a published answer as well. This
+// reports what came back rather than what was asked for: a result that
+// said "with a Google Meet link" on the strength of having asked would
+// be promising something that may not be there — the same failure as
+// reporting `none` as silence (§4.3 rule 3).
+func conferenceNote(asked bool, e model.Event) string {
+	if !asked {
+		return ""
+	}
+	switch {
+	case e.Conference.Ready():
+		return "Google Meet: " + e.Conference.URI
+	case e.Conference.Failed():
+		return "The Google Meet link could NOT be created, and the event exists without one. " +
+			"Google gave no reason. Add a link in Google Calendar, or ask again on another calendar."
+	case e.Conference.Pending():
+		return "The Google Meet link was requested and Google is still making it, so there is no link " +
+			"to give out yet. This is the slower of Google's two answers — read this event again " +
+			"with get_event in a moment."
+	default:
+		// Asked for, and the answer carries nothing about it. Reported
+		// as absent rather than as pending: a caller told to wait for a
+		// link nobody is making would wait forever.
+		return "No Google Meet link came back with this event, and Google said nothing about one. " +
+			"Read the event again with get_event before promising anybody a link."
+	}
 }
 
 // maybeLanded is the boundary of the ambiguous_outcome class (§2.11): a
@@ -773,11 +830,16 @@ func splitBody(parent gcal.Event, target model.Event, draft plan.Draft, rule str
 	body.RecurringEventID, body.OriginalStartTime = "", nil
 	body.Recurrence = []string{rule}
 	// The conference is NOT carried, and the result says so rather than
-	// letting it vanish. Google ignores conferenceData unless the insert
-	// sends conferenceDataVersion=1, which this server does not — §17.3
-	// keeps conference writes to a later phase — so copying it would
-	// have produced a new series with no meeting link and nothing said
-	// about it.
+	// letting it vanish.
+	//
+	// The reason is no longer "this server cannot write one" — since
+	// §17.3 it can, and the client would send the version parameter for
+	// this body as readily as for a create. It is that copying the value
+	// points TWO series at one conference, which is a decision about
+	// somebody's meeting rather than about this write, and minting a
+	// second conference for a split is a write nobody asked for. So the
+	// split leaves the new series without a link and says so, which is
+	// the honest half of a limitation.
 	droppedConference := len(body.ConferenceData) > 0
 	body.ConferenceData = nil
 
@@ -924,6 +986,13 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 	}
 	if note != "" {
 		report.Notes = append(report.Notes, note)
+	}
+	if o.Force {
+		// §4.4 on the write where it matters most: a forced cancel
+		// deletes an event under If-Match: *, so a change somebody made
+		// since the read is gone with it. update_event and move_event
+		// said so and this did not.
+		report.Notes = append(report.Notes, forcedNote)
 	}
 	report.Notes = append(report.Notes, guestsStillHaveIt(decision))
 
@@ -1305,6 +1374,9 @@ func (s *Service) RespondToEvent(ctx context.Context, o RespondOptions) (render.
 	report.Notes = append(report.Notes,
 		"Only this account's own response changed. Every other guest's answer is exactly as it was read, "+
 			"which is why RSVPing is its own tool rather than an update.")
+	if o.Force {
+		report.Notes = append(report.Notes, forcedNote)
+	}
 
 	if o.DryRun {
 		report.After, report.Requests = &targetModel, gapi.Requests(ctx)

@@ -102,9 +102,11 @@ type Event struct {
 	// and fromGmail cannot be created at all (§2.12).
 	EventType string `json:"eventType,omitempty"`
 
-	// ConferenceData is read in phase 0 and written in a later phase
-	// (§17.3). Kept as raw JSON until then so a read round-trips it
-	// without this package pretending to model a union it does not.
+	// ConferenceData is read here and written by create_event (§17.3).
+	// It stays raw JSON: the union has a third-party arm this package
+	// does not model, and a read that round-trips the value whole cannot
+	// lose what it did not understand. ReadConference takes out the
+	// three fields a result needs.
 	ConferenceData json.RawMessage `json:"conferenceData,omitempty"`
 
 	// ETag backs If-Match on every write (§4.4).
@@ -206,7 +208,16 @@ type Calendar struct {
 	// TimeZone is the calendar's own IANA zone and the second source in
 	// §4.1's resolution order.
 	TimeZone string `json:"timeZone,omitempty"`
-	ETag     string `json:"etag,omitempty"`
+	// ConferenceProperties says which conference types this calendar
+	// accepts, which is what create_event checks before asking for a
+	// Meet link (§17.3).
+	ConferenceProperties *ConferenceProperties `json:"conferenceProperties,omitempty"`
+	ETag                 string                `json:"etag,omitempty"`
+}
+
+// ConferenceProperties is a calendar's conference capability.
+type ConferenceProperties struct {
+	AllowedConferenceSolutionTypes []string `json:"allowedConferenceSolutionTypes,omitempty"`
 }
 
 // CalendarListEntry is one user's subscription to a calendar, carrying
@@ -236,6 +247,10 @@ type CalendarListEntry struct {
 	// calendar, and is a per-user override like the colour: changing it
 	// changes nothing for anybody else.
 	NotificationSettings *NotificationSettings `json:"notificationSettings,omitempty"`
+	// ConferenceProperties is carried here too, so the calendar list
+	// this server already holds answers "can this calendar have a Meet
+	// link" without a second request.
+	ConferenceProperties *ConferenceProperties `json:"conferenceProperties,omitempty"`
 	ETag                 string                `json:"etag,omitempty"`
 }
 
@@ -822,4 +837,207 @@ func SameScope(a, b AclScope) bool {
 		return true
 	}
 	return strings.EqualFold(a.Value, b.Value)
+}
+
+// ----------------------------------------------------- conference data
+
+// ConferenceSolutionMeet is the only conference a client may create.
+// The discovery document (revision 20260826) deprecates both hangout
+// types for new conferences and reserves "addOn" for third parties, so
+// the type is a constant here rather than a parameter offering choices
+// that cannot be taken.
+const ConferenceSolutionMeet = "hangoutsMeet"
+
+// The three states a create request can be in.
+//
+// Google documents the data as generated ASYNCHRONOUSLY, and a live run
+// answered the insert with "success" and the link already in it (§18 row
+// 60). Both are true: the link is usually there at once, and "pending"
+// is a published value this server must not report as a link. The status
+// is carried rather than assumed either way.
+const (
+	ConferencePending = "pending"
+	ConferenceSuccess = "success"
+	ConferenceFailure = "failure"
+)
+
+// conferenceEntryVideo is the entry point a person clicks. A conference
+// has at most one.
+const conferenceEntryVideo = "video"
+
+// conferenceData is the shape this package reads out of the raw field.
+// It is deliberately partial: the wire value is kept whole as
+// json.RawMessage so a round trip cannot lose a field this struct does
+// not know about.
+type conferenceData struct {
+	CreateRequest *conferenceCreateRequest `json:"createRequest,omitempty"`
+	EntryPoints   []conferenceEntryPoint   `json:"entryPoints,omitempty"`
+}
+
+type conferenceCreateRequest struct {
+	RequestID             string                 `json:"requestId,omitempty"`
+	Status                *conferenceStatus      `json:"status,omitempty"`
+	ConferenceSolutionKey *conferenceSolutionKey `json:"conferenceSolutionKey,omitempty"`
+}
+
+type conferenceStatus struct {
+	StatusCode string `json:"statusCode,omitempty"`
+}
+
+type conferenceSolutionKey struct {
+	Type string `json:"type,omitempty"`
+}
+
+type conferenceEntryPoint struct {
+	EntryPointType string `json:"entryPointType,omitempty"`
+	URI            string `json:"uri,omitempty"`
+}
+
+// Conference is what a caller needs to know about a meeting's video
+// link: whether there is one, where it is, and whether Google is still
+// making it.
+//
+// Three fields, because three are read. The solution's name, the entry
+// point's label and the domain administrator's notes are all in the
+// wire value and none of them is printed anywhere — a field parsed and
+// never shown is one a reader has to chase to find out it does nothing.
+// The raw JSON is kept on the event either way, so adding one later
+// costs a line here and nothing at the boundary.
+type Conference struct {
+	// Present is false when the event carries no conference data at all.
+	Present bool
+	// Status is the create request's state, empty on a conference that
+	// was not created through a request.
+	Status string
+	// URI is the video entry point, empty while a request is pending or
+	// after one failed.
+	URI string
+}
+
+// ConferenceState is what a caller can do about an event's conference,
+// which is not the same as the create request's status: an event can
+// carry conference data with no video entry point and no request at all,
+// and that is neither ready nor pending nor failed.
+type ConferenceState int
+
+// The four states, and there are only four.
+const (
+	// NoConference: the event has none.
+	NoConference ConferenceState = iota
+	// ConferenceReady: there is a link to join.
+	ConferenceReady
+	// ConferenceComing: Google is still making it.
+	ConferenceComing
+	// ConferenceRefused: the create request failed, and the event exists
+	// without a link.
+	ConferenceRefused
+	// ConferenceOther: conference data this server cannot turn into a
+	// link — a phone-only conference, or a third-party provider. Its own
+	// state rather than a silent "none", because a result that reported
+	// it as no conference would be wrong about an event that has one.
+	ConferenceOther
+)
+
+// State is the one reading of the union, so the text, the structured
+// result and the write note cannot disagree about an event. They did:
+// the text said "conference data with no video link in it" while the
+// JSON reported no conference at all.
+func (c Conference) State() ConferenceState {
+	switch {
+	case !c.Present:
+		return NoConference
+	case c.URI != "":
+		return ConferenceReady
+	case c.Status == ConferencePending:
+		return ConferenceComing
+	case c.Status == ConferenceFailure:
+		return ConferenceRefused
+	default:
+		return ConferenceOther
+	}
+}
+
+// Pending reports whether Google is still making the conference, so a
+// result must not promise a link yet.
+func (c Conference) Pending() bool { return c.State() == ConferenceComing }
+
+// Failed reports whether the create request failed. The event exists;
+// the meeting link does not.
+func (c Conference) Failed() bool { return c.State() == ConferenceRefused }
+
+// Ready reports whether there is a link to join.
+func (c Conference) Ready() bool { return c.State() == ConferenceReady }
+
+// NewConferenceRequest is the body that asks Google to attach a Meet
+// conference to an event.
+//
+// requestId is the caller's, and this server passes the event id: the
+// discovery document says a request repeating an id is IGNORED, so a
+// retry of a create that may have landed (§2.11) cannot produce a second
+// conference. An id regenerated per attempt would.
+//
+// The request only asks, and Conference carries the status rather than a
+// promise: the answer may be "success" with the link in it, which is
+// what one live run saw, or "pending" with no entry point yet.
+func NewConferenceRequest(requestID string) json.RawMessage {
+	raw, err := json.Marshal(conferenceData{CreateRequest: &conferenceCreateRequest{
+		RequestID:             requestID,
+		ConferenceSolutionKey: &conferenceSolutionKey{Type: ConferenceSolutionMeet},
+	}})
+	if err != nil {
+		// Unreachable: the value is this package's own struct of
+		// strings. Returning nil rather than panicking means a marshal
+		// that somehow failed creates an event without a conference
+		// instead of killing the process mid-write.
+		return nil
+	}
+	return raw
+}
+
+// ReadConference reads what a result needs out of an event's raw
+// conference data.
+//
+// A shape this package does not recognise reports Present without a URI
+// rather than an error: the field is a union Google extends, the caller
+// asked about an event rather than about a conference, and failing a
+// read because a third-party provider nested something unexpectedly
+// would lose the whole event over the least important part of it.
+func ReadConference(raw json.RawMessage) Conference {
+	if len(raw) == 0 {
+		return Conference{}
+	}
+	out := Conference{Present: true}
+	var data conferenceData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return out
+	}
+	if cr := data.CreateRequest; cr != nil && cr.Status != nil {
+		out.Status = cr.Status.StatusCode
+	}
+	for _, ep := range data.EntryPoints {
+		if ep.EntryPointType != conferenceEntryVideo {
+			continue
+		}
+		out.URI = ep.URI
+		break
+	}
+	return out
+}
+
+// AllowsMeet reports whether a calendar accepts a Meet conference.
+//
+// An EMPTY list is not a refusal. Google documents the field as optional
+// and it is absent on calendars that do create conferences, so treating
+// absence as "forbidden" would refuse a write that works. The check is
+// only for the case the list is present and says no.
+func (p *ConferenceProperties) AllowsMeet() bool {
+	if p == nil || len(p.AllowedConferenceSolutionTypes) == 0 {
+		return true
+	}
+	for _, t := range p.AllowedConferenceSolutionTypes {
+		if t == ConferenceSolutionMeet {
+			return true
+		}
+	}
+	return false
 }

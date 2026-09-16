@@ -1,16 +1,41 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 3 is built, run live and green (2026-09-16).** Phase 0 —
-the scaffolding, the gates, the time model and the six read tools — phase 1 — `internal/recur`, `list_instances` and
-`check_availability` — and phase 2 — `internal/plan`, the five event
-writes, `If-Match`, the client-generated id and `dry_run` — are built,
-verified live and committed. Phase 3 — the two calendar tools, the three
-sharing tools and the two gated ones — is built, verified live and
-committed with it. The surface is twenty tools; `make check` is green
-across nineteen targets; the live driver runs **77 steps against a real
-account over three runs, with none failing**, 7 undetermined by default, being the five that reach a real
-person and spikes A and B, all of which need `-spike-notify` and a
-configured guest.
+**Status: phase 4 is built, run live and green (2026-09-16).** Phase 0 —
+the scaffolding, the gates, the time model and the six read tools —
+phase 1 — `internal/recur`, `list_instances` and `check_availability` —
+phase 2 — `internal/plan`, the five event writes, `If-Match`, the
+client-generated id and `dry_run` — and phase 3 — the two calendar
+tools, the three sharing tools and the two gated ones — are built,
+verified live and committed. Phase 4 — the three resources, the
+working-hours mask, the conference parameter, the attendee warning,
+`scripts/evals` and the `.mcpb` bundle with its gate — is built,
+verified live and committed with them. The surface is **twenty tools and
+three resources**; `make check` is green across twenty-one targets; the
+live driver runs **85 steps against a real account with none failing**, 7
+undetermined by default, being the five that reach a real person and
+spikes A and B, all of which need `-spike-notify` and a configured guest.
+Five runs: one to see it work, two reading the new steps' bodies rather
+than their check lines, and two more after the reviews changed code.
+
+**What phase 4 cost and taught, in one line each.** Spike M asked what
+Google does with a conference create request and answered both halves
+the code depended on: **without `conferenceDataVersion=1` the conference
+is dropped in silence** — 200, event created, no link (§18 row 61) — and
+**with it the link arrives on the insert itself**, which refuted the
+"read the event again" wording this phase had written into the tool
+description, the result note and three comments (§18 row 60). A URI
+template written the obvious way would have made **every secondary
+calendar unreachable as a resource**, because simple expansion does not
+match the at sign every calendar id carries (§18 row 59). And §16's
+phase 0 entry claims goreleaser and a release workflow that **never
+existed**, so the bundle this phase built is packed by hand rather than
+by a signed release (§18 row 62).
+
+**Still owed**, said here rather than left implied: a second MCP client
+and the bundle installed from a real desktop, both deferred by decision;
+spike G's negative half, from phase 0; the release wiring above; and
+§17.1, incremental sync, which stays open. §17.2, §17.3 and §17.5 are
+decided and built.
 
 **What phase 3's live runs cost and taught. Three runs, and the second is
 the one worth reading.** The first failed two steps and both came from
@@ -623,7 +648,9 @@ standard's "derive the package map, or delete it".
 - `internal/redact/` the log and transcript redactor.
 - `scripts/gates/` the repository's own checks, as Go; `scripts/livecal/`
   the live driver, which also carries the live probes of §15;
-  `scripts/evals/` (phase 4) the model-facing scoring harness.
+  `scripts/evals/` the model-facing scoring harness, run by hand.
+- `packaging/mcpb/` the bundle's manifest and Linux launcher; the packer
+  and its gate are two subcommands of `scripts/gates` (§12).
 - `testdata/` synthetic fixtures, renderer goldens, the API surface
   snapshot and coverage records of §8a and §8b, and the recorded
   tool-schema baseline.
@@ -892,9 +919,9 @@ the read scopes (§10).
 | `get_event` | `events.get` | |
 | `list_instances` | `events.instances` | |
 | `search_events` | `events.list` (`q`) | fanned out; `q` is unscoped (§2) |
-| `check_availability` | `freebusy.query` | batched at 50; free gaps (§7.3) |
+| `check_availability` | `freebusy.query` | batched at 50; free gaps (§7.3); working-hours mask (§17.2) |
 | `get_settings` | `settings.list`, `colors.get` | the user's zone and week start |
-| `create_event` | `events.insert` | client-side id (§2.11) |
+| `create_event` | `events.insert` | client-side id (§2.11); optional Meet link (§17.3) |
 | `update_event` | `events.patch` | `scope` + `notify` + `If-Match` |
 | `cancel_event` | `events.delete`, `events.patch` | not gated (§7.4) |
 | `move_event` | `events.move` | between calendars |
@@ -908,9 +935,25 @@ the read scopes (§10).
 | `clear_calendar` | `calendars.clear` | **gated**, needs `confirm` |
 
 Resources, for clients that attach rather than call: `gcal://calendars`
-(the list), `gcal://calendars/{id}` (the card) and
-`gcal://calendars/{id}/events/{id}` (one event). They carry the same
-content as the matching tools and no handles.
+(the list), `gcal://calendars/{+calendar_id}` (the card) and
+`gcal://calendars/{+calendar_id}/events/{+event_id}` (one event). They
+carry the same content as the matching tools, computed once, and no
+handles.
+
+The `+` is RFC 6570's reserved expansion and is not decoration. Under
+simple expansion a template matches unreserved characters only, and
+every secondary calendar id is an address — so the obvious URI, with the
+at sign written as itself, matches nothing and reads back "not found"
+while the percent-encoded form works (§18 row 59). Reserved expansion
+also matches a slash, so the calendar template matches an event URI too
+and the SDK routes to whichever template matches first; both templates
+therefore share one handler that parses the URI rather than depending on
+registration order.
+
+There is no resource for a schedule, and that is the rule rather than an
+omission: a resource takes no arguments, a read must state its window and
+its zone (§4.5), and a URI with nowhere to put them would have to invent
+both.
 
 ### 8a. Every published method, with a verdict
 
@@ -1164,17 +1207,31 @@ terminal first.
   and deletes, with a step per tool option, held by the `live-cover`
   gate; every print routed through the one redactor, held by the
   `transcript` gate.
-- **`scripts/evals`** (phase 4) — tasks a model must complete through the tools,
-  scored. The three that matter most are the three failures of §3: an
-  all-day event created from a user in a negative-offset zone, a weekly
-  recurrence that must survive a daylight-saving change, and an
-  invitation that must actually reach an external guest.
+- **`scripts/evals`** — tasks a model must complete through the tools,
+  scored. The three are the three failures of §3: an all-day event
+  created from a user in a negative-offset zone, a weekly recurrence that
+  must survive a daylight-saving change, and an invitation that must
+  actually reach an external guest. The model is given the server's own
+  tool list over an in-memory session against `caltest`, and the score
+  reads the CALENDAR rather than the model's account of what it did — a
+  model that says it created the all-day event and wrote a timestamp has
+  failed. It is run by hand like the live driver, because it costs money
+  and is not deterministic; `-self-check` runs everything but the model
+  and asserts every task fails on a calendar nobody touched, since a
+  scorer that passes there is scoring nothing.
 
 `make check` and CI run the same set, asserted by the `parity` gate:
 `fmt`, `vet` (including the tagged tests), `tidy`, `lint`, `cover`,
 `vuln`, `licenses`, `secrets`, `api-coverage`, `api-fields`, `classes`,
-`leaks`, `transcript`, `live-cover`, `parity`, `pins`, `schema-diff`,
-`smoke`, `staleness` — nineteen targets.
+`evals-check`, `leaks`, `mcpb`, `transcript`, `live-cover`, `parity`,
+`pins`, `schema-diff`, `smoke`, `staleness` — twenty-one targets.
+
+Two of those are the deterministic halves of things that are otherwise
+run by hand. `mcpb` checks the bundle's manifest against the names the
+packer stages, which needs no build. `evals-check` builds each eval
+task's calendar, offers the tool list and asserts every task FAILS on a
+calendar nobody touched — a scorer that passes there is scoring nothing,
+and without this in `check` that would be found by spending money.
 
 `schema-diff` compares the built tool surface against the last tag, and
 against `testdata/schema-baseline.json` when there is no tag. The
@@ -1188,11 +1245,14 @@ never fails: removing a tool is sometimes right, and the definition of
 done says a person reads this one.
 
 `mcpb`, the bundle manifest gate, is the one this list named before it
-existed. It arrives with the bundle in phase 4; until then it is in §16
-as owed rather than here as done. Three gates were named here while
-absent — `api-fields`, `live-cover` and `mcpb` — and the first two were
-built in phase 1. A list of gates is not a gate, which is the same
-mistake, one level up, that this family of checks exists to catch.
+existed. It was built in phase 4 with the bundle, and runs in `make
+check` and CI because it needs only the staged NAMES, which are static;
+the packer beside it needs binaries and runs at release time. Three
+gates were named here while absent — `api-fields`, `live-cover` and
+`mcpb` — and all three exist now. A list of gates is not a gate, which
+is the same mistake, one level up, that this family of checks exists to
+catch, and §18 row 62 is the same mistake again on the release
+scaffolding.
 
 **Green gates are not done.** Anything touching the write path or a
 response shape gets a live run before it counts, and **the transcript is
@@ -1358,7 +1418,11 @@ states its question and its verdict separately.
   nothing, which is spike I's mistake. It is never run against the
   account's primary calendar, and never against the scratch one, which
   holds the events spikes A and B leave for a person to read.
-  **Not yet run.**
+
+  **Answered 2026-09-16: REFUSED with 400.** So `clear_calendar`'s
+  refusal of a secondary calendar is the API's rule rather than this
+  server's caution (§18 row 56), and the third possibility — accepted
+  and did nothing — did not happen.
 - **Spike L — is `If-Match` honoured on the calendar and sharing
   writes?** §2.4 says ETags are supported across this API and §4.4 puts
   every write under one, but spike J showed that "the general rule" and
@@ -1370,6 +1434,31 @@ states its question and its verdict separately.
   **Answered 2026-09-16: HONOURED on both.** `calendars.patch` and
   `acl.patch` each refuse a stale etag with **412**, so §4.4 covers these
   writes without qualification (§18 row 57).
+- **Spike M — what happens to a conference create request?** §17.3 asked
+  three things and this can answer two. Does an insert carrying
+  `conferenceData` without `conferenceDataVersion=1` lose it, as the
+  discovery document says version 0 does? And does the insert's own
+  answer carry the link, or a pending request the caller has to come back
+  for? Both change what `create_event` may say.
+
+  The third question — what a domain that FORBIDS conferencing does — is
+  **not answerable here**, and the spike says so rather than implying
+  otherwise. It needs a calendar whose `allowedConferenceSolutionTypes`
+  excludes Meet, and that is set by a domain's policy rather than by
+  anything this driver can arrange. The server refuses such a write from
+  the published list before it reaches the network, so the untested path
+  is a refusal rather than a request; what the spike does instead is
+  record what this account's own calendar publishes, which is the input
+  that refusal reads.
+
+  **Answered 2026-09-16, and one half went the other way.** Without the
+  version parameter Google answered **200, created the event, and
+  dropped the conference in silence** — success with the one thing the
+  caller asked for missing (§18 row 61). With it, the insert answered
+  `status: "success"` with the link already in it, which refutes the
+  assumption that a caller usually has to read the event again (§18
+  row 60). The pending path stays in the code because Google publishes
+  it; it is no longer what the result says to expect.
 - **Spike H — free/busy on an unreadable calendar.** Query a calendar the
   user cannot read and confirm the per-calendar error shape §4.6 depends
   on. **Confirmed, 2026-09-15.** The query succeeds; the unreadable
@@ -1982,9 +2071,106 @@ run, which is the price of driving `create_calendar` and
 `delete_calendar` at all, and a run that stops early leaves it behind —
 so the driver sweeps it on the way out.
 
-**Phase 4 — the model's experience (v1.0.0).** Resources; the evals of
-§13 with the three tasks named there; a second MCP client; the `.mcpb`
-bundle exercised from a real install; and whatever §17 is still holding.
+**Phase 4 — the model's experience (v1.0.0). Built and run live
+2026-09-16.** The three resources of §8; the working-hours mask, the
+conference parameter and the attendee warning §17 was holding;
+`scripts/evals` with the three tasks of §3; and `packaging/mcpb` with
+the bundle gate §13 named before it existed. The surface is twenty tools
+and three resources; `make check` is green across twenty-one targets;
+the live run is **85 steps, none failed**, 7 undetermined by default,
+being the five that reach a real person and spikes A and B.
+
+**Reading the transcript found what the count did not**, as it has in
+every phase. `check_availability` printed `busy 2026-03-20 00:00-00:00`
+for an all-day event — a block of no length, on the one kind of event
+that occupies the whole day. Free/busy reports such an event midnight to
+midnight and the busy list printed the end time without its date, while
+the free gaps two lines below already carried that rule. Every gate was
+green, the step passed, and only the body showed it.
+
+**What spike M cost and taught, which is the phase's own lesson.** It
+asked two things about a conference create request and both mattered.
+Without `conferenceDataVersion=1` Google answers **200, creates the
+event and drops the conference in silence** — the exact shape this
+server exists to refuse, and the reason the client sets that parameter
+from the body rather than trusting twenty call sites to remember it
+(§18 row 61). And the insert's own answer carried the link, with
+`status: "success"`, which **refutes what this phase had written
+everywhere**: the tool description, the result note and the field
+comments all said a caller usually has to read the event again. They say
+the opposite now, and the pending path stays in the code because Google
+publishes it as a status — one observation retires an expectation, not a
+possibility (§18 row 60). The spike also said plainly what it could not
+settle: a domain that forbids conferencing needs a calendar this account
+cannot be made to have.
+
+**The URI templates, which no test would have caught.** A resource
+template written the obvious way — `gcal://calendars/{calendar_id}` —
+matches unreserved characters only, and every secondary calendar id is
+an address. A model pasting the id `list_calendars` just gave it would
+have got "not found" from every calendar but the primary. Reserved
+expansion fixes it and brings its own consequence: `{+calendar_id}`
+matches a slash too, so the calendar template also matches an event URI
+and the SDK routes to whichever template matches first. Both templates
+share one handler that reads the URI, rather than resting on
+registration order (§18 row 59).
+
+**What the bundle is and is not.** `packaging/mcpb` has the manifest,
+the Linux launcher, a packer in Go and the `mcpb` gate, with all six
+referential checks of the standard watched failing in tests. What it
+does not have is a release to ship in: **§16 listed goreleaser and a
+release workflow among phase 0's work and neither ever existed**
+(§18 row 62). So the bundle is packed by `make mcpb-pack` from a built
+tree and installed by hand, and the signed-release wiring —
+`checksum.extra_files`, `release.extra_files`, the universal binary's
+post hook — is owed rather than done.
+
+**What `/code-review high` found, on a tree where every gate was green
+and `/simplify` had already run.** Twelve, of which eleven are fixed and
+one is written down.
+
+- **`manage_calendar` reported a change that had not been made.** Both
+  halves appended to the change list BEFORE their API call, and the
+  partial-write sentence — "that change stands, there is no rollback" —
+  is built from that list. A rename refused with 412 told the caller it
+  had landed. The list is what the call DID now, appended after the
+  write.
+- **`get_calendar` refused the whole card for a calendar somebody else
+  owns.** `acl.list` needs owner access; a plain 403 is `[forbidden]`
+  and only `[auth]` was being turned into a note, so the tool answered
+  nothing at all for a colleague's calendar while its own doc comment
+  promised the opposite. Both now carry the card and say which sentence
+  applies.
+- **The crowd warning counted the wrong population.** Google's threshold
+  is on its own `attendees` field, which carries the organiser's row and
+  the rooms; counting "guests" stayed silent on an event Google had
+  already stopped tracking, and disagreed with the `Guests (202)` the
+  same result printed.
+- **A dry run reported a conference state it had invented.** `After` was
+  built from the request body, so the create request read back as "a
+  conference with no video link" — a real state, and not this one.
+- **A forced `cancel_event` did not say it was forced.** `update_event`
+  and `move_event` carry §4.4's sentence and the other two did not,
+  including the write where what is overwritten is gone.
+- **`gcal://calendars/primary/events/` answered with the CALENDAR.** An
+  empty event segment fell through to the calendar card, sharing list
+  and all: a different resource from the one the URI names, with no
+  error.
+- And five smaller ones: the driver's gap assertion could not see a
+  cross-midnight row, which is precisely what a mask that failed to
+  apply produces; `caltest`'s read path mutated shared state under a
+  lock that protected nothing a reader sees; spike M reused one request
+  id across both halves, when a repeated id is itself a variable; a dry
+  run printed the user's PREVIOUS private name as the one others see;
+  and a field verdict still said §17.2 was open.
+
+**Outstanding, and named rather than implied.** A second MCP client and
+the bundle exercised from a real install are deferred by decision: both
+need a desktop this session did not have. Spike G's negative half is
+still owed from phase 0. §17.1, incremental sync, stays open. And §18
+row 63 records what the review found in phase 2's split arithmetic: the
+expansion runs in the zone the CALLER asked to see, and two attempts to
+make that produce a wrong rule did not.
 
 ### 16a. Found by review, and fixed
 
@@ -2064,11 +2250,49 @@ because the shape of the mistake is the useful part.
    Adding an optional parameter later is additive, so shipping without
    one blocks nothing. The decision is which of the two the server
    should own, and the daily-mask point is the one to decide it on.
+
+   **Decided in phase 4: the server owns it**, on exactly that argument.
+   `check_availability` takes `working_from`, `working_to` and
+   `working_days`, and none of them has a default — without them every
+   hour of the window counts, as before. Days left out means EVERY day
+   rather than Monday to Friday: a five-day default would be the server
+   guessing somebody's working week, and it is wrong in every country
+   whose week runs Sunday to Thursday. A mask crossing midnight is
+   refused rather than guessed at, because the day a night shift belongs
+   to is a choice this server would be making for somebody. The mask is
+   applied in the zone the answer is rendered in, day by local day, so
+   09:00 is still 09:00 on the Sunday the clocks change — the same rule
+   as §4.1, one level up from an event — and both halves of the result
+   say which mask was used, because a gap list with the evenings
+   silently removed reads as "nobody is free then". **Decided.**
 3. **Conferencing.** Creating a Meet link is a `conferenceData`
    `createRequest` with a caller-generated `requestId`, and it is in
    scope by §1's boundary. Whether it is a parameter on `create_event` or
-   its own tool, and what happens when the domain forbids it, is
-   undecided. **Open.**
+   its own tool, and what happens when the domain forbids it, was
+   undecided.
+
+   **Decided in phase 4: a parameter on `create_event`, and nothing
+   else.** A tool would be a second way to make an event, and the link
+   belongs to the event's creation rather than to a separate act.
+   `conference: true` sends a create request whose `requestId` is the
+   EVENT id, so a retry of a create whose answer was never seen (§2.11)
+   cannot make a second conference — Google ignores a repeated request
+   id. The version parameter is set by the client from the body rather
+   than by each caller, because without it Google drops the conference in
+   silence (§18 row 61).
+
+   Three consequences, each stated where a caller meets it. The result
+   reports what came BACK — the link, or that Google is still making it —
+   never what was asked for; spike M found the link usually arrives with
+   the insert, so "read it again" is the other answer rather than the
+   expected one (§18 row 60). A calendar whose published
+   `conferenceProperties` exclude Meet is refused BEFORE the write,
+   because Google's own answer there is a 200 with a failed request and
+   an event that exists; an absent list is not a refusal. And attaching a
+   conference to an event that already exists is refused with what to do
+   instead, rather than silently dropped: `events.patch` can carry
+   conference data and this server does not write it, so saying so is the
+   honest half. **Decided, with the boundary named.**
 4. **quickAdd, argued against.** §1 writes it off and the counter-argument
    is recorded rather than lost: it is one call where the structured path
    is several, and users type strings like that. It stays out because it
@@ -2078,8 +2302,24 @@ because the shape of the mistake is the useful part.
    ambiguous zone. **Decided, with the argument kept.**
 5. **Attendee limits.** §2 notes that response status is not propagated
    above 200 guests. Whether the server warns above that threshold, and
-   what it does at the hard limit, needs a number the documentation does
-   not state. **Open, needs a spike.**
+   what it does at the hard limit, needed a number the documentation does
+   not state.
+
+   **Decided in phase 4: warn at the documented threshold, and say what
+   is not known.** Any result describing an event with more than 200
+   guests reports that its RSVPs are incomplete — above that Google stops
+   propagating individual responses, so a caller counting acceptances is
+   wrong with nothing looking wrong. The warning is derived from the
+   event the write PRODUCED rather than added by whichever write grew the
+   guest list, so every write that can leave an event in that state says
+   so, including the ones that did not add anybody. It carries the count
+   and never the addresses (§9).
+
+   The hard limit is left alone and said out loud: Google does not
+   publish where it stops accepting guests, so the warning says that
+   rather than inventing a number, and no spike is run to find it — one
+   would mean putting several hundred invented addresses on a real
+   event. **Decided.**
 
 ## 18. Evidence log: conventions checked, changed, or rejected
 
@@ -2145,12 +2385,17 @@ what §15 exists to settle, and they are marked.
 | 50 | Google's `self` flag marks the signed-in account on its own attendee row | **Live, 2026-09-16** | **Refuted on a secondary calendar, and it made a write that reached nobody demand a notification decision.** The driver put the account on its own event, on a calendar that account owns, and the attendee came back WITHOUT `self` — so §4.3.2's "a write that reaches nobody does not ask" counted the caller as their own guest and `respond_to_event` was refused with "this write reaches 1 guest". The flag appears to be relative to the calendar in the request rather than to the authenticated user, and a secondary calendar is not a person; that mechanism is a reading of one observation and the fix does not rest on it. `model.Event.Guests` takes the account's own address and excludes it whatever the flag says |
 | 51 | `acl.delete` takes a `sendNotifications` like the other ACL writes, so `unshare_calendar` needs a `notify` | Discovery document, `calendar.acl.delete` and `calendar.acl.patch`, revision 20260826, refetched 2026-09-16 | **Refuted, and it removed a parameter rather than adding one.** `acl.delete` publishes no `sendNotifications` at all, and `acl.patch`'s own description says it plainly: "Note that there are no notifications on access removal." So there is no choice to offer. `unshare_calendar` takes no `notify`, and its result says what the API's silence means for a person: they are not told, they find the calendar gone. A `notify` parameter there would have been a switch wired to nothing, reported as though it had done something — the same failure as reporting `none` as silence (§4.3 rule 3), with the wire empty instead of ambiguous |
 | 52 | §4.3's three choices carry over to the ACL tools unchanged | Discovery document, `calendar.acl.insert.sendNotifications`, revision 20260826 | **Half refuted: the requirement carries, the vocabulary does not.** `sendUpdates` on an event is an enum of three; `sendNotifications` on a rule is a **boolean**, so `external_only` has nothing to map to. It is refused as `[unsupported]` rather than rounded, because rounding it emails either more people or fewer than the caller asked for, and neither is the thing they said. The requirement itself carries and is stricter here: there is no "reaches nobody" exemption, because a group address expands to people this server cannot count and a domain rule covers everybody in one — the reach of a sharing change is not knowable from here, so the choice is always the caller's (§4.3) |
-| 53 | `calendars.clear` empties any calendar and `calendars.delete` removes any calendar | Discovery document, method descriptions, revision 20260826 | **Refuted by the methods' own descriptions, and both guards come from them.** `clear` is "Clears a **primary** calendar"; `delete` is "Deletes a **secondary** calendar. Use calendars.clear for clearing all events on primary calendars." So `delete_calendar` refuses the primary naming `clear_calendar`, and `clear_calendar` refuses anything else naming `delete_calendar`. What the documentation does NOT say is what `clear` does when handed a secondary calendar, and the three possibilities differ: refused, cleared, or accepted-and-did-nothing. Spike K asks, against a calendar the driver filled itself, counting events on both sides — because a 2xx alone would settle nothing, which is the mistake spike I made once. **Unrun**, so the narrower guard stands on the description until it has an answer |
+| 53 | `calendars.clear` empties any calendar and `calendars.delete` removes any calendar | Discovery document, method descriptions, revision 20260826 | **Refuted by the methods' own descriptions, and both guards come from them.** `clear` is "Clears a **primary** calendar"; `delete` is "Deletes a **secondary** calendar. Use calendars.clear for clearing all events on primary calendars." So `delete_calendar` refuses the primary naming `clear_calendar`, and `clear_calendar` refuses anything else naming `delete_calendar`. What the documentation does NOT say is what `clear` does when handed a secondary calendar, and the three possibilities differ: refused, cleared, or accepted-and-did-nothing. Spike K asks, against a calendar the driver filled itself, counting events on both sides — because a 2xx alone would settle nothing, which is the mistake spike I made once. **Answered in row 56**: refused with 400, so the guard is the API's rule rather than this server's caution |
 | 54 | A calendar notification has a delivery method worth exposing as a choice | Discovery document, `CalendarNotification.method`, revision 20260826 | **Refuted: there is exactly one.** "The possible value is: 'email'." So `manage_calendar` takes notification TYPES — creation, change, cancellation, response, agenda — and fills the method in, rather than offering a parameter with one option and letting a caller wonder what the others are. The same reading settled the other half: `notificationSettings` is written whole, so the tool replaces the list rather than adding to it, and an empty list turns every notification off |
 | 55 | A user can remove any calendar from their own calendar list | **Live, 2026-09-16** | **Refuted for a calendar you own, and nothing published says so.** `calendarList.delete` on a calendar this account had just created answered **403: "The data owner of a calendar cannot remove such a calendar from their calendar list."** So `manage_calendar`'s unsubscribe could not work on any calendar the caller made, and the tool offered it anyway. It is translated now into the two things that do work — `hidden:true` to keep it out of the way, `delete_calendar` to remove it for everybody — and classified `[unsupported]`, because no retry and no permission changes it. **Not pre-empted**, deliberately: Google's own role description separates the `owner` ROLE from the single data OWNER, and the `dataOwner` field is written off in §8b for being an address nothing here needs, so the API stays the authority on who that is and this server translates its answer. The live driver cannot exercise the working path at all — every calendar it has is one it made — so unsubscribing from somebody else's calendar is held offline against the fake and said so in §16 |
 | 56 | `calendars.clear` empties whichever calendar it is given | **Spike K live, 2026-09-16** | **Refused on a secondary calendar: 400.** Google's description says "Clears a primary calendar" and this server refused anything else on the strength of that prose, which rule 13 does not accept on its own. The probe put an event on a calendar the driver owns, cleared it, and counted both sides — because a 2xx alone would have settled nothing, which is the mistake spike I made once. The refusal `clear_calendar` gives is the API's rule now rather than this server's caution, and §7.5 says which. The third possibility, accepted-and-did-nothing, is the one this was written to catch and did not happen |
 | 57 | `If-Match` is honoured on the calendar and sharing writes (§2.4, §4.4) | **Spike L live, 2026-09-16** | **Confirmed on both, with a stale etag: 412 from `calendars.patch` and 412 from `acl.patch`.** §2.4 says ETags work across this API, but spike J had just shown that "the general rule" and "this method" are separate questions — `events.move` honours the header while nothing published says it applies. So the four methods phase 3 added were sending `If-Match` on an assumption. They are not any more: §4.4 covers the calendar and sharing writes as it covers the event ones, and the results may say so. The discriminator is the same one spike J needed — a CURRENT etag would have succeeded whether or not the header is read |
 | 58 | A patch that writes a field the value it already holds still moves the resource's etag | **Live, 2026-09-16, second run** | **Refuted for `calendars.patch`, and it broke a spike to find out.** Spike L patched the scratch calendar's description to a fixed string, which on the second run was the value already there; Google returned the SAME etag, so no stale one could be built and the spike reported undetermined on a question it had answered an hour earlier. The claim appears in `internal/plan`'s own comments as the reason a no-op field is never sent, and one observation now contradicts it on one resource. **The rule it justifies survives the refutation on its own merits**: not sending a field that has not changed saves nothing to argue about, keeps the change list honest about what the write did, and costs nothing — so the comments say that instead of asserting a bump nobody has verified. Whether `events.patch` behaves the same way is **unprobed**, and the comment there says so rather than guessing. The spike's own text now carries the run's mark, because a probe that only works on a calendar it has never touched is a probe that works once |
+| 59 | A URI template variable matches a calendar id | RFC 6570; the SDK's matcher, probed locally 2026-09-16 | **Refuted, and it would have made every secondary calendar unreachable.** `gcal://calendars/{calendar_id}` uses simple expansion, which matches unreserved characters only — and every secondary calendar id is an ADDRESS. The obvious URI, with the at sign written as itself, matches nothing and the read comes back "not found", while the percent-encoded form works; a model writing the id it was just given by `list_calendars` gets the first one. The templates use reserved expansion (`{+calendar_id}`) now, which matches both. That has a second consequence worth stating: reserved expansion also matches a slash, so the calendar template matches an EVENT URI too, and the SDK routes a read to the first template that matches. Both templates therefore share one handler that parses the URI itself, rather than depending on the order two registrations happen to be in |
+| 60 | Conference data is generated asynchronously, so an insert answers with a pending request and no link | Discovery document, `ConferenceData.createRequest` and `ConferenceRequestStatus`, revision 20260826; **spike M live, 2026-09-16** | **Refuted as the usual case, and the published one is kept anyway.** The insert answered `status: "success"` with the video entry point already in it — no waiting, no second read. The documentation says the data "is generated asynchronously" and publishes "pending" as a status, so the slower answer is a thing the API may do; one observation does not retire it, for the same reason spike F did not retire `ambiguous_outcome`. What changes is every sentence that said a caller usually has to read the event again: the link normally arrives with the event, `create_event` reports what came back rather than what it asked for, and "still being made" is the other answer rather than the expected one |
+| 61 | Conference data in an insert body is honoured | Discovery document, `events.insert.conferenceDataVersion`, revision 20260826; **spike M live, 2026-09-16** | **Refuted without the version parameter, and it fails silently.** `conferenceDataVersion` defaults to 0, which "ignores conference data in the event's body": the probe sent the same body twice, once with the parameter and once without, and the version-less insert answered **200 with the event created and no conference at all**. Success, with the one thing the caller asked for missing and nothing in the response saying so. The client sets the parameter from the BODY rather than taking it from each caller, so a call site cannot forget it, and `caltest` drops conference data without it exactly as Google does — a fake that accepted it would let this ship |
+| 62 | The release scaffolding §16 lists as done exists | **The tree, 2026-09-16** | **Refuted: there is no `.goreleaser.yaml` and no release workflow.** §16's phase 0 entry names "goreleaser, CI, CodeQL and release workflows" among the things it built; CI and CodeQL exist and the other two never did. Nothing noticed because nothing references them: the staleness gate checks paths named in backticks in the docs, and a claim in prose naming no path is invisible to it. This is the same shape as the three gates phase 1 found named but absent, and as the empty directories of row 46 — a list of things is not the things. The bundle this phase built is therefore packed by `make mcpb-pack` and installed by hand; wiring it into a signed release is owed, and §16 says so where it used to be claimed |
+| 63 | A `this_and_following` split expands the series in the event's own zone | **Review, 2026-09-16; two reproduction attempts** | **Refuted as written, and the consequence is UNPROVEN.** The split reads the parent through `model.ParseWhen`, which re-renders the instant into the zone the CALL asked to be shown in and drops the wire `timeZone`; `recur.ExpandTimes` then takes its wall clock and its day walk from that. So a series read with a `time_zone` other than its own expands from a different anchor, and the head count that becomes the truncated series' `COUNT=` is computed over a different set of instants. Two attempts to make that change the answer — a weekly `BYDAY=MO` series in Asia/Tokyo split while shown in America/Los_Angeles, and a daily one near local midnight — produced the SAME rule on both sides, because the generated set and the target instant shift together and a rule's gap is wider than the shift. Recorded rather than fixed: the mechanism is real, the harm is not demonstrated, and threading the event's own zone through `Set.Split`, `Set.Reach` and `cancelFollowing` is a change to phase 2's write path that no test here can currently hold. Anybody picking it up should start with a rule whose LOCAL day walk changes the number of matches — `BYMONTHDAY=31`, or `BYDAY=-1SU` near a month boundary |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |

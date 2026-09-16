@@ -42,6 +42,10 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"own zone; the result says which it used, and the zone is always sent alongside the timestamp so " +
 			"a repeating event keeps its wall-clock time across a daylight-saving change. " +
 			"`recurrence` takes RFC 5545 lines such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10. " +
+			"`conference: true` asks Google for a Meet link. The link normally comes back with the event, " +
+			"but Google may still be making it — the result says which, and when it says the link is " +
+			"still being made, read the event again to get it rather than promising anybody a link. A " +
+			"link can only be attached as the event is created; this server cannot add one afterwards. " +
 			notifyHelp + " " + dryRunHelp,
 		Kind: Write,
 		Handle: func(ctx context.Context, in createEventIn) (service.WriteResult, error) {
@@ -49,7 +53,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 				Calendar: in.Calendar, Title: in.Title, Start: in.Start, End: in.End,
 				TimeZone: in.TimeZone, Description: in.Description, Location: in.Location,
 				Guests: in.Guests, Recurrence: in.Recurrence, Transparent: in.FreeNotBusy,
-				Notify: in.Notify, DryRun: in.DryRun,
+				Conference: in.Conference, Notify: in.Notify, DryRun: in.DryRun,
 			})
 			if err != nil {
 				return service.WriteResult{}, err
@@ -69,6 +73,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"`this_and_following` is two calls: the original series is ended before this occurrence and a " +
 			"NEW series starts at it with a new id, and any exception after this occurrence is reset. The " +
 			"result says so. " + notifyHelp + " " + etagHelp + " " + dryRunHelp + " " +
+			"A Google Meet link cannot be added here: `conference: true` on create_event attaches one when " +
+			"the event is made, and this server does not add one to an event that already exists. " +
 			"Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
 		Kind: IdempotentWrite,
 		Handle: func(ctx context.Context, in updateEventIn) (service.WriteResult, error) {
@@ -171,6 +177,7 @@ type createEventIn struct {
 	Guests      []string `json:"guests,omitempty" jsonschema:"Email addresses to invite. Passing any of these makes notify required."`
 	Recurrence  []string `json:"recurrence,omitempty" jsonschema:"RFC 5545 lines, such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10."`
 	FreeNotBusy bool     `json:"free_not_busy,omitempty" jsonschema:"Mark the time as free rather than busy, so it does not block availability."`
+	Conference  bool     `json:"conference,omitempty" jsonschema:"Ask Google for a Google Meet link. Usually in the answer; if it says the link is still being made, read the event again for it."`
 	Notify      string   `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests."`
 	DryRun      bool     `json:"dry_run,omitempty" jsonschema:"Report what would be created and who would be emailed, without writing."`
 }

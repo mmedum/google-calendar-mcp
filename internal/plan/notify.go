@@ -274,3 +274,33 @@ func isare(n int) string {
 	}
 	return "are"
 }
+
+// AttendeeLimit is where Google stops propagating each guest's response
+// status on an event (§2). It is not the hard limit on guests, which
+// Google does not publish (§17.5).
+const AttendeeLimit = 200
+
+// CrowdWarning is what a result says about an event with more attendees
+// than Google will track individually, and "" for an ordinary one.
+//
+// The count is ATTENDEE ROWS, because the threshold is Google's and it
+// is on Google's own field: the organiser's row and the rooms are on
+// that list. Counting "guests" — the narrower set a write can reach —
+// would leave an event Google had already stopped tracking unqualified,
+// and would disagree with the number the same result prints.
+//
+// It reports the COUNT and never the addresses (§9). The sentence is
+// about what the server can no longer tell the caller, which is the
+// honest half: above this many the RSVPs in a read are not the RSVPs on
+// the event, and a caller counting acceptances would be wrong without
+// anything looking wrong.
+func CrowdWarning(attendees int) string {
+	if attendees <= AttendeeLimit {
+		return ""
+	}
+	return fmt.Sprintf("This event has %d attendees, above Google's limit of %d for tracking replies. "+
+		"Above that, individual responses are not propagated, so the RSVPs any read reports here are "+
+		"incomplete — do not count acceptances off them. Google does not publish where it stops "+
+		"accepting guests altogether, so this server cannot tell you how much further there is to go.",
+		attendees, AttendeeLimit)
+}
