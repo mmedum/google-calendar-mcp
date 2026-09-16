@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only at the top; no job here needs more.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Three platforms, because the first run of a matrix like this
+        # on a sibling found four Linux-only assumptions in its tests.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: make fmt
+      - name: vet
+        run: make vet
+      - name: tidy
+        run: make tidy
+      - name: test and coverage floor
+        run: make cover
+      - name: stdio smoke
+        run: make smoke
+      - name: schema diff
+        run: make schema-diff
+      - name: staleness
+        run: make staleness
+
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The leak gate's history mode needs the whole history.
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: error classes
+        run: make classes
+      - name: API coverage
+        run: make api-coverage
+      - name: API field coverage
+        run: make api-fields
+      - name: leak scan
+        run: make leaks
+      - name: transcript redaction
+        run: make transcript
+      - name: live driver coverage
+        run: make live-cover
+      - name: workflow pins
+        run: make pins
+      - name: make/CI parity
+        run: make parity
+      - name: licences
+        run: make licenses
+      - name: vulnerabilities
+        run: make vuln
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: lint
+        run: make lint
+
+  secrets:
+    name: secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: gitleaks
+        run: make secrets

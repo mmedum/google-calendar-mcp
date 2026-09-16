@@ -1,0 +1,5 @@
+# Go tooling assumes LF. Without this, a Windows checkout converts every
+# file to CRLF and `gofmt -l .` then lists the entire repository as
+# needing formatting — which is exactly what the first CI run on Windows
+# reported, for every .go file at once.
+* text=auto eol=lf

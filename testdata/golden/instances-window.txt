@@ -1,0 +1,9 @@
+Weekly review
+series ev-weekly on calendar primary
+2026-03-16T00:00:00+01:00 to 2026-04-01T00:00:00+02:00 (Europe/Copenhagen)
+times are in Europe/Copenhagen, the calendar's own time zone
+
+  2026-03-17 Tue  14:00-15:00  Weekly review  [id ev-weekly_20260317T130000Z]
+
+1 occurrence.
+Cancelled occurrences are hidden; pass show_cancelled to see which dates were removed.

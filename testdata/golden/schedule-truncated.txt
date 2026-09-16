@@ -1,0 +1,10 @@
+2026-03-16T00:00:00+01:00 to 2026-03-17T00:00:00+01:00 (Europe/Copenhagen)
+times are in Europe/Copenhagen, the calendar's own time zone
+calendars: Sample Primary, Sample Team
+recurring events are expanded into their occurrences
+
+2026-03-16 (Monday)
+  09:00-09:15  Morning sync
+
+Showing 1 of 40 events — the read hit its budget. Pass page_token to continue.
+(2 API requests)

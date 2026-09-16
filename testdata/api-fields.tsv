@@ -1,0 +1,98 @@
+# One verdict per published field of the four resources whose fields
+# decide what this server can do. `gates api-fields` holds this,
+# testdata/api-surface.json and internal/gcal to each other, and runs in
+# make check with no network.
+#
+# `modelled` names a field internal/gcal carries; the gate fails if the
+# struct does not have it. `out` says why this server ignores it; the
+# gate fails if the struct DOES have it, so the record cannot claim a
+# field is ignored while the code reads it.
+#
+# Methods are the coarse axis (testdata/api-coverage.tsv). This is the
+# fine one, and it exists because this API keeps its capability in the
+# Event resource: a server can model twelve of its 44 properties and
+# still say "we support events". A reason of the form `planned=N` names
+# the phase that will model the field.
+#
+# resource	field	verdict	reason
+Event	anyoneCanAddSelf	out	deprecated in Google's own field description
+Event	attachments	out	a file on an event belongs to the Drive API and to the server built on it; this one answers when, not what (§1)
+Event	attendees	modelled	the guest list, and the reason notify is required on any write that can reach a person (§4.3)
+Event	attendeesOmitted	modelled	Google truncated the list; a renderer that ignores it shows a meeting as smaller than it is
+Event	birthdayProperties	out	immutable, and only on eventType=birthday. The renderer marks such events so a model does not try to reschedule one (§2.12)
+Event	colorId	modelled	resolved to a colour name through colors.get, because "colorId 5" tells a person nothing
+Event	conferenceData	modelled	read as raw JSON and round-tripped; whether this server creates a Meet link is §17.3, still open
+Event	created	modelled	shown on an event card
+Event	creator	modelled	who made it; with organizer it decides whether an edit or an RSVP is the right call
+Event	description	modelled	content, renderer only (§9)
+Event	end	modelled	the other half (§4.1)
+Event	endTimeUnspecified	modelled	Google invented the end, so a duration computed from it is fiction; the renderer says so
+Event	etag	modelled	If-Match on every write, which is how a patch cannot overwrite what it did not see (§4.4)
+Event	eventLabelId	out	supersedes colorId and refers to a label defined on the calendar. Labels are a calendar-level surface this server does not manage (see Calendar.labelProperties); revisit with colour writing
+Event	eventType	modelled	a birthday or an out-of-office is not a meeting, and the type cannot be changed after creation (§2.12)
+Event	extendedProperties	out	an application's private key-value store on an event. This server has no state to keep there, and reading another application's keys is not something to do by default
+Event	focusTimeProperties	out	only on eventType=focusTime, which this server reads and marks but does not create (§2.12)
+Event	gadget	out	deprecated by Google, and per its own description now only carries birthday calendar metadata
+Event	guestsCanInviteOthers	modelled	what a guest may do; a write that drops it widens or narrows access silently
+Event	guestsCanModify	modelled	as guestsCanInviteOthers
+Event	guestsCanSeeOtherGuests	modelled	as guestsCanInviteOthers, and this one decides whether the guest list is visible at all
+Event	hangoutLink	out	read-only and superseded by conferenceData, which is modelled
+Event	htmlLink	modelled	the link a person opens to see the event in Calendar
+Event	iCalUID	modelled	accepted on lookup through events.list, never used as an address: one uid covers a whole series (§6.2)
+Event	id	modelled	the address, and client-generated on insert so a retry is nearly idempotent (§2.11)
+Event	kind	out	a constant string naming the resource type; the code already knows what it asked for
+Event	location	modelled	content, renderer only (§9)
+Event	locked	out	read-only, and a locked event refuses the write anyway — the API's refusal says more than a pre-check would
+Event	organizer	modelled	who owns the event, which is what respond_to_event and move_event turn on
+Event	originalStartTime	modelled	identifies an instance even after it has been moved, which is why it addresses one (§6.2)
+Event	outOfOfficeProperties	out	only on eventType=outOfOffice, read and marked but not created (§2.12)
+Event	privateCopy	out	immutable, and set by propagation machinery this server does not take part in
+Event	recurrence	modelled	the RRULE, EXDATE and RDATE lines, parsed by internal/recur and sent as the caller's own strings (§6.4)
+Event	recurringEventId	modelled	names the series an instance belongs to, and is what makes a scope required on a write (§4.2)
+Event	reminders	modelled	the per-event override of the calendar's defaults
+Event	sequence	modelled	the iCalendar revision; carried through a patch so a write does not reset it
+Event	source	out	the page or message an event was created from, visible only to its creator; no tool here shows provenance
+Event	start	modelled	half of the time model: date XOR dateTime, never converted (§4.1)
+Event	status	modelled	cancelled events are hidden by default and a cancelled instance is how one date leaves a series (§2.13)
+Event	summary	modelled	the title; content, so it reaches a renderer and never a log (§9)
+Event	transparency	modelled	an event marked free does not make somebody busy: the reason availability cannot come from a list (§4.6)
+Event	updated	modelled	shown on an event card, and the answer to "has this changed since I looked"
+Event	visibility	modelled	a private event reads differently depending on the caller's role, and the renderer must not imply it read the details
+Event	workingLocationProperties	out	only on eventType=workingLocation. It is the API's nearest thing to working hours and is not one: §17.2 keeps that decision open rather than reading it from here
+Calendar	autoAcceptInvitations	out	only meaningful on a Workspace resource calendar, which this server does not administer (§1)
+Calendar	conferenceProperties	out	which conference types a calendar allows. Needed only when this server creates conferences, which is §17.3 and still open
+Calendar	dataOwner	out	read-only, and an email address: it is exactly the kind of field §9 keeps out of logs and results, and nothing here needs it
+Calendar	description	modelled	shown by get_calendar
+Calendar	etag	modelled	If-Match on a calendar patch (§4.4)
+Calendar	id	modelled	the address of a calendar (§6.1)
+Calendar	kind	out	a constant string naming the resource type
+Calendar	labelProperties	out	calendar-level label definitions, which Event.eventLabelId refers to. Managing label vocabularies is not a scheduling job (§1)
+Calendar	location	modelled	shown by get_calendar
+Calendar	summary	modelled	the title, and what a title resolution matches against
+Calendar	timeZone	modelled	the second source in the zone resolution order, and the reason list_calendars carries it (§4.1)
+CalendarListEntry	accessRole	modelled	what this user may do here, which decides whether a write is refused before it is attempted (§7.1)
+CalendarListEntry	autoAcceptInvitations	out	read-only here, and only meaningful on a resource calendar (§1)
+CalendarListEntry	backgroundColor	modelled	the colour actually shown, which colorId only indexes
+CalendarListEntry	colorId	modelled	a per-user override; planned=3 manage_calendar sets it (§7.5)
+CalendarListEntry	conferenceProperties	out	as Calendar.conferenceProperties: §17.3
+CalendarListEntry	dataOwner	out	read-only, and an email address nothing here needs (§9)
+CalendarListEntry	defaultReminders	modelled	the calendar's default reminders, which an event inherits
+CalendarListEntry	deleted	modelled	a deleted entry is skipped when the list is read
+CalendarListEntry	description	modelled	shown by get_calendar
+CalendarListEntry	etag	modelled	If-Match on a calendarList patch (§4.4)
+CalendarListEntry	foregroundColor	modelled	as backgroundColor
+CalendarListEntry	hidden	modelled	hidden in the Calendar UI; list_calendars says so and can include them
+CalendarListEntry	id	modelled	the calendar this subscription is to
+CalendarListEntry	kind	out	a constant string naming the resource type
+CalendarListEntry	location	modelled	shown by get_calendar
+CalendarListEntry	notificationSettings	out	planned=3 manage_calendar's per-user notification settings (§7.5). Not modelled while no tool writes them, because a read that shows settings nothing can change invites a request this server would refuse
+CalendarListEntry	primary	modelled	the account's own calendar, which sorts first and is what "primary" resolves to
+CalendarListEntry	selected	modelled	not shown in the UI, which is not the same as hidden and confuses people
+CalendarListEntry	summary	modelled	the calendar's own title, which is what a colleague sees
+CalendarListEntry	summaryOverride	modelled	the name THIS user gave it; both are carried because a title that matches for one user may not for another (§6.1)
+CalendarListEntry	timeZone	modelled	the calendar's zone as this user sees it (§4.1)
+AclRule	etag	modelled	If-Match on an acl patch (§4.4)
+AclRule	id	modelled	the rule's address, which unshare_calendar deletes by
+AclRule	kind	out	a constant string naming the resource type
+AclRule	role	modelled	what the rule grants, explained rather than echoed because writerWithoutPrivateAccess is not self-explanatory (§7.6)
+AclRule	scope	modelled	who the rule applies to, including the default scope that means the public internet (§7.6)
