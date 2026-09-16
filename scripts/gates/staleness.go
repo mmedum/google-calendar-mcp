@@ -171,6 +171,9 @@ func checkSettings() ([]string, int, error) {
 // below are that triage, not a widening.
 var pathRe = regexp.MustCompile("`((?:cmd|internal|scripts|docs|testdata|packaging|\\.github)/[A-Za-z0-9_./-]+)`")
 
+// plannedRe marks a path a later phase builds: `internal/plan/` (phase 2).
+var plannedRe = regexp.MustCompile("^`[^`]+`[,]? \\(phase [0-9]+\\)")
+
 func checkPaths() ([]string, int, error) {
 	files, err := docFiles()
 	if err != nil {
@@ -185,17 +188,31 @@ func checkPaths() ([]string, int, error) {
 		if err != nil {
 			continue
 		}
-		for _, m := range pathRe.FindAllStringSubmatch(string(data), -1) {
-			p := strings.TrimSuffix(m[1], "/")
+		text := string(data)
+		for _, m := range pathRe.FindAllStringSubmatchIndex(text, -1) {
+			p := strings.TrimSuffix(text[m[2]:m[3]], "/")
 			key := doc + "|" + p
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
 			checked++
-			if _, err := os.Stat(p); err != nil {
-				problems = append(problems, fmt.Sprintf("%s names %s, which does not exist", doc, p))
+			if _, err := os.Stat(p); err == nil {
+				continue
 			}
+			// A path that does not exist yet is fine if the document
+			// says which phase owes it. Without this the gate cannot
+			// tell a plan from a stale reference, and §5 legitimately
+			// describes packages later phases build.
+			//
+			// It stays strict in the direction that matters: the marker
+			// has to name a phase, and it has to sit immediately after
+			// the path, so "this will exist one day" is not enough.
+			if plannedRe.MatchString(text[m[0]:]) {
+				continue
+			}
+			problems = append(problems, fmt.Sprintf(
+				"%s names %s, which does not exist and is not marked with the phase that builds it", doc, p))
 		}
 	}
 	sort.Strings(problems)

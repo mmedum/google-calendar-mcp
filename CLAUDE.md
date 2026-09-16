@@ -115,14 +115,14 @@ and Drive APIs.
 - `internal/when/` dates, zoned times and windows, no network and no
   clock of its own; `internal/recur/` RRULEs, instance expansion and the
   three scopes; `internal/model/` the server's view of a calendar, event
-  and busy interval; `internal/render/` text output; `internal/plan/`
+  and busy interval; `internal/render/` text output; `internal/plan/` (phase 2)
   typed write ops and the guards; `internal/service/` orchestration and
   policy; `internal/tools/` the MCP tools; `internal/server/` SDK wiring
   and the schema dump; `internal/redact/` the log and transcript
   redactor.
 - `scripts/gates/` the repository's own checks, as Go; `scripts/livecal/`
-  the live driver; `scripts/evals/` the model-facing scoring harness;
-  `scripts/spikes/` the live probes of §15.
+  the live driver, which also carries the live probes of §15;
+  `scripts/evals/` (phase 4) the model-facing scoring harness.
 - `testdata/` synthetic fixtures, renderer goldens, the API surface
   snapshot and coverage records, and the recorded tool-schema baseline.
 
