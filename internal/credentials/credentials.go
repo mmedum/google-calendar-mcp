@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -99,21 +98,14 @@ type tokenFile struct {
 }
 
 // FileProtection says what the file fallback's permissions actually
-// achieve on this platform, for the warnings that used to assert
-// "mode 0600" everywhere.
+// achieve on this platform, so a warning never names a protection the
+// platform does not provide.
 //
-// They are written with 0600, and on Unix that is what it means. On
-// Windows Go's file modes do not map to ACLs: the file lands readable by
-// every account on the machine, and the first CI run there reported it
-// as 0666. A warning that names a protection the platform does not
-// provide is worse than no warning, because it is the sentence somebody
-// would rely on (§18 row 47).
-func FileProtection() string {
-	if runtime.GOOS == "windows" {
-		return "NOT restricted by file permissions on Windows; readable by any account on this machine"
-	}
-	return "mode 0600"
-}
+// It used to be unconditional: every warning said "mode 0600", which was
+// false on Windows, where Go's modes do not map to ACLs and the file
+// landed readable by any account on the machine. The file is restricted
+// by an explicit ACL there now, and this says so (§18 row 47).
+func FileProtection() string { return fileProtection() }
 
 func (s *Store) warn(msg string) {
 	if s.Warn != nil {
@@ -244,7 +236,10 @@ func (s *Store) writeFile(token string) error {
 	if err := os.Rename(tmp, s.FilePath); err != nil {
 		return fmt.Errorf("credentials: replace %s: %w", s.FilePath, err)
 	}
-	return nil
+	// After the rename, not before: on Windows the access list is a
+	// property of the file at its final path, and a temporary file's
+	// list does not survive being moved into place.
+	return restrictToOwner(s.FilePath)
 }
 
 func (s *Store) removeFile() error {

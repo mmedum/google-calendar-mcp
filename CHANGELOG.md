@@ -9,12 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- The plaintext token fallback is not protected on Windows, and no
-  longer claims to be. Go's file modes do not map to Windows ACLs, so a
-  file written 0600 lands at 0666 — readable by any account on the
-  machine — while both warnings said "mode 0600" on every read and every
-  save. They now say what the platform actually provides. Whether
-  Windows should refuse the fallback outright is open (§18 row 47).
+- The plaintext token fallback is restricted on Windows, where it never
+  was. Go's file modes do not map to Windows ACLs, so a file written
+  0600 landed at 0666 — readable by any account on the machine — while
+  both warnings said "mode 0600" on every read and every save. The file
+  now carries an explicit access list granting only the signed-in
+  account, replacing what it inherited rather than adding to it, and the
+  warnings describe the mechanism that actually applies (§18 row 47).
 - `make check` passing locally did not mean passing on a clone. Three
   directories named in the docs existed only as empty ones, which git
   does not carry, so the staleness gate had been checking a tree nobody
