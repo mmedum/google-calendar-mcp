@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -160,8 +161,23 @@ func TestFileIsOwnerOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "windows" {
+		// Go's file modes do not map to Windows ACLs: the file is
+		// written with 0600 and lands at 0666. Asserting the mode here
+		// would either fail forever or be skipped and forgotten, so what
+		// is held instead is the thing that actually protects a user —
+		// that the warning does not claim a protection they do not have
+		// (§18 row 47).
+		if note := credentials.FileProtection(); !strings.Contains(note, "NOT restricted") {
+			t.Fatalf("on Windows the file is not permission-protected, and the warning says %q", note)
+		}
+		return
+	}
 	if mode := fi.Mode().Perm(); mode&0o077 != 0 {
 		t.Fatalf("token file mode %o is readable by others", mode)
+	}
+	if note := credentials.FileProtection(); note != "mode 0600" {
+		t.Fatalf("the warning describes the file as %q", note)
 	}
 }
 

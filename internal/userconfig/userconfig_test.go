@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/mmedum/google-calendar-mcp/internal/userconfig"
@@ -87,6 +88,12 @@ func TestSaveWritesOwnerOnly(t *testing.T) {
 	fi, err := os.Stat(p)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		// Windows does not carry POSIX modes; see §18 row 47. This file
+		// is non-secret profile state, so the consequence is smaller
+		// than for the token, but the assertion cannot hold here.
+		return
 	}
 	if mode := fi.Mode().Perm(); mode&0o077 != 0 {
 		t.Fatalf("config file mode %o is readable by others", mode)

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -97,6 +98,23 @@ type tokenFile struct {
 	SavedAt      time.Time `json:"saved_at"`
 }
 
+// FileProtection says what the file fallback's permissions actually
+// achieve on this platform, for the warnings that used to assert
+// "mode 0600" everywhere.
+//
+// They are written with 0600, and on Unix that is what it means. On
+// Windows Go's file modes do not map to ACLs: the file lands readable by
+// every account on the machine, and the first CI run there reported it
+// as 0666. A warning that names a protection the platform does not
+// provide is worse than no warning, because it is the sentence somebody
+// would rely on (§18 row 47).
+func FileProtection() string {
+	if runtime.GOOS == "windows" {
+		return "NOT restricted by file permissions on Windows; readable by any account on this machine"
+	}
+	return "mode 0600"
+}
+
 func (s *Store) warn(msg string) {
 	if s.Warn != nil {
 		s.Warn(msg)
@@ -134,8 +152,8 @@ func (s *Store) ResolveStored() (string, Source, error) {
 	if s.FilePath != "" {
 		tok, err := s.readFile()
 		if err == nil && tok != "" {
-			s.warn(fmt.Sprintf("refresh token read from the plaintext file %s (mode 0600); "+
-				"an OS keyring would hold it better", s.FilePath))
+			s.warn(fmt.Sprintf("refresh token read from the plaintext file %s (%s); "+
+				"an OS keyring would hold it better", s.FilePath, FileProtection()))
 			return tok, SourceFile, nil
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -176,7 +194,8 @@ func (s *Store) Save(token string) (Source, error) {
 		return "", err
 	}
 	if keyringErr != nil {
-		s.warn(fmt.Sprintf("keyring unavailable (%v); refresh token saved in plaintext at %s (mode 0600)", keyringErr, s.FilePath))
+		s.warn(fmt.Sprintf("keyring unavailable (%v); refresh token saved in plaintext at %s (%s)",
+			keyringErr, s.FilePath, FileProtection()))
 	}
 	return SourceFile, nil
 }
