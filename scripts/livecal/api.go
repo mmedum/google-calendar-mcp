@@ -267,6 +267,22 @@ func (a *liveAPI) insertEvent(ctx context.Context, cal string, body map[string]a
 	return a.do(ctx, http.MethodPost, "/calendars/"+cal+"/events?sendUpdates=none", body, nil)
 }
 
+// insertWithUpdates posts one event under an explicit sendUpdates value.
+//
+// The only place in this driver that may mail a real person, which is
+// why the value is a required argument rather than a default: every
+// other write goes through insertEvent, which hardcodes none because
+// those events have no guests at all.
+func (a *liveAPI) insertWithUpdates(ctx context.Context, cal string, body map[string]any, updates string) error {
+	if id, ok := body["id"].(string); ok {
+		if err := gcal.ValidEventID(id); err != nil {
+			return err
+		}
+	}
+	return a.do(ctx, http.MethodPost,
+		"/calendars/"+cal+"/events?sendUpdates="+updates, body, nil)
+}
+
 // patchEvent patches one event. Patch, never PUT (§4.4).
 func (a *liveAPI) patchEvent(ctx context.Context, cal, id string, body map[string]any) error {
 	return a.do(ctx, http.MethodPatch,
@@ -425,6 +441,10 @@ var (
 	spikeENewID    = "livecaltrailingsecond" + runSuffix
 	// Spike F's id: one client-generated id, sent twice at once.
 	spikeFID = "livecalduplicateprobe" + runSuffix
+
+	// Spike A makes three events, one per sendUpdates value; spike B one.
+	spikeAIDBase = "livecalnotifiprobe" + runSuffix
+	spikeBID     = "livecallosseventprobe" + runSuffix
 )
 
 const (
@@ -438,6 +458,9 @@ const (
 	spikeERule  = "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=8"
 
 	spikeFTitle = "Livecal duplicate-insert probe"
+
+	spikeATitle = "Livecal notification probe"
+	spikeBTitle = "Livecal none-on-insert probe"
 
 	// noSuchCalendar is spike H's target: a calendar that cannot exist.
 	//

@@ -140,6 +140,15 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	}
 	defer sess.close()
 
+	// Spikes A and B are the only things here that can mail a person, and
+	// they only do it when addresses are configured. Saying so before
+	// they run means nobody discovers it in a colleague's inbox.
+	if g := guestsFromEnv(); g.any() {
+		out.Printf("guests are configured, so spikes A and B WILL send real invitations: %s\n",
+			g.describe())
+		out.Printf("run with -keep if you want the events left in place to inspect\n\n")
+	}
+
 	r := &results{out: out, invented: map[string]bool{
 		scratch:            true,
 		noSuchCalendar:     true,
@@ -157,6 +166,8 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		name string
 		run  func(context.Context, *redact.Printer, *liveAPI, string) (verdict, string)
 	}{
+		{"spike A: notification truth", spikeA},
+		{"spike B: none on insert", spikeB},
 		{"spike G: acl scopes", spikeG},
 		{"spike C: unzoned series", spikeC},
 		{"spike E: this and following", spikeE},

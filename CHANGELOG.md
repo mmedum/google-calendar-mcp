@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `externalOnly` does not mean "outside your organisation". Google
+  documents it as "notifications are sent to non-Google Calendar guests
+  only", so the axis is the guest's calendar system and not their
+  domain. §4.3 said `dry_run` would report "internal versus external",
+  which would have mislabelled exactly the guests the parameter treats
+  differently, and §15's spike A asked for two guests where only a
+  third — one not on Google Calendar — can exercise that value. Both are
+  corrected before the write path is built on them.
+
 - `list_instances` refuses an occurrence id instead of answering with an
   empty series. It used to explain the mistake only when Google returned
   an error; Google returns 200 and expands whatever occurrence the id
@@ -135,6 +144,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Spikes A and B, which set up §15's notification questions and
+  deliberately do not answer them: who received mail is visible in an
+  inbox and nowhere in any API response, so the driver creates the
+  events, says what to look for, and the verdict is written down by
+  hand. Guest addresses come from `GCAL_LIVE_GUEST_INTERNAL`,
+  `GCAL_LIVE_GUEST_EXTERNAL` and `GCAL_LIVE_GUEST_NONGOOGLE` and never
+  enter the repository.
 - Spikes E and F, and both are answered. **E**: "this and following"
   resets exceptions after the target, confirmed on a real series — so
   §4.2's warning is accurate and phase 2 must print it. The split came
