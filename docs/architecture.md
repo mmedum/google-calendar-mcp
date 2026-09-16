@@ -147,11 +147,16 @@ asserted earlier the same day.
 **Still owed:** spike A's `externalOnly` arm and spike B, which need an
 out-of-domain guest and a non-Google one and cannot be scored by any
 driver (§15); spike G's negative half, whose `GCAL_SHARING=off` path
-phase 3 has now built; and **CI has never run on macOS or Windows** —
-the workflow covers all three platforms and the branch has never been
-pushed. Both platforms cross-compile clean, including the
-tagged tests, so a first run is unlikely to fail on compilation; the
-keyring, the file fallback's permissions and path handling are untested.
+phase 3 has now built.
+
+**Corrected in phase 5: CI HAS run on macOS and Windows**, and this
+paragraph said otherwise while row 46 — three screens down — described
+that very run failing on all three platforms. Checked against the
+repository's own run history: the latest `ci.yml` run is green on
+`test (ubuntu-latest)`, `test (macos-latest)` and `test (windows-latest)`
+alike. What remains untested there is narrower and worth naming: the
+keyring, the file fallback's permissions and path handling, none of
+which a compile covers.
 
 **What phase 1 found in phase 0's own record.** Three gates this
 document listed as part of `make check` did not exist: `api-fields`,
