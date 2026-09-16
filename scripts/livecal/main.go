@@ -204,6 +204,13 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 
 	spikeDest = dest
 	writes := &writeState{dest: dest, self: self}
+	// The only address in this run that belongs to another person. It is
+	// read from the environment and never written anywhere: not to a
+	// file, not to the transcript (the redactor masks it by shape), and
+	// above all not into this repository (§9.1).
+	if spikeNotify {
+		writes.guest = guestsFromEnv().internal
+	}
 	for _, st := range steps(scratch, state) {
 		r.run(ctx, sess, st)
 	}
@@ -252,6 +259,18 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 1
 	}
 	out.Printf("\nGreen is not done: read every line above before believing it.\n")
+	if writes.guest != "" {
+		// Said at the END, because this is the one thing in the run that
+		// somebody else has to act on, and a driver whose discipline is
+		// "read the transcript" should not bury it forty lines up.
+		out.Printf("\nThis run mailed a real person, and left one meeting behind on purpose.\n")
+		out.Printf("  \u2022 %q was cancelled with notify:none. It is gone from this account and\n", quietTitle)
+		out.Printf("    STILL ON THEIRS, and this account can no longer withdraw it (\u00a718 row 43).\n")
+		out.Printf("    Ask them to delete it; nothing here can.\n")
+		out.Printf("  \u2022 Spikes A and B set up events and cannot score themselves: who received\n")
+		out.Printf("    what is visible in an inbox and nowhere in the API. Read the inbox AND\n")
+		out.Printf("    the calendar, then write the verdict into \u00a718 by hand.\n")
+	}
 	return 0
 }
 

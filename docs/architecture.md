@@ -1530,6 +1530,26 @@ with no body and nothing Google publishes says `If-Match` applies. A
 stale etag is refused with 412 (§18 row 49). The exception was a hole,
 not a fact; §4.4 covers every write now.
 
+**And §4.3 was finally exercised live through the tools.** Every write
+step above has no guests by construction, and spikes A and B go through
+the driver's own REST calls rather than through the server — so the
+notification path a caller actually uses had been green offline and
+unproven live for the whole phase. Five steps, armed by `-spike-notify`
+alongside the spikes because they are the only ones here that reach a
+person, now drive `create_event`, `update_event` and `cancel_event` with
+a real guest: the invitation, the reschedule, the proper withdrawal, and
+§18 row 43 through the tool — a cancellation with `notify: none` that
+leaves the meeting on the guest's calendar and reports that it has. The
+last one is a deliberate mess: the account cannot withdraw what it
+cancelled quietly, which is the finding rather than a side effect, so the
+run says at the end who has to delete it.
+
+What those steps CANNOT do is score themselves, and the driver says so
+rather than guessing: who received what is visible in an inbox and
+nowhere in the API (§15). With only a same-domain guest configured, the
+`externalOnly` arm and spike B's non-Google case stay untested — that
+needs the other two addresses of §15's spike A.
+
 The write steps need a second scratch calendar for `move_event`, which
 spends one more of the creation quota of §18 row 36, once, and is adopted
 on every run after.

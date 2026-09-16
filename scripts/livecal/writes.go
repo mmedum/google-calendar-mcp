@@ -33,6 +33,12 @@ const (
 	dryRunTitle  = "Livecal dry run that must not exist"
 	rsvpTitle    = "Livecal rsvp probe"
 	cancelTitle  = "Livecal cancel probe"
+	// The two that reach a real person. Armed by -spike-notify, like
+	// spikes A and B, because every other step in this file is written
+	// so that it CANNOT mail anybody and these two are written so that
+	// they do.
+	guestTitle = "Livecal guest write probe"
+	quietTitle = "Livecal quiet cancel probe"
 )
 
 // rsvpID is the event this account is a guest on, so respond_to_event
@@ -56,6 +62,11 @@ type writeState struct {
 	dest      string
 	self      string
 	splitFrom string
+	// guest is a REAL person's address, from GCAL_LIVE_GUEST_INTERNAL,
+	// and it is empty unless -spike-notify armed the run. The steps that
+	// use it are the only ones here that put an event in somebody else's
+	// calendar, so they check both before doing anything.
+	guest string
 }
 
 // seedRSVP puts an event on the scratch calendar with this account as a
@@ -551,6 +562,140 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the result does not say whether anybody else is holding it (§4.3.3)"
 				}
 				return pass, "deleted, and the result says who else has it"
+			},
+		},
+		// ---------------------------------------------------------------
+		// The steps that reach a real person. Everything above this line
+		// is written so that it cannot.
+		//
+		// §4.3 is the largest bet in this design and until now no live
+		// step had ever exercised it through the TOOLS with somebody on
+		// the other end: every write step above has no guests, and
+		// spikes A and B go through the driver's own REST calls rather
+		// than through the server. So the notification path a caller
+		// actually uses — notify required, the result reporting what was
+		// ASKED FOR rather than what arrived — was green offline and
+		// unproven live.
+		{
+			name: "create_event with a real guest",
+			tool: "create_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"title": guestTitle,
+					"start": "2026-04-20T10:00:00+02:00", "end": "2026-04-20T10:30:00+02:00",
+					"guests": []string{w.guest}, "notify": "all",
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if w.guest == "" {
+					return undetermined, "no guest configured; this step mails a real person and needs " +
+						envGuestInternal + " with -spike-notify"
+				}
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				w.created = field(r.text, "id: ")
+				if !strings.Contains(r.text, "1 guest") {
+					return fail, "the result does not report who it reaches"
+				}
+				// §4.3.3: what was asked for, never what arrived.
+				if !strings.Contains(r.text, "not what arrived") {
+					return fail, "the result claims a delivery the API never reports: " + truncate(r.text, 200)
+				}
+				return pass, "invitation sent, and the result says asked-for rather than delivered"
+			},
+		},
+		{
+			name: "update_event with a real guest",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"event_id": w.created, "start": "2026-04-20T11:00:00+02:00",
+					"end": "2026-04-20T11:30:00+02:00", "notify": "all",
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if w.guest == "" || w.created == "" {
+					return undetermined, "no guest event to update"
+				}
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "10:00") || !strings.Contains(r.text, "11:00") {
+					return fail, "the result does not show the time it moved from and to"
+				}
+				return pass, "rescheduled, and the guest was asked to be told"
+			},
+		},
+		{
+			name: "cancel_event notifying",
+			tool: "cancel_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "notify": "all"})
+			},
+			check: func(r callResult) (verdict, string) {
+				if w.guest == "" || w.created == "" {
+					return undetermined, "no guest event to cancel"
+				}
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "Google was asked to tell") {
+					return fail, "the result does not say the guest was told: " + truncate(r.text, 200)
+				}
+				return pass, "withdrawn properly: the guest was asked to be told"
+			},
+		},
+		{
+			// §18 row 43, through the tool this time. This one LEAVES a
+			// meeting on a real person's calendar that this account can
+			// no longer withdraw — that is the finding, not a side
+			// effect — so it is armed with everything else that mails,
+			// and the run says so at the end.
+			name: "create for the quiet cancel",
+			tool: "create_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"title": quietTitle,
+					"start": "2026-04-21T10:00:00+02:00", "end": "2026-04-21T10:30:00+02:00",
+					"guests": []string{w.guest}, "notify": "all",
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if w.guest == "" {
+					return undetermined, "no guest configured"
+				}
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				w.splitFrom = field(r.text, "id: ")
+				return pass, "created, and the guest was invited so they have it to keep"
+			},
+		},
+		{
+			name: "cancel_event quietly (§18 row 43)",
+			tool: "cancel_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.splitFrom, "notify": "none"})
+			},
+			check: func(r callResult) (verdict, string) {
+				if w.guest == "" || w.splitFrom == "" {
+					return undetermined, "no guest event to cancel quietly"
+				}
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				// The sentence §4.3.3 exists for, and the one a caller
+				// most needs: it is gone from yours and still on theirs.
+				if !strings.Contains(r.text, "leaves it on theirs") {
+					return fail, "a quiet cancellation did not warn that the guest keeps the meeting: " +
+						truncate(r.text, 250)
+				}
+				if !strings.Contains(r.text, "still") {
+					return fail, "the warning does not say the guest still has it"
+				}
+				return pass, "cancelled with no notification, and the result says the guest still has it — " +
+					"CHECK THEIR CALENDAR: that meeting is still there and this account cannot remove it"
 			},
 		},
 		{
