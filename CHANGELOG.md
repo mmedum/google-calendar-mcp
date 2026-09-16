@@ -144,6 +144,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The live driver cancels events that have guests instead of deleting
+  them silently. Its cleanup used `sendUpdates=none`, which removes an
+  event from the organiser's calendar and leaves it on everyone else's —
+  so a day of probe runs left meetings on two real calendars that nobody
+  could get rid of. `-sweep-spikes` removes the kept spike events the
+  same way, cancelling them to their guests.
 - The live driver no longer mails anyone unless asked. Spikes A and B
   sent four real invitations on every run with guest addresses
   configured, which a phase that runs the driver dozens of times would
@@ -156,6 +162,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   started — inert through exactly the phases that add the most tools. It
   now falls back to `testdata/schema-baseline.json`, written by
   `make schema-baseline`.
+- Spike A found a second thing, and it changes a rule rather than a
+  parameter: `all` did not reach an out-of-domain guest in three runs,
+  while `externalOnly` reached them every time. The event carries both
+  guests, so the invitation was accepted and not delivered. §4.3 rule 3
+  now refuses to promise delivery for `all` exactly as it already
+  refused to promise silence for `none` (§18 row 42).
 - Spike A is answered: `externalOnly` follows the organiser's domain,
   and `sendUpdates=none` mailed nobody on insert. The second does not
   soften §4.3 rule 3 — Google warns mail "might still be sent", so one

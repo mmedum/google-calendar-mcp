@@ -58,7 +58,13 @@ func main() {
 	// accident.
 	notify := flag.Bool("spike-notify", false,
 		"spikes A and B: send REAL invitations to the configured guests")
+	// Spike A and B events are kept for a person to read. Removing them
+	// cancels them properly, which mails the guests — so it is asked for.
+	sweep := flag.Bool("sweep-spikes", false,
+		"delete the kept spike A and B events, cancelling them to their guests")
 	flag.Parse()
+
+	clearSpikeEvents = *sweep
 
 	spikeCeiling = *ceiling
 	spikeNotify = *notify
@@ -217,6 +223,10 @@ var spikeCeiling bool
 // spikeNotify arms spikes A and B, which are the only things here that
 // can reach another person.
 var spikeNotify bool
+
+// clearSpikeEvents lets the cleanup remove the spike events it normally
+// preserves, cancelling them to their guests on the way out.
+var clearSpikeEvents bool
 
 // results tallies and prints, through the redactor only.
 type results struct {

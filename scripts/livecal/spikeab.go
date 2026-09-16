@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/internal/redact"
 )
@@ -16,6 +17,11 @@ import (
 // example/test/invalid/localhost, so a real address committed anywhere
 // in the tree fails `make check` on the spot — which is the intended
 // way to find out, rather than a reviewer noticing.
+// spikeANotifyGap separates the three inserts. Long enough that a burst
+// filter on the receiving side is not what the run measures, short
+// enough that an armed run is still one sitting.
+const spikeANotifyGap = 20 * time.Second
+
 const (
 	envGuestInternal  = "GCAL_LIVE_GUEST_INTERNAL"
 	envGuestExternal  = "GCAL_LIVE_GUEST_EXTERNAL"
@@ -99,14 +105,32 @@ func spikeA(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 
 	// One event per value, each named so an inbox can be read against
 	// this list without guessing.
-	for _, arm := range []struct{ value, id, when string }{
-		{"none", spikeAIDBase + "0", "2026-06-02T09:00:00+02:00"},
-		{"externalOnly", spikeAIDBase + "1", "2026-06-02T11:00:00+02:00"},
+	//
+	// `all` goes FIRST, and spaced, because the first two runs produced a
+	// result that was an artifact of neither. The out-of-domain guest
+	// received `externalOnly` and not `all`, twice. But `none` sends no
+	// mail, so the messages Google actually sent arrived as externalOnly
+	// then all, about a second apart, from a sender the receiving Gmail
+	// labels "unknown sender" — and Gmail throttles invitation mail from
+	// unknown senders. Delivering the first and dropping the second
+	// explains the result without any API behaviour at all.
+	//
+	// Sending the control first inverts the prediction: if order is what
+	// matters, `all` now arrives and `externalOnly` does not. If the
+	// parameter is what matters, the result does not move. Either way the
+	// run says something, which the previous ordering could not.
+	for i, arm := range []struct{ value, id, when string }{
 		{"all", spikeAIDBase + "2", "2026-06-02T13:00:00+02:00"},
+		{"externalOnly", spikeAIDBase + "1", "2026-06-02T11:00:00+02:00"},
+		{"none", spikeAIDBase + "0", "2026-06-02T09:00:00+02:00"},
 	} {
+		// Spaced, so a burst filter is not the thing being measured.
+		if i > 0 {
+			time.Sleep(spikeANotifyGap)
+		}
 		body := map[string]any{
 			"id":        arm.id,
-			"summary":   spikeATitle + " — sendUpdates=" + arm.value,
+			"summary":   spikeATitle + " " + runMark + " — sendUpdates=" + arm.value,
 			"start":     map[string]any{"dateTime": arm.when, "timeZone": scratchZone},
 			"end":       map[string]any{"dateTime": addHour(arm.when), "timeZone": scratchZone},
 			"attendees": g.attendees(),
@@ -114,7 +138,8 @@ func spikeA(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		if err := api.insertWithUpdates(ctx, scratch, body, arm.value); err != nil {
 			return fail, "could not create the " + arm.value + " event: " + redact.String(err.Error())
 		}
-		out.Printf("      created %q with sendUpdates=%s\n", spikeATitle+" — "+arm.value, arm.value)
+		out.Printf("      created %q with sendUpdates=%s\n",
+			spikeATitle+" "+runMark+" — "+arm.value, arm.value)
 	}
 
 	note := "SET UP, not answered: three events exist, one per sendUpdates value. Read each guest's " +
@@ -157,7 +182,8 @@ func spikeB(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	if _, err := api.getEvent(ctx, scratch, spikeBID); err != nil {
 		return fail, "the insert reported success and the event is not there: " + redact.String(err.Error())
 	}
-	out.Printf("      created %q with sendUpdates=none and %d guest(s)\n", spikeBTitle, len(g.attendees()))
+	out.Printf("      created %q with sendUpdates=none and %d guest(s)\n",
+		spikeBTitle+" "+runMark, len(g.attendees()))
 
 	note := "SET UP, not answered: the insert succeeded, which it does whether or not the guests ever " +
 		"see it. Check each guest's CALENDAR, not their mail: §2.7 warns of events not syncing or " +

@@ -229,8 +229,11 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 	for pass := 0; pass < 20; pass++ {
 		var out struct {
 			Items []struct {
-				ID      string `json:"id"`
-				Summary string `json:"summary"`
+				ID        string `json:"id"`
+				Summary   string `json:"summary"`
+				Attendees []struct {
+					Email string `json:"email"`
+				} `json:"attendees"`
 			} `json:"items"`
 		}
 		if err := a.do(ctx, http.MethodGet,
@@ -244,12 +247,25 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 			// used to delete them, which destroyed the thing the spike
 			// existed to produce — silently, between a run and the
 			// reading of its result.
-			if strings.HasPrefix(it.Summary, spikeATitle) || strings.HasPrefix(it.Summary, spikeBTitle) {
+			if !clearSpikeEvents &&
+				(strings.HasPrefix(it.Summary, spikeATitle) || strings.HasPrefix(it.Summary, spikeBTitle)) {
 				continue
+			}
+			// An event with guests is cancelled WITH notification, and
+			// this is the one place in the driver where none is wrong.
+			//
+			// Deleting with sendUpdates=none does not remove the event
+			// from the guests' calendars — it leaves a meeting there
+			// that the organiser believes is cancelled (§18 row 43).
+			// This driver did exactly that for a day, littering two real
+			// calendars with probe events nobody could get rid of.
+			updates := "none"
+			if len(it.Attendees) > 0 {
+				updates = "all"
 			}
 			// A 410 means it is already gone, which is the state wanted.
 			if derr := a.do(ctx, http.MethodDelete,
-				"/calendars/"+cal+"/events/"+it.ID+"?sendUpdates=none", nil, nil); derr != nil &&
+				"/calendars/"+cal+"/events/"+it.ID+"?sendUpdates="+updates, nil, nil); derr != nil &&
 				!strings.Contains(derr.Error(), "returned 410") &&
 				!strings.Contains(derr.Error(), "returned 404") {
 				return derr
@@ -449,6 +465,13 @@ var (
 	// Spike A makes three events, one per sendUpdates value; spike B one.
 	spikeAIDBase = "livecalnotifiprobe" + runSuffix
 	spikeBID     = "livecallosseventprobe" + runSuffix
+
+	// runMark goes in those events' titles. They survive the next run's
+	// clearing on purpose, so several rounds sit in the same inbox at the
+	// same times — and without a marker the reader cannot tell which run
+	// an invitation came from, which is how a second round of a spike
+	// becomes unreadable.
+	runMark = runSuffix[len(runSuffix)-4:]
 )
 
 const (
