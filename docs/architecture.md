@@ -1,17 +1,35 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 1 built and run live (2026-09-15).** Phase 0 — the
-scaffolding, the gates, the time model and the six read tools — is built,
-verified live and committed. Phase 1 adds `internal/recur`,
-`list_instances` and `check_availability`, taking the read surface to
-eight tools; `make check` is green across nineteen targets. The driver
-has now run three times against a real account: 29 steps, and the first
-run failed one and was quietly wrong about two more that passed (§16).
-Spikes C, H and I are answered (§15) — including spike I, which on its
-first run reported a verdict about a ceiling it had never reached. Still
-owed from phase 0: **spike G's negative half**, which needs a profile
-logged in with `GCAL_SHARING=off`, and CI has never run on macOS or
-Windows.
+**Status: phase 1 complete; phase 2 is unblocked (2026-09-16).** Phase 0
+— the scaffolding, the gates, the time model and the six read tools — and
+phase 1 — `internal/recur`, `list_instances` and `check_availability` —
+are built, verified live and committed. The read surface is eight tools;
+`make check` is green across nineteen targets; the live driver runs 33
+steps.
+
+**Every spike except one is answered (§15).** A, B, C, D, E, F, H and I.
+That matters because §16's phase 2 says its refusal wording waits on A,
+B, E and F, and it no longer does. Spike G's negative half is still
+owed, and phase 3 builds the `GCAL_SHARING=off` path it needs, so it
+stops being a separate errand there.
+
+**What the live work cost and taught, in one line each.** The first run
+failed one step and was quietly wrong about two that passed. Spike I
+reported a verdict about a ceiling it never reached. A field's published
+description misled twice, on `showDeleted` and on `sendUpdates`. Three
+consistent runs of spike A were consistent because the instrument was,
+and only a second receiver on the same event separated sending from
+delivery. The driver deleted guest-carrying events with `none` for a
+day and left meetings on two real calendars that the organiser could no
+longer withdraw. Nine of §18's forty-four rows were written or rewritten
+on 2026-09-16, four of them correcting something this document had
+asserted earlier the same day.
+
+**Still owed:** spike G's negative half, and **CI has never run on macOS
+or Windows** — the workflow covers all three platforms and the branch
+has never been pushed. Both platforms cross-compile clean, including the
+tagged tests, so a first run is unlikely to fail on compilation; the
+keyring, the file fallback's permissions and path handling are untested.
 
 **What phase 1 found in phase 0's own record.** Three gates this
 document listed as part of `make check` did not exist: `api-fields`,
@@ -1361,10 +1379,29 @@ than lost:
 
 **Phase 2 — writing events (v0.2.0).** The write path: `plan` and its
 guards, `If-Match`, the client-generated id, `dry_run`. `create_event`,
-`update_event`, `cancel_event`, `move_event`, `respond_to_event`. §4.2's
-required scope and §4.3's required notify, both with the refusal wording
-spikes A, B, E and F settle. This is the phase that needs the most live
-work and the one where the transcript matters most.
+`update_event`, `cancel_event`, `move_event`, `respond_to_event`.
+`internal/plan` is an empty directory today. The three declared-but-unemitted
+error classes are all this phase's: `blocked`, `ambiguous_outcome` and
+`unsupported`, so the class gate says when the phase is done.
+
+**Its four spikes are answered, and each one decided something.**
+A: `externalOnly` follows the organiser's domain, and a result reports
+what was asked for rather than what arrived. B: `none` is refused, not
+warned about, when a guest is outside the domain — such a guest may have
+no calendar for the event to land in, so mail is the only channel and
+`none` removes it. E: "this and following" resets exceptions after the
+target, so the result must say so, and `Set.Split` in `internal/recur`
+is confirmed against Google. F: a duplicate client-generated id was
+caught with a 409, which does not retire `ambiguous_outcome` because the
+API declines to guarantee it and a retry after a transport failure is
+the other half of the class.
+
+Still the phase that needs the most live work, and the one where the
+transcript matters most. Two cautions from phase 1's runs: the
+calendar-creation quota is spent by creating, not refunded by deleting
+(§18 row 36), so use `-keep` and let runs adopt the scratch calendar;
+and a write that carries guests is cleaned up with a cancellation, never
+a silent delete (§18 row 43).
 
 **Phase 3 — calendars and sharing (v0.3.0).** `create_calendar`,
 `manage_calendar`, `list_sharing`, `share_calendar`,
