@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Tests that read a packed bundle BACK, which nothing in this family had.
@@ -77,10 +78,17 @@ func TestTwoPacksOfTheSameInputsAreByteIdentical(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = z.Close() }()
+	// The expected instant is a LITERAL, not zipTime. Asserting
+	// f.Modified equals zipTime puts the same variable on both sides: it
+	// catches the stamp being replaced at the call site, which is how
+	// this was first found, and passes vacuously if zipTime itself
+	// becomes time.Now(). Writing the date out is what makes the
+	// assertion independent of the thing it is checking.
+	want := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	for _, f := range z.File {
-		if got := f.Modified.UTC(); !got.Equal(zipTime.UTC()) {
+		if got := f.Modified.UTC(); !got.Equal(want) {
 			t.Errorf("%s is stamped %s, not the fixed %s; the archive takes the clock and a rebuild "+
-				"of the same tag stops reproducing", f.Name, got, zipTime.UTC())
+				"of the same tag stops reproducing", f.Name, got, want)
 		}
 	}
 }

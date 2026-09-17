@@ -1,6 +1,6 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 6 is built; v1.0.0 is being cut (2026-09-17).** Phases 0 to 4 —
+**Status: v1.0.0 is released and verified from outside (2026-09-17).** Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
 writes, `If-Match`, the client-generated id and `dry_run`; the two calendar
@@ -15,12 +15,24 @@ is **twenty-one tools and three resources**; `make check`
 is green across **twenty-two** targets; the live driver's last run was 85
 steps against a real account with none failing.
 
-**The release is rehearsed and has never run for a tag.** Two `--snapshot`
-builds produced the six archives, the bundle and `checksums.txt`, and the
-version agrees in all five of §10b's places. Signing and provenance are
-the part no rehearsal reaches: both need an OIDC token only a real
-workflow run has, so the first tag is the first time they execute. Watch
-that run.
+**v1.0.0 ran, and was verified from outside rather than trusted.**
+`sha256sum -c` on the archives and the bundle, `cosign verify-blob`
+returning `Verified OK`, `gh attestation verify` passing on the genuine
+bundle and exiting 1 on a deliberately corrupted copy, the version
+agreeing in all five of §10b's places, and the MCP registry's own
+`fileSha256` equal to the release's `checksums.txt` row. Six archives,
+six SBOMs, the signed checksum file and the bundle.
+
+**What has changed since that tag, and is therefore unproven again.** The
+registry publish moved out of the goreleaser job into its own
+`publish-mcp.yml` — for privilege, because `mcp-publisher` is a
+third-party binary that also held `contents: write` there, and for
+recovery, because a job welded into the release cannot publish an entry
+for a tag that shipped weeks ago. That workflow has been exercised by
+hand in a sibling server but **never through `workflow_call` from a
+release**, which is the path the next tag takes. The bundle manifest also
+moved to `manifest_version` 0.3 with a pinned `$schema`. v1.0.1 is the
+canary for both.
 
 **What phase 5 cost and taught, in one line each.** The packer's macOS
 glob **could never have matched anything**: goreleaser names that
