@@ -1,10 +1,11 @@
 {
-  "manifest_version": "0.2",
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json",
+  "manifest_version": "0.3",
   "name": "google-calendar-mcp",
   "display_name": "Google Calendar",
   "version": "0.0.0-dev",
   "description": "Google Calendar over MCP: calendars, events, recurrence and availability.",
-  "long_description": "Read and write Google Calendar from your own account: what is on a calendar, when people are free, and the writes that change it — with the time model this kind of server usually gets wrong. An all-day event stays a date, every timed event carries its IANA zone, a recurring write keeps its wall-clock time across a daylight-saving change, and availability comes from Google's free/busy service rather than from a list of events.\n\nTHIS BUNDLE DOES NOT LOG YOU IN, and cannot. Google requires each user to bring their own OAuth Desktop client, so before the tools work you need to create one in a Google Cloud project, enable the Calendar API, and run `google-calendar-mcp login` once in a terminal. The setup is documented at https://github.com/mmedum/google-calendar-mcp/blob/main/docs/gcp-setup.md. Installing this without that step produces a server that starts, lists its tools, and answers every call with \"not signed in\".",
+  "long_description": "Read and write Google Calendar from your own account: what is on a calendar, when people are free, and the writes that change it \u2014 with the time model this kind of server usually gets wrong. An all-day event stays a date, every timed event carries its IANA zone, a recurring write keeps its wall-clock time across a daylight-saving change, and availability comes from Google's free/busy service rather than from a list of events.\n\nTHIS BUNDLE DOES NOT LOG YOU IN, and cannot. Google requires each user to bring their own OAuth Desktop client, so before the tools work you need to create one in a Google Cloud project, enable the Calendar API, and run `google-calendar-mcp login` once in a terminal. The setup is documented at https://github.com/mmedum/google-calendar-mcp/blob/main/docs/gcp-setup.md. Installing this without that step produces a server that starts, lists its tools, and answers every call with \"not signed in\".",
   "author": {
     "name": "Mark Medum Bundgaard"
   },
@@ -14,8 +15,14 @@
     "type": "git",
     "url": "https://github.com/mmedum/google-calendar-mcp"
   },
+  "support": "https://github.com/mmedum/google-calendar-mcp/issues",
   "license": "Apache-2.0",
-  "keywords": ["calendar", "google-calendar", "scheduling", "availability"],
+  "keywords": [
+    "calendar",
+    "google-calendar",
+    "scheduling",
+    "availability"
+  ],
   "server": {
     "type": "binary",
     "entry_point": "server/google-calendar-mcp-darwin",
@@ -69,6 +76,10 @@
   },
   "compatibility": {
     "claude_desktop": ">=0.10.0",
-    "platforms": ["darwin", "win32", "linux"]
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ]
   }
 }
