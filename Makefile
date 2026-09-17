@@ -27,6 +27,10 @@ GOLICENSES    ?= github.com/google/go-licenses@v1.6.0
 # The module path is zricethezav, not gitleaks: the project moved
 # organisation and the module path did not follow it.
 GITLEAKS      ?= github.com/zricethezav/gitleaks/v8@v8.30.1
+# The release runs goreleaser through goreleaser-action, which pins its
+# own copy. `pins` holds this version against that one: a rehearsal on a
+# different goreleaser is not a rehearsal.
+GORELEASER    ?= github.com/goreleaser/goreleaser/v2@v2.18.1
 
 .PHONY: all
 all: check
@@ -156,6 +160,15 @@ release: gates ## The release config builds what the packer stages, and signs an
 .PHONY: mcpb-pack
 mcpb-pack: gates ## Pack the .mcpb from a built dist tree (release; manual)
 	@$(GATES) mcpb-pack $(DIST) $(VERSION) $(MCPB_OUT)
+
+# The release, as far as a laptop can take it. Four things it does NOT
+# do: the three that need an OIDC token only a workflow run has, and the
+# SBOMs, which need syft installed rather than credentials — a broken
+# `sboms:` block is green here and fails the tag. `--snapshot` also skips
+# goreleaser's dirty-tree check. docs/release.md says what that costs.
+.PHONY: release-rehearse
+release-rehearse: ## Build the whole release locally, unsigned (manual)
+	$(GO) run $(GORELEASER) release --snapshot --clean --skip=publish,sign,sbom
 
 # The release body, from the CHANGELOG section for the tag. release.yml
 # runs the gate directly and writes it outside the checkout; this target

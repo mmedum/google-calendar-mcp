@@ -47,7 +47,8 @@ it, or `out` with why this server does not call it.
 ## Commits and branches
 
 `main` is released code and takes pull requests only. Work on a short
-topic branch and write a message that says what and why.
+topic branch and write a message that says what and why. Cutting a tag is
+the maintainer's, and `docs/release.md` is what it involves.
 
 ## Reporting a bug
 

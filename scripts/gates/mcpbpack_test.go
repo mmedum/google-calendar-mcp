@@ -151,9 +151,14 @@ func TestThePackedManifestCarriesTheRealVersion(t *testing.T) {
 	}
 }
 
-// Every staged file arrives executable. The packer forces the bit on the
-// entry point and copies the mode for the rest, so a Windows binary
-// staged 0644 installs and cannot run.
+// Every staged file arrives executable, whatever mode it was staged in.
+//
+// This packer writes 0755 into the zip deliberately rather than copying
+// the source's mode, because the reference implementation forces the bit
+// on the entry point and copies the mode for the rest — a binary packed
+// 0644 installs and cannot run. The fixture stages its files 0600, so
+// this fails the day somebody replaces that constant with the source's
+// own mode, which is the regression it is here for.
 func TestEveryStagedBinaryIsExecutable(t *testing.T) {
 	t.Chdir("../..")
 	out := filepath.Join(t.TempDir(), "b.mcpb")

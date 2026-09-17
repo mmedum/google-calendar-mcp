@@ -42,6 +42,7 @@ func pinGate() error {
 
 	var problems []string
 	actions, installers := 0, 0
+	workflowPins := map[int][]installerPin{}
 
 	for _, path := range files {
 		data, err := os.ReadFile(path) //nolint:gosec // a path from the workflow glob
@@ -56,8 +57,11 @@ func pinGate() error {
 		if err != nil {
 			return err
 		}
-		found, n := unpinnedTools(flow)
-		installers += n
+		found, pins := unpinnedTools(flow)
+		installers += len(pins)
+		for _, pin := range pins {
+			workflowPins[pin.row] = append(workflowPins[pin.row], pin)
+		}
 		for _, problem := range found {
 			problems = append(problems, path+": "+problem)
 		}
@@ -114,11 +118,15 @@ func pinGate() error {
 		return fmt.Errorf("found %d tool-installing action(s) across %d workflows and the table names %d; "+
 			"a workflow that cannot be read reports no problems", installers, len(files), len(toolInstallers))
 	}
+	drift, compared := rehearsalDrift(workflowPins, makefilePath)
+	problems = append(problems, drift...)
+
 	if len(problems) > 0 {
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
 	}
 	fmt.Printf("  %d workflows, %d action references, all SHA-pinned and commented; "+
-		"%d tool-installing action(s) pin their tool\n", len(files), actions, installers)
+		"%d tool-installing action(s) pin their tool, %d also run locally\n",
+		len(files), actions, installers, compared)
 	return nil
 }
 
@@ -134,38 +142,120 @@ func pinGate() error {
 var toolInstallers = []struct {
 	action string
 	input  string
+	// makeVar is the Makefile variable that pins the same tool for a
+	// local run, empty when nothing here runs it locally. A rehearsal on
+	// a different version of goreleaser is not a rehearsal, and the two
+	// numbers sit in two files that do not mention each other.
+	makeVar string
 }{
-	{"sigstore/cosign-installer", "cosign-release"},
-	{"anchore/sbom-action", "syft-version"},
-	{"goreleaser/goreleaser-action", "version"},
+	{"sigstore/cosign-installer", "cosign-release", ""},
+	{"anchore/sbom-action", "syft-version", ""},
+	{"goreleaser/goreleaser-action", "version", "GORELEASER"},
 }
 
-// unpinnedTools reports any tool-installing action whose version input is
-// missing or floating, and how many such actions it saw.
+// installerPin is what one tool-installing step says about its tool.
+type installerPin struct {
+	row     int    // which toolInstallers entry it matched
+	version string // the value of that entry's input
+	pinned  bool   // whether the step set it at all
+}
+
+// installerPins finds the tool-installing steps in a workflow.
 //
-// The count is returned so the caller can assert a floor on it: an action
-// this never recognised and an action correctly pinned are the same
-// silence otherwise.
-func unpinnedTools(flow workflow) ([]string, int) {
-	var problems []string
-	count := 0
+// Which steps those are is one rule with two readers — claim 2 below,
+// and the rehearsal check, which needs the version rather than its
+// absence. Two walks would let the two disagree about what a
+// tool-installing step is, which is how a table with one reader grows a
+// second that quietly sees less.
+func installerPins(flow workflow) []installerPin {
+	var out []installerPin
 	for _, step := range flow.steps() {
-		for _, want := range toolInstallers {
+		for i, want := range toolInstallers {
 			if !strings.HasPrefix(step.Uses, want.action) {
 				continue
 			}
-			count++
 			value, found := step.input(want.input)
-			switch {
-			case !found:
+			out = append(out, installerPin{row: i, version: value, pinned: found})
+		}
+	}
+	return out
+}
+
+// unpinnedTools reports any tool-installing action whose version input is
+// missing or floating, along with every tool-installing step it saw.
+//
+// The steps are returned rather than a count so the caller can assert a
+// floor — an action this never recognised and an action correctly pinned
+// are the same silence otherwise — and so the rehearsal check reads the
+// versions from the same walk rather than repeating it.
+func unpinnedTools(flow workflow) ([]string, []installerPin) {
+	var problems []string
+	pins := installerPins(flow)
+	for _, pin := range pins {
+		want := toolInstallers[pin.row]
+		switch {
+		case !pin.pinned:
+			problems = append(problems, fmt.Sprintf(
+				"%s is pinned to a SHA and does not set %s, so the TOOL it installs is whatever is "+
+					"current that morning", want.action, want.input))
+		case !strings.HasPrefix(pin.version, "v") || strings.Contains(pin.version, "~") || pin.version == "latest":
+			problems = append(problems, fmt.Sprintf(
+				"%s sets %s to %q, which floats", want.action, want.input, pin.version))
+		}
+	}
+	return problems, pins
+}
+
+// rehearsalDrift holds the version a maintainer runs by hand against the
+// version the release runs.
+//
+// `make release-rehearse` exists to run what the tag runs. Both numbers
+// are valid on their own, neither file mentions the other, and the
+// difference shows up as a release behaving unlike every rehearsal of
+// it. The pair is named in the table rather than derived from the two
+// strings: a module path and an action reference have only the tool in
+// common, and guessing that from the names gets `anchore/sbom-action`
+// wrong — it installs syft.
+func rehearsalDrift(workflowPins map[int][]installerPin, makefile string) ([]string, int) {
+	var problems []string
+	compared := 0
+	for i, want := range toolInstallers {
+		if want.makeVar == "" {
+			continue
+		}
+		compared++
+		local, err := makeVariable(makefile, want.makeVar)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf(
+				"the table pairs %s with %s, and %v", want.action, want.makeVar, err))
+			continue
+		}
+		_, version, found := strings.Cut(local, "@")
+		if !found {
+			problems = append(problems, fmt.Sprintf(
+				"%s is %q, which pins no version, so nothing holds %s to it", want.makeVar, local, want.action))
+			continue
+		}
+		// "Compared nothing" and "found nothing wrong" print the same
+		// clean line otherwise: a paired row whose action no workflow
+		// uses any more is a comparison that silently stopped running.
+		//
+		// A step that is there and pins nothing is a different sentence,
+		// and claim 2 above has already said it — saying "no workflow
+		// uses this" as well would name the wrong file.
+		if len(workflowPins[i]) == 0 {
+			problems = append(problems, fmt.Sprintf(
+				"the table pairs %s with %s and no workflow step uses %s, so nothing was compared",
+				want.action, want.makeVar, want.action))
+			continue
+		}
+		for _, remote := range workflowPins[i] {
+			if remote.pinned && remote.version != version {
 				problems = append(problems, fmt.Sprintf(
-					"%s is pinned to a SHA and does not set %s, so the TOOL it installs is whatever is "+
-						"current that morning", want.action, want.input))
-			case !strings.HasPrefix(value, "v") || strings.Contains(value, "~") || value == "latest":
-				problems = append(problems, fmt.Sprintf(
-					"%s sets %s to %q, which floats", want.action, want.input, value))
+					"%s pins %s and %s runs %s: a rehearsal on a different version is not a rehearsal",
+					want.makeVar, version, want.action, remote.version))
 			}
 		}
 	}
-	return problems, count
+	return problems, compared
 }

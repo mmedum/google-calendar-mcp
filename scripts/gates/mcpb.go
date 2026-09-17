@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -327,6 +328,27 @@ func licenceOf() string {
 // version it declares.
 var pinnedSchema = regexp.MustCompile(`/mcpb-manifest-v(\d+\.\d+)\.schema\.json$`)
 
+// movingRef matches a schema URL served from a branch rather than a tag.
+// The version in the path pins the FORMAT; the ref pins the bytes, and
+// a branch can be amended under a document that claims to conform to it.
+var movingRef = regexp.MustCompile(`/(main|master|HEAD)/`)
+
+// minManifestVersion is the format version this repository has checked,
+// and the floor a manifest may not fall below.
+//
+// A floor rather than an exact match, because a manifest is allowed to
+// be ahead of this and not behind it. Without one the shape check is
+// satisfied by any version agreeing with its own $schema — including the
+// self-consistent 0.2 pair this check was written to stop spreading.
+//
+// Checked 2026-09-17 against the upstream schemas: 0.2, 0.3 and 0.4 are
+// served and 0.5 is not. 0.4 adds one thing, a `uv` server type, and
+// this bundle's server type is `binary` — so the version is deliberately
+// not raised to it. Raise this floor only after checking what the newer
+// format changes AND that a desktop installs a bundle declaring it;
+// §18 row 77.
+const minManifestVersion = "0.3"
+
 // checkManifestShape holds the manifest's own version declaration.
 //
 // This is the check whose absence let three of seven servers drift. The
@@ -348,6 +370,12 @@ var pinnedSchema = regexp.MustCompile(`/mcpb-manifest-v(\d+\.\d+)\.schema\.json$
 //  3. The version in that URL equals manifest_version. A document
 //     claiming 0.2 and validating against 0.3 is making a claim nobody
 //     can check, which is worse than making none.
+//  4. The URL names a tag rather than a branch. `/main/` pins the
+//     format and not the bytes: upstream amending that file in place
+//     changes what this document validates against, silently.
+//  5. manifest_version is not below minManifestVersion. Claims 1 to 3
+//     hold a manifest against ITSELF, and a stale one is perfectly
+//     self-consistent — which is exactly the shape that spread.
 //
 // And `support`, which the 0.3 shape carries: a bundle that fails on
 // somebody's desktop should say where to report it.
@@ -372,6 +400,11 @@ func manifestShapeProblems(schema, manifestVersion, support string) []string {
 			"$schema is %q, which is not the pinned mcpb-manifest-v<version>.schema.json form. An "+
 				"unpinned schema validates against whatever upstream serves today, which is the same "+
 				"defect `pins` refuses for an action", schema))
+	case movingRef.MatchString(schema):
+		problems = append(problems, fmt.Sprintf(
+			"$schema is %q, which is served from a branch: the version in the path pins the format and "+
+				"the ref pins the bytes, so an amendment upstream changes what this document validates "+
+				"against. Name a tag", schema))
 	default:
 		declared := pinnedSchema.FindStringSubmatch(schema)[1]
 		if declared != manifestVersion {
@@ -381,9 +414,47 @@ func manifestShapeProblems(schema, manifestVersion, support string) []string {
 		}
 	}
 
+	if behind(manifestVersion, minManifestVersion) {
+		problems = append(problems, fmt.Sprintf(
+			"manifest_version is %q and this repository has checked %s; a manifest agreeing with its own "+
+				"$schema is still a manifest a version behind", manifestVersion, minManifestVersion))
+	}
+
 	if support == "" {
 		problems = append(problems, "the manifest has no support URL, so a bundle that fails on "+
 			"somebody's desktop does not say where to report it")
 	}
 	return problems
+}
+
+// behind reports whether a major.minor version is lower than the floor.
+//
+// A string comparison would read "0.10" as older than "0.3", which is
+// the kind of thing that stays right until the tenth minor version.
+func behind(version, floor string) bool {
+	major, minor, ok := majorMinor(version)
+	wantMajor, wantMinor, floorOK := majorMinor(floor)
+	if !ok || !floorOK {
+		return !ok // an unreadable floor is the gate's own bug, not the manifest's
+	}
+	if major != wantMajor {
+		return major < wantMajor
+	}
+	return minor < wantMinor
+}
+
+func majorMinor(v string) (int, int, bool) {
+	before, after, found := strings.Cut(v, ".")
+	if !found {
+		return 0, 0, false
+	}
+	major, err := strconv.Atoi(before)
+	if err != nil {
+		return 0, 0, false
+	}
+	minor, err := strconv.Atoi(after)
+	if err != nil {
+		return 0, 0, false
+	}
+	return major, minor, true
 }
