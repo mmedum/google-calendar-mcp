@@ -352,27 +352,36 @@ var pinnedSchema = regexp.MustCompile(`/mcpb-manifest-v(\d+\.\d+)\.schema\.json$
 // And `support`, which the 0.3 shape carries: a bundle that fails on
 // somebody's desktop should say where to report it.
 func checkManifestShape(m manifest) []string {
+	return manifestShapeProblems(m.Schema, m.ManifestVersion, m.Support)
+}
+
+// manifestShapeProblems is the check itself, over the three values it
+// reads. Taking strings rather than a struct so the sibling servers can
+// call it from whatever they decode a manifest into — several read it as
+// a map, because the packer rewrites one field and must not drop the
+// rest.
+func manifestShapeProblems(schema, manifestVersion, support string) []string {
 	var problems []string
 
 	switch {
-	case m.Schema == "":
+	case schema == "":
 		problems = append(problems, "the manifest has no $schema, so nothing says which version of the "+
 			"format it is, and manifest_version is a claim with nothing to check it against")
-	case !pinnedSchema.MatchString(m.Schema):
+	case !pinnedSchema.MatchString(schema):
 		problems = append(problems, fmt.Sprintf(
 			"$schema is %q, which is not the pinned mcpb-manifest-v<version>.schema.json form. An "+
 				"unpinned schema validates against whatever upstream serves today, which is the same "+
-				"defect `pins` refuses for an action", m.Schema))
+				"defect `pins` refuses for an action", schema))
 	default:
-		declared := pinnedSchema.FindStringSubmatch(m.Schema)[1]
-		if declared != m.ManifestVersion {
+		declared := pinnedSchema.FindStringSubmatch(schema)[1]
+		if declared != manifestVersion {
 			problems = append(problems, fmt.Sprintf(
 				"manifest_version is %q and $schema pins v%s; a document cannot claim one version and "+
-					"validate against another", m.ManifestVersion, declared))
+					"validate against another", manifestVersion, declared))
 		}
 	}
 
-	if m.Support == "" {
+	if support == "" {
 		problems = append(problems, "the manifest has no support URL, so a bundle that fails on "+
 			"somebody's desktop does not say where to report it")
 	}
