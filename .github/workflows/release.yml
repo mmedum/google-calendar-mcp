@@ -117,51 +117,18 @@ jobs:
         with:
           subject-path: "dist/*.tar.gz,dist/*.zip,dist/*.mcpb,dist/checksums.txt"
 
-      # The MCP registry entry, last because the registry does a HEAD on
-      # the bundle's download URL before it accepts one: the release has
-      # to exist first. The hash comes from the release's own
-      # checksums.txt, because a client verifies the bundle before
-      # installing it and the registry requires it for an MCPB package —
-      # which is also why this is not goreleaser's `mcp` block, whose
-      # package entry has nowhere to put a hash.
-      #
-      # A prerelease rehearses the pipeline and must NOT rehearse the
-      # registry: an entry cannot be taken back, so v1.0.0-rc1 would
-      # leave a permanent row pointing at a bundle nobody should install.
-      # The test is goreleaser's own for `prerelease: auto` — a hyphen in
-      # the tag.
-      - name: Registry entry from the release's own checksums
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          go run ./scripts/gates server-json "${REF_NAME}" dist/checksums.txt > dist/server.json
-          cat dist/server.json
-
-      # Verified before it runs, for the same reason the tools above are
-      # pinned — and more so: this job holds an identity that can publish
-      # under io.github.mmedum, so an unverified binary here would be
-      # handed exactly that.
-      - name: Install mcp-publisher
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          PUBLISHER: v1.8.1
-          BASE: https://github.com/modelcontextprotocol/registry/releases/download
-        run: |
-          set -euo pipefail
-          asset=mcp-publisher_linux_amd64.tar.gz
-          curl -fsSL -O "${BASE}/${PUBLISHER}/${asset}"
-          curl -fsSL -O "${BASE}/${PUBLISHER}/${asset}.sigstore.json"
-          cosign verify-blob "${asset}" \
-            --bundle "${asset}.sigstore.json" \
-            --certificate-identity \
-              "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${PUBLISHER}" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com
-          tar xzf "${asset}" mcp-publisher
-
-      - name: Publish to the MCP registry
-        if: ${{ !contains(github.ref_name, '-') }}
-        run: |
-          set -euo pipefail
-          ./mcp-publisher login github-oidc
-          ./mcp-publisher publish dist/server.json
+  # The registry entry, in its own workflow so it can also be run by hand
+  # against a tag that already shipped. publish-mcp.yml says why.
+  registry:
+    needs: goreleaser
+    # A prerelease rehearses the pipeline and must NOT rehearse the
+    # registry: an entry cannot be taken back, so v1.0.0-rc1 would leave
+    # a permanent row pointing at a bundle nobody should install. The
+    # test is goreleaser's own for `prerelease: auto` — a hyphen.
+    if: ${{ !contains(github.ref_name, '-') }}
+    uses: ./.github/workflows/publish-mcp.yml
+    with:
+      tag: ${{ github.ref_name }}
+    permissions:
+      id-token: write
+      contents: read
