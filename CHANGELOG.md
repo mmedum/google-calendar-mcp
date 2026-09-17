@@ -7,8 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `make mcpb` holds the manifest's own version declaration: a `$schema`
+  is present, it is the pinned `mcpb-manifest-v<version>.schema.json`
+  form rather than the unpinned `dist/` path, the version in that URL
+  equals `manifest_version`, and the URL is upstream's published path at
+  a ref that cannot move — a full tag or a commit SHA. An allow-list on
+  the whole URL rather than a list of refs to refuse: a blacklist of
+  `main` passes a branch called anything else, a partial tag like `v2.1`
+  that upstream re-points as it releases, and the right filename served
+  by somebody else entirely. Plus a support URL, so a bundle that fails on somebody's
+  desktop says where to report it. The gate parsed `manifest_version` and
+  compared it to nothing before, which is how a manifest claiming one
+  version while validating against another passed.
+
+  And a floor, because the four claims above hold the manifest against
+  ITSELF: 0.2 beside a 0.2 schema is stale and perfectly self-consistent,
+  so a sibling's old manifest pasted in passed every one of them. The
+  floor is the version this repository has checked against the published
+  schemas, and it is raised deliberately, never by copying.
+- `make release-rehearse` builds the whole release locally, unsigned,
+  and `make pins` holds the goreleaser it runs against the one the tag
+  runs. The rehearsal command lived in the docs with its version written
+  out, which is a copy of a fact the release owns: both numbers are valid
+  alone, neither file mentions the other, and the difference shows up as
+  a release behaving unlike every rehearsal of it. The Makefile pins it
+  now, beside the other four tools, and the runbook names the target
+  instead of a version. The pair is named in the gate's table rather than
+  derived from the two strings — deriving it looks free and gets
+  `anchore/sbom-action` wrong, which installs syft.
+- The packer's tests open a bundle it wrote, rather than only checking
+  the document that describes one. Four claims a manifest check cannot
+  see: the version reaches the packed manifest through a decode and an
+  encode with every other field intact, every staged file is written
+  executable whatever mode it was staged in — the reference packer copies
+  the mode, and a binary packed 0644 installs and cannot run — a `dist`
+  tree missing a binary is refused rather than packed short, and the
+  archive is reproducible.
+
+  That last one earned its place twice. §12 claims a rebuild of a tag
+  reproduces it byte for byte; the binaries get that from `-trimpath` and
+  `mod_timestamp`, and the bundle gets it only if the packer stamps its
+  own zip entries. The first version of the test compared two packs and
+  passed with `time.Now()` in place of the fixed stamp, because zip
+  stores DOS timestamps at two-second granularity. It asserts the
+  expected instant on every entry now.
+
 ### Changed
 
+- The bundle manifest declares `manifest_version` 0.3, with a `support`
+  URL and `$schema` pinned to `mcpb-manifest-v0.3.schema.json` at a
+  release tag rather than `main`. It declared 0.2 and carried no `$schema` at all. A document
+  declaring conformance to one version while validating against whatever
+  the unpinned `dist/` path serves today is a claim that cannot be
+  checked — the same argument this repository's `pins` gate already makes
+  one level down. The ref matters for the same reason the version does:
+  the path pins the format, the ref pins the bytes, and a branch can be
+  amended under a document that claims to conform to it.
+
+  0.3 rather than 0.4, which is published: 0.4's only change is a `uv`
+  server type, this bundle's server type is `binary`, and no desktop here
+  has installed a bundle of any version yet. Checked against the upstream
+  schemas rather than against what other repositories do.
 - The MCP registry entry is published from its own workflow, with
   `id-token: write` and `contents: read` and nothing else.
 

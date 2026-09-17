@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -42,12 +44,12 @@ func TestAnActionThatInstallsAToolMustPinTheTool(t *testing.T) {
         with:
           syft-version: v1.51.1
 `)
-	problems, seen := unpinnedTools(asWorkflow(t, pinned))
+	problems, pins := unpinnedTools(asWorkflow(t, pinned))
 	if len(problems) > 0 {
 		t.Fatalf("a correctly pinned pair was refused:\n%s", strings.Join(problems, "\n"))
 	}
-	if seen != 2 {
-		t.Fatalf("saw %d installers in a fixture with two", seen)
+	if len(pins) != 2 {
+		t.Fatalf("saw %d installers in a fixture with two", len(pins))
 	}
 
 	cases := []struct {
@@ -118,9 +120,9 @@ func TestAnActionThatInstallsAToolMustPinTheTool(t *testing.T) {
 // this workflow produced no steps, no installers and no problems.
 func TestAWorkflowWrittenInFlowStyleIsStillRead(t *testing.T) {
 	w := asWorkflow(t, "jobs: {release: {steps: [{uses: 'sigstore/cosign-installer@abc'}]}}\n")
-	problems, seen := unpinnedTools(w)
-	if seen != 1 {
-		t.Fatalf("saw %d installers in a flow-style workflow that has one", seen)
+	problems, pins := unpinnedTools(w)
+	if len(pins) != 1 {
+		t.Fatalf("saw %d installers in a flow-style workflow that has one", len(pins))
 	}
 	if !mentions(problems, "cosign-release") {
 		t.Fatalf("the unpinned tool was not reported: %v", problems)
@@ -167,5 +169,115 @@ func TestTheReleaseWorkflowTriggersOnATag(t *testing.T) {
 	ci := asWorkflow(t, string(repoFile(t, ".github/workflows/ci.yml")))
 	if ci.triggersOnTag("v") {
 		t.Fatal("ci triggers on a tag, so a release would run its gates twice and this check proves nothing")
+	}
+}
+
+// The rehearsal is a copy of the release, and a copy goes stale. The
+// Makefile pins the goreleaser `make release-rehearse` runs, the
+// workflow pins the goreleaser the tag runs, and neither file mentions
+// the other: the difference would show up as a release behaving unlike
+// every rehearsal of it.
+//
+// The pair is named in the table rather than derived from the two
+// strings. Deriving it looks free and gets `anchore/sbom-action` wrong,
+// which installs syft.
+
+// pinnedIn is the workflow side of the comparison, keyed the way
+// pinGate keys it.
+func pinnedIn(version string) map[int][]installerPin {
+	for i, want := range toolInstallers {
+		if want.makeVar != "" {
+			return map[int][]installerPin{i: {{row: i, version: version, pinned: true}}}
+		}
+	}
+	return nil
+}
+
+// unpinnedIn is the same row with a step that exists and sets no
+// version: claim 2's sentence, not this check's.
+func unpinnedIn() map[int][]installerPin {
+	for i, want := range toolInstallers {
+		if want.makeVar != "" {
+			return map[int][]installerPin{i: {{row: i}}}
+		}
+	}
+	return nil
+}
+
+func TestATooledRehearsalRunsTheReleasesVersion(t *testing.T) {
+	makefile := repoPath(t, makefilePath)
+
+	local, err := makeVariable(makefile, "GORELEASER")
+	if err != nil {
+		t.Fatalf("the table pairs goreleaser-action with GORELEASER: %v", err)
+	}
+	_, version, _ := strings.Cut(local, "@")
+
+	// The repository as it stands, read from BOTH files.
+	//
+	// The first version of this built the workflow side out of the
+	// Makefile's own value and then asserted the two agreed, which is a
+	// comparison with itself: it passes on any pin, including two that
+	// have drifted apart. The expected value has to come from somewhere
+	// other than the thing under test, so the workflow is parsed.
+	flow, err := readWorkflow(repoPath(t, ".github/workflows/release.yml"))
+	if err != nil {
+		t.Fatalf("read the release workflow: %v", err)
+	}
+	real := map[int][]installerPin{}
+	for _, pin := range installerPins(flow) {
+		real[pin.row] = append(real[pin.row], pin)
+	}
+	problems, compared := rehearsalDrift(real, makefile)
+	if len(problems) != 0 || compared != 1 {
+		t.Fatalf("the Makefile pins %s and release.yml disagrees: %v (%d comparison(s))",
+			version, problems, compared)
+	}
+
+	// One version behind is the whole failure: both numbers are valid.
+	problems, _ = rehearsalDrift(pinnedIn("v0.0.1"), makefile)
+	if len(problems) != 1 {
+		t.Fatalf("a drifted workflow pin must be reported: %v", problems)
+	}
+	for _, want := range []string{"GORELEASER", version, "v0.0.1"} {
+		if !strings.Contains(problems[0], want) {
+			t.Errorf("the message does not name %q: %s", want, problems[0])
+		}
+	}
+}
+
+// A paired row nobody runs any more compares nothing, and a check that
+// compares nothing prints the same clean line as one that found nothing
+// wrong.
+func TestAPairedToolNoWorkflowInstallsIsReported(t *testing.T) {
+	problems, compared := rehearsalDrift(map[int][]installerPin{}, repoPath(t, makefilePath))
+	if compared != 1 {
+		t.Fatalf("the table pairs %d tool(s) with a Makefile variable, want 1", compared)
+	}
+	if len(problems) != 1 || !strings.Contains(problems[0], "nothing was compared") {
+		t.Fatalf("an unused pairing must be reported: %v", problems)
+	}
+}
+
+// A step that installs the tool and pins nothing is claim 2's business.
+// Reporting it here as "no workflow step uses this" would send the
+// reader to the wrong file for a defect the gate has already named.
+func TestAnUnpinnedStepIsLeftToTheClaimThatOwnsIt(t *testing.T) {
+	problems, _ := rehearsalDrift(unpinnedIn(), repoPath(t, makefilePath))
+	if len(problems) != 0 {
+		t.Fatalf("the rehearsal check spoke for a defect claim 2 owns: %v", problems)
+	}
+}
+
+// The Makefile variable named in the table has to exist, or the
+// comparison reads one side of two.
+func TestAMissingMakefilePinIsReported(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "Makefile")
+	if err := os.WriteFile(empty, []byte("all:\n\ttrue\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	problems, _ := rehearsalDrift(pinnedIn("v2.18.1"), empty)
+	if len(problems) != 1 || !strings.Contains(problems[0], "GORELEASER") {
+		t.Fatalf("a Makefile with no pin must be reported: %v", problems)
 	}
 }

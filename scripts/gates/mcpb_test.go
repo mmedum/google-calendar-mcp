@@ -220,3 +220,144 @@ func TestTheManifestIsTheJSONThePackerWrites(t *testing.T) {
 		t.Fatal("the stamped manifest does not carry the version")
 	}
 }
+
+// The ways a manifest can misdeclare its own version, and the missing
+// support URL. This check did not exist while three of the seven
+// servers drifted apart — one carried no $schema, and two declared
+// manifest_version 0.2 while pointing at the UNPINNED schema path, which
+// serves whatever upstream publishes today. Two of those were written
+// from the third as a template, which is how a stale shape spreads.
+func TestTheWaysAManifestMisdeclaresItsVersion(t *testing.T) {
+	const pinned = "https://raw.githubusercontent.com/anthropics/mcpb/v2.1.2/schemas/mcpb-manifest-v0.3.schema.json"
+
+	good := manifest{Schema: pinned, ManifestVersion: "0.3", Support: "https://example.invalid/issues"}
+	if problems := checkManifestShape(good); len(problems) > 0 {
+		t.Fatalf("a well-formed manifest was refused:\n%s", strings.Join(problems, "\n"))
+	}
+
+	// A commit SHA is the other ref that cannot move, and the stronger
+	// of the two. Refusing it would push somebody back to a branch.
+	bySHA := good
+	bySHA.Schema = "https://raw.githubusercontent.com/anthropics/mcpb/" +
+		"0123456789abcdef0123456789abcdef01234567/schemas/mcpb-manifest-v0.3.schema.json"
+	if problems := checkManifestShape(bySHA); len(problems) > 0 {
+		t.Fatalf("a schema pinned to a commit was refused:\n%s", strings.Join(problems, "\n"))
+	}
+
+	cases := []struct {
+		name string
+		m    manifest
+		want string
+	}{
+		{
+			name: "no $schema at all",
+			m:    manifest{ManifestVersion: "0.3", Support: "x"},
+			want: "no $schema",
+		},
+		{
+			// The defect that actually shipped: conformance claimed
+			// against one version, validated against whatever dist/ holds.
+			name: "the unpinned schema path",
+			m: manifest{
+				Schema:          "https://raw.githubusercontent.com/anthropics/mcpb/main/dist/mcpb-manifest.schema.json",
+				ManifestVersion: "0.2", Support: "x",
+			},
+			want: "not the pinned",
+		},
+		{
+			name: "a pinned schema that disagrees with manifest_version",
+			m:    manifest{Schema: pinned, ManifestVersion: "0.2", Support: "x"},
+			want: "cannot claim one version and validate against another",
+		},
+		{
+			name: "no support URL",
+			m:    manifest{Schema: pinned, ManifestVersion: "0.3"},
+			want: "no support URL",
+		},
+		{
+			// The version pins the format; the ref pins the bytes. A
+			// branch can be amended under a document claiming to
+			// conform to it, which is the residue of the same defect
+			// one level down.
+			name: "a schema served from a branch",
+			m: manifest{
+				Schema:          "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json",
+				ManifestVersion: "0.3", Support: "x",
+			},
+			want: "can be re-pointed",
+		},
+		{
+			// The case a blacklist of branch names passes: a tag that
+			// upstream moves as it releases. It reads as pinned.
+			name: "a partial tag",
+			m: manifest{
+				Schema:          "https://raw.githubusercontent.com/anthropics/mcpb/v2.1/schemas/mcpb-manifest-v0.3.schema.json",
+				ManifestVersion: "0.3", Support: "x",
+			},
+			want: "can be re-pointed",
+		},
+		{
+			// And the case both of those pass: the right filename,
+			// served by somebody else.
+			name: "the right file from another host",
+			m: manifest{
+				Schema:          "https://example.invalid/schemas/mcpb-manifest-v0.3.schema.json",
+				ManifestVersion: "0.3", Support: "x",
+			},
+			want: "not upstream's published path",
+		},
+		{
+			// The case the other claims cannot see: 0.2 with a 0.2
+			// schema is wrong and entirely self-consistent, so a
+			// sibling's stale manifest pasted in passes every check
+			// that holds the document against itself.
+			name: "a self-consistent manifest a version behind",
+			m: manifest{
+				Schema:          "https://raw.githubusercontent.com/anthropics/mcpb/v2.1.2/schemas/mcpb-manifest-v0.2.schema.json",
+				ManifestVersion: "0.2", Support: "x",
+			},
+			want: "still a manifest a version behind",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := checkManifestShape(tc.m)
+			if len(problems) == 0 {
+				t.Fatalf("%s was accepted", tc.name)
+			}
+			if !mentions(problems, tc.want) {
+				t.Fatalf("wanted %q, got:\n%s", tc.want, strings.Join(problems, "\n"))
+			}
+		})
+	}
+}
+
+// The floor compares numbers, not strings. "0.10" sorts before "0.3" as
+// text, which is a bug that waits until the tenth minor version to
+// appear and then looks like the manifest's fault.
+func TestTheFloorComparesVersionsAsNumbers(t *testing.T) {
+	for _, c := range []struct {
+		version, floor string
+		want           bool
+	}{
+		{"0.3", "0.3", false},
+		{"0.2", "0.3", true},
+		{"0.4", "0.3", false},
+		{"0.10", "0.3", false},
+		{"1.0", "0.3", false},
+		{"0.9", "1.0", true},
+		{"nonsense", "0.3", true},
+	} {
+		if got := behind(c.version, c.floor); got != c.want {
+			t.Errorf("behind(%q, %q) = %v, want %v", c.version, c.floor, got, c.want)
+		}
+	}
+}
+
+// The floor is a claim about what somebody checked, so it has to name a
+// version upstream actually publishes.
+func TestTheCommittedManifestMeetsTheFloor(t *testing.T) {
+	if behind(good(t).ManifestVersion, minManifestVersion) {
+		t.Fatalf("the committed manifest is below the floor this repository claims to have checked")
+	}
+}

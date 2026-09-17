@@ -1,6 +1,6 @@
 # Architecture — google-calendar-mcp
 
-**Status: phase 6 is built; v1.0.0 is being cut (2026-09-17).** Phases 0 to 4 —
+**Status: v1.0.0 is released and verified from outside (2026-09-17).** Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
 writes, `If-Match`, the client-generated id and `dry_run`; the two calendar
@@ -15,12 +15,44 @@ is **twenty-one tools and three resources**; `make check`
 is green across **twenty-two** targets; the live driver's last run was 85
 steps against a real account with none failing.
 
-**The release is rehearsed and has never run for a tag.** Two `--snapshot`
-builds produced the six archives, the bundle and `checksums.txt`, and the
-version agrees in all five of §10b's places. Signing and provenance are
-the part no rehearsal reaches: both need an OIDC token only a real
-workflow run has, so the first tag is the first time they execute. Watch
-that run.
+**v1.0.0 ran, and was verified from outside rather than trusted.**
+`sha256sum -c` on the archives and the bundle, `cosign verify-blob`
+returning `Verified OK`, `gh attestation verify` passing on the genuine
+bundle and exiting 1 on a deliberately corrupted copy, the version
+agreeing in all five of §10b's places, and the MCP registry's own
+`fileSha256` equal to the release's `checksums.txt` row. Six archives,
+six SBOMs, the signed checksum file and the bundle.
+
+**What has changed since that tag, and is therefore unproven again.** The
+registry publish moved out of the goreleaser job into its own
+`publish-mcp.yml` — for privilege, because `mcp-publisher` is a
+third-party binary that also held `contents: write` there, and for
+recovery, because a job welded into the release cannot publish an entry
+for a tag that shipped weeks ago. That workflow has been exercised by
+hand in a sibling server but **never through `workflow_call` from a
+release**, which is the path the next tag takes. The bundle manifest also
+moved to `manifest_version` 0.3 with a pinned `$schema`. v1.0.1 is the
+canary for both.
+
+**The release procedure has its own file.** `docs/release.md`: what the
+tag does, what to check afterwards, the three steps no rehearsal reaches
+and the recovery for each — which differs by which one failed, and that
+is the part a person needs at the moment it fails. It sat inside
+`docs/development.md`, where it was read on the one day it does not
+matter. `make release-rehearse` runs the release locally, unsigned, and
+has been run: it reaches the bundle's post hook and the archives.
+
+**And what that cost, which is the lesson worth keeping.** The rehearsal
+command lived in the docs with its goreleaser version written out, while
+`release.yml` pinned its own. The first fix was a gate holding one
+against the other — **machinery to keep a copy correct**, which is the
+thing the same gate's own comment argues against one claim earlier, where
+a version in the README is deleted rather than maintained. The Makefile
+pins goreleaser now, beside the other four tools; the runbook names a
+target and carries no version; and `pins` compares the two pins that
+remain, both of them code. The pairing is named in its table rather than
+derived from the two strings, because deriving it looks free and gets
+`anchore/sbom-action` wrong — that one installs syft.
 
 **What phase 5 cost and taught, in one line each.** The packer's macOS
 glob **could never have matched anything**: goreleaser names that
@@ -212,7 +244,7 @@ preamble says to expect.
 document** (`www.googleapis.com/discovery/v1/apis/calendar/v3/rest`,
 revision 20260826, fetched 2026-09-15 and refetched unchanged
 2026-09-16), the Calendar guides, and the public MCP calendar servers
-named in §1. §18 is the evidence log, 54 rows. More than a third of them
+named in §1. §18 is the evidence log, 77 rows. More than a third of them
 refute an assumption this design started out holding; phase 3 added four
 before it wrote any code, one of which removed a parameter rather than
 adding one; and one reversed the single most consequential decision in
@@ -1225,6 +1257,9 @@ The one thing to say in the manifest's `long_description`, because it is
 the first-run failure: the bundle does not log you in, and cannot — the
 user needs their own OAuth Desktop client and one `login` from a
 terminal first.
+
+The procedure a tag actually follows is `docs/release.md`, including the
+three steps no rehearsal reaches and the recovery for each.
 
 ## 13. Testing
 
@@ -2561,6 +2596,7 @@ what §15 exists to settle, and they are marked.
 | 74 | A transcript is safe to paste once addresses, ids and links are redacted | **Read, 2026-09-17** | **Refuted again, and by this phase's own tool.** `list_changes` prints the sync token, and the live transcript carried a real one from the account. It is a cursor rather than a credential — it grants nothing — but it is account state with the entropy of a secret, and the leak gate refuses a string of that shape in the tree, which is the same judgement. It has no shape of its own to anchor a rule on, so the redactor anchors on the LABEL this server's own renderer prints in front of it, which is a firmer anchor than a shape: it cannot drift without the renderer changing. Row 34 found the same class in display names and fixed it with scope; this one had a label available |
 | 75 | CodeQL's `go/regex/missing-regexp-anchor` applies to the redactor's URL rules | **CodeQL on pull request 7, checked by probe, 2026-09-17** | **Rejected as written, and it found a real defect anyway.** The rule is for a regex that VALIDATES a URL, where matching anywhere lets an attacker embed an allowed host in a longer string and bypass the check. The redactor does the opposite: it has to find a link WHEREVER it appears, and anchoring `meetRe` would stop it matching a link mid-sentence, which is where every link in a transcript is. Anchoring would therefore turn a working rule into a leak. But the line was worth the visit: a probe found the rule under-matching three ways — an upper-case URL, a plain `http://` one, and `meet.google.com/lookup/<code>`, where it stopped at the second slash and redacted the host while printing the meeting code. All three put a joinable meeting into a transcript. Fixed, with the three as regression cases, and the alert dismissed as a false positive with this reasoning rather than silenced. **The general lesson: a scanner's rule carries an assumption about how the code is used, and "validate" and "redact" want opposite answers from the same question** |
 | 76 | A newer version of a dependency is a safer version of it | **The licence gate, 2026-09-17** | **Refuted, and the gate was right to refuse.** Bumping the indirect `segmentio/asm` from v1.1.3 to v1.2.1 failed `make licenses` on every package in it. The cause is not a missing licence: the module RELICENSED from MIT to **MIT No Attribution** (MIT-0), which is strictly MORE permissive — it drops the attribution requirement. `go-licenses` cannot classify MIT-0, so it reports an empty licence name, and an allow-list of `Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC` refuses an empty name as it should. Widening the list would not even work, because there is no name to add. The bump is reverted rather than argued around: nothing needed it, no advisory drove it, and the version in place is the one the direct dependency asks for. **The rule this leaves: a gate that refuses what it cannot classify is working, and "the licence got more permissive" is not a reason to teach it to pass an unknown.** |
+| 77 | The bundle manifest's `manifest_version` is current, because it agrees with its own `$schema` and four sibling repositories use it | **The published mcpb schemas, fetched 2026-09-17** | **Rejected as evidence, and the version kept anyway.** The 0.3 bump was adopted because four other repositories were on it, which is a sibling and not a source — hard rule 13. Fetched: `mcpb-manifest-v0.2`, `v0.3` and `v0.4` are served and `v0.5` is not, so this manifest was one version behind while every check on it passed. Diffing 0.3 against 0.4 is what settled it: the ONLY difference is a `uv` server type added to the `server.type` enum, and this bundle's type is `binary`, so 0.4 buys nothing and would declare a format no desktop here has been seen to install. 0.3 stays, deliberately. Two things changed instead: `$schema` now names a tag rather than `main`, because the path pins the FORMAT and the ref pins the BYTES — the rule is an allow-list on the whole URL, upstream's path at a full tag or a commit SHA, because a blacklist of branch names passes a partial tag like `v2.1`, which upstream re-points as it releases; the schema at `v2.1.2` is byte-identical to `main` today, which is the point, since nothing would say if it stopped being — and the gate has a FLOOR, because claims that hold a document against itself are all satisfied by a stale one: 0.2 beside a 0.2 schema is self-consistent, which is exactly the shape that spread through four repositories |
 | 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |

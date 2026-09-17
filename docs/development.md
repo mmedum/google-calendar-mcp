@@ -27,7 +27,7 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make api-fields` | every published field of the four main resources is modelled or written off, with a reason |
 | `make classes` | the error vocabulary is closed **from both sides** |
 | `make leaks` | no deployer-specific data in the tree |
-| `make pins` | actions pinned to SHAs, tools pinned to versions |
+| `make pins` | actions pinned to SHAs, tools pinned to versions, and a tool run locally pinned to the version the release runs |
 | `make live-cover` | every published tool has a step in the live driver |
 | `make parity` | `make check` and `ci.yml` run the same things |
 | `make schema-diff` | the tool surface against the last tag |
@@ -89,53 +89,8 @@ What it does to the account, so nothing is a surprise:
 
 ## Cutting a release
 
-`main` is released code and the tag is the maintainer's. What the tag
-does is in `.goreleaser.yaml` and `.github/workflows/release.yml`: six
-platform archives, `checksums.txt`, an SBOM per archive, a keyless cosign
-signature over the checksums, `actions/attest-build-provenance`, and the
-`.mcpb` bundle, packed in the universal binary's post hook so it reaches
-`checksums.txt` and therefore the signature.
-
-Rehearse it first. This runs everything except the three steps that need
-credentials, and leaves the whole tree under `dist/`:
-
-```
-go run github.com/goreleaser/goreleaser/v2@v2.18.1 release \
-  --snapshot --clean --skip=publish,sign,sbom
-make release-notes VERSION=Unreleased  # what the release page would say
-```
-
-At tag time the `[Unreleased]` heading becomes `[1.2.3]` and the same
-command takes that version. `gates release-notes` fails on a version with
-no section, so a tag pushed before the rename stops the release before
-goreleaser runs — which is the right way round, but it means the entry
-has to be written first.
-
-Then **check the version in five places**, because four of them agreeing
-is what a broken bundle looks like: the bundle's filename, the archive
-filenames, `manifest.json` inside the bundle, the binary's own
-`--version`, and `checksums.txt`. The bundle missing from that last file
-is the failure to look for — it ships unsigned and looks no different.
-
-Three things a rehearsal cannot tell you, so watch the first real run:
-
-- **Signing and provenance need an OIDC token**, which only a workflow
-  run has. `goreleaser check` and a full local build both pass while that
-  step is wrong.
-- **goreleaser refuses a dirty tree, and `--snapshot` skips that check.**
-  This is why the `before` hook is `go mod download` rather than
-  `go mod tidy`, and why the workflow writes its notes file outside the
-  checkout.
-- **Push tags one at a time.** GitHub drops tag events past the third in
-  a single push, and the release simply never runs.
-
-The MCP registry entry is the last step of the workflow, for the same
-reason §12 puts it last: the registry does a HEAD on the bundle's
-download URL before accepting an entry, so the release has to exist
-first. `gates server-json` builds the entry from the release's own
-`checksums.txt`, and a prerelease tag skips it — an entry cannot be taken
-back, so `v1.0.0-rc1` must not leave a row pointing at a bundle nobody
-should install.
+That is `docs/release.md`: what the tag does, what to check afterwards,
+and the three steps no rehearsal reaches.
 
 ## Adding a tool
 
