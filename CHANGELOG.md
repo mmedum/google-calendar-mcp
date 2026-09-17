@@ -12,8 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `make mcpb` holds the manifest's own version declaration: a `$schema`
   is present, it is the pinned `mcpb-manifest-v<version>.schema.json`
   form rather than the unpinned `dist/` path, the version in that URL
-  equals `manifest_version`, and the URL names a tag rather than a
-  branch. Plus a support URL, so a bundle that fails on somebody's
+  equals `manifest_version`, and the URL is upstream's published path at
+  a ref that cannot move — a full tag or a commit SHA. An allow-list on
+  the whole URL rather than a list of refs to refuse: a blacklist of
+  `main` passes a branch called anything else, a partial tag like `v2.1`
+  that upstream re-points as it releases, and the right filename served
+  by somebody else entirely. Plus a support URL, so a bundle that fails on somebody's
   desktop says where to report it. The gate parsed `manifest_version` and
   compared it to nothing before, which is how a manifest claiming one
   version while validating against another passed.
@@ -54,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - The bundle manifest declares `manifest_version` 0.3, with a `support`
   URL and `$schema` pinned to `mcpb-manifest-v0.3.schema.json` at a
-  tagged ref. It declared 0.2 and carried no `$schema` at all. A document
+  release tag rather than `main`. It declared 0.2 and carried no `$schema` at all. A document
   declaring conformance to one version while validating against whatever
   the unpinned `dist/` path serves today is a claim that cannot be
   checked — the same argument this repository's `pins` gate already makes

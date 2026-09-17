@@ -328,10 +328,21 @@ func licenceOf() string {
 // version it declares.
 var pinnedSchema = regexp.MustCompile(`/mcpb-manifest-v(\d+\.\d+)\.schema\.json$`)
 
-// movingRef matches a schema URL served from a branch rather than a tag.
-// The version in the path pins the FORMAT; the ref pins the bytes, and
-// a branch can be amended under a document that claims to conform to it.
-var movingRef = regexp.MustCompile(`/(main|master|HEAD)/`)
+// upstreamSchema matches the host and path the schema is published at,
+// and captures the ref it is served from.
+//
+// An allow-list on the whole URL rather than a list of refs to refuse,
+// for §9.1's reason one level down: a blacklist of `main`, `master` and
+// `HEAD` passes a branch called anything else, a partial tag like `v2.1`
+// that upstream can re-point, and a schema served from somewhere that is
+// not upstream at all.
+var upstreamSchema = regexp.MustCompile(
+	`^https://raw\.githubusercontent\.com/anthropics/mcpb/([^/]+)/schemas/mcpb-manifest-v\d+\.\d+\.schema\.json$`)
+
+// immutableRef is a ref that cannot be moved under the document: a full
+// release tag or a commit SHA. A partial tag is a moving ref with a
+// version number in it.
+var immutableRef = regexp.MustCompile(`^(v[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{40})$`)
 
 // minManifestVersion is the format version this repository has checked,
 // and the floor a manifest may not fall below.
@@ -370,9 +381,10 @@ const minManifestVersion = "0.3"
 //  3. The version in that URL equals manifest_version. A document
 //     claiming 0.2 and validating against 0.3 is making a claim nobody
 //     can check, which is worse than making none.
-//  4. The URL names a tag rather than a branch. `/main/` pins the
-//     format and not the bytes: upstream amending that file in place
-//     changes what this document validates against, silently.
+//  4. The URL is upstream's, at a ref that cannot move. The path pins
+//     the FORMAT and the ref pins the BYTES: a branch — or a partial
+//     tag, which is a branch with a version number in it — can be
+//     amended under a document that claims to conform to it.
 //  5. manifest_version is not below minManifestVersion. Claims 1 to 3
 //     hold a manifest against ITSELF, and a stale one is perfectly
 //     self-consistent — which is exactly the shape that spread.
@@ -400,11 +412,16 @@ func manifestShapeProblems(schema, manifestVersion, support string) []string {
 			"$schema is %q, which is not the pinned mcpb-manifest-v<version>.schema.json form. An "+
 				"unpinned schema validates against whatever upstream serves today, which is the same "+
 				"defect `pins` refuses for an action", schema))
-	case movingRef.MatchString(schema):
+	case !upstreamSchema.MatchString(schema):
 		problems = append(problems, fmt.Sprintf(
-			"$schema is %q, which is served from a branch: the version in the path pins the format and "+
-				"the ref pins the bytes, so an amendment upstream changes what this document validates "+
-				"against. Name a tag", schema))
+			"$schema is %q, which is not upstream's published path. A schema fetched from anywhere else "+
+				"is not the document this format is defined by", schema))
+	case !immutableRef.MatchString(upstreamSchema.FindStringSubmatch(schema)[1]):
+		problems = append(problems, fmt.Sprintf(
+			"$schema is served from %q, which can be re-pointed — a branch, or a partial tag. The path "+
+				"pins the format and the ref pins the bytes, so an amendment upstream changes what this "+
+				"document validates against. Name a full tag or a commit SHA",
+			upstreamSchema.FindStringSubmatch(schema)[1]))
 	default:
 		declared := pinnedSchema.FindStringSubmatch(schema)[1]
 		if declared != manifestVersion {

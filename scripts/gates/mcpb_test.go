@@ -235,6 +235,15 @@ func TestTheWaysAManifestMisdeclaresItsVersion(t *testing.T) {
 		t.Fatalf("a well-formed manifest was refused:\n%s", strings.Join(problems, "\n"))
 	}
 
+	// A commit SHA is the other ref that cannot move, and the stronger
+	// of the two. Refusing it would push somebody back to a branch.
+	bySHA := good
+	bySHA.Schema = "https://raw.githubusercontent.com/anthropics/mcpb/" +
+		"0123456789abcdef0123456789abcdef01234567/schemas/mcpb-manifest-v0.3.schema.json"
+	if problems := checkManifestShape(bySHA); len(problems) > 0 {
+		t.Fatalf("a schema pinned to a commit was refused:\n%s", strings.Join(problems, "\n"))
+	}
+
 	cases := []struct {
 		name string
 		m    manifest
@@ -275,7 +284,27 @@ func TestTheWaysAManifestMisdeclaresItsVersion(t *testing.T) {
 				Schema:          "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json",
 				ManifestVersion: "0.3", Support: "x",
 			},
-			want: "served from a branch",
+			want: "can be re-pointed",
+		},
+		{
+			// The case a blacklist of branch names passes: a tag that
+			// upstream moves as it releases. It reads as pinned.
+			name: "a partial tag",
+			m: manifest{
+				Schema:          "https://raw.githubusercontent.com/anthropics/mcpb/v2.1/schemas/mcpb-manifest-v0.3.schema.json",
+				ManifestVersion: "0.3", Support: "x",
+			},
+			want: "can be re-pointed",
+		},
+		{
+			// And the case both of those pass: the right filename,
+			// served by somebody else.
+			name: "the right file from another host",
+			m: manifest{
+				Schema:          "https://example.invalid/schemas/mcpb-manifest-v0.3.schema.json",
+				ManifestVersion: "0.3", Support: "x",
+			},
+			want: "not upstream's published path",
 		},
 		{
 			// The case the other claims cannot see: 0.2 with a 0.2

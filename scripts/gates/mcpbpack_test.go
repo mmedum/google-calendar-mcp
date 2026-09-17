@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,6 +131,15 @@ func TestThePackedManifestCarriesTheRealVersion(t *testing.T) {
 		// Everything else survived the rewrite.
 		if m["name"] == nil || m["server"] == nil {
 			t.Fatal("the rewrite dropped fields; it must decode and encode, not replace a line")
+		}
+		// Including the declaration, which is the half `make mcpb`
+		// reads from the committed file while this is what ships. Same
+		// check, over the manifest that is actually in the bundle.
+		schema, _ := m["$schema"].(string)
+		declared, _ := m["manifest_version"].(string)
+		support, _ := m["support"].(string)
+		if problems := manifestShapeProblems(schema, declared, support); len(problems) > 0 {
+			t.Fatalf("the packed manifest's own declaration is wrong:\n%s", strings.Join(problems, "\n"))
 		}
 	}
 	if !found {
