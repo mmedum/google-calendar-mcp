@@ -82,7 +82,9 @@ var bundleFiles = []staged{
 
 // manifest is the part of the document these checks are about.
 type manifest struct {
+	Schema          string `json:"$schema"`
 	ManifestVersion string `json:"manifest_version"`
+	Support         string `json:"support"`
 	Name            string `json:"name"`
 	Version         string `json:"version"`
 	License         string `json:"license"`
@@ -129,6 +131,8 @@ func mcpbGate() error {
 		problems = append(problems, "long_description does not say the bundle cannot log the user in, "+
 			"which is the first thing that fails for somebody who installs it")
 	}
+	problems = append(problems, checkManifestShape(m)...)
+
 	if want := licenceOf(); want != "" && m.License != want {
 		problems = append(problems, fmt.Sprintf(
 			"the manifest says the licence is %q and LICENSE is %s", m.License, want))
@@ -317,4 +321,60 @@ func licenceOf() string {
 	default:
 		return ""
 	}
+}
+
+// pinnedSchema matches the versioned manifest schema URL and captures the
+// version it declares.
+var pinnedSchema = regexp.MustCompile(`/mcpb-manifest-v(\d+\.\d+)\.schema\.json$`)
+
+// checkManifestShape holds the manifest's own version declaration.
+//
+// This is the check whose absence let three of seven servers drift. The
+// gate parsed manifest_version and compared it to nothing, and read
+// neither $schema nor support — so a manifest could declare conformance
+// to 0.2 while pointing at the UNPINNED schema path, which serves
+// whatever the upstream dist/ directory currently holds. Two of those
+// three were manifests written from a third as a template, which is how
+// a stale shape spreads rather than being noticed.
+//
+// Three claims:
+//
+//  1. $schema is present. Without it nothing says which document this
+//     is, and the contradiction below cannot even be expressed.
+//  2. $schema is the PINNED, versioned file. The unpinned path is the
+//     same defect this repository's pins gate exists to refuse one level
+//     down: "latest" is not a version, and a green check against it
+//     today says nothing about tomorrow.
+//  3. The version in that URL equals manifest_version. A document
+//     claiming 0.2 and validating against 0.3 is making a claim nobody
+//     can check, which is worse than making none.
+//
+// And `support`, which the 0.3 shape carries: a bundle that fails on
+// somebody's desktop should say where to report it.
+func checkManifestShape(m manifest) []string {
+	var problems []string
+
+	switch {
+	case m.Schema == "":
+		problems = append(problems, "the manifest has no $schema, so nothing says which version of the "+
+			"format it is, and manifest_version is a claim with nothing to check it against")
+	case !pinnedSchema.MatchString(m.Schema):
+		problems = append(problems, fmt.Sprintf(
+			"$schema is %q, which is not the pinned mcpb-manifest-v<version>.schema.json form. An "+
+				"unpinned schema validates against whatever upstream serves today, which is the same "+
+				"defect `pins` refuses for an action", m.Schema))
+	default:
+		declared := pinnedSchema.FindStringSubmatch(m.Schema)[1]
+		if declared != m.ManifestVersion {
+			problems = append(problems, fmt.Sprintf(
+				"manifest_version is %q and $schema pins v%s; a document cannot claim one version and "+
+					"validate against another", m.ManifestVersion, declared))
+		}
+	}
+
+	if m.Support == "" {
+		problems = append(problems, "the manifest has no support URL, so a bundle that fails on "+
+			"somebody's desktop does not say where to report it")
+	}
+	return problems
 }

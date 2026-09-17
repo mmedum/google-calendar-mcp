@@ -220,3 +220,61 @@ func TestTheManifestIsTheJSONThePackerWrites(t *testing.T) {
 		t.Fatal("the stamped manifest does not carry the version")
 	}
 }
+
+// The three ways a manifest can misdeclare its own version, and the
+// missing support URL. This check did not exist while three of the seven
+// servers drifted apart — one carried no $schema, and two declared
+// manifest_version 0.2 while pointing at the UNPINNED schema path, which
+// serves whatever upstream publishes today. Two of those were written
+// from the third as a template, which is how a stale shape spreads.
+func TestTheWaysAManifestMisdeclaresItsVersion(t *testing.T) {
+	const pinned = "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json"
+
+	good := manifest{Schema: pinned, ManifestVersion: "0.3", Support: "https://example.invalid/issues"}
+	if problems := checkManifestShape(good); len(problems) > 0 {
+		t.Fatalf("a well-formed manifest was refused:\n%s", strings.Join(problems, "\n"))
+	}
+
+	cases := []struct {
+		name string
+		m    manifest
+		want string
+	}{
+		{
+			name: "no $schema at all",
+			m:    manifest{ManifestVersion: "0.3", Support: "x"},
+			want: "no $schema",
+		},
+		{
+			// The defect that actually shipped: conformance claimed
+			// against one version, validated against whatever dist/ holds.
+			name: "the unpinned schema path",
+			m: manifest{
+				Schema:          "https://raw.githubusercontent.com/anthropics/mcpb/main/dist/mcpb-manifest.schema.json",
+				ManifestVersion: "0.2", Support: "x",
+			},
+			want: "not the pinned",
+		},
+		{
+			name: "a pinned schema that disagrees with manifest_version",
+			m:    manifest{Schema: pinned, ManifestVersion: "0.2", Support: "x"},
+			want: "cannot claim one version and validate against another",
+		},
+		{
+			name: "no support URL",
+			m:    manifest{Schema: pinned, ManifestVersion: "0.3"},
+			want: "no support URL",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := checkManifestShape(tc.m)
+			if len(problems) == 0 {
+				t.Fatalf("%s was accepted", tc.name)
+			}
+			if !mentions(problems, tc.want) {
+				t.Fatalf("wanted %q, got:\n%s", tc.want, strings.Join(problems, "\n"))
+			}
+		})
+	}
+}
