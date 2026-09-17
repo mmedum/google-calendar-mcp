@@ -207,16 +207,31 @@ func unpinnedIn() map[int][]installerPin {
 func TestATooledRehearsalRunsTheReleasesVersion(t *testing.T) {
 	makefile := repoPath(t, makefilePath)
 
-	// The repository as it stands: the Makefile's pin and the
-	// workflow's agree.
 	local, err := makeVariable(makefile, "GORELEASER")
 	if err != nil {
 		t.Fatalf("the table pairs goreleaser-action with GORELEASER: %v", err)
 	}
 	_, version, _ := strings.Cut(local, "@")
-	problems, compared := rehearsalDrift(pinnedIn(version), makefile)
+
+	// The repository as it stands, read from BOTH files.
+	//
+	// The first version of this built the workflow side out of the
+	// Makefile's own value and then asserted the two agreed, which is a
+	// comparison with itself: it passes on any pin, including two that
+	// have drifted apart. The expected value has to come from somewhere
+	// other than the thing under test, so the workflow is parsed.
+	flow, err := readWorkflow(repoPath(t, ".github/workflows/release.yml"))
+	if err != nil {
+		t.Fatalf("read the release workflow: %v", err)
+	}
+	real := map[int][]installerPin{}
+	for _, pin := range installerPins(flow) {
+		real[pin.row] = append(real[pin.row], pin)
+	}
+	problems, compared := rehearsalDrift(real, makefile)
 	if len(problems) != 0 || compared != 1 {
-		t.Fatalf("agreeing pins reported %v after %d comparison(s)", problems, compared)
+		t.Fatalf("the Makefile pins %s and release.yml disagrees: %v (%d comparison(s))",
+			version, problems, compared)
 	}
 
 	// One version behind is the whole failure: both numbers are valid.
