@@ -129,13 +129,65 @@ Three things a rehearsal cannot tell you, so watch the first real run:
 - **Push tags one at a time.** GitHub drops tag events past the third in
   a single push, and the release simply never runs.
 
-The MCP registry entry is the last step of the workflow, for the same
-reason §12 puts it last: the registry does a HEAD on the bundle's
-download URL before accepting an entry, so the release has to exist
-first. `gates server-json` builds the entry from the release's own
-`checksums.txt`, and a prerelease tag skips it — an entry cannot be taken
-back, so `v1.0.0-rc1` must not leave a row pointing at a bundle nobody
+## The registry entry, and how to recover it
+
+The MCP registry entry is **not** part of the goreleaser job. It lives in
+`.github/workflows/publish-mcp.yml`, which `release.yml` calls after the
+release exists, and which is **dispatchable on its own with a tag**:
+
+```
+gh workflow run publish-mcp.yml --ref main -f tag=v1.2.3
+```
+
+That matters more than it looks. The registry sends a HEAD to the
+bundle's download URL before it accepts an entry, so this step can only
+run last — and a step that can only run last needs a way to be run again
+without cutting another release. If the registry publish is the thing
+that fails, re-dispatch it; do not tag again.
+
+It also runs with `id-token: write` and `contents: read` and nothing
+else, because `mcp-publisher` is a third-party binary handed a token that
+can publish under `io.github.mmedum`. The binary is verified with cosign
+against the registry project's own release workflow before it is
+unpacked — a version pins which artifact to fetch, not that the bytes are
+the ones upstream built.
+
+`gates server-json` builds the entry from the release's **own**
+`checksums.txt`, so the hash describes the bytes that were published. A
+prerelease tag skips the step: an entry cannot be taken back, so
+`v1.0.0-rc1` must not leave a permanent row pointing at a bundle nobody
 should install.
+
+## What the first run after a pipeline change is for
+
+Three steps need an OIDC token that only a real workflow run has, so no
+rehearsal reaches them: the **cosign signature**, the **provenance
+attestation**, and the **registry publish**. `goreleaser check`,
+`actionlint`, `make check` and a full `--snapshot` build all pass while
+any of the three is wrong.
+
+Read that run rather than watching it go green, and know the recovery for
+each, because they are not the same:
+
+| Fails | State afterwards | Recovery |
+|---|---|---|
+| cosign | **no release** — signing precedes publish | fix, delete the tag, tag again |
+| attestation | release published, unattested | re-run the failed job |
+| registry publish | release fine, no entry | dispatch `publish-mcp.yml` with the tag |
+
+Verify from outside afterwards, with the commands the release page itself
+prints:
+
+```
+sha256sum -c checksums.txt --ignore-missing
+cosign verify-blob checksums.txt --bundle checksums.txt.bundle \
+  --certificate-identity-regexp 'https://github\.com/mmedum/google-calendar-mcp/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify google-calendar-mcp_*.mcpb --repo mmedum/google-calendar-mcp
+```
+
+An exit code of 0 on empty output is not evidence. Check the attestation
+against a deliberately corrupted copy too — it must exit non-zero.
 
 ## Adding a tool
 
