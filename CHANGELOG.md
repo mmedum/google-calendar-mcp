@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The MCP registry entry is published from its own workflow, with
+  `id-token: write` and `contents: read` and nothing else.
+
+  It ran inside the goreleaser job, which also holds `contents: write`
+  and `attestations: write` — so `mcp-publisher`, a third-party binary,
+  had a token that could rewrite the release it had just been told
+  about. Verifying the binary is what makes running it acceptable; least
+  privilege is what stops that being the only thing in the way.
+
+  A separate workflow rather than a separate job, because the registry
+  HEADs the bundle's download URL before accepting an entry: this can
+  only run after the release exists, and a step that can only run last
+  needs a way to be run again on its own. As a job inside `release.yml`
+  it had none — re-running that workflow re-runs goreleaser against a
+  release that already exists, and an entry for a tag that shipped weeks
+  ago could not be published at all.
+
+  It reads the **published** release's `checksums.txt` rather than the
+  build's local copy, so the hash a client verifies is the number cosign
+  signed. Verified end to end by dispatching the same workflow in a
+  sibling server: cosign reported `Verified OK`, the publish succeeded,
+  and the registry's hash matched the release's `checksums.txt`.
+
 ## [1.0.0] - 2026-09-17
 
 ### Added
