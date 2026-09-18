@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-18
+
 ### Fixed
 
 - The registry entry is no longer built from an unverified checksum
@@ -866,6 +868,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mmedum/google-calendar-mcp/releases/tag/v1.0.0

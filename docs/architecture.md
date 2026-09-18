@@ -1,6 +1,6 @@
 # Architecture — google-calendar-mcp
 
-**Status: v1.0.0 is released and verified from outside (2026-09-17).** Phases 0 to 4 —
+**Status: v1.0.2 (2026-09-18); v1.0.1 was the canary and it ran.** Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
 writes, `If-Match`, the client-generated id and `dry_run`; the two calendar
@@ -23,16 +23,36 @@ agreeing in all five of §10b's places, and the MCP registry's own
 `fileSha256` equal to the release's `checksums.txt` row. Six archives,
 six SBOMs, the signed checksum file and the bundle.
 
-**What has changed since that tag, and is therefore unproven again.** The
-registry publish moved out of the goreleaser job into its own
-`publish-mcp.yml` — for privilege, because `mcp-publisher` is a
-third-party binary that also held `contents: write` there, and for
-recovery, because a job welded into the release cannot publish an entry
-for a tag that shipped weeks ago. That workflow has been exercised by
-hand in a sibling server but **never through `workflow_call` from a
-release**, which is the path the next tag takes. The bundle manifest also
-moved to `manifest_version` 0.3 with a pinned `$schema`. v1.0.1 is the
-canary for both.
+**v1.0.1 was the canary for the registry publish, and it answered.** The
+publish moved out of the goreleaser job into its own `publish-mcp.yml` —
+for privilege, because `mcp-publisher` is a third-party binary that also
+held `contents: write` there, and for recovery, because a job welded into
+the release cannot publish an entry for a tag that shipped weeks ago.
+That path had never run through `workflow_call` from a release. It ran on
+v1.0.1: cosign `Verified OK` over `checksums.txt` with the identity
+pinned to the exact tag, the attestation exit 0 on the genuine bundle and
+exit 1 on a corrupted copy, 8 subjects with the `.mcpb` among them, the
+version agreeing in all five of §10b's places, and the registry's own
+`fileSha256` equal to the published `checksums.txt` row. The manifest at
+`manifest_version` 0.3 with a pinned `$schema` shipped intact inside the
+bundle.
+
+**And the canary earned the name, because v1.0.1 published its entry
+through a path nothing had verified.** `publish-mcp.yml` downloaded the
+published `checksums.txt` and handed it to the gate that writes
+`server.json`, whose `fileSha256` is the number a registry-driven client
+checks its download against — and the only `cosign verify-blob` in that
+job covered the `mcp-publisher` tarball. Somebody able to replace a
+release asset could have edited `checksums.txt` beside it; the signature
+and the attestation would both have broken, and neither was consulted
+there. The dispatch route is the sharp end, because it re-publishes for a
+tag that shipped weeks ago and a registry entry cannot be withdrawn.
+v1.0.1's entry is correct — it was checked from outside afterwards — but
+it went out through the unguarded path. v1.0.2 is the first release where
+the signature is verified before the hash is read, with the certificate
+identity pinned to this repository's `release.yml` at the exact tag.
+Found by a sibling server's security review; all seven had it, and none
+had inherited it from another.
 
 **The release procedure has its own file.** `docs/release.md`: what the
 tag does, what to check afterwards, the three steps no rehearsal reaches
