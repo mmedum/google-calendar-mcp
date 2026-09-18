@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The registry entry is no longer built from an unverified checksum
+  file. `publish-mcp.yml` downloaded the published `checksums.txt` and
+  fed it straight to the gate that writes `server.json` — and the entry's
+  `fileSha256` comes out of that file, which is the number a
+  registry-driven client checks its download against. The only
+  `cosign verify-blob` in the job ran against the `mcp-publisher`
+  tarball, so the header's claim that "the hash a client verifies is the
+  number cosign signed" was not made true by anything in the file.
+
+  Somebody able to replace a release asset could edit `checksums.txt`
+  beside it; the signature and the attestation would both break, which is
+  the detection the pipeline exists for, and neither was consulted on
+  this path. The dispatch route makes it worse rather than better: it
+  exists to re-publish for a tag that shipped weeks ago, long after
+  anybody was watching, and a registry entry cannot be withdrawn.
+
+  The job verifies the signature over `checksums.txt` before reading it,
+  with the certificate identity pinned to this repository's `release.yml`
+  at the exact tag rather than a regexp. Checked against the published
+  v1.0.1: the pinned identity returns `Verified OK`, and the same command
+  with the previous tag's identity exits 1.
+
+  Found by a sibling server's phase-boundary security review, which hit
+  the same shape independently rather than by inheriting it.
+
 ## [1.0.1] - 2026-09-17
 
 ### Added
