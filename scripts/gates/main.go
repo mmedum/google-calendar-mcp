@@ -72,6 +72,11 @@ func main() {
 		// between a fetch that refreshes a stable judgement and a check
 		// whose freshness IS the check.
 		check(apiDiff(os.Stdout), "API diff")
+	case "schema-refetch":
+		// Manual, and for the same reason as api-diff above: it reaches
+		// the network, and what CI holds is the vendored copy rather
+		// than the fetch.
+		check(schemaRefetch(os.Stdout), "vendored schemas")
 	case "leaks":
 		check(leakGate(len(os.Args) > 2 && os.Args[2] == "history"), "leak scan")
 	case "pins":

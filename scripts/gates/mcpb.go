@@ -134,6 +134,19 @@ func mcpbGate() error {
 	}
 	problems = append(problems, checkManifestShape(m)...)
 
+	// And against the schema the manifest cites, which the checks above
+	// only name. They hold the DECLARATION — present, pinned to an
+	// immutable ref, agreeing with manifest_version, not below the floor
+	// — and a document can satisfy all of that while not satisfying the
+	// schema itself.
+	raw, err := os.ReadFile(manifestPath) //nolint:gosec // a repository path from a constant
+	if err != nil {
+		return err
+	}
+	if err := validateDocument(mcpbSchemaFile, "the committed manifest", raw); err != nil {
+		problems = append(problems, err.Error())
+	}
+
 	if want := licenceOf(); want != "" && m.License != want {
 		problems = append(problems, fmt.Sprintf(
 			"the manifest says the licence is %q and LICENSE is %s", m.License, want))
@@ -359,6 +372,12 @@ var immutableRef = regexp.MustCompile(`^(v[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{40})$`
 // format changes AND that a desktop installs a bundle declaring it;
 // §18 row 77.
 const minManifestVersion = "0.3"
+
+// mcpbSchemaFile is the vendored copy of the schema a 0.3 manifest
+// cites. It moves with minManifestVersion: the floor says which format
+// this repository has checked, and this is the document that says what
+// that format is.
+const mcpbSchemaFile = "mcpb-manifest-v0.3.schema.json"
 
 // checkManifestShape holds the manifest's own version declaration.
 //

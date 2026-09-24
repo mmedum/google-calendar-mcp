@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `make mcpb` and `gates server-json` validate their documents against
+  the schemas those documents cite, rather than only checking that the
+  `$schema` line is present, pinned and agreeing with the version beside
+  it. Every one of those claims is about the REFERENCE; none of them
+  opens the schema, and a document can cite the right file without
+  satisfying it.
+
+  The registry entry is the expensive direction, which is why the
+  refusal is in the gate that builds it rather than in a test alone: a
+  rejected publish costs a dispatch against a tag that already shipped,
+  and an entry that is accepted and wrong cannot be withdrawn.
+
+  The schemas are vendored under `scripts/gates/schemas`, embedded so
+  the gate does not depend on where it was started, and each is pinned
+  by a recorded SHA-256 — without that, "make the document pass" and
+  "edit the schema" are the same amount of work, and the second is
+  silent.
+
+  Worth saying because the check reads stronger than it is: this schema
+  constrains less than it appears to. `version` is a string of at most
+  255 characters with no pattern, and a package's `registryType` is a
+  bare string with no enum, so `"not a version"` and `"tarball"` are
+  both valid documents. Two test cases started out asserting otherwise,
+  passed, and were replaced. The schema is a floor; `server-json`'s own
+  rules hold what it leaves open.
+- `make schema-refetch`, which is the half a vendored copy cannot do for
+  itself. A digest proves the bytes are the ones somebody reviewed, not
+  that upstream still serves them — a frozen copy is frozen in both
+  directions. It fetches each source, reports a difference and refuses,
+  and deliberately does not rewrite anything: a refresh is a decision
+  somebody makes after reading what changed. `docs/release.md` runs it
+  before a tag.
+
 ## [1.0.2] - 2026-09-18
 
 ### Fixed
