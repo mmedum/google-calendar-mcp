@@ -31,6 +31,11 @@ import (
 
 const registrySchema = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 
+// registrySchemaFile is the vendored copy of the above. The two are held
+// together by `schemas` — a document citing one version and validated
+// against another is the defect `mcpb` refuses one level down.
+const registrySchemaFile = "server-2025-12-11.schema.json"
+
 // descriptionMax is the registry's cap.
 const descriptionMax = 100
 
@@ -197,6 +202,17 @@ func serverJSON(version, checksums string, stdout io.Writer) error {
 	}
 	out, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
+		return err
+	}
+	// Against the schema the entry cites, before anybody publishes it.
+	// The checks above hold the fields this repository fills in; this
+	// holds the document the registry will read. A rejected publish
+	// costs a dispatch against a tag that already shipped, and an entry
+	// that is accepted and wrong cannot be withdrawn at all — so the
+	// refusal belongs here rather than in a test alone, which is also
+	// why the publish workflow runs this command rather than a
+	// hand-written file.
+	if err := validateDocument(registrySchemaFile, "the registry entry", out); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(stdout, string(out))

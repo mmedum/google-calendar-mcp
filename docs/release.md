@@ -46,6 +46,13 @@ has to be written first.
 - The status line of `docs/architecture.md` says what has changed since
   the last tag and is therefore unproven again. That is the list to watch
   this run.
+- `make schema-refetch`. The gates hold this repository's manifest and
+  registry entry against **vendored** copies of the schemas they cite,
+  and a vendored copy is frozen in both directions: its digest says the
+  bytes are the ones somebody reviewed, never that upstream still serves
+  them or that a newer format exists beside them. This is the only step
+  that looks, so it belongs here rather than in a gate that would pass
+  on a train.
 
 ## Push the tag
 

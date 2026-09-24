@@ -101,6 +101,13 @@ api-fields: gates ## Every published field is modelled or written off
 api-diff: gates ## Refetch the discovery document and rewrite the snapshot (network; manual)
 	@$(GATES) api-diff
 
+# The half a vendored schema cannot do for itself: a digest says these
+# bytes are the ones somebody reviewed, not that upstream still serves
+# them. Manual, and read at release time — docs/release.md runs it.
+.PHONY: schema-refetch
+schema-refetch: gates ## Check the vendored schemas against what their sources serve (network; manual)
+	@$(GATES) schema-refetch
+
 .PHONY: leaks
 leaks: gates ## Identifiers and data in the working tree
 	@$(GATES) leaks
