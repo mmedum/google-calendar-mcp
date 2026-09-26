@@ -11,7 +11,7 @@ import (
 // It explains rather than reformats: the caller's own rule is what gets
 // sent (§6.4), and this is what a result shows beside it. A rule this
 // package cannot describe comes back as itself, which is honest and
-// still readable — a caller who wrote "FREQ=WEEKLY;BYDAY=TU" recognises
+// still readable — a caller who wrote "FREQ=WEEKLY;BYDAY=TU" recognizes
 // their own line.
 func (s Set) Explain() string {
 	if s.Rule == nil {

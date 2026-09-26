@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/fileperm"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/fileperm"
 )
 
 // AppDir is the directory name under the user's config directory.

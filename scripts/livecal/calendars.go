@@ -51,7 +51,7 @@ type calendarState struct {
 // It exists so a step whose calendar was never created is never CALLED.
 // A tool call naming no calendar resolves to the account's primary one,
 // so the alternative — calling and letting the result be judged
-// afterwards — would point `manage_calendar`, `unshare_calendar` and
+// afterward — would point `manage_calendar`, `unshare_calendar` and
 // `clear_calendar` at the operator's own calendar on any run where
 // `create_calendar` failed. The quota that makes that failure ordinary
 // is §18 row 36.
@@ -128,7 +128,7 @@ func calendarSteps(c *calendarState) []step {
 		},
 		{
 			// §7.5's third axis: this account's own view, which nobody
-			// else sees. The colour id is 1, which every account has.
+			// else sees. The color id is 1, which every account has.
 			name: "manage_calendar my view",
 			tool: "manage_calendar",
 			argsFn: args(map[string]any{
@@ -300,7 +300,7 @@ func calendarSteps(c *calendarState) []step {
 					return fail, "the result does not show exposure on both sides (§7.6)"
 				}
 				if !strings.Contains(r.text, "reader") {
-					return fail, "the new rule is not in the exposure afterwards"
+					return fail, "the new rule is not in the exposure afterward"
 				}
 				if !strings.Contains(r.text, "not a promise of silence") {
 					return fail, "notify:none was reported as silence (§4.3.3)"
@@ -342,14 +342,14 @@ func calendarSteps(c *calendarState) []step {
 				if !strings.Contains(r.text, "no notification") {
 					return fail, "the result does not say Google tells nobody about a removal"
 				}
-				// The exposure afterwards must not still carry the rule
+				// The exposure afterward must not still carry the rule
 				// that was just removed. Read from the "now" heading
 				// rather than from the whole page: the "before" half
 				// names it too, and an assertion satisfied by a line it
 				// is not about is the failure §15 opens by naming.
 				at := strings.Index(r.text, "who can see it now")
 				if at < 0 {
-					return fail, "the result does not show the exposure afterwards (§7.6)"
+					return fail, "the result does not show the exposure afterward (§7.6)"
 				}
 				if strings.Contains(r.text[at:], probeGuest) {
 					return fail, "the rule is still in the exposure after being removed"

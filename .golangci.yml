@@ -18,6 +18,8 @@ linters:
     - unparam
 
   settings:
+    misspell:
+      locale: US
     forbidigo:
       # Stdout carries only MCP JSON-RPC frames. This is the protocol,
       # not a house preference: one stray print corrupts the stream and
@@ -54,6 +56,10 @@ linters:
       # The in-memory Calendar is test scaffolding.
       - path: 'internal/gapi/caltest/'
         linters: [revive, gosec, errcheck]
+      # Google spells an event's status `cancelled`, on the wire and in
+      # the discovery document this repository quotes.
+      - linters: [misspell]
+        text: '`[Cc]ancelled` is a misspelling'
 
 formatters:
   enable:

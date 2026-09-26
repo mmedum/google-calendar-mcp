@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 // The three sentences every write tool has to say, written once here
@@ -14,8 +14,8 @@ import (
 
 const notifyHelp = "`notify` is REQUIRED whenever the write can reach another person, and this server has no " +
 	"default in either direction: `none` asks Google to email nobody, `external_only` emails the guests " +
-	"outside your own organisation, `all` emails every guest. `none` is refused outright when a guest is " +
-	"outside your organisation, because such a guest may have no Google Calendar for the event to appear " +
+	"outside your own organization, `all` emails every guest. `none` is refused outright when a guest is " +
+	"outside your organization, because such a guest may have no Google Calendar for the event to appear " +
 	"in and email is then the only way they can learn of it. Whatever you pass, the result says what was " +
 	"ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence."
 
@@ -45,7 +45,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"`conference: true` asks Google for a Meet link. The link normally comes back with the event, " +
 			"but Google may still be making it — the result says which, and when it says the link is " +
 			"still being made, read the event again to get it rather than promising anybody a link. A " +
-			"link can only be attached as the event is created; this server cannot add one afterwards. " +
+			"link can only be attached as the event is created; this server cannot add one afterward. " +
 			notifyHelp + " " + dryRunHelp,
 		Kind: Write,
 		Handle: func(ctx context.Context, in createEventIn) (service.WriteResult, error) {
@@ -97,14 +97,14 @@ func registerWrite(s *mcp.Server, d Deps) {
 	add(s, d, Def[cancelEventIn, service.WriteResult]{
 		Name: "cancel_event",
 		Description: "Cancel an event, or one occurrence of a repeating one. " +
-			"A whole event is deleted; one occurrence is marked cancelled, which is how a single date leaves " +
+			"A whole event is deleted; one occurrence is marked canceled, which is how a single date leaves " +
 			"a series — the result says which of the two happened. Google keeps the record either way, and " +
-			"list_events with show_cancelled still shows it. " + scopeHelp + " " +
+			"list_events with show_canceled still shows it. " + scopeHelp + " " +
 			"With `this_and_following` the series simply ends before this occurrence, which is one call " +
 			"rather than the two an update takes. " + notifyHelp + " " +
-			"Read that rule twice here: cancelling with no notification removes the meeting from YOUR " +
+			"Read that rule twice here: canceling with no notification removes the meeting from YOUR " +
 			"calendar and leaves it on your guests'. They will still turn up. " + etagHelp + " " + dryRunHelp,
-		Kind: Cancelling,
+		Kind: Canceling,
 		Handle: func(ctx context.Context, in cancelEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CancelEvent(ctx, service.CancelOptions{
 				Calendar: in.Calendar, EventID: in.EventID, OriginalStart: in.OriginalStart,
@@ -120,7 +120,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 
 	add(s, d, Def[moveEventIn, service.WriteResult]{
 		Name: "move_event",
-		Description: "Move an event to another calendar, which changes who organises it. " +
+		Description: "Move an event to another calendar, which changes who organizes it. " +
 			"The event keeps its id but is addressed on the new calendar from then on. This does NOT change " +
 			"the time — use update_event for that. " + scopeHelp + " " +
 			"`this_and_following` is not available here: there is nothing to split when the event is simply " +
@@ -214,7 +214,7 @@ type cancelEventIn struct {
 	Notify        string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests — with none, the guests keep the meeting."`
 	ETag          string `json:"etag,omitempty" jsonschema:"The etag from the get_event you decided on."`
 	Force         bool   `json:"force,omitempty" jsonschema:"Cancel with If-Match: * rather than being refused if somebody changed it first."`
-	DryRun        bool   `json:"dry_run,omitempty" jsonschema:"Report what would be cancelled and who would be emailed, without writing."`
+	DryRun        bool   `json:"dry_run,omitempty" jsonschema:"Report what would be canceled and who would be emailed, without writing."`
 }
 
 type moveEventIn struct {

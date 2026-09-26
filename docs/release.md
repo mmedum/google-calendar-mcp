@@ -32,6 +32,10 @@ no section, so a tag pushed before the rename stops the release before
 goreleaser runs — which is the right way round, but it means the entry
 has to be written first.
 
+`gates release-tag` runs before that, and fails when the tag's major
+version is not go.mod's (`/vN`, or none for v0 and v1). `go install
+...@latest` never serves a v2 tag on a module without `/v2`.
+
 ## Before the tag
 
 - `make check` on the commit being tagged, and CI green on it: the
@@ -101,7 +105,7 @@ publish**. `goreleaser check`, `actionlint`, `make check` and a full
 first run after any change to the pipeline rather than watching it go
 green, and know the recovery for each, because they are not the same:
 
-| Fails | State afterwards | Recovery |
+| Fails | State afterward | Recovery |
 |---|---|---|
 | cosign | **no release** — signing precedes publish | fix, delete the tag, tag again |
 | attestation | release published, unattested | re-run the failed job |

@@ -68,6 +68,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # `go install ...@latest` resolves within one module path, so a v2
+      # tag on a module without /v2 is never served. Before anything is
+      # built, because nothing after it can be taken back. `gates
+      # release` fails if this step moves after goreleaser.
+      - name: The tag's major version is go.mod's
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: go run ./scripts/gates release-tag "${REF_NAME}"
+
       # ci already ran this on three platforms for this commit. A minute
       # here closes the gap between "ci was green" and "these are the
       # bytes being signed".

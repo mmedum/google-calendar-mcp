@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // Scope is which occurrences a write to a recurring event touches.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/fileperm"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/fileperm"
 )
 
 // TestRestrictToOwnerNarrowsAWideFile is the case the Unix path exists

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 )
 
 // TestSeedIsSynthetic is §9.1 held as a test rather than as a promise.
@@ -52,7 +52,7 @@ func TestSeedIsSynthetic(t *testing.T) {
 				check("an attendee on "+cal, a.Email)
 			}
 			if e.Organizer != nil {
-				check("an organiser on "+cal, e.Organizer.Email)
+				check("an organizer on "+cal, e.Organizer.Email)
 			}
 		}
 	}
@@ -67,7 +67,7 @@ func TestSeedCoversTheShapesThatGoWrong(t *testing.T) {
 	s := caltest.Seed()
 	primary := s.Events["primary"]
 
-	var allDay, series, instance, cancelled, transparent bool
+	var allDay, series, instance, canceled, transparent bool
 	for _, e := range primary {
 		switch {
 		case e.Start != nil && e.Start.IsAllDay():
@@ -79,8 +79,8 @@ func TestSeedCoversTheShapesThatGoWrong(t *testing.T) {
 		if e.RecurringEventID != "" {
 			instance = true
 		}
-		if e.Status == gcal.StatusCancelled {
-			cancelled = true
+		if e.Status == gcal.StatusCanceled {
+			canceled = true
 		}
 		if e.Transparency == gcal.TransparencyTransparent {
 			transparent = true
@@ -88,7 +88,7 @@ func TestSeedCoversTheShapesThatGoWrong(t *testing.T) {
 	}
 	for name, got := range map[string]bool{
 		"an all-day event": allDay, "a recurring series": series,
-		"an expanded instance": instance, "a cancelled event": cancelled,
+		"an expanded instance": instance, "a canceled event": canceled,
 		"a transparent event": transparent,
 	} {
 		if !got {

@@ -10,7 +10,7 @@ Include what you did, what happened, and what you expected. Please do not
 include real calendar data, email addresses or credentials in the report:
 describe the shape of the problem instead.
 
-You should get an acknowledgement within a week.
+You should get an acknowledgment within a week.
 
 ## Scope
 

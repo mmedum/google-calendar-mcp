@@ -10,7 +10,7 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/mmedum/google-calendar-mcp/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/credentials"
 )
 
 // fakeKeyring is an in-memory Backend. failGet/failSet make it behave
@@ -251,7 +251,7 @@ func TestOSKeyringIsTheProductionBackend(t *testing.T) {
 		t.Fatal("OSKeyring returned nil")
 	}
 	if !credentials.IsKeyringNotFound(keyring.ErrNotFound) {
-		t.Fatal("IsKeyringNotFound does not recognise the keyring's own sentinel")
+		t.Fatal("IsKeyringNotFound does not recognize the keyring's own sentinel")
 	}
 	if credentials.IsKeyringNotFound(errors.New("something else")) {
 		t.Fatal("IsKeyringNotFound matched an unrelated error")

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 )
 
 // The write steps (§16, phase 2). This is the phase §16 says needs the
@@ -130,7 +130,7 @@ func writeSteps(scratch string, w *writeState) []step {
 				"title": writeTitle,
 				"start": "2026-04-01T09:00:00+02:00", "end": "2026-04-01T10:00:00+02:00",
 				"location": "Room one",
-				// Honoured on an event with no guests, so the parameter
+				// Honored on an event with no guests, so the parameter
 				// is exercised end to end while nothing can be sent.
 				"notify": "none",
 			}),
@@ -283,7 +283,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			}),
 			check: func(r callResult) (verdict, string) {
 				if !r.isError {
-					return fail, "notify:none was accepted for a guest outside the organiser's domain"
+					return fail, "notify:none was accepted for a guest outside the organizer's domain"
 				}
 				if !strings.Contains(r.text, "[blocked]") {
 					return fail, "the refusal is not classified blocked: " + truncate(r.text, 200)
@@ -402,7 +402,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			// start it was SCHEDULED for.
 			// 17 March, the FIRST occurrence, deliberately: the seed
 			// cancels the second one, and a step that changed a
-			// cancelled occurrence proved nothing and then made the
+			// canceled occurrence proved nothing and then made the
 			// next two steps unreadable.
 			name: "scope instance by start",
 			tool: "update_event",
@@ -472,7 +472,7 @@ func writeSteps(scratch string, w *writeState) []step {
 				}
 				// The exception made BEFORE the target must survive: the
 				// reset is of what comes after. It is on 17 March, which
-				// is still visible; the seed's cancelled occurrence is
+				// is still visible; the seed's canceled occurrence is
 				// the second one and is hidden here by design.
 				if !strings.Contains(r.text, "Room five") {
 					return fail, "the 17 March exception did not survive a split made after it"
@@ -481,7 +481,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §7.4: an occurrence is cancelled with a status patch, not
+			// §7.4: an occurrence is canceled with a status patch, not
 			// deleted, because that is how one date leaves a series.
 			name: "cancel one occurrence",
 			tool: "cancel_event",
@@ -502,15 +502,15 @@ func writeSteps(scratch string, w *writeState) []step {
 		{
 			name: "the occurrence is gone",
 			tool: "list_instances",
-			args: map[string]any{"calendar": scratch, "event_id": weeklyID, "show_cancelled": true},
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID, "show_canceled": true},
 			check: func(r callResult) (verdict, string) {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 200)
 				}
-				if !strings.Contains(r.text, "CANCELLED") {
-					return fail, "the cancelled occurrence is not marked as one"
+				if !strings.Contains(r.text, "CANCELED") {
+					return fail, "the canceled occurrence is not marked as one"
 				}
-				return pass, "the removed date shows as cancelled, which is how it is told from missing"
+				return pass, "the removed date shows as canceled, which is how it is told from missing"
 			},
 		},
 		{
@@ -552,8 +552,8 @@ func writeSteps(scratch string, w *writeState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				if !strings.Contains(r.text, "organiser") {
-					return fail, "the result does not say a move changes the organiser"
+				if !strings.Contains(r.text, "organizer") {
+					return fail, "the result does not say a move changes the organizer"
 				}
 				return pass, "moved to the second scratch calendar"
 			},
@@ -599,7 +599,7 @@ func writeSteps(scratch string, w *writeState) []step {
 				if !strings.Contains(r.text, "DRY RUN") {
 					return fail, "a dry run does not say so"
 				}
-				return pass, "reported without cancelling"
+				return pass, "reported without canceling"
 			},
 		},
 		{
@@ -610,7 +610,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 			check: func(r callResult) (verdict, string) {
 				if r.isError {
-					return fail, "a dry run cancelled the event: " + truncate(r.text, 200)
+					return fail, "a dry run canceled the event: " + truncate(r.text, 200)
 				}
 				return pass, "still there"
 			},
@@ -764,19 +764,19 @@ func writeSteps(scratch string, w *writeState) []step {
 				if !strings.Contains(r.text, "still") {
 					return fail, "the warning does not say the guest still has it"
 				}
-				return pass, "cancelled with no notification, and the result says the guest still has it — " +
+				return pass, "canceled with no notification, and the result says the guest still has it — " +
 					"CHECK THEIR CALENDAR: that meeting is still there and this account cannot remove it"
 			},
 		},
 		{
-			name: "cancelling it twice conflicts",
+			name: "canceling it twice conflicts",
 			tool: "cancel_event",
 			argsFn: func() map[string]any {
 				return on(map[string]any{"event_id": w.created})
 			},
 			check: func(r callResult) (verdict, string) {
 				if !r.isError {
-					return fail, "cancelling an event that is already gone reported success"
+					return fail, "canceling an event that is already gone reported success"
 				}
 				if !strings.Contains(r.text, "[not_found]") && !strings.Contains(r.text, "[conflict]") {
 					return fail, "the refusal is classified neither not_found nor conflict: " +

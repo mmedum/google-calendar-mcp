@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // Zones chosen for what each one proves, not for variety:

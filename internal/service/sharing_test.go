@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 func TestListSharingExplainsEveryRole(t *testing.T) {
@@ -148,7 +148,7 @@ func TestShareCalendarRefusesExternalOnly(t *testing.T) {
 }
 
 // §7.6: the public scope needs an explicit flag, because removing the
-// rule afterwards takes nothing back.
+// rule afterward takes nothing back.
 func TestShareCalendarRefusesThePublicScopeWithoutTheFlag(t *testing.T) {
 	svc, fake := calendarSeed(t)
 
@@ -299,7 +299,7 @@ func TestShareCalendarDryRunWritesNothingAndShowsTheResult(t *testing.T) {
 		t.Fatalf("a dry run does not say so:\n%s", got.Text())
 	}
 	if len(got.After) != 2 {
-		t.Fatalf("a dry run shows %d rules afterwards, want the 2 it would leave", len(got.After))
+		t.Fatalf("a dry run shows %d rules afterward, want the 2 it would leave", len(got.After))
 	}
 }
 

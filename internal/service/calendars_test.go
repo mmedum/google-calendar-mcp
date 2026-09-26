@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 // calendarSeed is a small account: the user's own calendar, a team
@@ -96,14 +96,14 @@ func TestCreateCalendarDryRunWritesNothing(t *testing.T) {
 }
 
 // §7.5's distinction, held at the API: a title change goes to
-// calendars.patch and a colour to calendarList.patch, and neither
+// calendars.patch and a color to calendarList.patch, and neither
 // touches the other resource.
 func TestManageSeparatesTheCalendarFromTheSubscription(t *testing.T) {
 	svc, fake := calendarSeed(t)
-	title, colour := "Team — renamed", "7"
+	title, color := "Team — renamed", "7"
 
 	got, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
-		Calendar: "team@group.calendar.example.test", Title: &title, ColorID: &colour,
+		Calendar: "team@group.calendar.example.test", Title: &title, ColorID: &color,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func TestManageSeparatesTheCalendarFromTheSubscription(t *testing.T) {
 			patchedCalendar, patchedEntry)
 	}
 	if len(got.Changes) != 2 {
-		t.Fatalf("changes %+v, want the title and the colour", got.Changes)
+		t.Fatalf("changes %+v, want the title and the color", got.Changes)
 	}
 	if !strings.Contains(got.Text(), "everybody") {
 		t.Fatalf("a rename of the calendar itself does not say it is visible to everybody:\n%s", got.Text())
@@ -151,7 +151,7 @@ func TestManageMyNameNeverTouchesTheSharedCalendar(t *testing.T) {
 }
 
 // A calendar this account can only read still takes the per-user
-// settings: the colour and the name you give it are yours, whatever
+// settings: the color and the name you give it are yours, whatever
 // your access to the calendar is.
 func TestManageOverridesWorkOnAReadOnlyCalendar(t *testing.T) {
 	svc, _ := calendarSeed(t)
@@ -234,9 +234,9 @@ func TestUnsubscribeRefusesThePrimaryCalendar(t *testing.T) {
 // meant: the entry the other change lands on is the one being removed.
 func TestUnsubscribeRefusesToCarryOtherChanges(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	colour := "5"
+	color := "5"
 	_, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
-		Calendar: "team@group.calendar.example.test", Unsubscribe: true, ColorID: &colour,
+		Calendar: "team@group.calendar.example.test", Unsubscribe: true, ColorID: &color,
 	})
 	if cls := classOf(t, err); cls != gapi.ClassInvalid {
 		t.Fatalf("class %s, want invalid", cls)
@@ -311,10 +311,10 @@ func TestManageRefusesAnUnknownTimeZone(t *testing.T) {
 // entry's must never end up on the calendar's write.
 func TestCalendarPatchesCarryTheirOwnETag(t *testing.T) {
 	svc, fake := calendarSeed(t)
-	title, colour := "Renamed", "3"
+	title, color := "Renamed", "3"
 
 	if _, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
-		Calendar: "team@group.calendar.example.test", Title: &title, ColorID: &colour,
+		Calendar: "team@group.calendar.example.test", Title: &title, ColorID: &color,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +669,7 @@ func TestRenamingASharedCalendarKeepsYourOwnNameForIt(t *testing.T) {
 // what the fake actually served, and pin the counts themselves so a
 // second read added later fails here rather than in somebody's quota.
 func TestTheCalendarWritesSpendWhatTheySay(t *testing.T) {
-	colour, title := "5", "Renamed"
+	color, title := "5", "Renamed"
 
 	for _, c := range []struct {
 		name  string
@@ -678,7 +678,7 @@ func TestTheCalendarWritesSpendWhatTheySay(t *testing.T) {
 	}{
 		{name: "manage_calendar, my own view", spend: 3, call: func(svc *service.Service) (int, error) {
 			got, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
-				Calendar: "primary", ColorID: &colour,
+				Calendar: "primary", ColorID: &color,
 			})
 			return got.Requests, err
 		}},
@@ -731,10 +731,10 @@ func TestTheCalendarWritesSpendWhatTheySay(t *testing.T) {
 func TestAWriteKeepsTheCalendarListUsable(t *testing.T) {
 	svc, fake := calendarSeed(t)
 	ctx := context.Background()
-	colour := "5"
+	color := "5"
 
 	if _, err := svc.ManageCalendar(ctx, service.ManageOptions{
-		Calendar: "team@group.calendar.example.test", ColorID: &colour,
+		Calendar: "team@group.calendar.example.test", ColorID: &color,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -774,10 +774,10 @@ func TestAPartialManageCallSaysWhatAlreadyLanded(t *testing.T) {
 	const id = "team@group.calendar.example.test"
 	svc, fake := calendarSeed(t)
 	fake.Fail["PATCH /users/me/calendarList/"] = 500
-	title, colour := "Renamed", "5"
+	title, color := "Renamed", "5"
 
 	_, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
-		Calendar: id, Title: &title, ColorID: &colour,
+		Calendar: id, Title: &title, ColorID: &color,
 	})
 	if err == nil {
 		t.Fatal("the failing half reported success")
@@ -793,7 +793,7 @@ func TestAPartialManageCallSaysWhatAlreadyLanded(t *testing.T) {
 	}
 }
 
-// "Subscribe to this calendar and set my colour on it" is what the tool
+// "Subscribe to this calendar and set my color on it" is what the tool
 // description offers, and a dry run of it has to work: the entry does
 // not exist yet, so reading it 404s and the refusal tells the caller to
 // pass subscribe:true — which they did.
@@ -802,16 +802,16 @@ func TestADryRunCanSubscribeAndSetYourOwnView(t *testing.T) {
 	fake.Calendars["other@group.calendar.example.test"] = &gcal.Calendar{
 		ID: "other@group.calendar.example.test", Summary: "Somebody else's", TimeZone: "UTC",
 	}
-	colour := "7"
+	color := "7"
 
 	got, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
-		Calendar: "other@group.calendar.example.test", Subscribe: true, ColorID: &colour, DryRun: true,
+		Calendar: "other@group.calendar.example.test", Subscribe: true, ColorID: &color, DryRun: true,
 	})
 	if err != nil {
-		t.Fatalf("a dry run of subscribe plus a colour was refused: %v", err)
+		t.Fatalf("a dry run of subscribe plus a color was refused: %v", err)
 	}
 	if len(got.Changes) != 1 || got.Changes[0].Field != "color_id" {
-		t.Fatalf("changes %+v, want the colour it would set", got.Changes)
+		t.Fatalf("changes %+v, want the color it would set", got.Changes)
 	}
 	for _, w := range fake.Wrote() {
 		t.Fatalf("a dry run wrote %s", w.Method)
@@ -824,10 +824,10 @@ func TestAFailedDryRunClaimsNothingLanded(t *testing.T) {
 	const id = "team@group.calendar.example.test"
 	svc, fake := calendarSeed(t)
 	fake.Fail["GET /users/me/calendarList/"] = 500
-	title, colour := "Renamed", "5"
+	title, color := "Renamed", "5"
 
 	_, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
-		Calendar: id, Title: &title, ColorID: &colour, DryRun: true,
+		Calendar: id, Title: &title, ColorID: &color, DryRun: true,
 	})
 	if err == nil {
 		t.Fatal("the failing read reported success")
@@ -842,10 +842,10 @@ func TestAFailedDryRunClaimsNothingLanded(t *testing.T) {
 func TestADryRunShowsBothHalvesOfWhatItWouldDo(t *testing.T) {
 	const id = "team@group.calendar.example.test"
 	svc, _ := calendarSeed(t)
-	title, colour := "Renamed Team", "7"
+	title, color := "Renamed Team", "7"
 
 	got, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
-		Calendar: id, Title: &title, ColorID: &colour, DryRun: true,
+		Calendar: id, Title: &title, ColorID: &color, DryRun: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -854,8 +854,8 @@ func TestADryRunShowsBothHalvesOfWhatItWouldDo(t *testing.T) {
 		t.Fatalf("the calendar shown is titled %q while the change list says it becomes %q:\n%s",
 			got.Calendar.Title, title, got.Text())
 	}
-	if got.Calendar.ColorID != colour {
-		t.Fatalf("colour shown is %q, want the one it would set", got.Calendar.ColorID)
+	if got.Calendar.ColorID != color {
+		t.Fatalf("color shown is %q, want the one it would set", got.Calendar.ColorID)
 	}
 }
 

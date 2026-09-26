@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // MaxOccurrences bounds every expansion.
@@ -66,7 +66,7 @@ func (s Set) ExpandDates(start when.Date, from, to when.Date, limit int) (Occurr
 
 	// An UNTIL that is an instant rather than a date belongs to a timed
 	// series, but nothing stops one arriving on an all-day rule. The
-	// timed path honoured it and this one did not, which is the drift
+	// timed path honored it and this one did not, which is the drift
 	// two copies of a loop produce.
 	var untilDate when.Date
 	if s.Rule != nil && !s.Rule.Until.IsZero() {
@@ -114,7 +114,7 @@ func (s Set) ExpandDates(start when.Date, from, to when.Date, limit int) (Occurr
 
 	// RDATEs are occurrences too, and they are subject to the same
 	// window, the same exclusions and the same limit. Appending them
-	// afterwards, as the first version did, reported a date 73 years
+	// afterward, as the first version did, reported a date 73 years
 	// outside the requested window as being inside it.
 	for _, p := range s.Added {
 		if !p.AllDay || !wanted(p.Date) || seen[p.Date] {
@@ -138,7 +138,7 @@ func (s Set) ExpandDates(start when.Date, from, to when.Date, limit int) (Occurr
 //
 // The zone is load-bearing and is why this takes a when.Zoned rather
 // than an instant: each occurrence is the same WALL CLOCK on a later
-// date, resolved in that zone afterwards. A weekly 09:00 stays 09:00
+// date, resolved in that zone afterward. A weekly 09:00 stays 09:00
 // across a transition, which is what Google's own expansion does and
 // what §2.2 requires the write to carry.
 func (s Set) ExpandTimes(start when.Zoned, from, to when.Zoned, limit int) (Occurrences, error) {
@@ -353,7 +353,7 @@ func weeklyWalker(start when.Date, r Rule) func() (when.Date, bool) {
 //
 // BYDAY with an ordinal ("the second Tuesday") and BYMONTHDAY are both
 // resolved here; a month that has no such day yields nothing and the
-// walk moves on, which is the behaviour RFC 5545 specifies and the
+// walk moves on, which is the behavior RFC 5545 specifies and the
 // reason the guard above counts candidates.
 func monthlyWalker(start when.Date, r Rule) func() (when.Date, bool) {
 	year, month := start.Year, start.Month
@@ -425,7 +425,7 @@ func monthCandidates(year int, month time.Month, start when.Date, r Rule) []when
 	return out
 }
 
-// yearlyWalker yields one date per interval-th year, honouring BYMONTH
+// yearlyWalker yields one date per interval-th year, honoring BYMONTH
 // and BYMONTHDAY when they are present.
 func yearlyWalker(start when.Date, r Rule) func() (when.Date, bool) {
 	year := start.Year

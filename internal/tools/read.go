@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 // The window arguments every schedule read shares. Said once here and
@@ -56,7 +56,7 @@ func registerRead(s *mcp.Server, d Deps) {
 			"default) a repeating event appears as each of its occurrences, which is what you want to answer " +
 			"\"what is on this week\". With expand=false it appears once, as a series with its recurrence rule, " +
 			"which is what you want before changing the whole series. " +
-			"Cancelled events are hidden unless show_cancelled is set. " +
+			"Canceled events are hidden unless show_canceled is set. " +
 			"Use search_events to find an event by text; use check_availability to find free time, because a list " +
 			"of events is not the same as being free.",
 		Kind: Read,
@@ -64,9 +64,9 @@ func registerRead(s *mcp.Server, d Deps) {
 			sched, err := d.Service.ListEvents(ctx, service.ListOptions{
 				Calendars: in.Calendars, TimeZone: in.TimeZone,
 				From: in.From, To: in.To,
-				Expand:        !in.NoExpand,
-				ShowCancelled: in.ShowCancelled,
-				MaxEvents:     in.MaxEvents, PageToken: in.PageToken,
+				Expand:       !in.NoExpand,
+				ShowCanceled: in.ShowCanceled,
+				MaxEvents:    in.MaxEvents, PageToken: in.PageToken,
 			})
 			if err != nil {
 				return service.ScheduleResult{}, err
@@ -121,14 +121,14 @@ func registerRead(s *mcp.Server, d Deps) {
 			"occurrence's own id is not a series id. " +
 			"Pass both from and to for a window, or neither for the whole series. " + zoneHelp + " " +
 			"Each occurrence reports its own id, and says when it was moved from its scheduled time. " +
-			"Cancelled occurrences are hidden unless show_cancelled is set, and a cancelled occurrence is " +
+			"Canceled occurrences are hidden unless show_canceled is set, and a canceled occurrence is " +
 			"how one date is removed from a series — so pass it when you need to know which dates are gone. " +
 			"Use get_event on the series id to see the recurrence rule itself.",
 		Kind: Read,
 		Handle: func(ctx context.Context, in listInstancesIn) (service.InstancesResult, error) {
 			out, err := d.Service.Instances(ctx, service.InstanceOptions{
 				Calendar: in.Calendar, EventID: in.EventID, TimeZone: in.TimeZone,
-				From: in.From, To: in.To, ShowCancelled: in.ShowCancelled,
+				From: in.From, To: in.To, ShowCanceled: in.ShowCanceled,
 				MaxEvents: in.MaxEvents, PageToken: in.PageToken,
 			})
 			if err != nil {
@@ -198,7 +198,7 @@ func registerRead(s *mcp.Server, d Deps) {
 	add(s, d, Def[getSettingsIn, service.SettingsResult]{
 		Name: "get_settings",
 		Description: "The account's own Calendar settings: its time zone, which day the week starts on, and the " +
-			"colour palette. The time zone here is the last fallback for every other tool, so read it when you " +
+			"color palette. The time zone here is the last fallback for every other tool, so read it when you " +
 			"need to know what \"today\" or \"9am\" means for this person.",
 		Kind: Read,
 		Handle: func(ctx context.Context, _ getSettingsIn) (service.SettingsResult, error) {
@@ -226,10 +226,10 @@ type listEventsIn struct {
 	// Spelled as the negative so the default (expand) is the zero value.
 	// A model that omits it gets occurrences, which is what "what is on
 	// this week" means.
-	NoExpand      bool   `json:"no_expand,omitempty" jsonschema:"Return repeating events once as a series with its rule, instead of as each occurrence."`
-	ShowCancelled bool   `json:"show_cancelled,omitempty" jsonschema:"Include cancelled events, which are hidden by default."`
-	MaxEvents     int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
-	PageToken     string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+	NoExpand     bool   `json:"no_expand,omitempty" jsonschema:"Return repeating events once as a series with its rule, instead of as each occurrence."`
+	ShowCanceled bool   `json:"show_canceled,omitempty" jsonschema:"Include canceled events, which are hidden by default."`
+	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
+	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
 }
 
 type searchEventsIn struct {
@@ -249,14 +249,14 @@ type getEventIn struct {
 }
 
 type listInstancesIn struct {
-	Calendar      string `json:"calendar" jsonschema:"The calendar the series is on."`
-	EventID       string `json:"event_id" jsonschema:"The repeating event's id. On an occurrence from list_events this is its series_id, not its own id."`
-	From          string `json:"from,omitempty" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Pass both from and to, or neither."`
-	To            string `json:"to,omitempty" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Pass both from and to, or neither."`
-	TimeZone      string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the occurrences in."`
-	ShowCancelled bool   `json:"show_cancelled,omitempty" jsonschema:"Include occurrences that were cancelled, which is how single dates are removed from a series."`
-	MaxEvents     int    `json:"max_events,omitempty" jsonschema:"Cap on occurrences returned. The server has its own budget and says when it truncated."`
-	PageToken     string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+	Calendar     string `json:"calendar" jsonschema:"The calendar the series is on."`
+	EventID      string `json:"event_id" jsonschema:"The repeating event's id. On an occurrence from list_events this is its series_id, not its own id."`
+	From         string `json:"from,omitempty" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Pass both from and to, or neither."`
+	To           string `json:"to,omitempty" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Pass both from and to, or neither."`
+	TimeZone     string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the occurrences in."`
+	ShowCanceled bool   `json:"show_canceled,omitempty" jsonschema:"Include occurrences that were canceled, which is how single dates are removed from a series."`
+	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on occurrences returned. The server has its own budget and says when it truncated."`
+	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
 }
 
 type listChangesIn struct {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
 )
 
 // The calendar and sharing results (§7.5, §7.6).

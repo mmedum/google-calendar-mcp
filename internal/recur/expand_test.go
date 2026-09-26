@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // Zones, chosen for what each one proves (the same set internal/when
@@ -432,11 +432,11 @@ func TestBoundedRuleThatProducesNothing(t *testing.T) {
 	wantWalls(t, occ.Times, []string{"2026-01-31 09:00", "2026-03-31 09:00", "2026-05-31 09:00"})
 }
 
-// TestAllDaySeriesHonoursAnInstantUntil: an UNTIL that is an instant
+// TestAllDaySeriesHonorsAnInstantUntil: an UNTIL that is an instant
 // belongs to a timed series, and nothing stops one arriving on an
-// all-day rule. The timed path honoured it while the date path ignored
+// all-day rule. The timed path honored it while the date path ignored
 // it, which is what two copies of one loop drift into.
-func TestAllDaySeriesHonoursAnInstantUntil(t *testing.T) {
+func TestAllDaySeriesHonorsAnInstantUntil(t *testing.T) {
 	set := mustParse(t, "RRULE:FREQ=DAILY;UNTIL=20260318T235959Z")
 	occ, err := set.ExpandDates(when.MustParseDate("2026-03-16"), when.Date{}, when.Date{}, 0)
 	if err != nil {
@@ -531,10 +531,10 @@ func TestMonthlyIntersectsByDayAndByMonthDay(t *testing.T) {
 	}
 }
 
-// TestYearlyHonoursAnOrdinalByDay is every fourth-Thursday holiday rule.
+// TestYearlyHonorsAnOrdinalByDay is every fourth-Thursday holiday rule.
 // BYDAY was never read on a yearly rule, so the series silently used the
 // start's day of the month and came back wrong rather than refused.
-func TestYearlyHonoursAnOrdinalByDay(t *testing.T) {
+func TestYearlyHonorsAnOrdinalByDay(t *testing.T) {
 	set := mustParse(t, "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=4TH;COUNT=3")
 	occ, err := set.ExpandDates(when.MustParseDate("2026-11-26"), when.Date{}, when.Date{}, 0)
 	if err != nil {

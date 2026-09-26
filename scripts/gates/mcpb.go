@@ -147,9 +147,9 @@ func mcpbGate() error {
 		problems = append(problems, err.Error())
 	}
 
-	if want := licenceOf(); want != "" && m.License != want {
+	if want := licenseOf(); want != "" && m.License != want {
 		problems = append(problems, fmt.Sprintf(
-			"the manifest says the licence is %q and LICENSE is %s", m.License, want))
+			"the manifest says the license is %q and LICENSE is %s", m.License, want))
 	}
 	if len(problems) > 0 {
 		sort.Strings(problems)
@@ -314,14 +314,14 @@ func readManifest(path string) (manifest, error) {
 	return m, nil
 }
 
-// licenceOf reads the SPDX identifier the repository's LICENSE file
+// licenseOf reads the SPDX identifier the repository's LICENSE file
 // carries, so the manifest cannot claim a different one.
 //
 // It is a referential check like the others: "MIT" in a manifest beside
-// an Apache licence is well formed, packs, installs, and is wrong about
+// an Apache license is well formed, packs, installs, and is wrong about
 // the one thing a redistributor reads it for. The first draft of this
 // manifest said MIT.
-func licenceOf() string {
+func licenseOf() string {
 	data, err := os.ReadFile("LICENSE")
 	if err != nil {
 		return ""

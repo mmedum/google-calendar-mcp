@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 // Incremental sync (§17.1). The claims worth holding are not "it lists
@@ -30,11 +30,11 @@ func TestChangesBaselineHandsBackAToken(t *testing.T) {
 		t.Fatal("the baseline read the whole calendar and should report itself complete")
 	}
 	// A baseline reads with showDeleted=true like every call in the
-	// series, so it picks up whatever is already cancelled. Those are
+	// series, so it picks up whatever is already canceled. Those are
 	// not deletions "since" anything, and the text must not call them
 	// that — there was no since yet.
 	if strings.Contains(got.Text(), "Deleted (") {
-		t.Fatalf("a baseline called already-cancelled events deletions:\n%s", got.Text())
+		t.Fatalf("a baseline called already-canceled events deletions:\n%s", got.Text())
 	}
 	if got.Zone.Name() == "" {
 		t.Fatal("the result does not name the zone it rendered in (§4.5)")

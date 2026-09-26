@@ -1,8 +1,8 @@
-Cancelled "Weekly review" on Sample Primary.
+Canceled "Weekly review" on Sample Primary.
 scope: instance
 
   before: 2026-03-24  14:00-15:00  Weekly review  [one occurrence]
-  after:  (cancelled)
+  after:  (canceled)
 
 changed:
   status: confirmed → cancelled
@@ -11,6 +11,6 @@ Nobody to notify: this write reaches no guests, so no notification was requested
 
 This event has no guests, so nobody else is holding it.
 
-One occurrence, cancelled with a status patch rather than deleted.
+One occurrence, canceled with a status patch rather than deleted.
 
 times are in Europe/Copenhagen, the calendar's own time zone

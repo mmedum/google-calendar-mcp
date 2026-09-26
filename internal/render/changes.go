@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // Changes is what `list_changes` answers with (§17.1).
@@ -84,10 +84,10 @@ func (c Changes) Text() string {
 		// sync series — Google forbids false alongside a token, and the
 		// discovery document asks for the other parameters to match the
 		// initial read — so a baseline picks up whatever is ALREADY
-		// cancelled on the calendar. Those were not deleted since
+		// canceled on the calendar. Those were not deleted since
 		// anything; there was no "since" yet.
 		if c.Baseline {
-			fmt.Fprintf(&b, "Already cancelled (%d)\n", len(c.Deleted))
+			fmt.Fprintf(&b, "Already canceled (%d)\n", len(c.Deleted))
 		} else {
 			fmt.Fprintf(&b, "Deleted (%d)\n", len(c.Deleted))
 		}

@@ -16,7 +16,7 @@ and Drive APIs.
 
 ## Hard rules
 
-1. **Nothing internal, ever.** No organisation names, calendar ids or
+1. **Nothing internal, ever.** No organization names, calendar ids or
    URLs, account or attendee email addresses, Cloud project ids, OAuth
    client ids or secrets; no event title, description, location or guest
    list from a real calendar; and no reference to any other project,
@@ -135,16 +135,17 @@ and Drive APIs.
 
 `make check`, which is what CI runs, asserted equal by the `parity` gate:
 gofmt, `go vet` including the tagged tests, golangci-lint, race tests
-with an 80% floor per package, govulncheck, the licence allow-list,
+with an 80% floor per package, govulncheck, the license allow-list,
 gitleaks, the API method and field coverage gates, the closed
 error-class gate, the leak scan, the transcript redaction gate, the live
 driver coverage gate, the bundle manifest gate, the eval scorers'
 self-check, the workflow pin check, a
 stdio smoke test, the schema diff, and the staleness gate over README,
-`docs/` and CHANGELOG. Plus tests for new behaviour, `/simplify` and
+`docs/` and CHANGELOG. Plus tests for new behavior, `/simplify` and
 `/code-review high` with findings resolved or written down, and a look at
 the schema diff for anything breaking — which now covers the resources
-as well as the tools.
+as well as the tools. The release workflow refuses a tag whose major
+version is not go.mod's, before goreleaser runs.
 
 Green gates are not done. Anything touching the write path or an API
 response shape gets a live run before it counts, and **the transcript is
