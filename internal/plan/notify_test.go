@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
 )
 
 // §4.3's whole point is that there is no default, so the first thing to
@@ -54,15 +54,15 @@ func TestNotifyIsNotAskedWhenNobodyIsReached(t *testing.T) {
 }
 
 // Inviting yourself is not reaching somebody.
-func TestTheOrganiserIsNotAGuest(t *testing.T) {
+func TestTheOrganizerIsNotAGuest(t *testing.T) {
 	r := plan.ReachOfAddresses("me@example.test", []string{"ME@example.test"})
 	if r.Any() {
-		t.Fatalf("the organiser's own address counted as a guest: %+v", r)
+		t.Fatalf("the organizer's own address counted as a guest: %+v", r)
 	}
 }
 
 // §4.3.4 and spike B: `none` is refused, not warned about, when a guest
-// is outside the organiser's domain. That guest may have no calendar for
+// is outside the organizer's domain. That guest may have no calendar for
 // the event to land in, so mail is the only channel there is.
 func TestNoneIsRefusedForAnOutOfDomainGuest(t *testing.T) {
 	r := plan.ReachOfAddresses("me@example.test", []string{"inside@example.test", "outside@elsewhere.test"})
@@ -98,12 +98,12 @@ func TestNoneIsAllowedInsideTheDomain(t *testing.T) {
 	}
 }
 
-// An unknown organiser domain makes every guest external, which fails
-// towards the refusal rather than past it.
-func TestAnUnknownOrganiserDomainCountsEverybodyAsOutside(t *testing.T) {
+// An unknown organizer domain makes every guest external, which fails
+// toward the refusal rather than past it.
+func TestAnUnknownOrganizerDomainCountsEverybodyAsOutside(t *testing.T) {
 	r := plan.ReachOfAddresses("", []string{"a@example.test"})
 	if r.External != 1 {
-		t.Fatalf("with no organiser domain every guest is external; got %+v", r)
+		t.Fatalf("with no organizer domain every guest is external; got %+v", r)
 	}
 	if _, err := plan.Notification("none", r); !errors.Is(err, plan.ErrBlocked) {
 		t.Fatalf("want [blocked] when the domain is unknown, got %v", err)
@@ -209,7 +209,7 @@ func TestAChoiceOnAWriteThatReachesNobodyStillReportsNobody(t *testing.T) {
 	if strings.Contains(d.Report(), "0 guests") {
 		t.Fatalf("the report counts guests that are not there: %q", d.Report())
 	}
-	// The choice is still honoured on the wire — it costs nothing and it
+	// The choice is still honored on the wire — it costs nothing and it
 	// is what the caller asked for.
 	if d.SendUpdatesFor() != gcal.SendUpdatesNone {
 		t.Fatalf("the caller's choice was dropped: %q", d.SendUpdatesFor())

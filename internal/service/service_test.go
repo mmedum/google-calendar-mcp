@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/config"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 func newService(t *testing.T, s *caltest.Server) *service.Service {
@@ -163,8 +163,8 @@ func TestListEventsRejectsABackwardsWindow(t *testing.T) {
 	}
 }
 
-// TestCancelledEventsAreHiddenByDefault is §2.13.
-func TestCancelledEventsAreHiddenByDefault(t *testing.T) {
+// TestCanceledEventsAreHiddenByDefault is §2.13.
+func TestCanceledEventsAreHiddenByDefault(t *testing.T) {
 	svc, _ := seeded(t)
 	ctx := context.Background()
 	opts := service.ListOptions{From: "2026-03-18", To: "2026-03-19"}
@@ -174,24 +174,24 @@ func TestCancelledEventsAreHiddenByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range hidden.Events {
-		if e.Cancelled() {
-			t.Fatalf("a cancelled event appeared without show_cancelled: %s", e.Title)
+		if e.Canceled() {
+			t.Fatalf("a canceled event appeared without show_canceled: %s", e.Title)
 		}
 	}
 
-	opts.ShowCancelled = true
+	opts.ShowCanceled = true
 	shown, err := svc.ListEvents(ctx, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, e := range shown.Events {
-		if e.Cancelled() {
+		if e.Canceled() {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("show_cancelled did not reveal the cancelled event")
+		t.Fatal("show_canceled did not reveal the canceled event")
 	}
 }
 
@@ -638,16 +638,16 @@ func TestHiddenCalendarStillResolvesByTitle(t *testing.T) {
 	}
 }
 
-// TestCancelledInstancesAreHiddenInSeriesMode is the live run's second
+// TestCanceledInstancesAreHiddenInSeriesMode is the live run's second
 // defect, as the reproduction that found it.
 //
 // The server passed showDeleted=false and trusted Google to filter.
-// The discovery document says otherwise: "Cancelled instances of
+// The discovery document says otherwise: "Canceled instances of
 // recurring events (but not the underlying recurring event) will still
 // be included if showDeleted and singleEvents are both False." One came
 // back with no start and no summary, so a series listing rendered a row
 // with no date and no title, and counted it among the results.
-func TestCancelledInstancesAreHiddenInSeriesMode(t *testing.T) {
+func TestCanceledInstancesAreHiddenInSeriesMode(t *testing.T) {
 	fake := caltest.Seed()
 	// The shape Google actually sends, which is the half a populated
 	// fixture cannot show: an id, a status, the series it belongs to and
@@ -657,7 +657,7 @@ func TestCancelledInstancesAreHiddenInSeriesMode(t *testing.T) {
 	// window, so it would land in every other test's counts.
 	fake.AddEvent("primary", &gcal.Event{
 		ID:                "ev-weekly_20260414T120000Z",
-		Status:            gcal.StatusCancelled,
+		Status:            gcal.StatusCanceled,
 		RecurringEventID:  "ev-weekly",
 		OriginalStartTime: &gcal.EventDateTime{DateTime: "2026-04-14T14:00:00+02:00"},
 	})
@@ -670,8 +670,8 @@ func TestCancelledInstancesAreHiddenInSeriesMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range got.Events {
-		if e.Cancelled() {
-			t.Fatalf("a cancelled instance survived a series read without show_cancelled: %q", e.ID)
+		if e.Canceled() {
+			t.Fatalf("a canceled instance survived a series read without show_canceled: %q", e.ID)
 		}
 	}
 	if got.Matched != len(got.Events) {
@@ -680,14 +680,14 @@ func TestCancelledInstancesAreHiddenInSeriesMode(t *testing.T) {
 	}
 
 	// And it is still reachable when asked for, from the same read.
-	opts.ShowCancelled = true
+	opts.ShowCanceled = true
 	shown, err := svc.ListEvents(ctx, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
 	found, bare := false, false
 	for _, e := range shown.Events {
-		if e.Cancelled() && e.SeriesID != "" {
+		if e.Canceled() && e.SeriesID != "" {
 			found = true
 		}
 		if e.ID == "ev-weekly_20260414T120000Z" {
@@ -695,12 +695,12 @@ func TestCancelledInstancesAreHiddenInSeriesMode(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("show_cancelled did not reveal the cancelled occurrence")
+		t.Fatal("show_canceled did not reveal the canceled occurrence")
 	}
 	// The bare row survives conversion and rendering when it is asked
 	// for. A start-less event must not fail the whole read.
 	if !bare {
-		t.Fatal("the bare cancelled instance did not survive show_cancelled")
+		t.Fatal("the bare canceled instance did not survive show_canceled")
 	}
 	// Rendering it must not panic on the missing start either.
 	if txt := shown.Text(); txt == "" {
@@ -708,19 +708,19 @@ func TestCancelledInstancesAreHiddenInSeriesMode(t *testing.T) {
 	}
 }
 
-// TestFilteringCancelledDoesNotBuyExtraPages.
+// TestFilteringCanceledDoesNotBuyExtraPages.
 //
 // The budget is a bound on what the read SPENDS, not on what survives a
 // filter. Counting kept events made every filtered row leave the budget
 // one short, so the loop fetched another page: a window whose first
-// twenty rows are cancelled cost twenty-one requests to return one
+// twenty rows are canceled cost twenty-one requests to return one
 // event. That is §4.7 failing in the direction the result cannot show,
 // and it is the second time in this phase — check_availability spent 168
 // requests to report 2.
-func TestFilteringCancelledDoesNotBuyExtraPages(t *testing.T) {
+func TestFilteringCanceledDoesNotBuyExtraPages(t *testing.T) {
 	fake := caltest.Seed()
 	tz := "Europe/Copenhagen"
-	// Twenty cancelled occurrences, all sorting before anything the
+	// Twenty canceled occurrences, all sorting before anything the
 	// caller wants. Google returns these in a series read whatever
 	// showDeleted says, so the server is the one that drops them.
 	for i := range 20 {
@@ -728,7 +728,7 @@ func TestFilteringCancelledDoesNotBuyExtraPages(t *testing.T) {
 		inst := caltest.Instance(
 			fmt.Sprintf("ev-noise_2026050%02dT080000Z", i+1), "ev-noise", "Noise",
 			day+"T10:00:00+02:00", day+"T11:00:00+02:00", tz, day+"T10:00:00+02:00")
-		inst.Status = gcal.StatusCancelled
+		inst.Status = gcal.StatusCanceled
 		fake.AddEvent("primary", inst)
 	}
 	fake.AddEvent("primary", caltest.Timed("ev-real", "The one event",
@@ -742,7 +742,7 @@ func TestFilteringCancelledDoesNotBuyExtraPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Requests > 2 {
-		t.Fatalf("spent %d requests to read one event past twenty cancelled rows; "+
+		t.Fatalf("spent %d requests to read one event past twenty canceled rows; "+
 			"the budget bounds what is drained, not what survives (§4.7)", got.Requests)
 	}
 }

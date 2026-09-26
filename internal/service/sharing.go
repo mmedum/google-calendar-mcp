@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
 )
 
 // The sharing tools (§7.6): list_sharing, share_calendar,
@@ -297,7 +297,7 @@ func (s *Service) UnshareCalendar(ctx context.Context, o UnshareOptions) (render
 	}
 	// Removing your own rule from your own calendar is a door locked
 	// from the inside. Google may or may not refuse it; this server does,
-	// because the caller cannot undo it afterwards — the tool that would
+	// because the caller cannot undo it afterward — the tool that would
 	// put the rule back needs the access the rule grants.
 	//
 	// Asked only of a rule that names one person. A domain or public rule

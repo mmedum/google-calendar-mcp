@@ -21,10 +21,10 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make lint` | golangci-lint, including `forbidigo` for the stdout rule |
 | `make cover` | race tests, and an 80% floor **per package**, not on the average |
 | `make vuln` | govulncheck |
-| `make licenses` | the dependency licence allow-list |
+| `make licenses` | the dependency license allow-list |
 | `make secrets` | gitleaks |
 | `make api-coverage` | every published API method is used or written off, with a reason |
-| `make api-fields` | every published field of the four main resources is modelled or written off, with a reason |
+| `make api-fields` | every published field of the four main resources is modeled or written off, with a reason |
 | `make classes` | the error vocabulary is closed **from both sides** |
 | `make leaks` | no deployer-specific data in the tree |
 | `make pins` | actions pinned to SHAs, tools pinned to versions, and a tool run locally pinned to the version the release runs |
@@ -33,7 +33,7 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make schema-diff` | the tool surface against the last tag |
 | `make smoke` | the binary over stdio, and a clean exit on disconnect |
 | `make mcpb` | the bundle manifest describes the bundle the packer stages |
-| `make release` | `.goreleaser.yaml` builds what the packer stages, and signs and uploads it |
+| `make release` | `.goreleaser.yaml` builds what the packer stages, and signs and uploads it; `release.yml` runs `gates release-tag` before goreleaser |
 | `make staleness` | README, `docs/` and the code agree |
 
 Two are manual because they need the network:
@@ -89,7 +89,7 @@ What it does to the account, so nothing is a surprise:
 
 ## Cutting a release
 
-That is `docs/release.md`: what the tag does, what to check afterwards,
+That is `docs/release.md`: what the tag does, what to check afterward,
 and the three steps no rehearsal reaches.
 
 ## Adding a tool

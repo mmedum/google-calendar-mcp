@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 )
 
 // BaseURL is the API root. A var so caltest can point it at a fake.
@@ -61,7 +61,7 @@ func backoff(attempt int) time.Duration {
 	if d > MaxBackoff {
 		d = MaxBackoff
 	}
-	// Jitter spreads retries so a fleet does not resynchronise on the
+	// Jitter spreads retries so a fleet does not resynchronize on the
 	// same second. It is a scheduling nicety, not a secret, so a
 	// cryptographic source would cost entropy for nothing.
 	return d + time.Duration(rand.IntN(1000))*time.Millisecond //nolint:gosec // jitter, not a secret
@@ -422,7 +422,7 @@ func (c *Client) ListSettings(ctx context.Context) (*gcal.Settings, error) {
 	return &out, nil
 }
 
-// GetColors returns the colour palette, so a result can name a colour
+// GetColors returns the color palette, so a result can name a color
 // instead of printing an id.
 func (c *Client) GetColors(ctx context.Context) (*gcal.Colors, error) {
 	var out gcal.Colors
@@ -557,7 +557,7 @@ func (c *Client) MoveEvent(ctx context.Context, calendarID, eventID, destination
 // only the third is new:
 //
 //   - If-Match carries the etag from the read that produced the plan,
-//     exactly as on an event. Whether Google honours it here is spike K:
+//     exactly as on an event. Whether Google honors it here is spike K:
 //     until that is answered, the result says the header was sent and
 //     does not claim it protected anything.
 //   - sendNotifications is sent on EVERY acl.insert and acl.patch, true
@@ -637,7 +637,7 @@ func (c *Client) InsertCalendarListEntry(ctx context.Context, e *gcal.CalendarLi
 
 // PatchCalendarListEntry changes this user's own overrides.
 //
-// No colorRgbFormat, and that is the whole decision about colour on the
+// No colorRgbFormat, and that is the whole decision about color on the
 // wire: the parameter tells Google to read backgroundColor and
 // foregroundColor instead of the indexed colorId, and this server writes
 // the indexed one. Sending it would ask Google to read two fields this

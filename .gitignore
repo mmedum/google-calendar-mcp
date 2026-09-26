@@ -11,7 +11,7 @@
 /livecal.exe
 /dist/
 
-# Test and gate artefacts
+# Test and gate artifacts
 cov.out
 schemas.json
 

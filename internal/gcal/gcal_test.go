@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 )
 
 // TestEventDateTimeIsAUnion: date and dateTime are mutually exclusive on
@@ -39,7 +39,7 @@ func TestOmitemptyKeepsAPatchMinimal(t *testing.T) {
 	got := string(b)
 	for _, forbidden := range []string{"attendees", "recurrence", "start", "end", "description", "location"} {
 		if strings.Contains(got, forbidden) {
-			t.Fatalf("an unset field %q was serialised; a patch built from this would clear it: %s", forbidden, got)
+			t.Fatalf("an unset field %q was serialized; a patch built from this would clear it: %s", forbidden, got)
 		}
 	}
 	if !strings.Contains(got, "Only a title") {
@@ -84,7 +84,7 @@ func TestRoleMeansExplainsEveryRole(t *testing.T) {
 		}
 	}
 	if gcal.RoleMeans("unknown") == "" {
-		t.Fatal("an unrecognised role got no explanation at all")
+		t.Fatal("an unrecognized role got no explanation at all")
 	}
 }
 

@@ -19,7 +19,7 @@ import (
 // be the ordinary choice, and it brings eleven transitive modules into
 // the module graph of a binary whose whole distribution story is
 // supply-chain hygiene — an SBOM per archive, a signature over the
-// checksums, govulncheck and a licence allow-list on every commit — to
+// checksums, govulncheck and a license allow-list on every commit — to
 // make one shape of request from maintainer tooling that never ships.
 // The shape below is four fields and a loop.
 //

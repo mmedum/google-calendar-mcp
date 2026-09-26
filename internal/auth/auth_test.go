@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/auth"
 )
 
 // TestScopesNeverIncludeTheBroadScope is §10 and §9 together: the broad

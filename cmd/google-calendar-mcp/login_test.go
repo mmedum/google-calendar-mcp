@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
 )
 
 // fakeKeyring stands in for the OS keyring. Every test in this file
@@ -279,7 +279,7 @@ func TestDoctorAfterLogin(t *testing.T) {
 }
 
 // TestBuildServiceFailsWithoutCredentialsAndTheServerStartsAnyway is the
-// pair of behaviours that let a client discover this server before
+// pair of behaviors that let a client discover this server before
 // anybody has logged in.
 func TestBuildServiceFailsWithoutCredentialsAndTheServerStartsAnyway(t *testing.T) {
 	_, env := setupLogin(t) // client JSON written, but no login run

@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 func zone(t *testing.T) when.Zone {
@@ -304,7 +304,7 @@ func TestNoSplitRefusesThisAndFollowing(t *testing.T) {
 	}
 }
 
-func TestEmptyDraftIsRecognised(t *testing.T) {
+func TestEmptyDraftIsRecognized(t *testing.T) {
 	if !(plan.Draft{}).Empty() {
 		t.Error("a draft with nothing in it must report itself empty")
 	}

@@ -24,6 +24,7 @@ on:
 jobs:
   goreleaser:
     steps:
+      - run: go run ./scripts/gates release-tag "${REF_NAME}"
       - run: go run ./scripts/gates release-notes "${REF_NAME}" > notes.md
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
         with:
@@ -317,6 +318,22 @@ func TestTheWaysTheReleaseWiringBreaks(t *testing.T) {
 				*workflow = strings.ReplaceAll(*workflow, "--release-notes", "--rm-dist")
 			},
 			want: "generated from commit subjects",
+		},
+		{
+			name: "a workflow that never checks the tag's major version",
+			breaks: func(_ *goreleaserConfig, _ *[]staged, _ *string, workflow *string) {
+				*workflow = strings.ReplaceAll(*workflow, "gates release-tag", "gates pins")
+			},
+			want: "does not run `gates release-tag` before goreleaser",
+		},
+		{
+			// After goreleaser is after the publish.
+			name: "a workflow that checks the tag once it has shipped",
+			breaks: func(_ *goreleaserConfig, _ *[]staged, _ *string, workflow *string) {
+				*workflow = strings.Replace(*workflow, "      - run: go run ./scripts/gates release-tag \"${REF_NAME}\"\n", "", 1)
+				*workflow += "      - run: go run ./scripts/gates release-tag \"${REF_NAME}\"\n"
+			},
+			want: "does not run `gates release-tag` before goreleaser",
 		},
 		{
 			name: "a release nothing but a human can start",

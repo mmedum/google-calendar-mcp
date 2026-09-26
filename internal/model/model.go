@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // Calendar is a calendar as this server presents it.
@@ -181,8 +181,8 @@ func (e Event) IsInstance() bool { return e.SeriesID != "" }
 // IsRecurring reports whether a write here needs a scope (§4.2).
 func (e Event) IsRecurring() bool { return e.IsSeries() || e.IsInstance() }
 
-// Cancelled reports whether the event is cancelled (§2.13).
-func (e Event) Cancelled() bool { return e.Status == gcal.StatusCancelled }
+// Canceled reports whether the event is canceled (§2.13).
+func (e Event) Canceled() bool { return e.Status == gcal.StatusCanceled }
 
 // Moved reports whether this occurrence sits somewhere other than where
 // the series put it.

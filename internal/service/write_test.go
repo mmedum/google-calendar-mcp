@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 // writeSeed is a calendar whose event ids are legal base32hex (§2.11).
@@ -55,7 +55,7 @@ func writeSeed(t *testing.T) (*service.Service, *caltest.Server) {
 		"Weekly review", "2026-03-31T14:00:00+02:00", "2026-03-31T15:00:00+02:00", tz,
 		"2026-03-31T14:00:00+02:00"))
 
-	// An invitation this account has not answered, organised elsewhere.
+	// An invitation this account has not answered, organized elsewhere.
 	invite := caltest.Timed("evinvite001", "Somebody else's meeting",
 		"2026-03-19T13:00:00+01:00", "2026-03-19T14:00:00+01:00", tz)
 	invite.Organizer = &gcal.EventPerson{Email: "host@example.test"}
@@ -126,7 +126,7 @@ func TestCreateEventRefusesWithoutNotifyWhenItHasGuests(t *testing.T) {
 	}
 }
 
-// §4.3.4: `none` is refused when a guest is outside the organiser's
+// §4.3.4: `none` is refused when a guest is outside the organizer's
 // domain, because that guest may have no calendar for the event to
 // appear in (spike B).
 func TestCreateEventRefusesNoneForAnOutsideGuest(t *testing.T) {
@@ -419,10 +419,10 @@ func TestAWriteToAReadOnlyCalendarIsForbidden(t *testing.T) {
 	}
 }
 
-// ----------------------------------------------------------- cancelling
+// ----------------------------------------------------------- canceling
 
 // §7.4: two API shapes behind one verb, and the result names which.
-func TestCancellingAWholeEventDeletesIt(t *testing.T) {
+func TestCancelingAWholeEventDeletesIt(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001",
@@ -439,7 +439,7 @@ func TestCancellingAWholeEventDeletesIt(t *testing.T) {
 	}
 }
 
-func TestCancellingOneOccurrenceIsAStatusPatch(t *testing.T) {
+func TestCancelingOneOccurrenceIsAStatusPatch(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evseries001_20260324T130000Z", Scope: "instance",
@@ -451,18 +451,18 @@ func TestCancellingOneOccurrenceIsAStatusPatch(t *testing.T) {
 	if len(w) != 1 || w[0].Method != "patch" {
 		t.Fatalf("got %+v, want one status patch", w)
 	}
-	if out.After == nil || out.After.Status != gcal.StatusCancelled {
-		t.Fatalf("the occurrence should come back cancelled, got %+v", out.After)
+	if out.After == nil || out.After.Status != gcal.StatusCanceled {
+		t.Fatalf("the occurrence should come back canceled, got %+v", out.After)
 	}
 	if !strings.Contains(out.Text(), "rather than deleted") {
 		t.Errorf("the result must explain why an occurrence is patched, not deleted:\n%s", out.Text())
 	}
 }
 
-// §4.3.3: cancelling with no notification removes it from the
-// organiser's calendar and leaves it on the guests' (§18 row 43). The
+// §4.3.3: canceling with no notification removes it from the
+// organizer's calendar and leaves it on the guests' (§18 row 43). The
 // result says so, because that is the sentence a caller most needs.
-func TestCancellingQuietlySaysTheGuestsStillHaveIt(t *testing.T) {
+func TestCancelingQuietlySaysTheGuestsStillHaveIt(t *testing.T) {
 	svc, _ := writeSeed(t)
 	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evguests001", Notify: "all",
@@ -488,11 +488,11 @@ func TestCancellingQuietlySaysTheGuestsStillHaveIt(t *testing.T) {
 	}
 }
 
-func TestCancellingSomethingAlreadyCancelledIsAConflict(t *testing.T) {
+func TestCancelingSomethingAlreadyCanceledIsAConflict(t *testing.T) {
 	svc, fake := writeSeed(t)
 	gone := caltest.Timed("evgone00001", "Already gone",
 		"2026-03-18T10:00:00+01:00", "2026-03-18T11:00:00+01:00", "Europe/Copenhagen")
-	gone.Status = gcal.StatusCancelled
+	gone.Status = gcal.StatusCanceled
 	fake.AddEvent("me@example.test", gone)
 
 	_, err := svc.CancelEvent(context.Background(), service.CancelOptions{
@@ -503,9 +503,9 @@ func TestCancellingSomethingAlreadyCancelledIsAConflict(t *testing.T) {
 	}
 }
 
-// Cancelling "this and following" is ONE call: nothing has to start
+// Canceling "this and following" is ONE call: nothing has to start
 // again, so the pattern collapses to truncating the original.
-func TestCancellingThisAndFollowingIsOneCall(t *testing.T) {
+func TestCancelingThisAndFollowingIsOneCall(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evseries001_20260331T120000Z", Scope: "this_and_following",
@@ -542,8 +542,8 @@ func TestMoveChangesTheCalendarAndSaysWhatThatMeans(t *testing.T) {
 	if out.After == nil || out.After.CalendarID != "team@group.calendar.example.test" {
 		t.Fatalf("the result must report the event on its new calendar, got %+v", out.After)
 	}
-	if !strings.Contains(out.Text(), "organiser") {
-		t.Errorf("a move changes the organiser, and the result should say so:\n%s", out.Text())
+	if !strings.Contains(out.Text(), "organizer") {
+		t.Errorf("a move changes the organizer, and the result should say so:\n%s", out.Text())
 	}
 }
 
@@ -686,7 +686,7 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 		// Five, not four: the event is read back from the destination,
 		// because a successful move answers with status:cancelled and
 		// the result would otherwise report a moved meeting as a
-		// cancelled one (§18 row 48).
+		// canceled one (§18 row 48).
 		{"move", 5, func(s *service.Service) error {
 			_, err := s.MoveEvent(context.Background(), service.MoveOptions{
 				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
@@ -1038,7 +1038,7 @@ func TestThisAndFollowingOnAnAllDaySeries(t *testing.T) {
 	}
 }
 
-// And cancelling "this and following" on an all-day series, which is the
+// And canceling "this and following" on an all-day series, which is the
 // one-call version of the same arithmetic.
 func TestCancelThisAndFollowingOnAnAllDaySeries(t *testing.T) {
 	svc, fake := writeSeed(t)
@@ -1093,9 +1093,9 @@ func TestAnEtagFromTheOccurrenceWorksWithScopeSeries(t *testing.T) {
 }
 
 // §4.3.4's refusal must not fire on a colleague. An event on a secondary
-// calendar is organised by the CALENDAR, whose id has a domain of its
+// calendar is organized by the CALENDAR, whose id has a domain of its
 // own, and splitting the guest count on that made everybody external.
-func TestAnEventOrganisedByACalendarStillKnowsWhoIsInside(t *testing.T) {
+func TestAnEventOrganizedByACalendarStillKnowsWhoIsInside(t *testing.T) {
 	svc, fake := writeSeed(t)
 	ev := caltest.Timed("evteamev001", "Team thing",
 		"2026-03-18T10:00:00+01:00", "2026-03-18T11:00:00+01:00", "Europe/Copenhagen")
@@ -1150,14 +1150,14 @@ func TestADryRunProjectsTheChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CancelEvent: %v", err)
 	}
-	if !strings.Contains(c.Text(), "after:  (cancelled)") {
+	if !strings.Contains(c.Text(), "after:  (canceled)") {
 		t.Fatalf("a cancellation dry run showed the event alive:\n%s", c.Text())
 	}
 }
 
 // A 412 is the opposite of "already gone": the event is there and
 // somebody edited it. Reporting it as gone tells a caller their meeting
-// was cancelled when it is still live.
+// was canceled when it is still live.
 func TestAConcurrentEditOnADeleteIsStaleNotGone(t *testing.T) {
 	svc, fake := writeSeed(t)
 	fake.Fail["DELETE /calendars/me@example.test/events/evsolo00001"] = 412
@@ -1180,7 +1180,7 @@ func TestAConcurrentEditOnADeleteIsStaleNotGone(t *testing.T) {
 // the move's own response. It reported a meeting that had just been
 // moved as one that had been called off — green in every gate, and
 // visible only in the live transcript.
-func TestAMovedEventIsNotReportedAsCancelled(t *testing.T) {
+func TestAMovedEventIsNotReportedAsCanceled(t *testing.T) {
 	svc, _ := writeSeed(t)
 	out, err := svc.MoveEvent(context.Background(), service.MoveOptions{
 		Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
@@ -1191,18 +1191,20 @@ func TestAMovedEventIsNotReportedAsCancelled(t *testing.T) {
 	if out.After == nil {
 		t.Fatal("a move must report where the event landed")
 	}
-	if out.After.Cancelled() {
-		t.Fatalf("a moved event was reported cancelled: %+v", out.After)
+	if out.After.Canceled() {
+		t.Fatalf("a moved event was reported canceled: %+v", out.After)
 	}
-	if strings.Contains(out.Text(), "cancelled") {
-		t.Fatalf("the move result says cancelled:\n%s", out.Text())
+	// Both spellings: the "canceled" tag and Google's own "cancelled"
+	// status would each report the move wrong.
+	if text := out.Text(); strings.Contains(text, "canceled") || strings.Contains(text, "cancelled") {
+		t.Fatalf("the move result says canceled:\n%s", out.Text())
 	}
 	if out.After.CalendarID != "team@group.calendar.example.test" {
 		t.Fatalf("reported on %q, want the destination", out.After.CalendarID)
 	}
 }
 
-// §18 row 49: events.move honours If-Match, which nothing Google
+// §18 row 49: events.move honors If-Match, which nothing Google
 // publishes says. The server sent none for a while and told callers the
 // protection was absent; spike J asked the API instead of the
 // documentation, and §4.4 turned out to have no exception.
@@ -1495,14 +1497,14 @@ func TestEveryForcedWriteSaysSo(t *testing.T) {
 	svc, _ := writeSeed(t)
 	ctx := context.Background()
 
-	cancelled, err := svc.CancelEvent(ctx, service.CancelOptions{
+	canceled, err := svc.CancelEvent(ctx, service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001", Force: true, DryRun: true,
 	})
 	if err != nil {
 		t.Fatalf("CancelEvent: %v", err)
 	}
-	if !strings.Contains(cancelled.Text(), "If-Match: *") {
-		t.Fatalf("a forced cancel does not say it was forced:\n%s", cancelled.Text())
+	if !strings.Contains(canceled.Text(), "If-Match: *") {
+		t.Fatalf("a forced cancel does not say it was forced:\n%s", canceled.Text())
 	}
 
 	answered, err := svc.RespondToEvent(ctx, service.RespondOptions{

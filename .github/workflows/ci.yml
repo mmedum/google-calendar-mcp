@@ -83,7 +83,7 @@ jobs:
         run: make pins
       - name: make/CI parity
         run: make parity
-      - name: licences
+      - name: licenses
         run: make licenses
       - name: vulnerabilities
         run: make vuln

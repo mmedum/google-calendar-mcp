@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
 )
 
 // Guest addresses come from the environment and never from this
@@ -33,7 +33,7 @@ type guests struct {
 	// internal is inside the signed-in account's own domain.
 	internal string
 	// external is outside the domain but still on Google Calendar, and is
-	// the guest `externalOnly` reaches: the axis is the organiser's
+	// the guest `externalOnly` reaches: the axis is the organizer's
 	// Workspace domain, not the guest's calendar system, which took a
 	// live probe to establish against the documentation (§18 row 40).
 	external string
@@ -113,7 +113,7 @@ func spikeA(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	// then all, about a second apart, from a sender the receiving Gmail
 	// labels "unknown sender" — and Gmail throttles invitation mail from
 	// unknown senders. Delivering the first and dropping the second
-	// explains the result without any API behaviour at all.
+	// explains the result without any API behavior at all.
 	//
 	// Sending the control first inverts the prediction: if order is what
 	// matters, `all` now arrives and `externalOnly` does not. If the
@@ -176,7 +176,7 @@ func spikeB(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	if err := api.insertWithUpdates(ctx, scratch, body, "none"); err != nil {
 		return fail, "could not create the event: " + redact.String(err.Error())
 	}
-	// It is on the organiser's calendar whatever happened — that is not
+	// It is on the organizer's calendar whatever happened — that is not
 	// the question, and checking it here would be the spike answering
 	// something easy in place of something hard.
 	if _, err := api.getEvent(ctx, scratch, spikeBID); err != nil {

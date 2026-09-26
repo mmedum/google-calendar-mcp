@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 func main() {
@@ -64,7 +64,7 @@ func main() {
 	// Spike A and B events are kept for a person to read. Removing them
 	// cancels them properly, which mails the guests — so it is asked for.
 	sweep := flag.Bool("sweep-spikes", false,
-		"delete the kept spike A and B events, cancelling them to their guests")
+		"delete the kept spike A and B events, canceling them to their guests")
 	flag.Parse()
 
 	clearSpikeEvents = *sweep
@@ -161,17 +161,17 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 2
 	}
 	// One occurrence of the weekly series is removed, because a
-	// cancelled instance is how a single date leaves a series and
+	// canceled instance is how a single date leaves a series and
 	// list_instances exists to show which dates are gone.
 	state := seedState{}
-	cancelled, err := api.removeOneOccurrence(ctx, scratch)
+	canceled, err := api.removeOneOccurrence(ctx, scratch)
 	if err != nil {
 		out.Printf("could not cancel one occurrence: %v\n", redact.String(err.Error()))
 		return 2
 	}
-	state.cancelledOccurrence = cancelled
-	out.Printf("filled with %d invented events; the occurrence on %s was cancelled\n\n",
-		len(seedEvents()), cancelled)
+	state.canceledOccurrence = canceled
+	out.Printf("filled with %d invented events; the occurrence on %s was canceled\n\n",
+		len(seedEvents()), canceled)
 
 	sess, err := startServer(ctx, bin, profile)
 	if err != nil {
@@ -290,7 +290,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		// somebody else has to act on, and a driver whose discipline is
 		// "read the transcript" should not bury it forty lines up.
 		out.Printf("\nThis run mailed a real person, and left one meeting behind on purpose.\n")
-		out.Printf("  \u2022 %q was cancelled with notify:none. It is gone from this account and\n", quietTitle)
+		out.Printf("  \u2022 %q was canceled with notify:none. It is gone from this account and\n", quietTitle)
 		out.Printf("    STILL ON THEIRS, and this account can no longer withdraw it (\u00a718 row 43).\n")
 		out.Printf("    Ask them to delete it; nothing here can.\n")
 		out.Printf("  \u2022 Spikes A and B set up events and cannot score themselves: who received\n")
@@ -311,7 +311,7 @@ var spikeCeiling bool
 var spikeNotify bool
 
 // clearSpikeEvents lets the cleanup remove the spike events it normally
-// preserves, cancelling them to their guests on the way out.
+// preserves, canceling them to their guests on the way out.
 var clearSpikeEvents bool
 
 // results tallies and prints, through the redactor only.
@@ -768,19 +768,19 @@ func steps(scratch string, state seedState) []step {
 				if !strings.Contains(r.text, "series") {
 					return fail, "the result does not say it returned series"
 				}
-				// showDeleted=false does not filter a cancelled INSTANCE
+				// showDeleted=false does not filter a canceled INSTANCE
 				// when singleEvents is false — the discovery document
 				// says so and the first live run proved it. Google sends
 				// it with no start and no summary, so it rendered as a
 				// row with neither, and was counted.
 				if strings.Contains(r.text, "(no title)") || strings.Contains(r.text, "(no start)") {
-					return fail, "a cancelled instance leaked into the series view as a contentless row"
+					return fail, "a canceled instance leaked into the series view as a contentless row"
 				}
-				if strings.Contains(r.text, state.cancelledOccurrence) {
-					return fail, "the cancelled occurrence on " + state.cancelledOccurrence +
-						" appeared without show_cancelled"
+				if strings.Contains(r.text, state.canceledOccurrence) {
+					return fail, "the canceled occurrence on " + state.canceledOccurrence +
+						" appeared without show_canceled"
 				}
-				return pass, "series with its rule returned, no cancelled instance among them"
+				return pass, "series with its rule returned, no canceled instance among them"
 			},
 		},
 		{
@@ -891,31 +891,31 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			name: "cancelled hidden by default",
+			name: "canceled hidden by default",
 			tool: "list_events",
 			args: cal(nil),
 			check: func(r callResult) (verdict, string) {
 				if r.isError {
 					return fail, "returned an error"
 				}
-				if strings.Contains(r.text, cancelledTitle) {
-					return fail, "a cancelled event appeared without show_cancelled"
+				if strings.Contains(r.text, canceledTitle) {
+					return fail, "a canceled event appeared without show_canceled"
 				}
-				return pass, "cancelled event hidden"
+				return pass, "canceled event hidden"
 			},
 		},
 		{
-			name: "show_cancelled reveals it",
+			name: "show_canceled reveals it",
 			tool: "list_events",
-			args: cal(map[string]any{"show_cancelled": true}),
+			args: cal(map[string]any{"show_canceled": true}),
 			check: func(r callResult) (verdict, string) {
 				if r.isError {
 					return fail, "returned an error"
 				}
-				if !strings.Contains(r.text, cancelledTitle) {
-					return fail, "show_cancelled did not reveal the cancelled event"
+				if !strings.Contains(r.text, canceledTitle) {
+					return fail, "show_canceled did not reveal the canceled event"
 				}
-				return pass, "cancelled event shown"
+				return pass, "canceled event shown"
 			},
 		},
 		{
@@ -1017,30 +1017,30 @@ func steps(scratch string, state seedState) []step {
 				if !strings.Contains(r.text, "occurrence") {
 					return fail, "the result does not report occurrences"
 				}
-				// The cancelled one must NOT be here, and the result has
+				// The canceled one must NOT be here, and the result has
 				// to say it is hiding it.
-				if strings.Contains(r.text, state.cancelledOccurrence) {
-					return fail, "a cancelled occurrence appeared without show_cancelled"
+				if strings.Contains(r.text, state.canceledOccurrence) {
+					return fail, "a canceled occurrence appeared without show_canceled"
 				}
-				if !strings.Contains(r.text, "Cancelled occurrences are hidden") {
-					return fail, "the result hides cancelled occurrences without saying so"
+				if !strings.Contains(r.text, "Canceled occurrences are hidden") {
+					return fail, "the result hides canceled occurrences without saying so"
 				}
-				return pass, "occurrences listed, cancelled one hidden and declared"
+				return pass, "occurrences listed, canceled one hidden and declared"
 			},
 		},
 		{
-			name: "list_instances show_cancelled",
+			name: "list_instances show_canceled",
 			tool: "list_instances",
-			args: map[string]any{"calendar": scratch, "event_id": weeklyID, "show_cancelled": true},
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID, "show_canceled": true},
 			check: func(r callResult) (verdict, string) {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 200)
 				}
-				if !strings.Contains(r.text, state.cancelledOccurrence) {
-					return fail, "the cancelled occurrence on " + state.cancelledOccurrence + " is still missing"
+				if !strings.Contains(r.text, state.canceledOccurrence) {
+					return fail, "the canceled occurrence on " + state.canceledOccurrence + " is still missing"
 				}
-				if !strings.Contains(r.text, "CANCELLED") {
-					return fail, "the cancelled occurrence is not marked as one"
+				if !strings.Contains(r.text, "CANCELED") {
+					return fail, "the canceled occurrence is not marked as one"
 				}
 				return pass, "the removed date is shown and marked"
 			},
@@ -1088,9 +1088,9 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// The id names the CANCELLED occurrence deliberately. Google
+			// The id names the CANCELED occurrence deliberately. Google
 			// does not refuse an occurrence id — it expands whatever
-			// that occurrence is, and a cancelled one expands to
+			// that occurrence is, and a canceled one expands to
 			// nothing, so the call succeeds with an empty list. The
 			// first live run got "No occurrences" for a series with
 			// three, which is why the server now reads the id's shape

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 )
 
 // task is one thing a model has to get right.
@@ -140,7 +140,7 @@ func weeklyAcrossDST() task {
 // an invitation that reported success reached nobody.
 //
 // This server refuses the write until the caller chooses (§4.3), and
-// refuses `none` outright for a guest outside the organiser's domain
+// refuses `none` outright for a guest outside the organizer's domain
 // (spike B), so the task measures two things at once: whether the model
 // can read a refusal and recover, and whether what it then chose
 // actually mails the person it was asked to invite.

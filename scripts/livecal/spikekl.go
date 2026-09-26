@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/mmedum/google-calendar-mcp/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
 )
 
 // Phase 3's two spikes. Both are the shape rule 13 asks for: a
@@ -86,10 +86,10 @@ func spikeK(ctx context.Context, out *redact.Printer, api *liveAPI, _ string) (v
 
 	after, err := api.countEvents(ctx, spikeDest)
 	if err != nil {
-		return undetermined, "the clear was accepted but the events could not be counted afterwards: " +
+		return undetermined, "the clear was accepted but the events could not be counted afterward: " +
 			redact.String(err.Error())
 	}
-	// Counting afterwards is the discriminator, and skipping it is the
+	// Counting afterward is the discriminator, and skipping it is the
 	// mistake spike I made: a 2xx alone does not say anything was
 	// deleted, and "accepted and did nothing" is a real possibility here.
 	if after == 0 {
@@ -101,7 +101,7 @@ func spikeK(ctx context.Context, out *redact.Printer, api *liveAPI, _ string) (v
 		"secondary calendar, and now with a reason", status, after, before)
 }
 
-// spikeL — is If-Match honoured on the calendar and sharing writes?
+// spikeL — is If-Match honored on the calendar and sharing writes?
 //
 // §2.4 says ETags and If-Match are supported across this API, and §4.4
 // puts every write under one. Spike J found that the general rule held
@@ -112,7 +112,7 @@ func spikeK(ctx context.Context, out *redact.Printer, api *liveAPI, _ string) (v
 // what this asks.
 //
 // The discriminator is a STALE etag, as in spike J. A current one
-// succeeds whether the header is honoured or ignored and settles
+// succeeds whether the header is honored or ignored and settles
 // nothing.
 func spikeL(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
 	// calendars.patch, on the driver's own scratch calendar.
@@ -151,23 +151,23 @@ func spikeL(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		map[string]any{"description": "this write should be refused"}, nil)
 	out.Printf("      calendars.patch with a STALE If-Match answered %d\n", status)
 
-	calendarHonoured := status == http.StatusPreconditionFailed
+	calendarHonored := status == http.StatusPreconditionFailed
 
 	// acl.patch, on a rule this spike creates and removes. The address
 	// is in a domain that cannot resolve, and the rule is inserted with
 	// sendNotifications=false, so nothing is sent anywhere.
 	aclStatus, aclNote := api.probeACLIfMatch(ctx, scratch)
 	out.Printf("      acl.patch with a STALE If-Match answered %d\n", aclStatus)
-	aclHonoured := aclStatus == http.StatusPreconditionFailed
+	aclHonored := aclStatus == http.StatusPreconditionFailed
 
 	switch {
 	case aclNote != "":
 		return undetermined, fmt.Sprintf("calendars.patch answered %d; the ACL half could not run: %s",
 			status, aclNote)
-	case calendarHonoured && aclHonoured:
-		return pass, "HONOURED on both: a stale If-Match is refused with 412 by calendars.patch and " +
+	case calendarHonored && aclHonored:
+		return pass, "HONORED on both: a stale If-Match is refused with 412 by calendars.patch and " +
 			"acl.patch, so §4.4 covers the calendar and sharing writes as it covers the event ones"
-	case !calendarHonoured && !aclHonoured:
+	case !calendarHonored && !aclHonored:
 		return pass, fmt.Sprintf("IGNORED on both: calendars.patch answered %d and acl.patch %d with a "+
 			"STALE etag, so neither offers optimistic concurrency and the results must stop implying it",
 			status, aclStatus)

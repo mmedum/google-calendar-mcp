@@ -6,7 +6,7 @@ Updated "Project review" on Sample Primary.
 changed:
   location: Room 1 → Room 2
 
-Asked Google to notify all 2 guests, 1 of them outside your organisation. That is what was asked for, not what arrived: the API reports nothing about delivery.
+Asked Google to notify all 2 guests, 1 of them outside your organization. That is what was asked for, not what arrived: the API reports nothing about delivery.
 
 id: abcdef0123 on calendar primary
 etag: "abcdef0123-2" — pass it to the next write, which will be refused if somebody else changed this first

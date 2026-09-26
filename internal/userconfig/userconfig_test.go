@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/userconfig"
 )
 
 // isolate points the package at a temporary directory. Every test in
@@ -174,7 +174,7 @@ func TestRemoveIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestBaseDirHonoursTheEnvironmentOverride(t *testing.T) {
+func TestBaseDirHonorsTheEnvironmentOverride(t *testing.T) {
 	dir := isolate(t)
 	got, err := userconfig.BaseDir()
 	if err != nil {

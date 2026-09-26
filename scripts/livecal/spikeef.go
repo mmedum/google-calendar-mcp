@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // spikeE answers §15's "this and following" question, and it is the one
@@ -182,7 +182,7 @@ func spikeF(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		out.Printf("      other: %s\n", o)
 	}
 
-	// Whatever Google answered, exactly one event may exist afterwards:
+	// Whatever Google answered, exactly one event may exist afterward:
 	// the id is the key, so a second event under it is impossible. What
 	// the spike is really asking is whether the CALLER was told.
 	if _, err := api.getEvent(ctx, scratch, spikeFID); err != nil {
