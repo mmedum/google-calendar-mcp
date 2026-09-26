@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/internal/render"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // update rewrites the golden files instead of comparing against them.
@@ -171,17 +171,17 @@ func TestGoldenInstances(t *testing.T) {
 		"2026-04-07T14:00:00+02:00", "2026-04-07T15:00:00+02:00")
 	dropped.SeriesID = "ev-weekly"
 	dropped.OriginalStart = dropped.Start
-	dropped.Status = gcal.StatusCancelled
+	dropped.Status = gcal.StatusCanceled
 
 	in := render.Instances{
 		SeriesID: "ev-weekly", Title: "Weekly review", CalendarID: "primary",
 		Zone: z, Events: []model.Event{first, moved, dropped},
-		ShowCancelled: true, Requests: 1,
+		ShowCanceled: true, Requests: 1,
 	}
 	golden(t, "instances", in.Text())
 }
 
-func TestGoldenInstancesHidingCancelled(t *testing.T) {
+func TestGoldenInstancesHidingCanceled(t *testing.T) {
 	z := goldenZone(t)
 	w := goldenWindow(t, z, "2026-03-16T00:00:00+01:00", "2026-04-01T00:00:00+02:00")
 	first := goldenEvent(t, "ev-weekly_20260317T130000Z", "Weekly review",
@@ -307,16 +307,16 @@ func TestGoldenWrite(t *testing.T) {
 		Verb: render.VerbUpdate, Calendar: "Sample Primary", Zone: z,
 		Before: &before, After: &after,
 		Changes: []plan.Change{{Field: "location", From: "Room 1", To: "Room 2"}},
-		Notify: "Asked Google to notify all 2 guests, 1 of them outside your organisation." +
+		Notify: "Asked Google to notify all 2 guests, 1 of them outside your organization." +
 			" That is what was asked for, not what arrived: the API reports nothing about delivery.",
 		Requests: 2,
 	}
 	golden(t, "write-update", w.Text())
 }
 
-// A cancellation with nothing left afterwards, and a scope: the two
+// A cancellation with nothing left afterward, and a scope: the two
 // shapes the update golden does not cover.
-func TestGoldenWriteCancelled(t *testing.T) {
+func TestGoldenWriteCanceled(t *testing.T) {
 	z := goldenZone(t)
 	before := goldenEvent(t, "abcdef0123", "Weekly review",
 		"2026-03-24T14:00:00+01:00", "2026-03-24T15:00:00+01:00")
@@ -329,7 +329,7 @@ func TestGoldenWriteCancelled(t *testing.T) {
 		Notify:  "Nobody to notify: this write reaches no guests, so no notification was requested.",
 		Notes: []string{
 			"This event has no guests, so nobody else is holding it.",
-			"One occurrence, cancelled with a status patch rather than deleted.",
+			"One occurrence, canceled with a status patch rather than deleted.",
 		},
 		Requests: 1,
 	}

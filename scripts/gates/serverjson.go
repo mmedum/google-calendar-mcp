@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -69,9 +70,9 @@ type registryTransport struct {
 	Type string `json:"type"`
 }
 
-// majorVersion matches the /vN a module path carries from v2 onwards.
+// majorVersion matches the /vN a module path carries from v2 onward.
 //
-// v2 onwards, not v1: Go's rule is that the major version suffix appears
+// v2 onward, not v1: Go's rule is that the major version suffix appears
 // from v2, so `/v1` in a module path is an ordinary directory and
 // stripping it would name the wrong repository.
 var majorVersion = regexp.MustCompile(`^v([2-9]|[1-9][0-9]+)$`)
@@ -105,6 +106,63 @@ func modulePath() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("go.mod names no module")
+}
+
+// moduleMajor reads the major version off a module path: its /vN
+// suffix, or 1 when it has none.
+func moduleMajor(module string) int {
+	last := module[strings.LastIndex(module, "/")+1:]
+	if !majorVersion.MatchString(last) {
+		return 1
+	}
+	n, _ := strconv.Atoi(last[1:])
+	return n
+}
+
+// tagMajor reads N off a vN.x.y tag. A prerelease suffix is allowed; a
+// sign is not, because strconv would read v+1 as major 1.
+func tagMajor(tag string) (int, error) {
+	rest, ok := strings.CutPrefix(tag, "v")
+	major, _, dotted := strings.Cut(rest, ".")
+	n, err := strconv.Atoi(major)
+	if !ok || !dotted || err != nil || major[0] == '+' || major[0] == '-' {
+		return 0, fmt.Errorf("tag %q is not vMAJOR.MINOR.PATCH", tag)
+	}
+	return n, nil
+}
+
+// tagMatchesModule refuses a tag whose major version is not the
+// module's.
+//
+// `go install ...@latest` resolves within one module path, so a v2 tag
+// on a module without /v2 is never served, and a v1 tag on a /v2 module
+// is served to nobody who asked for v1. Every other gate passes both. v0
+// and v1 both mean no suffix.
+func tagMatchesModule(tag, module string) error {
+	got, err := tagMajor(tag)
+	if err != nil {
+		return err
+	}
+	want := moduleMajor(module)
+	if got == want || (got == 0 && want == 1) {
+		return nil
+	}
+	suffix := "no /vN suffix"
+	if got >= 2 {
+		suffix = fmt.Sprintf("/v%d", got)
+	}
+	return fmt.Errorf("tag %s is major %d and go.mod's module %s is major %d; "+
+		"a v%d tag needs %s on the module path", tag, got, module, want, got, suffix)
+}
+
+// releaseTag is release.yml's check that the tag it was started for
+// agrees with go.mod, before anything is built or published.
+func releaseTag(tag string) error {
+	module, err := modulePath()
+	if err != nil {
+		return err
+	}
+	return tagMatchesModule(tag, module)
 }
 
 // bundleRow finds the single .mcpb in a checksums file.
@@ -160,6 +218,12 @@ func serverJSON(version, checksums string, stdout io.Writer) error {
 	semver := strings.TrimPrefix(tag, "v")
 	if semver == "" {
 		return fmt.Errorf("empty version")
+	}
+	// release.yml checks this before goreleaser runs. A dispatch of the
+	// publish workflow never passes through there, so it is checked here
+	// too.
+	if err := tagMatchesModule(tag, module); err != nil {
+		return err
 	}
 
 	m, err := readManifest(manifestPath)

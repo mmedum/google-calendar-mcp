@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/internal/render"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // The write path. Five tools, one shape: resolve the calendar and the
@@ -69,10 +69,10 @@ func classifyPlan(err error) error {
 type writeEnv struct {
 	cal  model.Calendar
 	zone when.Zone
-	// organiser is the address §4.3.5 splits the guest count on. For a
+	// organizer is the address §4.3.5 splits the guest count on. For a
 	// new event it is this account; for an existing one it is whoever
-	// organises it, which is not always the same person.
-	organiser string
+	// organizes it, which is not always the same person.
+	organizer string
 }
 
 // §4.7's api_requests is read with gapi.Requests off the context prepare
@@ -95,10 +95,10 @@ func (s *Service) prepare(ctx context.Context, calRef, tz string) (context.Conte
 		return ctx, nil, err
 	}
 	ctx = gapi.WithCounter(ctx)
-	// The organiser is read first, and the order is the point: it fills
+	// The organizer is read first, and the order is the point: it fills
 	// the calendar-list cache, so resolving "primary" below costs
 	// nothing rather than a second request for the same fact.
-	organiser := s.primaryID(ctx)
+	organizer := s.primaryID(ctx)
 	c, err := s.ResolveCalendar(ctx, calRef)
 	if err != nil {
 		return ctx, nil, err
@@ -115,7 +115,7 @@ func (s *Service) prepare(ctx context.Context, calRef, tz string) (context.Conte
 	if err != nil {
 		return ctx, nil, err
 	}
-	return ctx, &writeEnv{cal: c, zone: zone, organiser: organiser}, nil
+	return ctx, &writeEnv{cal: c, zone: zone, organizer: organizer}, nil
 }
 
 // primaryID is this account's own calendar id, which is its address.
@@ -202,7 +202,7 @@ func address(eventID, originalStart string) (id, note string, err error) {
 // The decision is plan.Target's; this only spends the request it asks
 // for. Every operation that addresses an existing event goes through
 // here, which is the point: the three copies this replaced had already
-// drifted into two different behaviours and one missing refusal.
+// drifted into two different behaviors and one missing refusal.
 func (s *Service) aim(ctx context.Context, env *writeEnv, scope recur.Scope,
 	raw gcal.Event, e model.Event, eventID string,
 ) (gcal.Event, model.Event, string, error) {
@@ -347,7 +347,7 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 		draft.Recurrence = &lines
 	}
 
-	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organiser, o.Guests))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organizer, o.Guests))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -541,7 +541,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), env.organiser, targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -601,26 +601,26 @@ func project(before gcal.Event, patch gcal.EventPatch, env *writeEnv) (model.Eve
 const forcedNote = "Written with If-Match: *, so a change somebody else made since this was read was " +
 	"overwritten rather than reported."
 
-// organiserOf is whose domain the guest count is split on (§4.3.5).
+// organizerOf is whose domain the guest count is split on (§4.3.5).
 //
-// The event's organiser, not the signed-in account: an event on a shared
-// calendar can be organised by somebody else, and `external_only` splits
-// on the ORGANISER's Workspace domain (§18 row 40). The account is the
+// The event's organizer, not the signed-in account: an event on a shared
+// calendar can be organized by somebody else, and `external_only` splits
+// on the ORGANIZER's Workspace domain (§18 row 40). The account is the
 // fallback for an event that names none.
-func organiserOf(e model.Event, env *writeEnv) string {
-	// An event on a secondary calendar is organised by the CALENDAR, and
+func organizerOf(e model.Event, env *writeEnv) string {
+	// An event on a secondary calendar is organized by the CALENDAR, and
 	// its id is an address with a domain of its own. Splitting the guest
-	// count on that made every colleague "outside your organisation", so
+	// count on that made every colleague "outside your organization", so
 	// notify:none on a team calendar was refused with a sentence that
 	// was simply false and that no caller could work around.
 	//
 	// The test is exact rather than a guess at Google's resource
-	// domains: if the organiser IS the calendar being written, it is not
+	// domains: if the organizer IS the calendar being written, it is not
 	// a person, and this account is the nearest thing to one.
 	if e.Organizer != "" && !strings.EqualFold(e.Organizer, env.cal.ID) {
 		return e.Organizer
 	}
-	return env.organiser
+	return env.organizer
 }
 
 // notFoundHint says what an id that did not resolve was probably meant
@@ -691,7 +691,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(parent, env), env.organiser, parent))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, parent))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -717,7 +717,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 			// `recurrence` alongside the scope replaces it, and quoting
 			// the computed one described a series that does not exist.
 			parent.ID, beforeRule, strings.Join(newBody.Recurrence, " ")),
-		"Any exception after this occurrence — a moved or cancelled date — has been RESET to the series' own "+
+		"Any exception after this occurrence — a moved or canceled date — has been RESET to the series' own "+
 			"schedule. Google does that, not this server, and no caller expects it. Check list_instances on "+
 			"the new series if somebody had moved a later date.")
 	if droppedConference {
@@ -907,7 +907,7 @@ func daysBetween(from, to when.Date) int {
 	return n
 }
 
-// ----------------------------------------------------------- cancelling
+// ----------------------------------------------------------- canceling
 
 // CancelOptions is what cancel_event takes.
 type CancelOptions struct {
@@ -929,7 +929,7 @@ type CancelOptions struct {
 // patch for one instance, because deleting an instance id is not how an
 // occurrence leaves a series (§7.4).
 //
-// Not behind the destructive flag, and §9 argues why: cancelling a
+// Not behind the destructive flag, and §9 argues why: canceling a
 // meeting is the most ordinary write there is, a gate everybody turns on
 // protects nobody, and turning it on would also arm clear_calendar. What
 // protects it instead is the required scope and the required notify.
@@ -946,10 +946,10 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, notFoundHint(err, id, o.OriginalStart)
 	}
-	if before.Cancelled() {
+	if before.Canceled() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassConflict,
-			"that event is already cancelled. list_events and list_instances show cancelled events with "+
-				"show_cancelled, which is how you can tell this from a missing one")
+			"that event is already canceled. list_events and list_instances show canceled events with "+
+				"show_canceled, which is how you can tell this from a missing one")
 	}
 	scope, err := plan.Scope(o.Scope, before, s.seriesReach(ctx, env, raw, before))
 	if err != nil {
@@ -971,7 +971,7 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 		note = strings.TrimSpace(note + " " + aimed)
 	}
 
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), env.organiser, targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -1001,11 +1001,11 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 		return s.cancelFollowing(ctx, env, target, targetModel, before, etag,
 			decision.SendUpdatesFor(), report)
 	case recur.ScopeInstance:
-		report.Changes = []plan.Change{{Field: "status", From: targetModel.Status, To: gcal.StatusCancelled}}
+		report.Changes = []plan.Change{{Field: "status", From: targetModel.Status, To: gcal.StatusCanceled}}
 		report.Notes = append(report.Notes,
-			"One occurrence, cancelled with a status patch rather than deleted: that is how a single date "+
-				"leaves a series, and list_instances with show_cancelled still shows it.")
-		status := gcal.StatusCancelled
+			"One occurrence, canceled with a status patch rather than deleted: that is how a single date "+
+				"leaves a series, and list_instances with show_canceled still shows it.")
+		status := gcal.StatusCanceled
 		if o.DryRun {
 			after, perr := project(target, gcal.EventPatch{Status: &status}, env)
 			if perr != nil {
@@ -1034,11 +1034,11 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 		// "Deleted the event" under "DRY RUN — nothing was written" is
 		// the result contradicting itself in six lines.
 		report.Notes = append(report.Notes, "This deletes "+what+
-			" outright rather than marking it cancelled. Google keeps the record: it is still readable "+
-			"with show_cancelled.")
+			" outright rather than marking it canceled. Google keeps the record: it is still readable "+
+			"with show_canceled.")
 		if o.DryRun {
 			// A delete leaves nothing behind, so After stays nil and the
-			// renderer says "(cancelled)" — the same line the real call
+			// renderer says "(canceled)" — the same line the real call
 			// prints, which is the point of a dry run.
 			report.Requests = gapi.Requests(ctx)
 			return report, nil
@@ -1113,7 +1113,7 @@ func (s *Service) cancelFollowing(ctx context.Context, env *writeEnv, parentRaw 
 // guestsStillHaveIt is §4.3.3's sentence, and it is the one a caller
 // most needs on a cancellation.
 //
-// Deleting an event with `none` removes it from the organiser's calendar
+// Deleting an event with `none` removes it from the organizer's calendar
 // and leaves it on the guests' (§18 row 43). That is not quiet, it is a
 // meeting they will still turn up to.
 func guestsStillHaveIt(d plan.Decision) string {
@@ -1129,7 +1129,7 @@ func guestsStillHaveIt(d plan.Decision) string {
 			"the API reports, so check with them if it matters.", n, plan.People(n))
 	}
 	return fmt.Sprintf("Nobody was asked to be told, and %d %s still %s this meeting on their calendar. "+
-		"Cancelling with no notification removes it from yours and leaves it on theirs.",
+		"Canceling with no notification removes it from yours and leaves it on theirs.",
 		n, plan.People(n), holdWord(n))
 }
 
@@ -1147,15 +1147,15 @@ func alreadyGone(err error) error {
 	// same class, and a 412 is the opposite situation: the event is very
 	// much there and somebody edited it between the read and the write.
 	// Reporting that as "already gone" tells a caller their meeting was
-	// cancelled when it is still live, and sends them to show_cancelled
+	// canceled when it is still live, and sends them to show_canceled
 	// instead of to a re-read — §4.4's protection reported as its
 	// opposite.
 	var e *gapi.Error
 	if !errors.As(err, &e) || (e.Status != http.StatusNotFound && e.Status != http.StatusGone) {
 		return err
 	}
-	return gapi.Wrap(e.Class, err, "that event is already gone: either it was cancelled between this "+
-		"server reading it and writing, or it never existed. Read it with get_event and show_cancelled "+
+	return gapi.Wrap(e.Class, err, "that event is already gone: either it was canceled between this "+
+		"server reading it and writing, or it never existed. Read it with get_event and show_canceled "+
 		"to tell the two apart")
 }
 
@@ -1183,7 +1183,7 @@ type MoveOptions struct {
 }
 
 // MoveEvent changes which calendar an event belongs to, which is to say
-// who organises it.
+// who organizes it.
 func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteReport, error) {
 	// There is nothing to split when an event simply changes calendars,
 	// whether or not it repeats, so this is answered before anything is
@@ -1230,7 +1230,7 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 		return render.WriteReport{}, err
 	}
 	note = strings.TrimSpace(note + " " + aimed)
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), env.organiser, targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -1252,7 +1252,7 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 		report.Notes = append(report.Notes, forcedNote)
 	}
 	report.Notes = append(report.Notes,
-		fmt.Sprintf("Moving an event changes its organiser to %q. Its id does not change, but the calendar "+
+		fmt.Sprintf("Moving an event changes its organizer to %q. Its id does not change, but the calendar "+
 			"it is addressed on does — read it on %s from now on.", dest.Title, dest.ID),
 		"The move is made under If-Match, like every other write here, so it is refused rather than "+
 			"applied if somebody changed the event since it was read.")
@@ -1269,12 +1269,12 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 	// the move's own response, and the live run is why: a successful
 	// move answers with `status: cancelled`, so the result reported a
 	// meeting that had just been moved as a meeting that had been
-	// called off. Reading the destination afterwards showed it
+	// called off. Reading the destination afterward showed it
 	// confirmed and intact (§18 row 48).
 	//
 	// That costs one request, which §4.7 says a result must then own —
 	// api_requests counts it, and the note below says the move is two
-	// calls. It buys the difference between "moved" and "cancelled" in
+	// calls. It buys the difference between "moved" and "canceled" in
 	// the one sentence a caller acts on.
 	landed := *moved
 	if fresh, rerr := s.API.GetEvent(ctx, dest.ID, moved.ID); rerr == nil {
@@ -1350,11 +1350,11 @@ func (s *Service) RespondToEvent(ctx context.Context, o RespondOptions) (render.
 	}
 	note = strings.TrimSpace(note + " " + aimed)
 
-	attendees, was, err := setOwnResponse(target.Attendees, env.organiser, response, o.Comment)
+	attendees, was, err := setOwnResponse(target.Attendees, env.organizer, response, o.Comment)
 	if err != nil {
 		return render.WriteReport{}, err
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organiserOf(targetModel, env), env.organiser, targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -1443,5 +1443,5 @@ func setOwnResponse(attendees []gcal.EventAttendee, self, response, comment stri
 	}
 	return nil, "", gapi.Errf(gapi.ClassInvalid,
 		"this account is not a guest on that event, so there is no invitation to answer. "+
-			"get_event lists who is; use update_event if you organise it")
+			"get_event lists who is; use update_event if you organize it")
 }

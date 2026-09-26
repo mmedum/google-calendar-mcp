@@ -7,7 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/internal/server"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/server"
 )
 
 // session connects a client to a real server over the in-memory

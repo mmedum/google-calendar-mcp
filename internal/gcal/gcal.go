@@ -6,7 +6,7 @@
 //
 // Every field here is a decision, and §8b's api-fields gate holds the
 // list: a published field of Event, Calendar, CalendarListEntry or
-// AclRule is either modelled below or written off by name in
+// AclRule is either modeled below or written off by name in
 // testdata/api-fields.tsv with a reason. Without that gate, "we support
 // events" quietly means "we support the twelve fields somebody happened
 // to need".
@@ -49,7 +49,7 @@ func (e EventDateTime) IsAllDay() bool { return e.Date != "" && e.DateTime == ""
 // ---------------------------------------------------------------- Event
 
 // Event is a calendar event. 44 properties are published; the ones here
-// are modelled and the rest are written off in testdata/api-fields.tsv.
+// are modeled and the rest are written off in testdata/api-fields.tsv.
 type Event struct {
 	ID       string `json:"id,omitempty"`
 	Status   string `json:"status,omitempty"`
@@ -151,7 +151,7 @@ const (
 const (
 	StatusConfirmed = "confirmed"
 	StatusTentative = "tentative"
-	StatusCancelled = "cancelled"
+	StatusCanceled  = "cancelled"
 )
 
 // Event types (§2.12).
@@ -244,7 +244,7 @@ type CalendarListEntry struct {
 	Primary          bool            `json:"primary,omitempty"`
 	Deleted          bool            `json:"deleted,omitempty"`
 	// NotificationSettings is what THIS user is emailed about on this
-	// calendar, and is a per-user override like the colour: changing it
+	// calendar, and is a per-user override like the color: changing it
 	// changes nothing for anybody else.
 	NotificationSettings *NotificationSettings `json:"notificationSettings,omitempty"`
 	// ConferenceProperties is carried here too, so the calendar list
@@ -301,7 +301,7 @@ func RoleMeans(role string) string {
 	case RoleNone:
 		return "no access"
 	default:
-		return "an access level this server does not recognise"
+		return "an access level this server does not recognize"
 	}
 }
 
@@ -450,7 +450,7 @@ func (s Settings) Lookup(id string) (string, bool) {
 	return "", false
 }
 
-// Colors is the colors.get response. The API returns colour ids; a
+// Colors is the colors.get response. The API returns color ids; a
 // result that says "colorId 5" tells a person nothing, so the renderer
 // resolves them to names.
 type Colors struct {
@@ -460,7 +460,7 @@ type Colors struct {
 	Event    map[string]ColorPair `json:"event,omitempty"`
 }
 
-// ColorPair is one colour's background and foreground.
+// ColorPair is one color's background and foreground.
 type ColorPair struct {
 	Background string `json:"background,omitempty"`
 	Foreground string `json:"foreground,omitempty"`
@@ -587,7 +587,7 @@ type EventPatch struct {
 // this_and_following insert sends, and the in-memory Calendar the tests
 // run against. Two copies of a field list is one field away from a fake
 // that silently does not apply what the server sent, which would make a
-// test green over behaviour that never happened.
+// test green over behavior that never happened.
 func (p EventPatch) ApplyTo(e *Event) {
 	if p.Summary != nil {
 		e.Summary = *p.Summary
@@ -684,7 +684,7 @@ func OccurrenceID(series string, start EventDateTime) (string, error) {
 //
 // This is the calendar ITSELF — what everybody subscribed to it sees.
 // The per-user overrides are CalendarListPatch below, and confusing the
-// two is how one person's colour change renames a shared calendar for
+// two is how one person's color change renames a shared calendar for
 // the whole team.
 type CalendarPatch struct {
 	Summary     *string `json:"summary,omitempty"`
@@ -789,13 +789,13 @@ func NotificationMeans(t string) string {
 	case NotifyEventChange:
 		return "an event on it changes"
 	case NotifyEventCancellation:
-		return "an event on it is cancelled"
+		return "an event on it is canceled"
 	case NotifyEventResponse:
 		return "a guest answers an invitation"
 	case NotifyAgenda:
 		return "the day's agenda, sent each morning"
 	default:
-		return "a notification type this server does not recognise"
+		return "a notification type this server does not recognize"
 	}
 }
 
@@ -819,7 +819,7 @@ func ScopeMeans(t string) string {
 	case ScopeTypeDefault:
 		return "anybody at all, signed in or not"
 	default:
-		return "a scope type this server does not recognise"
+		return "a scope type this server does not recognize"
 	}
 }
 
@@ -997,7 +997,7 @@ func NewConferenceRequest(requestID string) json.RawMessage {
 // ReadConference reads what a result needs out of an event's raw
 // conference data.
 //
-// A shape this package does not recognise reports Present without a URI
+// A shape this package does not recognize reports Present without a URI
 // rather than an error: the field is a union Google extends, the caller
 // asked about an event rather than about a conference, and failing a
 // read because a third-party provider nested something unexpectedly

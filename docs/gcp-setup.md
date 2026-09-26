@@ -15,7 +15,7 @@ in it. This is the most common first-run failure, and
 ## 2. OAuth consent screen
 
 Configure the consent screen. If your account is not in a Workspace
-organisation, choose **External** and add yourself as a test user.
+organization, choose **External** and add yourself as a test user.
 
 Add these scopes. The set depends on how you run the server:
 

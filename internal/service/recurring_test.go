@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 func TestInstancesReturnsTheOccurrences(t *testing.T) {
@@ -19,7 +19,7 @@ func TestInstancesReturnsTheOccurrences(t *testing.T) {
 		t.Fatalf("Instances: %v", err)
 	}
 	if len(got.Events) != 2 {
-		t.Fatalf("got %d occurrences, want the 2 that are not cancelled", len(got.Events))
+		t.Fatalf("got %d occurrences, want the 2 that are not canceled", len(got.Events))
 	}
 	if got.SeriesID != "ev-weekly" {
 		t.Fatalf("series id = %q", got.SeriesID)
@@ -35,10 +35,10 @@ func TestInstancesReturnsTheOccurrences(t *testing.T) {
 	}
 }
 
-// TestInstancesHidesCancelledUntilAsked. A cancelled occurrence is how a
+// TestInstancesHidesCanceledUntilAsked. A canceled occurrence is how a
 // single date is removed from a series, so its absence is a fact the
 // result has to admit to rather than a detail (§2.13).
-func TestInstancesHidesCancelledUntilAsked(t *testing.T) {
+func TestInstancesHidesCanceledUntilAsked(t *testing.T) {
 	svc, _ := seeded(t)
 	ctx := context.Background()
 
@@ -46,22 +46,22 @@ func TestInstancesHidesCancelledUntilAsked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Instances: %v", err)
 	}
-	if !strings.Contains(hidden.Text(), "Cancelled occurrences are hidden") {
-		t.Fatalf("the result does not say it is hiding cancelled occurrences:\n%s", hidden.Text())
+	if !strings.Contains(hidden.Text(), "Canceled occurrences are hidden") {
+		t.Fatalf("the result does not say it is hiding canceled occurrences:\n%s", hidden.Text())
 	}
 
 	shown, err := svc.Instances(ctx, service.InstanceOptions{
-		Calendar: "primary", EventID: "ev-weekly", ShowCancelled: true,
+		Calendar: "primary", EventID: "ev-weekly", ShowCanceled: true,
 	})
 	if err != nil {
 		t.Fatalf("Instances: %v", err)
 	}
 	if len(shown.Events) != len(hidden.Events)+1 {
-		t.Fatalf("show_cancelled returned %d occurrences, hidden returned %d",
+		t.Fatalf("show_canceled returned %d occurrences, hidden returned %d",
 			len(shown.Events), len(hidden.Events))
 	}
-	if !strings.Contains(shown.Text(), "CANCELLED") {
-		t.Fatalf("a cancelled occurrence is not marked:\n%s", shown.Text())
+	if !strings.Contains(shown.Text(), "CANCELED") {
+		t.Fatalf("a canceled occurrence is not marked:\n%s", shown.Text())
 	}
 }
 
@@ -141,7 +141,7 @@ func TestInstancesRefusesWithoutAnEventID(t *testing.T) {
 //
 // The live run settled what Google does with one, and it is not a
 // refusal — it answers 200 and expands the occurrence the id names. A
-// CANCELLED occurrence expands to nothing, so the call succeeded with
+// CANCELED occurrence expands to nothing, so the call succeeded with
 // an empty list and the tool reported "No occurrences" for a series
 // that has three. The server reads the id's shape now, so all three of
 // these are refused before a request is built.
@@ -151,7 +151,7 @@ func TestInstancesRefusesAnOccurrenceID(t *testing.T) {
 		id   string
 	}{
 		{"a live occurrence, which Google expands", "ev-weekly_20260324T130000Z"},
-		{"a cancelled one, which expands to nothing", "ev-weekly_20260407T120000Z"},
+		{"a canceled one, which expands to nothing", "ev-weekly_20260407T120000Z"},
 		{"lowercased, the same mistake", "ev-weekly_20260407t120000z"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,7 +165,7 @@ func TestInstancesRefusesAnOccurrenceID(t *testing.T) {
 			// [invalid] rather than [not_found] is what distinguishes
 			// the shape rule from Google merely failing to find the id.
 			if !strings.Contains(err.Error(), "[invalid]") {
-				t.Fatalf("the id shape was not recognised: %v", err)
+				t.Fatalf("the id shape was not recognized: %v", err)
 			}
 			for _, want := range []string{"series_id", "ev-weekly"} {
 				if !strings.Contains(err.Error(), want) {
@@ -192,7 +192,7 @@ func TestInstancesPagesToItsBudget(t *testing.T) {
 	svc := newService(t, fake)
 
 	got, err := svc.Instances(context.Background(), service.InstanceOptions{
-		Calendar: "primary", EventID: "ev-weekly", ShowCancelled: true,
+		Calendar: "primary", EventID: "ev-weekly", ShowCanceled: true,
 	})
 	if err != nil {
 		t.Fatalf("Instances: %v", err)
@@ -208,7 +208,7 @@ func TestInstancesPagesToItsBudget(t *testing.T) {
 func TestInstancesStopsAtTheBudgetAndSaysSo(t *testing.T) {
 	svc, _ := seeded(t)
 	got, err := svc.Instances(context.Background(), service.InstanceOptions{
-		Calendar: "primary", EventID: "ev-weekly", MaxEvents: 1, ShowCancelled: true,
+		Calendar: "primary", EventID: "ev-weekly", MaxEvents: 1, ShowCanceled: true,
 	})
 	if err != nil {
 		t.Fatalf("Instances: %v", err)
@@ -238,7 +238,7 @@ func TestInstancesPagingDoesNotSkipOccurrences(t *testing.T) {
 	ctx := context.Background()
 
 	first, err := svc.Instances(ctx, service.InstanceOptions{
-		Calendar: "primary", EventID: "ev-weekly", MaxEvents: 1, ShowCancelled: true,
+		Calendar: "primary", EventID: "ev-weekly", MaxEvents: 1, ShowCanceled: true,
 	})
 	if err != nil {
 		t.Fatalf("Instances: %v", err)
@@ -255,7 +255,7 @@ func TestInstancesPagingDoesNotSkipOccurrences(t *testing.T) {
 	for i := 0; i < 5 && token != ""; i++ {
 		next, err := svc.Instances(ctx, service.InstanceOptions{
 			Calendar: "primary", EventID: "ev-weekly", MaxEvents: 1,
-			ShowCancelled: true, PageToken: token,
+			ShowCanceled: true, PageToken: token,
 		})
 		if err != nil {
 			t.Fatalf("Instances(page %d): %v", i, err)
@@ -267,7 +267,7 @@ func TestInstancesPagingDoesNotSkipOccurrences(t *testing.T) {
 	}
 
 	all, err := svc.Instances(ctx, service.InstanceOptions{
-		Calendar: "primary", EventID: "ev-weekly", ShowCancelled: true,
+		Calendar: "primary", EventID: "ev-weekly", ShowCanceled: true,
 	})
 	if err != nil {
 		t.Fatalf("Instances: %v", err)
@@ -281,7 +281,7 @@ func TestInstancesPagingDoesNotSkipOccurrences(t *testing.T) {
 }
 
 // Google does not return occurrences in date order: the live run got a
-// cancelled 24 March after 7 April, which reads badly for the question
+// canceled 24 March after 7 April, which reads badly for the question
 // this tool answers — which dates does this series have.
 //
 // The order is applied AFTER the budget cut, never before. Sorting first
@@ -308,7 +308,7 @@ func TestInstancesComeBackInDateOrder(t *testing.T) {
 	svc := newService(t, fake)
 
 	out, err := svc.Instances(context.Background(), service.InstanceOptions{
-		Calendar: "primary", EventID: "evorder0001", ShowCancelled: true,
+		Calendar: "primary", EventID: "evorder0001", ShowCanceled: true,
 	})
 	if err != nil {
 		t.Fatalf("Instances: %v", err)

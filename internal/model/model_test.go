@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 func zone(t *testing.T, name string) *when.Zone {
@@ -81,7 +81,7 @@ func TestFromEvent(t *testing.T) {
 		EventType: gcal.EventTypeDefault, ETag: `"abc"`,
 		Start:     &gcal.EventDateTime{DateTime: "2026-03-16T09:00:00+01:00", TimeZone: "Europe/Copenhagen"},
 		End:       &gcal.EventDateTime{DateTime: "2026-03-16T10:00:00+01:00", TimeZone: "Europe/Copenhagen"},
-		Organizer: &gcal.EventPerson{Email: "organiser@example.test", Self: true},
+		Organizer: &gcal.EventPerson{Email: "organizer@example.test", Self: true},
 		Attendees: []gcal.EventAttendee{
 			{Email: "self@example.test", Self: true, ResponseStatus: gcal.ResponseAccepted},
 			{Email: "guest@example.test", ResponseStatus: gcal.ResponseNeedsAction},
@@ -103,7 +103,7 @@ func TestFromEvent(t *testing.T) {
 	if !e.Transparent {
 		t.Fatal("transparency was lost")
 	}
-	if !e.OrganizerSelf || e.Organizer != "organiser@example.test" {
+	if !e.OrganizerSelf || e.Organizer != "organizer@example.test" {
 		t.Fatalf("organizer = %q self=%v", e.Organizer, e.OrganizerSelf)
 	}
 	if len(e.Attendees) != 3 {
@@ -155,12 +155,12 @@ func TestInstanceFlags(t *testing.T) {
 	}
 }
 
-func TestCancelled(t *testing.T) {
-	if !(model.Event{Status: gcal.StatusCancelled}).Cancelled() {
-		t.Fatal("a cancelled event does not report itself")
+func TestCanceled(t *testing.T) {
+	if !(model.Event{Status: gcal.StatusCanceled}).Canceled() {
+		t.Fatal("a canceled event does not report itself")
 	}
-	if (model.Event{Status: gcal.StatusConfirmed}).Cancelled() {
-		t.Fatal("a confirmed event reported itself cancelled")
+	if (model.Event{Status: gcal.StatusConfirmed}).Canceled() {
+		t.Fatal("a confirmed event reported itself canceled")
 	}
 }
 

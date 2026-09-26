@@ -9,7 +9,7 @@
 //
 // It models the parts of the API this server reads, including the parts
 // that are easy to get wrong and therefore worth having a fake for: the
-// singleEvents split (§2.9), cancelled events being hidden by default
+// singleEvents split (§2.9), canceled events being hidden by default
 // (§2.13), per-calendar free/busy errors (§4.6) and paging.
 package caltest
 
@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 )
 
 // Server is an in-memory Calendar.
@@ -96,7 +96,7 @@ type Server struct {
 	revs map[string]int
 	// syncSeq is a change counter per calendar, and changed records the
 	// LATEST state of every event that has moved since the calendar was
-	// seeded — a cancelled stub for one that was deleted outright.
+	// seeded — a canceled stub for one that was deleted outright.
 	//
 	// A deleted event is removed from Events entirely, so without this
 	// a sync could not report it, and reporting deletions is the whole
@@ -212,7 +212,7 @@ func Instance(id, seriesID, summary, start, end, tz, originalStart string) *gcal
 // Seed builds a small, invented calendar set covering the shapes this
 // server has to get right. It is deliberately not "realistic data": it
 // is the minimum that exercises all-day events, a recurrence, a
-// cancelled event, a transparent event and a second calendar.
+// canceled event, a transparent event and a second calendar.
 func Seed() *Server {
 	s := New()
 	const tz = "Europe/Copenhagen"
@@ -235,23 +235,23 @@ func Seed() *Server {
 	s.AddEvent("primary", Instance("ev-weekly_20260324T130000Z", "ev-weekly", "Weekly review",
 		"2026-03-24T14:00:00+01:00", "2026-03-24T15:00:00+01:00", tz, "2026-03-24T14:00:00+01:00"))
 
-	// One occurrence moved an hour later, and one cancelled: the two
+	// One occurrence moved an hour later, and one canceled: the two
 	// exceptions a series picks up, and the two things list_instances
-	// exists to show. A cancelled instance is how a single date is
-	// removed, so it is hidden by default like any other cancelled
+	// exists to show. A canceled instance is how a single date is
+	// removed, so it is hidden by default like any other canceled
 	// event (§2.13) and the result says it is hiding them.
 	s.AddEvent("primary", Instance("ev-weekly_20260331T130000Z", "ev-weekly", "Weekly review",
 		"2026-03-31T15:00:00+02:00", "2026-03-31T16:00:00+02:00", tz, "2026-03-31T14:00:00+02:00"))
 	dropped := Instance("ev-weekly_20260407T120000Z", "ev-weekly", "Weekly review",
 		"2026-04-07T14:00:00+02:00", "2026-04-07T15:00:00+02:00", tz, "2026-04-07T14:00:00+02:00")
-	dropped.Status = gcal.StatusCancelled
+	dropped.Status = gcal.StatusCanceled
 	s.AddEvent("primary", dropped)
 
-	// Cancelled: hidden unless showDeleted (§2.13).
-	cancelled := Timed("ev-cancelled", "Cancelled thing",
+	// Canceled: hidden unless showDeleted (§2.13).
+	canceled := Timed("ev-canceled", "Canceled thing",
 		"2026-03-18T10:00:00+01:00", "2026-03-18T11:00:00+01:00", tz)
-	cancelled.Status = gcal.StatusCancelled
-	s.AddEvent("primary", cancelled)
+	canceled.Status = gcal.StatusCanceled
+	s.AddEvent("primary", canceled)
 
 	// Transparent: on the calendar, but not busy. This is why
 	// availability cannot come from an event list (§4.6).
@@ -404,7 +404,7 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 	// The fold lives on the type, so this fake cannot drift from what
 	// the server sends: a field added to EventPatch and forgotten here
 	// would make the fake quietly not apply it, and a test green over
-	// behaviour that never happened.
+	// behavior that never happened.
 	p.ApplyTo(&next)
 	if s.revs == nil {
 		s.revs = map[string]int{}
@@ -417,7 +417,7 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 	writeJSON(w, next)
 }
 
-// deleteEvent is events.delete: the event is gone, not cancelled.
+// deleteEvent is events.delete: the event is gone, not canceled.
 func (s *Server) deleteEvent(w http.ResponseWriter, r *http.Request, calID, eventID string) {
 	cur, ok := s.event(calID, eventID)
 	if !ok {
@@ -436,7 +436,7 @@ func (s *Server) deleteEvent(w http.ResponseWriter, r *http.Request, calID, even
 	// Gone from the calendar, but sync still owes the caller a
 	// tombstone: that is how a client learns the event was deleted
 	// rather than simply stopped matching a window.
-	s.bumpSync(calID, gcal.Event{ID: eventID, Status: gcal.StatusCancelled})
+	s.bumpSync(calID, gcal.Event{ID: eventID, Status: gcal.StatusCanceled})
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -456,7 +456,7 @@ func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventI
 	match := r.Header.Get("If-Match")
 	s.recordWrite(Write{Method: "move", CalendarID: calID, EventID: eventID,
 		SendUpdates: r.URL.Query().Get("sendUpdates"), IfMatch: match})
-	// events.move honours If-Match, which nothing Google publishes says
+	// events.move honors If-Match, which nothing Google publishes says
 	// and spike J established live (§18 row 49).
 	if !etagOK(match, cur.ETag) {
 		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
@@ -471,13 +471,13 @@ func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventI
 	s.Events[dest][eventID] = &moved
 	s.mu.Unlock()
 
-	// The RESPONSE says cancelled; the stored event does not. That is
+	// The RESPONSE says canceled; the stored event does not. That is
 	// what Google does, found live: a successful move answers with
 	// status:cancelled while the event sits confirmed on the destination
 	// (§18 row 48). A fake that answered with the destination's state
 	// would hide the reason the server reads the event back.
 	answer := moved
-	answer.Status = gcal.StatusCancelled
+	answer.Status = gcal.StatusCanceled
 	writeJSON(w, answer)
 }
 
@@ -589,7 +589,7 @@ func (s *Server) patchCalendar(w http.ResponseWriter, r *http.Request, calID str
 
 // deleteCalendar is calendars.delete.
 //
-// Whether Google refuses this on a PRIMARY calendar is not modelled
+// Whether Google refuses this on a PRIMARY calendar is not modeled
 // here, and deliberately: its description says it deletes a secondary
 // calendar, but nobody is probing that live against a real account's own
 // calendar. The server refuses the primary itself, which is what the
@@ -1066,7 +1066,7 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		// Without it, parents; with it, instances.
 		isInstance := e.RecurringEventID != ""
 		isParent := len(e.Recurrence) > 0
-		// A cancelled instance is the exception to both rules below,
+		// A canceled instance is the exception to both rules below,
 		// and this fake used to hide it where Google does not. The
 		// discovery document: "Cancelled instances of recurring events
 		// (but not the underlying recurring event) will still be
@@ -1075,13 +1075,13 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		// Google sends it bare: an id, a status, the series it belongs
 		// to and the date it was, with no start and no summary. That is
 		// why the server rendered one as a row with no date and no
-		// title. The shape is not modelled here; that it arrives at all
+		// title. The shape is not modeled here; that it arrives at all
 		// is what the server has to handle.
-		keptCancelledInstance := !single && isInstance && e.Status == gcal.StatusCancelled
+		keptCanceledInstance := !single && isInstance && e.Status == gcal.StatusCanceled
 		switch {
-		case keptCancelledInstance:
+		case keptCanceledInstance:
 			// Returned regardless of showDeleted, which is the point.
-		case e.Status == gcal.StatusCancelled && !showDeleted:
+		case e.Status == gcal.StatusCanceled && !showDeleted:
 			continue // §2.13
 		case single && isParent, !single && isInstance:
 			continue // §2.9: one shape or the other, never both
@@ -1192,12 +1192,12 @@ func (s *Server) listInstances(w http.ResponseWriter, r *http.Request, calID, ev
 
 	// An occurrence's own id is not refused: the live driver probed this
 	// and Google answered 200, expanding the occurrence the id names
-	// (§18). A CANCELLED occurrence expands to nothing, so the answer is
+	// (§18). A CANCELED occurrence expands to nothing, so the answer is
 	// an empty list and a success — which is why the server has to
-	// recognise the id itself rather than wait to be told.
+	// recognize the id itself rather than wait to be told.
 	if parent.RecurringEventID != "" {
 		items := []gcal.Event{}
-		if parent.Status != gcal.StatusCancelled || showDeleted {
+		if parent.Status != gcal.StatusCanceled || showDeleted {
 			items = append(items, *parent)
 		}
 		writeJSON(w, gcal.EventList{Items: items})
@@ -1206,7 +1206,7 @@ func (s *Server) listInstances(w http.ResponseWriter, r *http.Request, calID, ev
 	if len(parent.Recurrence) == 0 {
 		// Still a guess, and still unprobed: what Google does for a
 		// plain non-recurring event is not documented, and the live
-		// driver has not asked. The server's own behaviour does not
+		// driver has not asked. The server's own behavior does not
 		// depend on which it is — it explains the mistake for both 400
 		// and 404.
 		writeErr(w, http.StatusBadRequest, "invalid", "the requested event is not a recurring event")
@@ -1218,7 +1218,7 @@ func (s *Server) listInstances(w http.ResponseWriter, r *http.Request, calID, ev
 		if e.RecurringEventID != eventID {
 			continue
 		}
-		if e.Status == gcal.StatusCancelled && !showDeleted {
+		if e.Status == gcal.StatusCanceled && !showDeleted {
 			continue
 		}
 		if tm := q.Get("timeMin"); tm != "" && endsBefore(e, tm) {
@@ -1305,7 +1305,7 @@ func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
 // paginate returns [lo,hi) and the next token.
 //
 // The page is the smaller of PageSize and the caller's maxResults.
-// Honouring maxResults is what the real API does, and a fake that
+// Honoring maxResults is what the real API does, and a fake that
 // ignores it hides a whole class of defect: a server that asks for 250
 // and keeps 10 loses the 240 in between, because the token it gets back
 // points past the page rather than past what it kept.
@@ -1594,7 +1594,7 @@ func (s *Server) Remove(calID, eventID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.Events[calID], eventID)
-	s.bumpSync(calID, gcal.Event{ID: eventID, Status: gcal.StatusCancelled})
+	s.bumpSync(calID, gcal.Event{ID: eventID, Status: gcal.StatusCanceled})
 }
 
 // AnyEventID returns some event id on a calendar, for a test that needs
@@ -1604,7 +1604,7 @@ func (s *Server) AnyEventID(calID string) string {
 	defer s.mu.Unlock()
 	ids := make([]string, 0, len(s.Events[calID]))
 	for id, e := range s.Events[calID] {
-		if e.Status != gcal.StatusCancelled && e.RecurringEventID == "" {
+		if e.Status != gcal.StatusCanceled && e.RecurringEventID == "" {
 			ids = append(ids, id)
 		}
 	}
@@ -1622,7 +1622,7 @@ func (s *Server) EventIDs(calID string) []string {
 	defer s.mu.Unlock()
 	var ids []string
 	for id, e := range s.Events[calID] {
-		if e.Status != gcal.StatusCancelled {
+		if e.Status != gcal.StatusCanceled {
 			ids = append(ids, id)
 		}
 	}

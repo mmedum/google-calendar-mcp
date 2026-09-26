@@ -16,23 +16,23 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/userconfig"
 )
 
 // The scratch calendar's contents. Everything here is invented: the
 // driver reads only what it wrote (§9.1), so nothing from the operator's
 // real calendar can reach a transcript.
 const (
-	scratchTitle   = "google-calendar-mcp live driver scratch"
-	timedTitle     = "Livecal timed probe"
-	allDayTitle    = "Livecal all-day probe"
-	weeklyTitle    = "Livecal weekly probe"
-	cancelledTitle = "Livecal cancelled probe"
-	searchTerm     = "Livecal"
+	scratchTitle  = "google-calendar-mcp live driver scratch"
+	timedTitle    = "Livecal timed probe"
+	allDayTitle   = "Livecal all-day probe"
+	weeklyTitle   = "Livecal weekly probe"
+	canceledTitle = "Livecal canceled probe"
+	searchTerm    = "Livecal"
 )
 
 // Event ids are base32hex: lowercase a-v and the digits, 5 to 1024
@@ -52,10 +52,10 @@ const (
 var (
 	runSuffix = strconv.FormatInt(time.Now().UnixNano(), 32)
 
-	timedID     = "livecaltimedprobe" + runSuffix
-	allDayID    = "livecalfulldateprobe" + runSuffix
-	weeklyID    = "livecalrepeatprobe" + runSuffix
-	cancelledID = "livecalcancelledprobe" + runSuffix
+	timedID    = "livecaltimedprobe" + runSuffix
+	allDayID   = "livecalfulldateprobe" + runSuffix
+	weeklyID   = "livecalrepeatprobe" + runSuffix
+	canceledID = "livecalcanceledprobe" + runSuffix
 )
 
 // destTitle is the second scratch calendar, and it exists for one tool.
@@ -128,7 +128,7 @@ func (a *liveAPI) do(ctx context.Context, method, path string, body, out any) er
 }
 
 // doWithMatch is do with an If-Match header, for the one spike that has
-// to ask whether a method honours it. It also returns the HTTP status,
+// to ask whether a method honors it. It also returns the HTTP status,
 // because "which status" IS the answer there rather than a detail.
 func (a *liveAPI) doWithMatch(ctx context.Context, method, path, ifMatch string, body, out any) error {
 	_, err := a.status(ctx, method, path, ifMatch, body, out)
@@ -283,12 +283,12 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 				(strings.HasPrefix(it.Summary, spikeATitle) || strings.HasPrefix(it.Summary, spikeBTitle)) {
 				continue
 			}
-			// An event with guests is cancelled WITH notification, and
+			// An event with guests is canceled WITH notification, and
 			// this is the one place in the driver where none is wrong.
 			//
 			// Deleting with sendUpdates=none does not remove the event
 			// from the guests' calendars — it leaves a meeting there
-			// that the organiser believes is cancelled (§18 row 43).
+			// that the organizer believes is canceled (§18 row 43).
 			// This driver did exactly that for a day, littering two real
 			// calendars with probe events nobody could get rid of.
 			updates := "none"
@@ -422,14 +422,14 @@ func seedEvents() []seedEvent {
 			},
 		},
 		{
-			id: cancelledID,
+			id: canceledID,
 			body: map[string]any{
-				"id": cancelledID, "summary": cancelledTitle,
+				"id": canceledID, "summary": canceledTitle,
 				"start": zoned("2026-03-18T11:00:00+01:00"),
 				"end":   zoned("2026-03-18T12:00:00+01:00"),
 			},
 			after: func(ctx context.Context, a *liveAPI, cal string) error {
-				return a.do(ctx, http.MethodDelete, "/calendars/"+cal+"/events/"+cancelledID, nil, nil)
+				return a.do(ctx, http.MethodDelete, "/calendars/"+cal+"/events/"+canceledID, nil, nil)
 			},
 		},
 	}
@@ -570,7 +570,7 @@ type instanceRow struct {
 	} `json:"start"`
 	Status string `json:"status"`
 	// ETag is what spike J needs a stale copy of, to ask whether
-	// events.move honours If-Match.
+	// events.move honors If-Match.
 	ETag string `json:"etag"`
 }
 
@@ -589,7 +589,7 @@ func (a *liveAPI) listInstances(ctx context.Context, cal, event string) ([]insta
 }
 
 // cancelInstance removes one occurrence from a series, which is what a
-// cancelled instance is.
+// canceled instance is.
 func (a *liveAPI) cancelInstance(ctx context.Context, cal, instance string) error {
 	return a.do(ctx, http.MethodDelete,
 		"/calendars/"+cal+"/events/"+instance+"?sendUpdates=none", nil, nil)
@@ -632,9 +632,9 @@ func (a *liveAPI) freeBusy(ctx context.Context, ids []string, expansionMax int) 
 // assert against facts only the setup can know — an instance id is
 // Google's to invent, so a step cannot hardcode one.
 type seedState struct {
-	// cancelledOccurrence is the date of the occurrence removed from the
+	// canceledOccurrence is the date of the occurrence removed from the
 	// weekly series, as Google returned it.
-	cancelledOccurrence string
+	canceledOccurrence string
 }
 
 // removeOneOccurrence cancels the second occurrence of the weekly
@@ -656,7 +656,7 @@ func (a *liveAPI) removeOneOccurrence(ctx context.Context, cal string) (string, 
 		return "", err
 	}
 	if len(target.Start.DateTime) < 10 {
-		return "", fmt.Errorf("the cancelled occurrence carried no start date")
+		return "", fmt.Errorf("the canceled occurrence carried no start date")
 	}
 	return target.Start.DateTime[:10], nil
 }
@@ -695,7 +695,7 @@ func (a *liveAPI) patchCalendar(ctx context.Context, cal string, body map[string
 	return a.do(ctx, http.MethodPatch, "/calendars/"+cal, body, nil)
 }
 
-// probeACLIfMatch asks whether acl.patch honours a stale If-Match.
+// probeACLIfMatch asks whether acl.patch honors a stale If-Match.
 //
 // It creates a rule, moves its etag with a role change, and then patches
 // again with the etag it read before that. The rule names an address in

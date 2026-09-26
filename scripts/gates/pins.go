@@ -185,7 +185,7 @@ func installerPins(flow workflow) []installerPin {
 // missing or floating, along with every tool-installing step it saw.
 //
 // The steps are returned rather than a count so the caller can assert a
-// floor — an action this never recognised and an action correctly pinned
+// floor — an action this never recognized and an action correctly pinned
 // are the same silence otherwise — and so the rehearsal check reads the
 // versions from the same walk rather than repeating it.
 func unpinnedTools(flow workflow) ([]string, []installerPin) {

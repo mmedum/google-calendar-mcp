@@ -105,7 +105,7 @@ func leakRules() []leakRule {
 				// non-routable no-reply address in a Co-Authored-By
 				// trailer, structurally identical to the GitHub noreply
 				// above, and it says nothing about a deployer, an
-				// organisation or a person's calendar.
+				// organization or a person's calendar.
 				regexp.MustCompile(`^noreply@anthropic\.com$`),
 			},
 		},

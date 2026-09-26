@@ -29,7 +29,7 @@ builds:
     # carries the snapshot version, so the binary is the one place that
     # disagrees and the five-way version check cannot be rehearsed.
     ldflags:
-      - -s -w -X github.com/mmedum/google-calendar-mcp/internal/version.Version={{ .Version }}
+      - -s -w -X github.com/mmedum/google-calendar-mcp/v2/internal/version.Version={{ .Version }}
 
 # The macOS universal binary exists for the Claude Desktop bundle alone.
 # A manifest names a command per PLATFORM and has no key for the

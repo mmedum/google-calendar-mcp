@@ -26,6 +26,7 @@
 //	go run ./scripts/gates mcpb-pack DIST VERSION OUT
 //	go run ./scripts/gates release
 //	go run ./scripts/gates release-notes VERSION [CHANGELOG]
+//	go run ./scripts/gates release-tag TAG
 //	go run ./scripts/gates server-json VERSION CHECKSUMS
 package main
 
@@ -43,7 +44,7 @@ func main() {
 			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
 			"schema-baseline BIN | " +
 			"staleness BIN | mcpb | mcpb-pack DIST VERSION OUT | release | " +
-			"release-notes VERSION [CHANGELOG] | server-json VERSION CHECKSUMS")
+			"release-notes VERSION [CHANGELOG] | release-tag TAG | server-json VERSION CHECKSUMS")
 	}
 	root, err := repoRoot()
 	if err != nil {
@@ -69,7 +70,7 @@ func main() {
 	case "api-diff":
 		// Manual: it reaches the network. What CI holds is the snapshot
 		// this writes, not the fetch itself — the standard's split
-		// between a fetch that refreshes a stable judgement and a check
+		// between a fetch that refreshes a stable judgment and a check
 		// whose freshness IS the check.
 		check(apiDiff(os.Stdout), "API diff")
 	case "schema-refetch":
@@ -95,6 +96,13 @@ func main() {
 		check(mcpbGate(), "bundle manifest")
 	case "release":
 		check(releaseGate(), "release wiring")
+	case "release-tag":
+		// Release only: it runs before goreleaser, and refuses a tag
+		// whose major version is not go.mod's.
+		if len(os.Args) < 3 {
+			fail("usage: gates release-tag TAG")
+		}
+		check(releaseTag(os.Args[2]), "release tag")
 	case "server-json":
 		// Release only, like mcpb-pack: it reads the checksums file a
 		// build produced, and writes the registry entry to stdout.

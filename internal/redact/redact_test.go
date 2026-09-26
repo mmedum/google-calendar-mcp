@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
 )
 
 // The fixtures below are assembled at run time rather than written out
@@ -90,7 +90,7 @@ func TestPrinterRedacts(t *testing.T) {
 	var buf bytes.Buffer
 	p := redact.New(&buf)
 	p.Printf("invited %s to %s\n", at("person", "company.example"), "a meeting")
-	p.Println("organiser", at("someone", "company.example"))
+	p.Println("organizer", at("someone", "company.example"))
 	got := buf.String()
 	if strings.Contains(got, "person@") || strings.Contains(got, "someone@") {
 		t.Fatalf("the printer let an address through: %q", got)

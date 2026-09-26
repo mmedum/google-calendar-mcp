@@ -6,7 +6,7 @@ GO        ?= go
 EXE       := $(if $(filter Windows_NT,$(OS)),.exe,)
 BIN       ?= ./google-calendar-mcp$(EXE)
 VERSION   ?= dev
-PKG        = github.com/mmedum/google-calendar-mcp
+PKG        = github.com/mmedum/google-calendar-mcp/v2
 LDFLAGS    = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
 COVER_MIN ?= 80
 # Where the release's binaries are, what version the bundle claims, and
@@ -25,7 +25,7 @@ GOLANGCI_LINT ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 GOVULNCHECK   ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
 GOLICENSES    ?= github.com/google/go-licenses@v1.6.0
 # The module path is zricethezav, not gitleaks: the project moved
-# organisation and the module path did not follow it.
+# organization and the module path did not follow it.
 GITLEAKS      ?= github.com/zricethezav/gitleaks/v8@v8.30.1
 # The release runs goreleaser through goreleaser-action, which pins its
 # own copy. `pins` holds this version against that one: a rehearsal on a
@@ -94,7 +94,7 @@ api-coverage: gates ## Every published API method is used or written off
 	@$(GATES) api-coverage
 
 .PHONY: api-fields
-api-fields: gates ## Every published field is modelled or written off
+api-fields: gates ## Every published field is modeled or written off
 	@$(GATES) api-fields
 
 .PHONY: api-diff

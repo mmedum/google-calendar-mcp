@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
 )
 
 // The sharing half of the plan package (§7.6).
@@ -163,7 +163,7 @@ func AllowPublic(a Audience, allow bool) error {
 		return nil
 	}
 	return fmt.Errorf("%w: this would publish the calendar to anybody at all, signed in or not. Removing "+
-		"the rule afterwards stops new readers and takes nothing back from whoever already looked. Pass "+
+		"the rule afterward stops new readers and takes nothing back from whoever already looked. Pass "+
 		"allow_public:true on this call if that is genuinely what you mean", ErrBlocked)
 }
 

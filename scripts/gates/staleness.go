@@ -174,7 +174,7 @@ func checkSettings() ([]string, int, error) {
 // references and every one was the extractor's fault. The exclusions
 // below are that triage, not a widening.
 // pathRe matches a repository path in backticks: a file under one of the
-// source directories, or a root file recognised by its SHAPE.
+// source directories, or a root file recognized by its SHAPE.
 //
 // Shape, never existence. The obvious "derive the roots from the
 // repository's own top-level entries" is circular and was tried here: a

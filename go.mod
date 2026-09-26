@@ -1,4 +1,4 @@
-module github.com/mmedum/google-calendar-mcp
+module github.com/mmedum/google-calendar-mcp/v2
 
 go 1.27.1
 

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // The calendar half of the plan package: what a calendar write changes,
@@ -17,7 +17,7 @@ import (
 // two resources what a person thinks of as one thing (§7.5). The
 // CALENDAR is shared — its title, description, location and time zone
 // are what everybody subscribed to it sees. The SUBSCRIPTION is this
-// user's alone — the colour, the name they gave it, whether it is hidden
+// user's alone — the color, the name they gave it, whether it is hidden
 // and what they are emailed about. Writing the first when the second was
 // meant renames a team's calendar for the team.
 
@@ -114,8 +114,8 @@ func (d ListDraft) Patch(before gcal.CalendarListEntry) (gcal.CalendarListPatch,
 		to := strings.TrimSpace(*d.ColorID)
 		if to == "" {
 			return gcal.CalendarListPatch{}, nil, fmt.Errorf(
-				"%w: color_id cannot be emptied — a calendar always has a colour. Pass one of the "+
-					"calendar colour ids get_settings reports", ErrInvalid)
+				"%w: color_id cannot be emptied — a calendar always has a color. Pass one of the "+
+					"calendar color ids get_settings reports", ErrInvalid)
 		}
 		setField(&changes, "color_id", before.ColorID, to, &p.ColorID)
 	}

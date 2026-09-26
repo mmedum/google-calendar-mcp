@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/render"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 func zone(t *testing.T, name string) when.Zone {
@@ -110,7 +110,7 @@ func TestEventLineTags(t *testing.T) {
 		edit func(e *model.Event)
 		want string
 	}{
-		{"cancelled", func(e *model.Event) { e.Status = gcal.StatusCancelled }, "cancelled"},
+		{"canceled", func(e *model.Event) { e.Status = gcal.StatusCanceled }, "canceled"},
 		{"transparent says free", func(e *model.Event) { e.Transparent = true }, "free"},
 		{"series shows its rule", func(e *model.Event) {
 			e.Recurrence = []string{"RRULE:FREQ=WEEKLY;BYDAY=TU"}
@@ -338,13 +338,13 @@ func TestBothLineRenderersCarryTheSameTags(t *testing.T) {
 		}
 	}
 	// And the one deliberate difference: an occurrence says which date
-	// was removed, not merely that something was cancelled.
-	e.Status = gcal.StatusCancelled
+	// was removed, not merely that something was canceled.
+	e.Status = gcal.StatusCanceled
 	if got := render.InstanceLine(e, z); !strings.Contains(got, "removed from the series") {
-		t.Fatalf("a cancelled occurrence reads as an ordinary cancellation:\n%s", got)
+		t.Fatalf("a canceled occurrence reads as an ordinary cancellation:\n%s", got)
 	}
-	if got := render.EventLine(e, z); !strings.Contains(got, "cancelled") {
-		t.Fatalf("EventLine lost its cancelled tag:\n%s", got)
+	if got := render.EventLine(e, z); !strings.Contains(got, "canceled") {
+		t.Fatalf("EventLine lost its canceled tag:\n%s", got)
 	}
 }
 

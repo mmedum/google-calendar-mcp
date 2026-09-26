@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 )
 
 // TestConferenceRequestAsksForMeetWithTheEventID: the request id is the
@@ -62,7 +62,7 @@ func TestReadConference(t *testing.T) {
 			// A union this package does not model must not lose the
 			// event it is attached to.
 			name:    "a shape from somewhere else",
-			raw:     `{"somethingNobodyModelled":{"nested":[1,2,3]}}`,
+			raw:     `{"somethingNobodyModeled":{"nested":[1,2,3]}}`,
 			present: true,
 		},
 		{

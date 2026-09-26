@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mmedum/google-calendar-mcp)](https://github.com/mmedum/google-calendar-mcp/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp/v2.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp/v2)
 
 An MCP server for Google Calendar. One binary, stdio, per-user OAuth
 against your own Google account.
@@ -44,7 +44,7 @@ tools are listed below, and the phase plan and what is still owed are in
 ## Install
 
 ```
-go install github.com/mmedum/google-calendar-mcp/cmd/google-calendar-mcp@latest
+go install github.com/mmedum/google-calendar-mcp/v2/cmd/google-calendar-mcp@latest
 ```
 
 Or download an archive from the releases page.
@@ -105,14 +105,14 @@ Every setting is in `docs/configuration.md`.
 | `list_instances` | The occurrences of one repeating event, with the dates that were moved or removed. |
 | `list_changes` | What changed since you last looked, including **deletions** — which a list cannot report, because a deleted event simply stops matching. Hands back a sync token to pass in next time. |
 | `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. Takes an optional working-hours mask. |
-| `get_settings` | The account's time zone, week start and colour palette. |
+| `get_settings` | The account's time zone, week start and color palette. |
 | `create_event` | Create an event, one-off or repeating, with a Google Meet link if you ask for one. |
 | `update_event` | Change an event. Only the fields you pass are touched. |
 | `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
-| `move_event` | Move an event to another calendar, which changes who organises it. |
+| `move_event` | Move an event to another calendar, which changes who organizes it. |
 | `respond_to_event` | Answer an invitation: accepted, declined or tentative. |
 | `create_calendar` | Create a calendar of your own. |
-| `manage_calendar` | Rename or re-zone a calendar, set your own colour and name for it, or add and remove it from your list. |
+| `manage_calendar` | Rename or re-zone a calendar, set your own color and name for it, or add and remove it from your list. |
 | `list_sharing` | Who can see a calendar, and what each of them can see. |
 | `share_calendar` | Give somebody access, or change the access they have. |
 | `unshare_calendar` | Take somebody's access away. |
@@ -125,7 +125,7 @@ scopes, so the API itself refuses a write.
 `manage_calendar` covers what the API splits across two resources and
 people do not: **the calendar** — its title, description, location and
 time zone — is what everybody it is shared with sees, while **your
-subscription** to it — the colour, the name you give it, whether it is
+subscription** to it — the color, the name you give it, whether it is
 hidden, what you are emailed about — is yours alone. Unsubscribing
 removes it from your list; it deletes nothing and nobody else notices.
 
@@ -134,7 +134,7 @@ what the surveyed servers do:
 
 - **`notify` is required** whenever the write can reach another person,
   and there is no default in either direction. `none` is refused outright
-  when a guest is outside your organisation — such a guest may have no
+  when a guest is outside your organization — such a guest may have no
   Google Calendar for the event to appear in, so email is the only way
   they can learn of it.
 - **`scope` is required** when the event repeats: `instance`, `series` or
@@ -193,7 +193,7 @@ quietly.
   `delete_calendar` and `clear_calendar` — are not registered at all
   unless `GCAL_ENABLE_DESTRUCTIVE=true`, and each still needs
   `confirm: true` on the call. `cancel_event` is deliberately not behind
-  that flag: cancelling a meeting is what a calendar is for, Google keeps
+  that flag: canceling a meeting is what a calendar is for, Google keeps
   the record, and a gate everybody turns on protects nobody.
   `docs/architecture.md` §9 argues it. What guards it instead is the
   required `scope` and the required `notify`.
@@ -203,7 +203,7 @@ quietly.
   `share_calendar` requires `notify` like every other write — and here
   Google's own default is to email, the opposite of its default on an
   event. Sharing with "anyone" publishes the calendar to the whole
-  internet and needs `allow_public: true`; removing the rule afterwards
+  internet and needs `allow_public: true`; removing the rule afterward
   stops new readers and takes nothing back from whoever already looked.
   Removing access notifies nobody, because Google offers no way to ask
   for it: they are not told, they find the calendar gone.
@@ -227,6 +227,6 @@ calendar, and needs an `ANTHROPIC_API_KEY`;
 `go run -tags=evals ./scripts/evals -self-check` exercises the harness
 without a key or a model.
 
-## Licence
+## License
 
 Apache 2.0. See `LICENSE`.

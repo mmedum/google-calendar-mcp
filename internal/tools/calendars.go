@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
 // The sentences every calendar and sharing tool has to say, written once
@@ -14,7 +14,7 @@ import (
 
 const twoThingsHelp = "A calendar is two things and the difference is visible to other people: the CALENDAR " +
 	"itself — its title, description, location and time zone — is what everybody it is shared with sees, and " +
-	"YOUR SUBSCRIPTION to it — the colour, the name you give it, whether it is hidden, what you are emailed " +
+	"YOUR SUBSCRIPTION to it — the color, the name you give it, whether it is hidden, what you are emailed " +
 	"about — is yours alone. Renaming the calendar renames it for the team; `my_name` renames it only for you."
 
 const shareNotifyHelp = "`notify` is REQUIRED and has no default: `all` asks Google to email about the " +
@@ -33,7 +33,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"You are its owner, it appears in your calendar list, and nobody else can see it until you " +
 			"share it — use share_calendar for that. " +
 			"It is created in `time_zone` if you pass one, otherwise the zone in this account's Calendar " +
-			"settings; the result says which it used, and every time written to the calendar afterwards is " +
+			"settings; the result says which it used, and every time written to the calendar afterward is " +
 			"read against it. " +
 			"Creating a calendar is quota-counted by Google and deleting one does not give the quota back, " +
 			"so do not create one per task. " + dryRunHelp,
@@ -166,7 +166,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 	add(s, d, Def[destructiveIn, service.CalendarWriteResult]{
 		Name: "clear_calendar",
 		Description: "Delete EVERY event on this account's own primary calendar: past, future, and every " +
-			"meeting it organises. This is the most destructive call the Calendar API offers and it cannot " +
+			"meeting it organizes. This is the most destructive call the Calendar API offers and it cannot " +
 			"be undone. Guests are not notified, and the meetings stay on their calendars. " +
 			"It needs `confirm: true` on the call, and the server has to have been started with the " +
 			"destructive tools enabled. " +
@@ -208,7 +208,7 @@ type manageCalendarIn struct {
 	Unsubscribe bool `json:"unsubscribe,omitempty" jsonschema:"Remove it from YOUR list. It is not deleted, its events stay, and nobody else notices."`
 
 	MyName        *string   `json:"my_name,omitempty" jsonschema:"The name YOU see for this calendar. Nobody else sees it. Pass an empty string to go back to its own title."`
-	ColorID       *string   `json:"color_id,omitempty" jsonschema:"Your colour for it, from the calendar palette get_settings reports."`
+	ColorID       *string   `json:"color_id,omitempty" jsonschema:"Your color for it, from the calendar palette get_settings reports."`
 	Hidden        *bool     `json:"hidden,omitempty" jsonschema:"Hide it from your calendar list."`
 	Selected      *bool     `json:"selected,omitempty" jsonschema:"Whether its events are drawn in the Calendar UI. Not the same as hidden."`
 	Notifications *[]string `json:"notifications,omitempty" jsonschema:"What YOU are emailed about on this calendar: creation, change, cancellation, response, agenda. Replaces the whole list; an empty list turns them off."`

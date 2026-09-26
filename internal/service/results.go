@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/internal/render"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // Rendered is the contract every tool result satisfies.
@@ -42,7 +42,7 @@ type CalendarOut struct {
 	Selected  bool   `json:"selected"`
 	Hidden    bool   `json:"hidden,omitempty"`
 	CanWrite  bool   `json:"can_write"`
-	// ColorID is this user's own colour for the calendar, which
+	// ColorID is this user's own color for the calendar, which
 	// manage_calendar sets. The palette is in get_settings.
 	//
 	// No etag here, unlike an event: a calendar is two resources with
@@ -362,7 +362,7 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 				extra = ", optional"
 			}
 			if a.Organizer {
-				extra += ", organiser"
+				extra += ", organizer"
 			}
 			fmt.Fprintf(&b, "  %s — %s%s\n", who, a.Response, extra)
 		}
@@ -388,7 +388,7 @@ type SettingsResult struct {
 	Locale       string            `json:"locale,omitempty"`
 	EventColors  map[string]string `json:"event_colors,omitempty"`
 	// CalendarColors is the other palette Google publishes, and the two
-	// are not interchangeable: an event colour id means nothing to
+	// are not interchangeable: an event color id means nothing to
 	// manage_calendar's color_id, which indexes this one.
 	CalendarColors map[string]string `json:"calendar_colors,omitempty"`
 
@@ -410,12 +410,12 @@ type InstancesResult struct {
 	Instances  []OccurrenceOut `json:"instances"`
 	Shown      int             `json:"shown"`
 	Truncated  bool            `json:"truncated"`
-	// CancelledHidden says a cancelled occurrence would not be in this
+	// CanceledHidden says a canceled occurrence would not be in this
 	// list. It is the difference between "the series has these dates"
 	// and "the series has these dates plus ones somebody removed".
-	CancelledHidden bool   `json:"cancelled_hidden"`
-	NextPageToken   string `json:"next_page_token,omitempty"`
-	Requests        int    `json:"api_requests"`
+	CanceledHidden bool   `json:"canceled_hidden"`
+	NextPageToken  string `json:"next_page_token,omitempty"`
+	Requests       int    `json:"api_requests"`
 
 	text string
 }
@@ -429,7 +429,7 @@ type OccurrenceOut struct {
 	// (§6.2), which is why it is reported rather than inferred.
 	OriginalStart string `json:"original_start,omitempty"`
 	Moved         bool   `json:"moved,omitempty"`
-	Cancelled     bool   `json:"cancelled,omitempty"`
+	Canceled      bool   `json:"canceled,omitempty"`
 }
 
 // Render implements Rendered.
@@ -441,15 +441,15 @@ func NewInstancesResult(in render.Instances) InstancesResult {
 		SeriesID: in.SeriesID, CalendarID: in.CalendarID, Title: in.Title,
 		TimeZone: in.Zone.Name(), ZoneSource: string(in.Zone.Source),
 		Shown: len(in.Events), Truncated: in.Truncated,
-		CancelledHidden: !in.ShowCancelled,
-		NextPageToken:   in.NextPageToken, Requests: in.Requests,
+		CanceledHidden: !in.ShowCanceled,
+		NextPageToken:  in.NextPageToken, Requests: in.Requests,
 		text: in.Text(),
 	}
 	if in.Window != nil {
 		out.Window = &WindowOut{From: in.Window.Start.String(), To: in.Window.End.String()}
 	}
 	for _, e := range in.Events {
-		occ := OccurrenceOut{EventOut: NewEventOut(e), Cancelled: e.Cancelled(), Moved: e.Moved()}
+		occ := OccurrenceOut{EventOut: NewEventOut(e), Canceled: e.Canceled(), Moved: e.Moved()}
 		switch {
 		case e.OriginalStart.AllDay:
 			occ.OriginalStart = e.OriginalStart.Date.String()
@@ -616,7 +616,7 @@ func NewWriteResult(w render.WriteReport) WriteResult {
 // changed, what it looks like now, and the notes that say what the write
 // did NOT do — because the mistakes §7.5 is about are all of that kind.
 // Unsubscribing deletes nothing; renaming a shared calendar renames it
-// for the team; a colour is yours alone.
+// for the team; a color is yours alone.
 type CalendarWriteResult struct {
 	// Action is the verb in the past tense, or the conditional under
 	// DryRun, from the same table every other write uses.
@@ -711,7 +711,7 @@ type ChangesResult struct {
 	// no title and no times, and inventing them would be this server
 	// claiming to know what it does not.
 	//
-	// On a BASELINE these are the events already cancelled on the
+	// On a BASELINE these are the events already canceled on the
 	// calendar rather than ones deleted since a point in time: there was
 	// no such point yet. `baseline` distinguishes the two, and the text
 	// half labels them differently.

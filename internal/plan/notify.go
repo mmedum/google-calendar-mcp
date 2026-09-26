@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
 )
 
 // Notify is the caller's notification choice (§4.3).
@@ -25,7 +25,7 @@ const (
 	// NotifyNone asks Google to send nothing. It is never reported as
 	// silence: §2.6 says some mail may go out anyway.
 	NotifyNone Notify = "none"
-	// NotifyExternalOnly reaches the guests outside the organiser's own
+	// NotifyExternalOnly reaches the guests outside the organizer's own
 	// Workspace domain. Google documents this as "non-Google Calendar
 	// guests only" and is wrong about its own parameter: spike A gave it
 	// one guest inside the domain and one outside, both on Google
@@ -54,9 +54,9 @@ func (n Notify) SendUpdates() string {
 func (n Notify) Means() string {
 	switch n {
 	case NotifyNone:
-		return "asks Google to email nobody — which is not a promise of silence, and is refused when a guest is outside your organisation"
+		return "asks Google to email nobody — which is not a promise of silence, and is refused when a guest is outside your organization"
 	case NotifyExternalOnly:
-		return "emails only the guests outside your own organisation"
+		return "emails only the guests outside your own organization"
 	case NotifyAll:
 		return "emails every guest"
 	default:
@@ -74,7 +74,7 @@ func NotifyChoices() string {
 }
 
 // Reach is how far a write can carry: how many people, and how many of
-// them are outside the organiser's own domain.
+// them are outside the organizer's own domain.
 //
 // Counts, never addresses. A refusal says "this event has 4 guests", and
 // the four addresses stay out of the message, the log and the transcript
@@ -82,10 +82,10 @@ func NotifyChoices() string {
 type Reach struct {
 	// Guests is people other than the caller. A room is not a person.
 	Guests int
-	// External is how many of those are outside the organiser's domain,
+	// External is how many of those are outside the organizer's domain,
 	// which is the axis `external_only` actually splits on (§18 row 40).
 	External int
-	// domain is the organiser's, kept for the split and never printed.
+	// domain is the organizer's, kept for the split and never printed.
 	domain string
 }
 
@@ -93,7 +93,7 @@ type Reach struct {
 // what makes notify required (§4.3.2).
 func (r Reach) Any() bool { return r.Guests > 0 }
 
-// ReachOfEvent counts an event's guests against the organiser's domain.
+// ReachOfEvent counts an event's guests against the organizer's domain.
 //
 // Who counts as a guest is model.Event.Guests' to say, not this
 // package's: it is the rule §4.3.2 decides a refusal on, and a second
@@ -102,9 +102,9 @@ func (r Reach) Any() bool { return r.Guests > 0 }
 // account is the signed-in account's own address, which is never a
 // guest — Google's `self` flag alone was not enough to establish that,
 // and the live run proved it (see model.Event.Guests).
-func ReachOfEvent(organiser, account string, e model.Event) Reach {
+func ReachOfEvent(organizer, account string, e model.Event) Reach {
 	guests := e.Guests(account)
-	r := Reach{domain: domainOf(organiser), Guests: len(guests)}
+	r := Reach{domain: domainOf(organizer), Guests: len(guests)}
 	for _, a := range guests {
 		if r.isExternal(a.Email) {
 			r.External++
@@ -116,14 +116,14 @@ func ReachOfEvent(organiser, account string, e model.Event) Reach {
 // ReachOfAddresses counts a guest list the caller supplied, which is
 // what create_event has before the event exists.
 //
-// The organiser's own address does not count: inviting yourself is not
+// The organizer's own address does not count: inviting yourself is not
 // reaching somebody, and a notify requirement over it would be friction
 // with no safety in it (§4.3.2).
-func ReachOfAddresses(organiser string, addresses []string) Reach {
-	r := Reach{domain: domainOf(organiser)}
+func ReachOfAddresses(organizer string, addresses []string) Reach {
+	r := Reach{domain: domainOf(organizer)}
 	for _, a := range addresses {
 		a = strings.TrimSpace(a)
-		if a == "" || strings.EqualFold(a, organiser) {
+		if a == "" || strings.EqualFold(a, organizer) {
 			continue
 		}
 		r.Guests++
@@ -134,13 +134,13 @@ func ReachOfAddresses(organiser string, addresses []string) Reach {
 	return r
 }
 
-// isExternal reports whether an address sits outside the organiser's
+// isExternal reports whether an address sits outside the organizer's
 // domain.
 //
-// An unknown organiser domain makes every guest external, and that is
+// An unknown organizer domain makes every guest external, and that is
 // deliberate: the consequence of guessing wrong is §4.3.4's refusal not
 // firing for somebody who cannot discover the event by any other means.
-// Failing towards the refusal costs a caller one explicit choice.
+// Failing toward the refusal costs a caller one explicit choice.
 func (r Reach) isExternal(email string) bool {
 	d := domainOf(email)
 	return d == "" || r.domain == "" || !strings.EqualFold(d, r.domain)
@@ -171,7 +171,7 @@ type Decision struct {
 //  1. a write that reaches nobody does not ask (§4.3.2);
 //  2. a write that reaches somebody and names no choice is refused, with
 //     the count and the three options (§4.3.1);
-//  3. `none` with a guest outside the organiser's domain is refused
+//  3. `none` with a guest outside the organizer's domain is refused
 //     rather than warned about — that guest may have no Google Calendar
 //     at all, and then mail is the only channel there is. Spike B
 //     invited one with `none`, it received nothing, and there was no
@@ -190,7 +190,7 @@ func Notification(v string, r Reach) (Decision, error) {
 	}
 	if choice == NotifyNone && r.External > 0 {
 		return Decision{}, fmt.Errorf(
-			"%w: %d of the %d guests %s outside your organisation, and notify:none is refused there rather than"+
+			"%w: %d of the %d guests %s outside your organization, and notify:none is refused there rather than"+
 				" warned about. Such a guest may have no Google Calendar for the event to appear in, so email is"+
 				" the only way they can learn of it — the event would exist with them attached and they could not"+
 				" find it. Pass notify:external_only to reach exactly them, or notify:all",
@@ -249,11 +249,11 @@ func (d Decision) Report() string {
 		return fmt.Sprintf("Asked Google to notify nobody, of %d %s. Google says some mail may still be sent,"+
 			" so this is not a promise of silence.", d.Reach.Guests, People(d.Reach.Guests))
 	case NotifyExternalOnly:
-		return fmt.Sprintf("Asked Google to notify the %d of %d %s outside your organisation."+
+		return fmt.Sprintf("Asked Google to notify the %d of %d %s outside your organization."+
 			" That is what was asked for, not what arrived: the API reports nothing about delivery.",
 			d.Reach.External, d.Reach.Guests, People(d.Reach.Guests))
 	default:
-		return fmt.Sprintf("Asked Google to notify all %d %s, %d of them outside your organisation."+
+		return fmt.Sprintf("Asked Google to notify all %d %s, %d of them outside your organization."+
 			" That is what was asked for, not what arrived: the API reports nothing about delivery.",
 			d.Reach.Guests, People(d.Reach.Guests), d.Reach.External)
 	}
@@ -284,7 +284,7 @@ const AttendeeLimit = 200
 // than Google will track individually, and "" for an ordinary one.
 //
 // The count is ATTENDEE ROWS, because the threshold is Google's and it
-// is on Google's own field: the organiser's row and the rooms are on
+// is on Google's own field: the organizer's row and the rooms are on
 // that list. Counting "guests" — the narrower set a write can reach —
 // would leave an event Google had already stopped tracking unqualified,
 // and would disagree with the number the same result prints.

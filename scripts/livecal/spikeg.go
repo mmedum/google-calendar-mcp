@@ -6,8 +6,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
 )
 
 // spikeG answers §15's question: does acl.list really need its own

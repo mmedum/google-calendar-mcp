@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 )
 
 func client(base string) *gapi.Client {
@@ -232,7 +232,7 @@ func TestContextCancellationIsNotAMysteriousFailure(t *testing.T) {
 		t.Fatalf("class = %q, want unavailable", cls)
 	}
 	if !strings.Contains(err.Error(), "cancel") {
-		t.Fatalf("a cancelled request does not say so: %v", err)
+		t.Fatalf("a canceled request does not say so: %v", err)
 	}
 }
 
@@ -305,7 +305,7 @@ func TestListInstancesPassesItsOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListInstances: %v", err)
 	}
-	// Two of the seeded occurrences fall in March; the cancelled one is
+	// Two of the seeded occurrences fall in March; the canceled one is
 	// in April, so showDeleted does not add it here.
 	if len(got.Items) != 2 {
 		t.Fatalf("got %d instances", len(got.Items))
@@ -442,11 +442,11 @@ func TestErrorWithNoBodyStillClassifies(t *testing.T) {
 // at the layer that talks to Google.
 //
 // events.instances does not refuse an occurrence's own id: it answers
-// 200 and expands the occurrence that id names. A cancelled occurrence
+// 200 and expands the occurrence that id names. A canceled occurrence
 // expands to nothing, so the call succeeds with an empty list — which is
 // why internal/service refuses the id shape rather than waiting to be
 // told. The refusal means nothing here reaches this method in
-// production, so this is the only place the fake's behaviour is held to
+// production, so this is the only place the fake's behavior is held to
 // the probe that established it (§18 row 31).
 func TestListInstancesOfAnOccurrenceID(t *testing.T) {
 	fake := caltest.Seed()
@@ -464,14 +464,14 @@ func TestListInstancesOfAnOccurrenceID(t *testing.T) {
 			len(live.Items))
 	}
 
-	// The cancelled one, which is the case that produced the defect.
+	// The canceled one, which is the case that produced the defect.
 	gone, err := c.ListInstances(ctx, "primary", "ev-weekly_20260407T120000Z",
 		gapi.EventsListOptions{})
 	if err != nil {
-		t.Fatalf("a cancelled occurrence id was refused rather than expanded: %v", err)
+		t.Fatalf("a canceled occurrence id was refused rather than expanded: %v", err)
 	}
 	if len(gone.Items) != 0 {
-		t.Fatalf("a cancelled occurrence expanded to %d items, want an empty list", len(gone.Items))
+		t.Fatalf("a canceled occurrence expanded to %d items, want an empty list", len(gone.Items))
 	}
 
 	// And it is reachable when asked for, so the emptiness is the
@@ -482,6 +482,6 @@ func TestListInstancesOfAnOccurrenceID(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(shown.Items) != 1 {
-		t.Fatalf("showDeleted returned %d items, want the cancelled occurrence", len(shown.Items))
+		t.Fatalf("showDeleted returned %d items, want the canceled occurrence", len(shown.Items))
 	}
 }

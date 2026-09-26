@@ -14,7 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
 )
 
 // isolate points the profile state at a temporary directory. Every test
@@ -197,7 +197,7 @@ func TestIsDisconnect(t *testing.T) {
 		t.Skip("the SDK now wraps io.EOF; the code match is still correct but this note is stale")
 	}
 	if !isDisconnect(sdkDisconnect) {
-		t.Fatal("the SDK's disconnect is not recognised, so an ordinary disconnect exits non-zero")
+		t.Fatal("the SDK's disconnect is not recognized, so an ordinary disconnect exits non-zero")
 	}
 }
 
@@ -213,7 +213,7 @@ func TestAccessForFollowsTheConfiguration(t *testing.T) {
 		t.Fatalf("doctor found no problem on a machine with no credentials:\n%s", s)
 	}
 	if !strings.Contains(s, "problem") {
-		t.Fatalf("doctor does not summarise:\n%s", s)
+		t.Fatalf("doctor does not summarize:\n%s", s)
 	}
 }
 

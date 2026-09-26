@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/service"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 func testZone(t *testing.T) when.Zone {

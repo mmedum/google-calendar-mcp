@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
 )
 
 // spikeC answers §15's daylight-saving question, and it is the half
@@ -258,7 +258,7 @@ func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api 
 	}
 }
 
-// spikeJ — does events.move honour If-Match?
+// spikeJ — does events.move honor If-Match?
 //
 // The one question phase 2 left open. §4.4 puts every write under
 // If-Match, and move_event is the single exception: events.move is a
@@ -269,7 +269,7 @@ func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api 
 // an assumption gets probed before it is adopted, and this is the probe.
 //
 // The discriminator is a STALE etag. A current one would succeed whether
-// the header is honoured or ignored, and would settle nothing — which is
+// the header is honored or ignored, and would settle nothing — which is
 // exactly the shape of failure §15 opens by naming.
 func spikeJ(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
 	if spikeDest == "" {
@@ -322,7 +322,7 @@ func spikeJ(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 
 	switch {
 	case status == http.StatusPreconditionFailed:
-		return pass, "HONOURED: a stale If-Match is refused with 412, so move_event can and should carry " +
+		return pass, "HONORED: a stale If-Match is refused with 412, so move_event can and should carry " +
 			"the etag — §4.4's exception is not needed and the tool should take one"
 	case status >= 200 && status < 300:
 		return pass, "IGNORED: a stale If-Match was accepted and the event moved anyway, so events.move " +

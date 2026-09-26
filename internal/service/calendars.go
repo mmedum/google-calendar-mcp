@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
 )
 
 // The calendar writes (§7.5): create_calendar, manage_calendar, and the
@@ -33,7 +33,7 @@ import (
 //
 // prepare refuses a calendar this account cannot write events to, which
 // is right for an event write and wrong here: the per-user half of
-// manage_calendar — the colour, the name you gave it, whether it is
+// manage_calendar — the color, the name you gave it, whether it is
 // hidden — works perfectly well on a calendar you can only read. The
 // access each axis actually needs is checked where that axis is applied.
 func (s *Service) openCalendar(ctx context.Context, ref string) (context.Context, model.Calendar, error) {
@@ -253,7 +253,7 @@ func (s *Service) ManageCalendar(ctx context.Context, o ManageOptions) (render.C
 //
 // manage_calendar can be two patches, and the second failing does not
 // undo the first: a call that renamed the calendar and then failed to
-// set the colour returned a bare error, so the caller could not tell
+// set the color returned a bare error, so the caller could not tell
 // that half the write had landed and a retry would redo it. There is no
 // rollback to offer — §2 has no transaction — so the honest thing is to
 // say which change is already made.
@@ -362,7 +362,7 @@ func (s *Service) unsubscribe(ctx context.Context, cal model.Calendar, dryRun bo
 // Read fresh, not taken from the resolved calendar, and the reason is
 // that these tools have no `force`. The calendar list is cached for the
 // process (§7.1), so its etag can be minutes old; sending it would turn
-// a colour somebody changed in the web UI into a `[stale]` refusal with
+// a color somebody changed in the web UI into a `[stale]` refusal with
 // no way past it. A read immediately before the write is what the tool
 // descriptions promise and the only version worth holding a write to.
 //
@@ -531,7 +531,7 @@ func notSubscribed(err error, cal model.Calendar) error {
 		return err
 	}
 	return gapi.Errf(gapi.ClassNotFound,
-		"%q is not in your calendar list, and the colour, the name you give it and the notifications are "+
+		"%q is not in your calendar list, and the color, the name you give it and the notifications are "+
 			"settings ON that list entry. Pass subscribe:true in the same call to add it first", cal.Title)
 }
 
@@ -600,7 +600,7 @@ func mergeEntry(have model.Calendar, e gcal.CalendarListEntry) model.Calendar {
 // mergeCalendar folds a patched calendar resource into what the report
 // already holds, keeping the fields only the list entry carries.
 //
-// The calendar resource has no access role, no colour and no hidden
+// The calendar resource has no access role, no color and no hidden
 // flag: they belong to the subscription. Replacing the report's calendar
 // with the resource wholesale would print "your access: " with nothing
 // after it on every rename.
@@ -631,7 +631,7 @@ func mergeCalendar(have model.Calendar, c gcal.Calendar) model.Calendar {
 //
 // The list is cached for the process (§7.1), which is what keeps a
 // resolution from costing a request; dropping it made the NEXT tool call
-// pay for a full calendarList.list, so setting a colour on ten calendars
+// pay for a full calendarList.list, so setting a color on ten calendars
 // cost thirty requests instead of twenty-one. Every write here has the
 // row Google just returned in hand, so the cache can be corrected rather
 // than emptied.
@@ -765,7 +765,7 @@ func (s *Service) ClearCalendar(ctx context.Context, o DestructiveOptions) (rend
 
 	report := render.CalendarReport{Verb: render.VerbClear, DryRun: o.DryRun, Calendar: cal}
 	report.Notes = append(report.Notes,
-		"Every event on this calendar is deleted: past, future, and every meeting you organise. Guests are "+
+		"Every event on this calendar is deleted: past, future, and every meeting you organize. Guests are "+
 			"not notified by this call. Calendar cannot bring any of it back.")
 	if !o.DryRun {
 		etag, err := s.calendarETag(ctx, cal)

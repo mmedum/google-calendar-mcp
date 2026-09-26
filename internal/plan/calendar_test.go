@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
 )
 
 func TestCalendarPatchSendsOnlyWhatChanged(t *testing.T) {
@@ -91,10 +91,10 @@ func TestListPatchIsPerUserAndComplete(t *testing.T) {
 	}
 }
 
-// A colour cannot be emptied: a calendar always has one, and an empty
+// A color cannot be emptied: a calendar always has one, and an empty
 // colorId would be a request Google refuses for a reason the caller
 // cannot see from here.
-func TestListPatchRefusesAnEmptyColour(t *testing.T) {
+func TestListPatchRefusesAnEmptyColor(t *testing.T) {
 	_, _, err := plan.ListDraft{ColorID: ptr("")}.Patch(gcal.CalendarListEntry{ColorID: "3"})
 	if !errors.Is(err, plan.ErrInvalid) {
 		t.Fatalf("error %v, want invalid", err)

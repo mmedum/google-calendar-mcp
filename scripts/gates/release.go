@@ -60,7 +60,7 @@ type goreleaserConfig struct {
 		Binary string   `yaml:"binary"`
 		Goos   []string `yaml:"goos"`
 		Goarch []string `yaml:"goarch"`
-		// Ignore removes combinations from the matrix. Unmodelled, a
+		// Ignore removes combinations from the matrix. Unmodeled, a
 		// release that ships five archives passes every check here.
 		Ignore []struct {
 			Goos   string `yaml:"goos"`
@@ -115,7 +115,7 @@ type buildTarget struct {
 	// `_v1` for GOAMD64, `_v8.0` for GOARM64 — which is why every staged
 	// glob ends its directory component with `*`.
 	//
-	// That variant is deliberately NOT modelled. Guessing it here would
+	// That variant is deliberately NOT modeled. Guessing it here would
 	// put the guess on both sides of the comparison, so a wrong one
 	// would make the gate and the packer agree and the release still
 	// fail. Matching against the documented name instead turns a glob
@@ -163,7 +163,7 @@ func releaseGate() error {
 	}
 
 	fmt.Printf("  %s: %d build targets, %d staged globs resolved, bundle signed and uploaded as %s\n",
-		goreleaserPath, len(targets), globCount(bundleFiles), normaliseVersion(out))
+		goreleaserPath, len(targets), globCount(bundleFiles), normalizeVersion(out))
 	return nil
 }
 
@@ -182,7 +182,7 @@ func validateRelease(cfg goreleaserConfig, files []staged, mcpbOut string, flow 
 	// "Found nothing" and "looked at nothing" print the same sentence.
 	// Six PLATFORM archives. The universal binary is a seventh target and
 	// not an archive, so counting it here would let a matrix of five
-	// platforms clear a floor of six — and `ignore:` is modelled above
+	// platforms clear a floor of six — and `ignore:` is modeled above
 	// for the same reason.
 	platforms := 0
 	for _, t := range targets {
@@ -276,7 +276,7 @@ func validateRelease(cfg goreleaserConfig, files []staged, mcpbOut string, flow 
 		case !strings.Contains(hook, "mcpb-pack"):
 			problems = append(problems, fmt.Sprintf(
 				"the universal binary's post hook does not run mcpb-pack: %q", hook))
-		case !strings.Contains(normaliseVersion(hook), normaliseVersion(mcpbOut)):
+		case !strings.Contains(normalizeVersion(hook), normalizeVersion(mcpbOut)):
 			// The Makefile and the hook are two files naming one path,
 			// and you are only ever editing one of them. They necessarily
 			// spell the version differently — make expands $(VERSION),
@@ -312,7 +312,7 @@ func validateRelease(cfg goreleaserConfig, files []staged, mcpbOut string, flow 
 	// 4. The bundle is checksummed AND uploaded. Both, or it ships
 	// unsigned, or is hashed and never published — and neither looks any
 	// different on the release page from the correct build.
-	bundle := normaliseVersion(mcpbOut)
+	bundle := normalizeVersion(mcpbOut)
 	if !namesFile(cfg.Checksum.ExtraFiles, bundle) {
 		problems = append(problems, fmt.Sprintf(
 			"checksum.extra_files does not cover %s, so the bundle is not in checksums.txt and therefore "+
@@ -407,11 +407,17 @@ func checkWorkflow(cfg goreleaserConfig, flow workflow) []string {
 	}
 
 	writesNotes, passesNotes, attests := false, false, false
+	checksTag, built := false, false
 	for _, step := range flow.steps() {
 		if strings.Contains(step.Run, "release-notes") {
 			writesNotes = true
 		}
+		// Before goreleaser, or the refusal comes after the publish.
+		if strings.Contains(step.Run, "release-tag") && !built {
+			checksTag = true
+		}
 		if strings.HasPrefix(step.Uses, "goreleaser/goreleaser-action") {
+			built = true
 			if args, ok := step.input("args"); ok && strings.Contains(args, "--release-notes") {
 				passesNotes = true
 			}
@@ -423,11 +429,11 @@ func checkWorkflow(cfg goreleaserConfig, flow workflow) []string {
 		subjects, _ := step.input("subject-path")
 		// The checksum file is the one everything else is verified
 		// through, and its name lives in the config. Two files naming
-		// one artefact, so they are held against each other.
+		// one artifact, so they are held against each other.
 		if want := cfg.Checksum.NameTemplate; want != "" && !strings.Contains(subjects, want) {
 			problems = append(problems, fmt.Sprintf(
 				"the provenance covers %q and the checksum file is called %q, so the file every "+
-					"other artefact is verified through carries no attestation", subjects, want))
+					"other artifact is verified through carries no attestation", subjects, want))
 		}
 		if !strings.Contains(subjects, ".mcpb") {
 			problems = append(problems, "the provenance does not cover the bundle, which is the file "+
@@ -441,6 +447,10 @@ func checkWorkflow(cfg goreleaserConfig, flow workflow) []string {
 	if !writesNotes {
 		problems = append(problems, releaseWorkflowPath+" never runs `gates release-notes`, so nothing "+
 			"writes the notes file it passes")
+	}
+	if !checksTag {
+		problems = append(problems, releaseWorkflowPath+" does not run `gates release-tag` before goreleaser, "+
+			"so a tag whose major version is not go.mod's publishes a release `go install ...@latest` never serves")
 	}
 	if !attests {
 		problems = append(problems, releaseWorkflowPath+" runs no build-provenance attestation")
@@ -597,7 +607,7 @@ func readGoreleaser(p string) (goreleaserConfig, error) {
 // makeVariable reads one `NAME ?= value` from the Makefile, so the path
 // the hook packs to has a single owner.
 //
-// A line scan rather than a regexp built per call: the neighbouring gates
+// A line scan rather than a regexp built per call: the neighboring gates
 // hoist their patterns to package level, and a pattern that has to be
 // composed from an argument cannot be.
 func makeVariable(p, name string) (string, error) {
@@ -625,12 +635,12 @@ func makeVariable(p, name string) (string, error) {
 	return "", fmt.Errorf("%s defines no %s", p, name)
 }
 
-// normaliseVersion reduces the two ways the version is spelled to one,
+// normalizeVersion reduces the two ways the version is spelled to one,
 // so the Makefile's path and the hook's path can be compared as
 // patterns. make expands $(VERSION) and goreleaser expands
 // {{ .Version }}; neither file can use the other's spelling, and a
 // comparison of the literals would fail on two files that agree.
-func normaliseVersion(s string) string {
+func normalizeVersion(s string) string {
 	for _, spelling := range []string{"$(VERSION)", "{{ .Version }}", "{{.Version}}"} {
 		s = strings.ReplaceAll(s, spelling, "<version>")
 	}

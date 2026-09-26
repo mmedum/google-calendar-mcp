@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
 )
 
 // Incremental sync (§17.1).
@@ -15,7 +15,7 @@ import (
 // This is the one read that answers "what changed", and it is the only
 // correct way to ask: a list with a window cannot tell you an event was
 // DELETED, because a deleted event simply stops matching. Sync reports
-// it as a cancelled tombstone, which is the whole reason the tool exists
+// it as a canceled tombstone, which is the whole reason the tool exists
 // rather than being a second way to list.
 //
 // The server holds no replica (§1) and does not store the token either.
@@ -42,7 +42,7 @@ import (
 // baselineRequests caps the pages a baseline will walk for its token.
 //
 // A baseline keeps paging past the event budget because the token is the
-// point of the call, but it cannot page for ever: §11 budgets requests
+// point of the call, but it cannot page forever: §11 budgets requests
 // per call, and a calendar that needs more than this is a fact the
 // caller has to be told rather than a reason to keep spending.
 const baselineRequests = 25
@@ -130,7 +130,7 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 			// sends it bare — an id and a status, with no start and no
 			// summary — so it is never put through model.FromEvent,
 			// which would fail on the missing times.
-			if raw.Status == gcal.StatusCancelled {
+			if raw.Status == gcal.StatusCanceled {
 				out.Deleted = append(out.Deleted, raw.ID)
 				continue
 			}

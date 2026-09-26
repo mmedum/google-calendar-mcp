@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/mmedum/google-calendar-mcp/internal/fileperm"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/fileperm"
 )
 
 // TestRestrictToOwnerSetsAProtectedACL reads the access list back rather

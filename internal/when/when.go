@@ -17,7 +17,7 @@
 // awkward one, not one with a comment: none. A caller who needs an
 // instant for a Date has to supply a zone and say so, through
 // Date.StartIn, which names what it did in its result. The renderer is
-// the only caller that does this, for display, labelled.
+// the only caller that does this, for display, labeled.
 //
 // # A zone is not an offset
 //
@@ -190,7 +190,7 @@ func LoadLocation(name string) (*time.Location, error) {
 // ParseZoned reads an RFC3339 timestamp and places it in loc.
 //
 // The string must carry an offset; RFC3339 requires one. When loc is
-// non-nil the instant is rendered in loc afterwards, so the returned
+// non-nil the instant is rendered in loc afterward, so the returned
 // Zoned reports the wall clock a user in that zone would read. The
 // instant itself never moves.
 func ParseZoned(s string, loc *time.Location) (Zoned, error) {

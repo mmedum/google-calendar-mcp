@@ -42,6 +42,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   somebody makes after reading what changed. `docs/release.md` runs it
   before a tag.
 
+### Changed
+
+- **Breaking:** fields spelled the British way are renamed to American
+  spelling. Update any call or parser that names them:
+  - `list_events` and `list_instances` take `show_canceled`, not
+    `show_cancelled`.
+  - `list_instances` reports `canceled_hidden`, not `cancelled_hidden`.
+  - Each occurrence `list_instances` returns reports `canceled`, not
+    `cancelled`.
+
+  An event's `status` still reads `cancelled`, because that is Google's
+  value and it is passed through unchanged, including where result text
+  shows the raw status. Everything else in descriptions and result text
+  uses American spelling.
+- **Breaking:** the module path is now
+  `github.com/mmedum/google-calendar-mcp/v2`, which Go requires from v2
+  onward. Without it, `go install ...@latest` would keep installing
+  v1.0.2. Install with:
+  `go install github.com/mmedum/google-calendar-mcp/v2/cmd/google-calendar-mcp@latest`.
+  The release archives and the Claude Desktop bundle are unaffected.
+- The release workflow refuses a tag whose major version is not go.mod's,
+  before anything is built or published.
+
 ## [1.0.2] - 2026-09-18
 
 ### Fixed
@@ -179,7 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the call rather than left to Google's 400. Deletions are always
   included and `showDeleted` may not be false, so the read forces it
   true — which means a baseline also picks up what is **already**
-  cancelled, labelled as that rather than as a deletion, because there
+  canceled, labeled as that rather than as a deletion, because there
   was no "since" yet. A window, a search, an ordering and `updatedMin`
   cannot accompany a token, so the tool offers none of them. And the
   token arrives on the **last page only**: a read that stops at its
@@ -259,7 +282,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   name, so taking it from `binary` was right only while the two matched:
   renaming the project alone moved the file, left the gate green and
   would have failed the pack at tag time (§18 row 71). `builds[].ignore`
-  is modelled for the same reason — without it a release shipping five
+  is modeled for the same reason — without it a release shipping five
   archives passed a check that says six.
 - `make pins` now holds the second half of its own comment. Every action
   that INSTALLS a tool must pin the tool as well — `cosign-release`,
@@ -356,7 +379,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `manage_calendar` covers what the API splits across two resources and
   people do not. **The calendar** — its title, description, location and
   time zone — is what everybody it is shared with sees; **your
-  subscription** to it — the colour, the name you give it, whether it is
+  subscription** to it — the color, the name you give it, whether it is
   hidden, what you are emailed about — is yours alone. The result says
   which of the two it changed, every time. Unsubscribing removes it from
   your list: it deletes nothing, touches no events, and nobody else
@@ -379,7 +402,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   either way would email the wrong set of people.
 
   Sharing with "anyone" publishes the calendar to the whole internet and
-  needs `allow_public: true`. Removing the rule afterwards stops new
+  needs `allow_public: true`. Removing the rule afterward stops new
   readers and takes nothing back from whoever already looked, and the
   result says so both ways.
 - `unshare_calendar` takes no `notify`, and the result says why: Google
@@ -391,7 +414,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `GCAL_ENABLE_DESTRUCTIVE=true` and both still need `confirm: true` on
   the call — and the refusal for a missing `confirm` names what would be
   destroyed, which is why `confirm` is not a schema-required field.
-- `get_settings` reports the **calendar** colour palette alongside the
+- `get_settings` reports the **calendar** color palette alongside the
   event one. They are different sets of ids, and `manage_calendar`'s
   `color_id` indexes the calendar one, which had no published source
   before.
@@ -403,7 +426,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
   Three rules run through all five, and none of them has a default.
   **`notify`** is required whenever the write can reach another person,
-  and `none` is refused outright when a guest is outside the organiser's
+  and `none` is refused outright when a guest is outside the organizer's
   domain — such a guest may have no Google Calendar for the event to
   appear in, so email is the only way they can learn of it. **`scope`**
   is required when the event repeats: `instance`, `series` or
@@ -420,7 +443,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   creating a second meeting. When the answer never arrived, the failure
   is `[ambiguous_outcome]` naming the id to read.
 - `cancel_event` deletes a whole event and marks one occurrence
-  cancelled, and the result says which of the two happened. It is not
+  canceled, and the result says which of the two happened. It is not
   behind `GCAL_ENABLE_DESTRUCTIVE` — a gate everybody turns on protects
   nobody — but it is annotated destructive, so a client can still decide
   to ask. With `notify: none` the result says the guests keep the
@@ -437,10 +460,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - The live driver cancels events that have guests instead of deleting
   them silently. Its cleanup used `sendUpdates=none`, which removes an
-  event from the organiser's calendar and leaves it on everyone else's —
+  event from the organizer's calendar and leaves it on everyone else's —
   so a day of probe runs left meetings on two real calendars that nobody
   could get rid of. `-sweep-spikes` removes the kept spike events the
-  same way, cancelling them to their guests.
+  same way, canceling them to their guests.
 - The live driver no longer mails anyone unless asked. Spikes A and B
   sent four real invitations on every run with guest addresses
   configured, which a phase that runs the driver dozens of times would
@@ -454,7 +477,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   now falls back to `testdata/schema-baseline.json`, written by
   `make schema-baseline`.
 - Spike B is answered, and §4.3 refuses `none` when a guest is outside
-  the organiser's domain. A non-Google guest invited with `none`
+  the organizer's domain. A non-Google guest invited with `none`
   received nothing, in a run where the same address had just received
   two other invitations — and such a guest has no Google Calendar for
   the event to appear in, so mail was the only way they could learn of
@@ -467,7 +490,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   not the other, so Google sent it and the receiving provider dropped
   it. Three consistent runs were consistent because the instrument was
   (§18 row 42).
-- Spike A is answered: `externalOnly` follows the organiser's domain,
+- Spike A is answered: `externalOnly` follows the organizer's domain,
   and `sendUpdates=none` mailed nobody on insert. The second does not
   soften §4.3 rule 3 — Google warns mail "might still be sent", so one
   silent run is not a promise of silence — but it does retire the fear
@@ -496,8 +519,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Phase 1: recurrence and availability.
 - `list_instances` — the occurrences of one repeating event, with the
-  dates that were moved and, on request, the ones that were cancelled. A
-  cancelled occurrence is how a single date leaves a series, so the
+  dates that were moved and, on request, the ones that were canceled. A
+  canceled occurrence is how a single date leaves a series, so the
   result says when it is hiding them.
 - `check_availability` — busy intervals and free gaps from
   `freebusy.query`, not from a list of events: a list misses everything
@@ -516,7 +539,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   reported between two meetings that run into each other.
 - Two gates this repository claimed to have and did not: `api-fields`,
   one verdict per published field of `Event`, `Calendar`,
-  `CalendarListEntry` and `AclRule` (81 fields, 56 modelled, 25 written
+  `CalendarListEntry` and `AclRule` (81 fields, 56 modeled, 25 written
   off), and `live-cover`, which fails on a tool with no step in the live
   driver. `make check` is nineteen targets.
 - Golden files for the renderers, in `testdata/golden/`, which §13 asked
@@ -537,8 +560,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
   One bump was reverted. `segmentio/asm` 1.2.1 relicensed to **MIT No
   Attribution**, which is more permissive than the MIT it replaced and
-  which `go-licenses` cannot classify, so the licence gate refused it
-  with an empty licence name. Nothing needed the bump and there is no
+  which `go-licenses` cannot classify, so the license gate refused it
+  with an empty license name. Nothing needed the bump and there is no
   name to add to the allow-list, so the version the direct dependency
   asks for stays (§18 row 76).
 
@@ -625,7 +648,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   event can be in — a phone-only or third-party conference — and not
   this one: a dry run wrote nothing.
 - Above 200 guests the warning counted the wrong people. Google's limit
-  is on its own attendees field, which carries the organiser and the
+  is on its own attendees field, which carries the organizer and the
   rooms, so an event Google had already stopped tracking could go
   unqualified while the same result printed a larger number beside it.
 - `gcal://calendars/{calendar_id}/events/` — an event URI with an empty
@@ -661,7 +684,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   already stands, because there is no rollback and a retry would
   otherwise redo it — and never says it under `dry_run`, where nothing
   landed.
-- A dry run of "subscribe to this calendar and set my colour on it"
+- A dry run of "subscribe to this calendar and set my color on it"
   failed, telling the caller to pass `subscribe: true`, which they had.
 - A dry run showed the calendar's old title above a change list saying
   the title changed. Both halves describe the same plan now.
@@ -675,7 +698,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   was reported as a missing OAuth scope, with advice to log in again
   that could not have helped. A missing scope and a refusal are
   different answers and now read differently.
-- A successful `move_event` reported the event as cancelled. Google's
+- A successful `move_event` reported the event as canceled. Google's
   move answers with `status: cancelled` while the event sits confirmed on
   its new calendar, so the result said the opposite of what had happened
   — in the one word a caller acts on. The event is read back from the
@@ -691,7 +714,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A cancellation `dry_run` said "Deleted the event" under the words
   "nothing was written".
 - `list_instances` returned the occurrences in whatever order Google sent
-  them, which is not date order: a cancelled 24 March came back after
+  them, which is not date order: a canceled 24 March came back after
   7 April. They are sorted now, after the budget cut rather than before
   it, so which occurrences come back is unchanged and only their order
   differs.
@@ -714,11 +737,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   may land on that event's series, and those are now two different
   checks.
 - `notify: none` was refused for a colleague on any shared calendar. Such
-  an event is organised by the calendar rather than by a person, and its
+  an event is organized by the calendar rather than by a person, and its
   id has a domain of its own, so everybody counted as outside the
-  organisation.
+  organization.
 - A write refused because somebody else had edited the event was reported
-  as the event being already cancelled, sending the caller to look for
+  as the event being already canceled, sending the caller to look for
   something deleted instead of re-reading and trying again.
 - `dry_run` on `update_event` and `cancel_event` showed the event
   unchanged where it should show what the change would make of it — a
@@ -757,7 +780,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the phase that builds it. Windows also checked the tree out with CRLF,
   which made gofmt list every file; a `.gitattributes` pins eol=lf.
 
-- `externalOnly` splits on the organiser's Workspace domain, not on the
+- `externalOnly` splits on the organizer's Workspace domain, not on the
   guest's calendar system, so `dry_run` reports how many guests are
   outside that domain. Google documents the parameter as "notifications
   are sent to non-Google Calendar guests only"; spike A gave one guest
@@ -769,15 +792,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `list_instances` refuses an occurrence id instead of answering with an
   empty series. It used to explain the mistake only when Google returned
   an error; Google returns 200 and expands whatever occurrence the id
-  names, and a cancelled one expands to nothing — so the tool reported
+  names, and a canceled one expands to nothing — so the tool reported
   "No occurrences" for a series that has three. An event id is base32hex
   and cannot contain an underscore, so the occurrence shape is
-  recognised before the call and refused with the series id to use.
-- A cancelled occurrence no longer appears in a series listing. Google
-  documents that `showDeleted=false` does not filter cancelled instances
+  recognized before the call and refused with the series id to use.
+- A canceled occurrence no longer appears in a series listing. Google
+  documents that `showDeleted=false` does not filter canceled instances
   when recurrences are not expanded, and it sends them with no start and
   no summary — so `list_events` with `no_expand` showed a row with no
-  date and no title, and counted it. Cancelled events are filtered by
+  date and no title, and counted it. Canceled events are filtered by
   the server now rather than by the parameter.
 - Continuing a truncated multi-calendar read lost events. A Google page
   token is scoped to one calendar, and `list_events` kept whichever
@@ -832,7 +855,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   what it cannot settle.
 - The in-memory Calendar reproduces Google where it had been guessing:
   `events.instances` on an occurrence id answers 200 with that
-  occurrence rather than 400, and a cancelled instance survives a
+  occurrence rather than 400, and a canceled instance survives a
   non-expanded list. Both are why the two defects above had no test.
 
 - `check_availability` spent an HTTP request per calendar reference
@@ -850,7 +873,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   occurrence view had stopped showing four of them: out-of-office, an
   invented end time, a guest list Google truncated, and an event that
   does not make anybody busy.
-- An `UNTIL` that is an instant is honoured on an all-day series. The
+- An `UNTIL` that is an instant is honored on an all-day series. The
   timed path applied it and the all-day path ignored it.
 - Recurrence expansion: six defects, all found by review after the
   tests were green.
@@ -862,7 +885,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     — the same rule — gave different answers.
   - `BYDAY` and `BYMONTHDAY` on a monthly rule intersect, as RFC 5545
     says: "the 13th, when it is a Friday", not whichever was read first.
-  - A yearly rule honours `BYDAY`. It was never read, so "the fourth
+  - A yearly rule honors `BYDAY`. It was never read, so "the fourth
     Thursday in November" silently used the start's day of the month.
   - A series that ends exactly at the read limit is complete, not
     truncated. It was reported as endless, in the refusal text a scope

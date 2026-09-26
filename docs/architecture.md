@@ -47,7 +47,7 @@ release asset could have edited `checksums.txt` beside it; the signature
 and the attestation would both have broken, and neither was consulted
 there. The dispatch route is the sharp end, because it re-publishes for a
 tag that shipped weeks ago and a registry entry cannot be withdrawn.
-v1.0.1's entry is correct — it was checked from outside afterwards — but
+v1.0.1's entry is correct — it was checked from outside afterward — but
 it went out through the unguarded path. v1.0.2 is the first release where
 the signature is verified before the hash is read, with the certificate
 identity pinned to this repository's `release.yml` at the exact tag.
@@ -55,7 +55,7 @@ Found by a sibling server's security review; all seven had it, and none
 had inherited it from another.
 
 **The release procedure has its own file.** `docs/release.md`: what the
-tag does, what to check afterwards, the three steps no rehearsal reaches
+tag does, what to check afterward, the three steps no rehearsal reaches
 and the recovery for each — which differs by which one failed, and that
 is the part a person needs at the moment it fails. It sat inside
 `docs/development.md`, where it was read on the one day it does not
@@ -160,17 +160,17 @@ none failed, spike L answering on a calendar it had already patched.
 **What phase 2's live runs cost and taught.** Six runs. The first failed
 five steps: three were the driver's own assertions, which grepped a whole
 rendered page for a date or a clock time and so were satisfied by a probe
-event that had nothing to do with them. One was a step that cancelled an
-occurrence the seed had already cancelled. The fifth was real — Google's
+event that had nothing to do with them. One was a step that canceled an
+occurrence the seed had already canceled. The fifth was real — Google's
 `self` flag is not set on the account's own attendee row on a secondary
 calendar, so a write that reached nobody demanded a notification choice
 (§18 row 50). Then the transcript, read rather than counted, showed two
 more that every gate had passed: **a successful move reported itself as
-`[cancelled]`**, because `events.move` answers with that status while the
+`[canceled]`**, because `events.move` answers with that status while the
 event sits confirmed on the destination (§18 row 48); and a cancellation
 dry run said "Deleted the event" under the words "nothing was written".
 And spike J settled the one question phase 2 had left open with a
-disclaimer: **`events.move` does honour `If-Match`** (§18 row 49), so
+disclaimer: **`events.move` does honor `If-Match`** (§18 row 49), so
 §4.4 has no exception and `move_event` takes an etag like everything
 else.
 
@@ -190,7 +190,7 @@ description misled twice, on `showDeleted` and on `sendUpdates`. Three
 consistent runs of spike A were consistent because the instrument was,
 and only a second receiver on the same event separated sending from
 delivery. The driver deleted guest-carrying events with `none` for a
-day and left meetings on two real calendars that the organiser could no
+day and left meetings on two real calendars that the organizer could no
 longer withdraw. Nine of §18's forty-four rows were written or rewritten
 on 2026-09-16, four of them correcting something this document had
 asserted earlier the same day.
@@ -276,7 +276,7 @@ events.
 server differs from every calendar integration surveyed:
 
 - **§4.1 — a date is not a time.** All-day events are carried as dates
-  and never as instants. Every other calendar tool surveyed normalises
+  and never as instants. Every other calendar tool surveyed normalizes
   them to UTC midnight, which puts them on the wrong day for every user
   west of UTC.
 - **§4.2 — the recurrence scope is required, never inferred.** "Change
@@ -300,7 +300,7 @@ for anything open, and begin.
 A production-grade, Go, stdio MCP server that lets Claude work with
 **time**: read a schedule and know exactly which hours in which zone it
 is looking at, find when people are free, create and change events
-without silently dropping the guests already on them, and say afterwards
+without silently dropping the guests already on them, and say afterward
 what changed and who was told. Single binary, per-user OAuth against the
 user's own Google account, Workspace or consumer.
 
@@ -311,7 +311,7 @@ release artifacts (§9, §12).
 
 **Scope is the calendar, every capability.** In: calendars and the
 subscribed list, events and their recurrences, availability, sharing,
-colours and the user's own settings. Out (**decided**): everything a
+colors and the user's own settings. Out (**decided**): everything a
 meeting *produces* rather than *is* — the Meet recording, the notes
 document, the file attached to an event — which belongs to the servers
 built on the Drive and Docs APIs. Google Tasks is a separate API and a
@@ -333,7 +333,7 @@ Eight public Google Calendar MCP servers were surveyed. Every one is
 Node or Python. They converge on the same shape — a `createEvent`, an
 `updateEvent`, a `listEvents` — and they converge on the same three
 defects, which §3 states as requirements. Those defects are not
-incidental: each one is the natural result of modelling a calendar as a
+incidental: each one is the natural result of modeling a calendar as a
 list of rows, which is what an API client library hands you.
 
 The gap worth building into is not more tools. It is a server that is
@@ -347,7 +347,7 @@ things the surveyed servers get wrong.
   and `channels.stop` need a public HTTPS endpoint Google can POST to. A
   stdio server has nowhere to put one. Out, permanently (§8a).
 - **Calendar migration.** `events.import` exists to carry a private copy
-  of an event between systems, preserving `iCalUID` and organiser. It is
+  of an event between systems, preserving `iCalUID` and organizer. It is
   a migration tool, not a scheduling one, and the failure modes are
   entirely different. Out (§8a).
 - **Admin operations.** `calendars.transferOwnership` requires a
@@ -418,7 +418,7 @@ either accommodates them or lies.
     events cannot be created at all. Birthdays, focus time, out-of-office
     and working-location events are not ordinary meetings and carry their
     own property blocks.
-13. **Cancelled events are hidden by default.** `events.list` returns
+13. **Canceled events are hidden by default.** `events.list` returns
     them only with `showDeleted: true` or on an incremental sync;
     `events.get` always returns them.
 14. **Quotas: 10 000 requests/minute per project, 600/minute per user**,
@@ -442,7 +442,7 @@ either accommodates them or lies.
   A result set from `q` is a suggestion (§7.2).
 - **No way to know whether mail was actually sent.** The API reports
   nothing about notifications. `sendUpdates` is a request, and §2.6 says
-  it is not even an honoured one.
+  it is not even an honored one.
 
 ## 3. Requirements distilled from other servers' failures
 
@@ -451,7 +451,7 @@ and the requirement it forces here.
 
 | Failure seen | Requirement |
 |---|---|
-| All-day events normalised to UTC midnight, rendering on the wrong day for every user west of UTC | A `date` is carried as a date end to end and never becomes an instant (§4.1) |
+| All-day events normalized to UTC midnight, rendering on the wrong day for every user west of UTC | A `date` is carried as a date end to end and never becomes an instant (§4.1) |
 | Recurring events written with a UTC instant, so a weekly 09:00 drifts to 08:00 after a daylight-saving change | Every recurring write carries an IANA `timeZone`; the server refuses a recurrence without one (§4.1) |
 | `sendUpdates` never set, so invitations that reported success reached nobody | `notify` is required on every write that can reach a person; there is no default (§4.3) |
 | "Update the event" applied to a whole series when one instance was meant, or the reverse | `scope` is required on every event write: `instance`, `series` or `this_and_following` (§4.2) |
@@ -472,7 +472,7 @@ a `Date` (`yyyy-mm-dd`, no zone, no instant) and a `Zoned` (an instant
 plus the IANA zone it was expressed in). There is no conversion from
 `Date` to `Zoned` in the package, because there is no correct one — the
 caller must supply a zone and say so, and only the renderer does that,
-for display, labelled.
+for display, labeled.
 
 **Every `dateTime` carries its IANA zone, not just an offset.** An
 offset is a fact about one moment; a zone is a rule. `+02:00` is not
@@ -485,7 +485,7 @@ is exercised every time rather than only on the rare path.
 on the call; else the target calendar's `timeZone`; else the user's
 `timezone` setting from `settings.list`. Never the process's local zone
 and never UTC-as-a-fallback. Every read names which of the three it used
-and what it resolved to. This is the direct analogue of the sibling
+and what it resolved to. This is the direct analog of the sibling
 Sheets server's "sheet names are read, never assumed", and it exists for
 the same reason: the default that looks harmless on the maintainer's
 machine is wrong on everyone else's.
@@ -564,24 +564,24 @@ Five supporting rules:
 
    **And `none` on a cancellation is worse than quiet — it is a lie.**
    Deleting an event with `none` leaves it on the guests' calendars
-   while removing it from the organiser's (§18 row 43). `cancel_event`
+   while removing it from the organizer's (§18 row 43). `cancel_event`
    therefore says, in its result, that the guests still have the meeting
    unless they were notified.
-4. **`none` is refused when a guest is outside the organiser's domain**,
+4. **`none` is refused when a guest is outside the organizer's domain**,
    not merely warned about. Such a guest may have no Google Calendar at
    all, and then mail is the only channel that exists: spike B invited a
    non-Google address with `none`, it received nothing, and there was no
    calendar for the event to land in. The guest cannot discover the
-   event by any means, while the organiser's copy shows them invited.
+   event by any means, while the organizer's copy shows them invited.
    That is §2.7's "lost altogether" with the mechanism visible, and it
    is structural rather than a defect — so it earns a refusal rather
    than a warning a caller can skim (§18 row 44).
 5. **`dry_run` shows the blast radius before anything is sent**: how
    many guests would be notified, how many of them are outside the
-   organiser's own domain and so are the ones `externalOnly` reaches, and
-   what the event would look like afterwards.
+   organizer's own domain and so are the ones `externalOnly` reaches, and
+   what the event would look like afterward.
 
-   **The axis is the organiser's Workspace domain, and it took a live
+   **The axis is the organizer's Workspace domain, and it took a live
    probe to establish that.** This document first said "internal versus
    external"; the discovery document appeared to refute it, describing
    `externalOnly` as "notifications are sent to non-Google Calendar
@@ -590,7 +590,7 @@ Five supporting rules:
    same-domain one, both of them on Google Calendar (§18 row 40). The
    original wording was right and the documentation was wrong.
 
-   The count is computed from the organiser's primary calendar id, which
+   The count is computed from the organizer's primary calendar id, which
    is the address, against each attendee's domain — never printed, only
    counted (§9).
 
@@ -647,7 +647,7 @@ written.
 
 ### 4.5 Every read states its window, its zone and its completeness
 
-The analogue of the Sheets server's "every read shows addresses". A
+The analog of the Sheets server's "every read shows addresses". A
 model asked "am I free Thursday afternoon" must not be able to answer
 from a different Thursday, a different zone, or the first page of three.
 
@@ -838,7 +838,7 @@ information that makes 412 actionable.
 
 `list_calendars` is the entry point and is cheap. It returns, per
 calendar: id, title, the IANA zone, the caller's `accessRole`, whether it
-is primary, whether it is selected and hidden in the UI, and its colour.
+is primary, whether it is selected and hidden in the UI, and its color.
 The zone is on this result specifically so the zone-resolution order of
 §4.1 can be followed without a second call.
 
@@ -854,7 +854,7 @@ their RRULEs). §2.9 makes these return different things, and the surveyed
 servers pick one silently; the caller picks here, and the result says
 which it got.
 
-Defaults that are decided: cancelled events are excluded unless asked
+Defaults that are decided: canceled events are excluded unless asked
 for (§2.13); `maxResults` is the API's 250 per page and the server pages
 to its own event budget (§4.5); `eventTypes` is unfiltered, but the
 renderer marks birthdays, focus-time, out-of-office and working-location
@@ -911,7 +911,7 @@ after an ambiguous failure is nearly idempotent, and reports
 `cancel_event` is `events.delete` for a single event and a
 `status: cancelled` patch for one instance of a series — two different
 API shapes behind one honest verb, with the result naming which happened.
-It is **not** behind the destructive flag: cancelling a meeting is an
+It is **not** behind the destructive flag: canceling a meeting is an
 ordinary calendar action, it notifies by the same `notify` rule, and
 Google keeps the record. §9 has the line.
 
@@ -926,7 +926,7 @@ patching the whole attendee array.
 API splits across two resources and which users do not distinguish:
 renaming or re-zoning the calendar itself (`calendars.patch`),
 subscribing and unsubscribing (`calendarList.insert` / `delete`), and the
-per-user overrides — colour, hidden, selected, notification settings
+per-user overrides — color, hidden, selected, notification settings
 (`calendarList.patch`).
 
 The tool description names the distinction that matters:
@@ -1070,7 +1070,7 @@ written off.
 | `calendarList.get` | used | `get_calendar`, per-user overrides |
 | `calendarList.insert` | used | `manage_calendar` subscribe |
 | `calendarList.list` | used | `list_calendars` |
-| `calendarList.patch` | used | `manage_calendar`, colour and visibility |
+| `calendarList.patch` | used | `manage_calendar`, color and visibility |
 | `calendarList.update` | out | PUT — §4.4 |
 | `calendarList.watch` | out | webhook |
 | `calendars.clear` | used | `clear_calendar`, gated |
@@ -1081,7 +1081,7 @@ written off.
 | `calendars.transferOwnership` | out | needs Workspace admin privilege and `useAdminAccess` — §1 |
 | `calendars.update` | out | PUT — §4.4 |
 | `channels.stop` | out | webhook |
-| `colors.get` | used | `get_settings`; names the colour ids |
+| `colors.get` | used | `get_settings`; names the color ids |
 | `events.delete` | used | `cancel_event`, whole event |
 | `events.get` | used | `get_event` |
 | `events.import` | out | migration, not scheduling — §1 |
@@ -1103,12 +1103,12 @@ written off.
 Methods are the coarse axis; this API keeps its capability in the `Event`
 resource, which has 44 properties. A second gate, `gates api-fields`,
 holds one verdict per published field of `Event`, `Calendar`,
-`CalendarListEntry` and `AclRule`: modelled in `internal/gcal`, or
+`CalendarListEntry` and `AclRule`: modeled in `internal/gcal`, or
 written off with a reason. Without it, "we support events" hides the fact
 that `attachments`, `extendedProperties`, `gadget` and the four
 event-type property blocks were never considered.
 
-Phase 1 writes the record: 81 fields, 56 modelled and 25 written off,
+Phase 1 writes the record: 81 fields, 56 modeled and 25 written off,
 each with a reason. `api-diff` records the field list from the discovery
 document alongside the methods, so a field Google adds arrives as a gate
 failure naming it. The write path fills verdicts in as the phases reach
@@ -1122,7 +1122,7 @@ equally short.
 ## 9. Confidentiality, security, safety
 
 Nothing deployer-specific ever enters the repository: no calendar ids or
-URLs, account or attendee email addresses, organisation names, Cloud
+URLs, account or attendee email addresses, organization names, Cloud
 project ids, OAuth client ids or secrets, and no title, description,
 location or guest list from a real calendar. This holds for code, docs,
 fixtures, goldens, transcripts, commit and tag messages, pull requests
@@ -1146,7 +1146,7 @@ Two structural rules, not matters of care:
    the driver invented.
 
    The emptying is what carries the guarantee, not the deleting. A run
-   deletes the calendar afterwards only if it created it; `-keep` leaves
+   deletes the calendar afterward only if it created it; `-keep` leaves
    it, and the next run adopts and empties it instead of making another.
    That is not tidiness, it is §18 row 36: the calendar-creation quota
    counts creations and is not refunded by deletion, so a phase with many
@@ -1176,14 +1176,14 @@ the call. The two behind it are `delete_calendar` and `clear_calendar`.
 destructive call this API offers.
 
 **Where the destructive line falls, and why it is not where it first
-looks.** `cancel_event` is not gated. Cancelling a meeting is what a
+looks.** `cancel_event` is not gated. Canceling a meeting is what a
 calendar is for; it is reversible in practice (the event is retained and
 visible with `showDeleted`); and gating it would put a flag between the
 model and the most ordinary write there is, training people to set
 `GCAL_ENABLE_DESTRUCTIVE=true` permanently — which would then also arm
 `clear_calendar`. A gate everybody turns on protects nobody. The
 protection `cancel_event` gets instead is §4.2's required `scope`, so
-cancelling a series can never be a slip of the wrist, and §4.3's required
+canceling a series can never be a slip of the wrist, and §4.3's required
 `notify`.
 
 **Read-only mode** (`GCAL_READONLY=true`) registers only the eight read
@@ -1328,7 +1328,7 @@ and without this in `check` that would be found by spending money.
 `schema-diff` compares the built tool surface against the last tag, and
 against `testdata/schema-baseline.json` when there is no tag. The
 fallback exists because there was no tag: the gate reported "no previous
-tag" on every run from the first commit onwards, which is the whole
+tag" on every run from the first commit onward, which is the whole
 stretch where the surface changes most — inert exactly when it was most
 needed. `make schema-baseline` records the current surface, and
 refreshing it is the deliberate act of saying the change has been looked
@@ -1385,7 +1385,7 @@ states its question and its verdict separately.
   **Three guests, not two, and the third is the one that matters.** This
   spike was written as "an internal and an external guest", which embeds
   the assumption §18 row 40 refutes: `externalOnly` means *non-Google
-  Calendar*, not *outside the organisation*. So it needs a guest inside
+  Calendar*, not *outside the organization*. So it needs a guest inside
   the domain, a guest outside it who is still on Google Calendar, and a
   guest who is not on Google Calendar at all — and only the third
   exercises `externalOnly`.
@@ -1398,7 +1398,7 @@ states its question and its verdict separately.
 
   **Answered 2026-09-16, over four runs, and the fourth is the one that
   made the first three readable.** Three guests in the end: one inside
-  the organiser's domain, one outside it on Gmail, one outside it and
+  the organizer's domain, one outside it on Gmail, one outside it and
   not on Google Calendar at all.
 
   - `externalOnly` reached **both** out-of-domain guests and not the
@@ -1407,7 +1407,7 @@ states its question and its verdict separately.
     guests only" is wrong about its own parameter (§18 row 40).
   - `all` reached the same-domain guest and the non-Google guest, and
     never the Gmail guest — across three runs and both orderings. That
-    looked like an API behaviour until the non-Google address was put on
+    looked like an API behavior until the non-Google address was put on
     the same events, at which point one send was visible at two
     receivers and the difference turned out to be Gmail (§18 row 42).
   - `none` reached nobody, in a run where every other arm demonstrably
@@ -1429,7 +1429,7 @@ states its question and its verdict separately.
   mail is the only way they can learn of it, and `none` removes the only
   way. The event exists with them attached and they cannot discover it.
 
-  So §4.3 refuses `none` when a guest is outside the organiser's domain
+  So §4.3 refuses `none` when a guest is outside the organizer's domain
   rather than warning about it (§18 row 44). The refusal is on the
   domain rather than on the calendar system because the domain is what
   the server can actually tell from an address.
@@ -1467,20 +1467,20 @@ states its question and its verdict separately.
   retry after a transport failure, where the caller never saw the first
   answer at all and Google's 409 would arrive for an event the caller
   itself created. The class stays, with one fewer reason to fear it.
-- **Spike J — does `events.move` honour `If-Match`?** §4.4 puts every
+- **Spike J — does `events.move` honor `If-Match`?** §4.4 puts every
   write under it, and `events.move` was the one this server could not
   place: a POST with no body, and neither the reference nor the discovery
   document says whether the header applies. The server sent none and said
   so in the result, which is an assumption wearing a disclaimer.
 
-  **Answered 2026-09-16: it is HONOURED.** A probe event was created, its
+  **Answered 2026-09-16: it is HONORED.** A probe event was created, its
   etag read, the event patched so that etag went stale, and the move sent
   with the stale one: **412**. So the exception was a hole rather than a
   fact, `move_event` takes an etag now, and §4.4 covers every write
   without qualification.
 
   The discriminator is the point. A CURRENT etag would have succeeded
-  whether the header is honoured or ignored and settled nothing — which
+  whether the header is honored or ignored and settled nothing — which
   is the failure this section opens by naming, and which spike I
   committed once already.
 - **Spike G — ACL scopes.** Confirm §2.15: that `acl.list` fails under
@@ -1515,7 +1515,7 @@ states its question and its verdict separately.
   refusal of a secondary calendar is the API's rule rather than this
   server's caution (§18 row 56), and the third possibility — accepted
   and did nothing — did not happen.
-- **Spike L — is `If-Match` honoured on the calendar and sharing
+- **Spike L — is `If-Match` honored on the calendar and sharing
   writes?** §2.4 says ETags are supported across this API and §4.4 puts
   every write under one, but spike J showed that "the general rule" and
   "this method" are different questions. The server sends the header on
@@ -1523,7 +1523,7 @@ states its question and its verdict separately.
   this asks whether Google enforces it, with a STALE etag, which is the
   only discriminator that can.
 
-  **Answered 2026-09-16: HONOURED on both.** `calendars.patch` and
+  **Answered 2026-09-16: HONORED on both.** `calendars.patch` and
   `acl.patch` each refuse a stale etag with **412**, so §4.4 covers these
   writes without qualification (§18 row 57).
 - **Spike M — what happens to a conference create request?** §17.3 asked
@@ -1647,7 +1647,7 @@ The failure was `list_instances` accepting an **occurrence** id as a
 series id. The refusal was reactive — it explained the mistake when
 Google answered 404 or 400 — and §18 row 31 had recorded, honestly, that
 nobody knew what Google actually did. What it does is answer **200 and
-expand that occurrence**; a *cancelled* occurrence expands to nothing,
+expand that occurrence**; a *canceled* occurrence expands to nothing,
 so the call succeeded with an empty list and the tool reported "No
 occurrences" for a series that has three. A wrong answer, confidently
 phrased, from the reactive design. The server reads the id's shape now:
@@ -1656,13 +1656,13 @@ occurrence id is refused up front naming the series to use instead.
 
 The second defect passed its step. `list_events` with `no_expand` showed
 a row reading `(undated) (no start) (no title)`, and counted it.
-`showDeleted=false` does not filter a cancelled **instance** when
+`showDeleted=false` does not filter a canceled **instance** when
 `singleEvents` is false — the discovery document says so in the
 parameter's own description — and Google sends such an instance bare,
 with no start and no summary. The server had passed the parameter and
-trusted it. It filters cancelled events itself now. `caltest` had been
+trusted it. It filters canceled events itself now. `caltest` had been
 hiding them, which is why no test could have caught it, and it
-reproduces Google's behaviour now instead.
+reproduces Google's behavior now instead.
 
 The third was in a spike, and it is the one worth remembering. **Spike I
 reported a verdict it had not established**: it sent one calendar id 51
@@ -1716,7 +1716,7 @@ the whole page — losing everything in between while saying the read was
 resumable. `list_events` decided truncation from the overflow alone, so
 a read that stopped exactly at its budget called itself complete. The
 fake was complicit: it ignored `maxResults`, so neither could be
-reproduced against it. It honours it now, which is what Google does.
+reproduced against it. It honors it now, which is what Google does.
 
 And two in the tool surface: `check_availability` resolved every calendar
 reference through `ResolveCalendar`, which re-listed the account's
@@ -1737,7 +1737,7 @@ Three smaller ones, all of them things a reader would have seen and a
 test did not: `list_instances` and `list_events` had separate tag lists,
 so an occurrence never said it was out of office, had no end time set,
 or carried a guest list Google had truncated; an `UNTIL` that is an
-instant was honoured on a timed series and ignored on an all-day one;
+instant was honored on a timed series and ignored on an all-day one;
 and a free gap crossing midnight rendered as `17:00-09:00`, which reads
 as ending before it began.
 
@@ -1747,7 +1747,7 @@ than lost:
 - **One generic expansion driver in `internal/recur`.** `ExpandDates`
   and `ExpandTimes` share the date walker — the part that matters — but
   repeat the loop around it. The duplication had already caused one
-  drift, an instant `UNTIL` honoured on the timed path and ignored on
+  drift, an instant `UNTIL` honored on the timed path and ignored on
   the all-day one; that is fixed and tested. The generic version is
   worth doing when phase 2 gives the all-day path its first caller,
   which is also when it can be tested against real use.
@@ -1832,7 +1832,7 @@ page for a date or a clock time can be satisfied by a line it is not
 about, and a probe seeded on 19 March at 13:00 satisfied two of them. An
 assertion now looks at the rows carrying the event's own title, and at
 those with a clock on them when it is asking about a clock. A fourth was
-a step cancelling an occurrence the seed had already cancelled.
+a step canceling an occurrence the seed had already canceled.
 
 The fifth was real and is §18 row 50: **Google's `self` flag is not set
 on the account's own attendee row on a secondary calendar**, so §4.3.2's
@@ -1842,13 +1842,13 @@ itself. `model.Event.Guests` takes the account's address now and
 excludes it whatever the flag says.
 
 Then the transcript, which is the part §13 insists on, showed three the
-count could not. **A successful move reported itself as `[cancelled]`**,
+count could not. **A successful move reported itself as `[canceled]`**,
 because `events.move` answers with that status while the event sits
 confirmed on the destination (§18 row 48) — the one word a caller acts
 on, exactly inverted; and a cancellation dry run printed "Deleted the
 event" under "DRY RUN — nothing was written", a result contradicting
 itself in six lines. And `list_instances` returned its occurrences in
-whatever order Google sent them, which is not date order — a cancelled
+whatever order Google sent them, which is not date order — a canceled
 24 March after 7 April, in the list a caller reads to find out which
 dates are gone. They are sorted after the budget cut rather than before
 it, so which occurrences come back is unchanged and only the order
@@ -1873,7 +1873,7 @@ a real guest: the invitation, the reschedule, the proper withdrawal, and
 §18 row 43 through the tool — a cancellation with `notify: none` that
 leaves the meeting on the guest's calendar and reports that it has. The
 last one is a deliberate mess: the account cannot withdraw what it
-cancelled quietly, which is the finding rather than a side effect, so the
+canceled quietly, which is the finding rather than a side effect, so the
 run says at the end who has to delete it.
 
 What those steps CANNOT do is score themselves, and the driver says so
@@ -1927,10 +1927,10 @@ Five more that mattered, each fixed with the reproduction as a test:
   The caller's etag is now checked against the event they addressed, and
   `If-Match` carries the etag of the event actually written.
 - **`notify:none` was refused for a colleague** on any secondary
-  calendar. Such an event is organised by the CALENDAR, whose id is an
+  calendar. Such an event is organized by the CALENDAR, whose id is an
   address with a domain of its own, so every guest counted as outside the
-  organisation and §4.3.4 fired with a sentence that was simply false.
-  The organiser is now taken as a person only when it is not the calendar
+  organization and §4.3.4 fired with a sentence that was simply false.
+  The organizer is now taken as a person only when it is not the calendar
   being written.
 - **A 412 on a delete was reported as "already gone".** `classify` maps
   410 and 412 to the same class and the handler matched on the class, so
@@ -1954,7 +1954,7 @@ read its event map outside its own mutex.
 The duplication `/simplify` found is worth one line each, because the
 cost is always the same: the `EventPatch` fold was written out in the
 service AND in the fake, so a field added to one would have made a test
-green over behaviour that never happened; "who counts as a guest" — the
+green over behavior that never happened; "who counts as a guest" — the
 rule §4.3.2 refuses on — had a definition in `model` and another in
 `plan`, so one result could have quoted two guest counts; the recur
 sentinel was hand-wrapped at four sites, two of which stripped the
@@ -2003,7 +2003,7 @@ the tool surface and one of them removed a parameter.
   read-only; `GCAL_SHARING=off` removes it with the other two, because a
   deployment that turned sharing off turned off the surface rather than
   the writes. Read-only mode drops it too, which keeps §8's "the first
-  eight" true rather than "the first eight plus a judgement call".
+  eight" true rather than "the first eight plus a judgment call".
 - **`confirm` is not required in the tool schema**, on either gated
   tool. The SDK validates a required field before the handler runs, so
   the caller would have received "missing properties: [confirm]" instead
@@ -2021,7 +2021,7 @@ the tool surface and one of them removed a parameter.
   to answer rather than guessed at here. The first draft used owner for
   both, and `unparam` caught it — a linter finding an unargued
   constraint.
-- **The per-user half needs no access at all.** The colour, the name you
+- **The per-user half needs no access at all.** The color, the name you
   give a calendar and what you are emailed about work on a calendar you
   can only read, so `prepare`'s write guard would have been wrong here.
 - **A write that changes the calendar list drops the cached list.** The
@@ -2088,7 +2088,7 @@ rather than design. A step now declares why it cannot run and is skipped
 before the call, which is §9.1's "structural rather than careful" applied
 to writing rather than to printing.
 
-**And what `/code-review high` found afterwards**, on a tree where every
+**And what `/code-review high` found afterward**, on a tree where every
 gate was green and `/simplify` had already run. Seven, of which four were
 defects a caller would have met and one was a regression the cleanup
 itself had introduced:
@@ -2102,7 +2102,7 @@ itself had introduced:
   make a resolution miss a calendar or see one twice. The mutators build
   a new slice and swap it, which is the invariant the whole-list drop had
   for free and the cleanup took away.
-- **A dry run of "subscribe and set my colour" failed outright**, with
+- **A dry run of "subscribe and set my color" failed outright**, with
   advice the caller had already followed: the entry does not exist yet,
   so reading it answered 404 and the refusal said to pass
   `subscribe: true`. The dry run supplies the entry it would be patching.
@@ -2132,7 +2132,7 @@ itself had introduced:
 - **Splitting `tools.Kind` into an effect and a gate.** The enum encodes
   both what a tool does to the world, which decides its annotations, and
   which flag it registers behind — and two of its seven values exist only
-  because those disagree (`Cancelling`, `SharingRead`). `Def{Effect,
+  because those disagree (`Canceling`, `SharingRead`). `Def{Effect,
   Gate}` would remove the vocabulary, and the argument for doing it now
   rather than at three values is a fair one. Not in this phase: it
   restructures phase 0's registration at the end of a long phase, and the
@@ -2237,7 +2237,7 @@ one is written down.
   promised the opposite. Both now carry the card and say which sentence
   applies.
 - **The crowd warning counted the wrong population.** Google's threshold
-  is on its own `attendees` field, which carries the organiser's row and
+  is on its own `attendees` field, which carries the organizer's row and
   the rooms; counting "guests" stayed silent on an event Google had
   already stopped tracking, and disagreed with the `Guests (202)` the
   same result printed.
@@ -2317,7 +2317,7 @@ keeps it.
 **It exists for one thing a list cannot do: report a deletion.** A
 deleted event stops matching a window, so its absence from `list_events`
 is indistinguishable from never having existed. Sync answers with a
-cancelled tombstone. Everything else the tool does — a token in, a token
+canceled tombstone. Everything else the tool does — a token in, a token
 out — is in service of that.
 
 **The caller holds the token, and the server stores nothing.** §1 says no
@@ -2327,8 +2327,8 @@ The contract is a page token's: opaque, handed back, passed in.
 
 **What the discovery document settled, and what it cost.** `showDeleted`
 may not be false alongside a token, so the read forces it true — which
-means a BASELINE also picks up whatever is already cancelled, and those
-are labelled "already cancelled" rather than "deleted", because there was
+means a BASELINE also picks up whatever is already canceled, and those
+are labeled "already canceled" rather than "deleted", because there was
 no "since" yet. A window, a search, an ordering and `updatedMin` are all
 refused alongside a token, so the tool offers none of them. And
 `nextSyncToken` arrives on the **last page only**, which collides with
@@ -2413,7 +2413,7 @@ because the shape of the mistake is the useful part.
    cannot report a DELETION. A deleted event stops matching the window,
    so it is absent from the answer in exactly the way an event that was
    never there is absent, and no caller can tell those apart. Sync
-   returns a cancelled tombstone, and that is the whole difference.
+   returns a canceled tombstone, and that is the whole difference.
 
    Four rules come from the discovery document (revision 20260826) and
    each is enforced before the call rather than left to Google's 400:
@@ -2422,7 +2422,7 @@ because the shape of the mistake is the useful part.
    `updatedMin` cannot accompany a token, so the tool **offers none of
    them**; the other parameters must match the initial read, which is
    why a baseline uses the same `showDeleted` and therefore picks up
-   what is ALREADY cancelled — labelled as that rather than as a
+   what is ALREADY canceled — labeled as that rather than as a
    deletion, because there was no "since" yet; and **`nextSyncToken`
    arrives on the last page only**.
 
@@ -2551,10 +2551,10 @@ what §15 exists to settle, and they are marked.
 | 6 | ETags and `If-Match` are available for optimistic concurrency | Calendar version-resources guide | **Confirmed.** 412 on mismatch; `If-Match: *` forces through. §4.4 is buildable as the standard states it, with no deviation recorded |
 | 7 | "This and following" is a single operation | Recurring-events guide | **Refuted.** Two calls, and it "resets any exceptions happening after the target instance". §4.2 performs it and says so |
 | 8 | `timeZone` is optional on an event's start and end | Discovery document, `EventDateTime.timeZone` | **Refuted for recurrence.** "For recurring events this field is required." §4.1 sends it always |
-| 9 | An all-day event can be modelled as midnight UTC | The surveyed servers, and an issue reproducing it | **Refuted.** It renders a day early for every user west of UTC. §4.1 keeps dates as dates; spike D confirms live |
+| 9 | An all-day event can be modeled as midnight UTC | The surveyed servers, and an issue reproducing it | **Refuted.** It renders a day early for every user west of UTC. §4.1 keeps dates as dates; spike D confirms live |
 | 10 | A client may supply an event id, making insert idempotent | Discovery document, `Event.id` | **Confirmed, with a caveat that changes the design.** Ids are allowed, but "we cannot guarantee that ID collisions will be detected at event creation time". Nearly idempotent only — hence `ambiguous_outcome` in §6.5 and spike F |
 | 11 | `singleEvents` is a display preference | Discovery document and the events reference | **Refuted.** It changes what the method returns — parents or instances — and `orderBy: startTime` requires it. §7.2 makes the caller choose |
-| 12 | `freebusy.query` handles any number of calendars | Discovery document, `calendarExpansionMax`; **spike I live, 2026-09-15** | **Confirmed with a limit, and the limit does not do what the batching assumed.** Maximum documented value 50, and §4.6 batches there. Live, 51 *distinct* ids with **no expansion cap set** came back as **51 entries** — neither refused nor trimmed. The cap is deliberately omitted: a spike that sets the ceiling it is measuring reports its own parameter as Google's behaviour. Fifty were unreadable, so this does not settle 51 *readable* calendars: the ceiling may count only the calendars it expands, and proving that would mean creating 51 calendars on somebody's account. The batching stays, and §4.6's rule that a calendar missing from the response is **unknown** is what the design actually rests on |
+| 12 | `freebusy.query` handles any number of calendars | Discovery document, `calendarExpansionMax`; **spike I live, 2026-09-15** | **Confirmed with a limit, and the limit does not do what the batching assumed.** Maximum documented value 50, and §4.6 batches there. Live, 51 *distinct* ids with **no expansion cap set** came back as **51 entries** — neither refused nor trimmed. The cap is deliberately omitted: a spike that sets the ceiling it is measuring reports its own parameter as Google's behavior. Fifty were unreadable, so this does not settle 51 *readable* calendars: the ceiling may count only the calendars it expands, and proving that would mean creating 51 calendars on somebody's account. The batching stays, and §4.6's rule that a calendar missing from the response is **unknown** is what the design actually rests on |
 | 13 | Availability can be computed from an event list | The surveyed servers | **Rejected.** A list misses events whose details the caller cannot read, and ignores `transparency`. §4.6 |
 | 14 | `calendars.transferOwnership` is a normal calendar operation | Discovery document | **Rejected for use.** Requires Workspace admin privilege and `useAdminAccess: true`, which this server never requests. §8a |
 | 15 | Push notifications could give live updates | Discovery document, the four `watch` methods | **Rejected.** They POST to a public HTTPS endpoint; a stdio server has none. §1 |
@@ -2569,26 +2569,26 @@ what §15 exists to settle, and they are marked.
 | 24 | `acl.list` needs `calendar.acls.readonly` (§2.15) | Discovery document; **spike G live, 2026-09-15 — positive half only** | **Confirmed from the primary source; the negative half is deliberately not probed.** With the scope granted, `acl.list` succeeds. Proving it is *refused* without the scope needs a grant that never had it — and Google stores a grant per OAuth client and user, so a later authorization asking for less does not revoke what was already given. Getting a clean negative would mean revoking this server's access at the account level and logging in again, which throws away the working login to re-confirm what the discovery document already states plainly: `acl.get` lists `calendar.readonly` among its scopes and `acl.list` does not. **The consequence is contained**, which is why this is acceptable: if §2.15 is wrong, the only cost is one scope on the consent screen that nothing needs, and `get_calendar` already reports a refused sharing read as a note rather than as an empty list (§7.1). Spike G stays in §15 and answers itself the first time anyone runs the driver under a narrower grant |
 | 27 | A profile's recorded scopes are the ones the account granted | Live, 2026-09-15 | **Refuted.** `login` stored what it *asked for*, so `status` presented a request as a fact about the grant — a scope Google refused would have been listed as held. It now records what `tokeninfo` reports the token actually carries, falling back to the request only when that call fails. Spike G reads the live token for the same reason: the recorded list would let it answer confidently and wrongly |
 | 25 | `tokeninfo` reports which account signed in | Live, 2026-09-15 | **Refuted.** It returns an email only when an email scope was granted, and this server asks for none — so the account was silently blank and `status` had a field that could never populate. The account is now read from the primary calendar's id, which is the address, and costs no extra scope. Asking for `userinfo.email` was rejected: a calendar server should not need to read a profile to say whose calendar it is looking at |
-| 28 | The `Event` resource has 44 published properties, and the four resources this server models have 81 between them | Discovery document, revision 20260826, fetched 2026-09-15 | **Confirmed, and now held by a gate.** `api-diff` records the field list beside the methods and `api-fields` holds one verdict per field: 56 modelled, 25 written off. The count in §8b is no longer a number somebody typed |
-| 29 | `colorId` is how an event's colour is set | Discovery document, `Event.eventLabelId` | **Superseded, and worth knowing before phase 2 writes a colour.** `eventLabelId` "supersedes the index-based colorId property" and refers to a label defined on the calendar (`Calendar.labelProperties`). Both are written off for now; §8b's row says so rather than leaving the newer field unmentioned |
+| 28 | The `Event` resource has 44 published properties, and the four resources this server models have 81 between them | Discovery document, revision 20260826, fetched 2026-09-15 | **Confirmed, and now held by a gate.** `api-diff` records the field list beside the methods and `api-fields` holds one verdict per field: 56 modeled, 25 written off. The count in §8b is no longer a number somebody typed |
+| 29 | `colorId` is how an event's color is set | Discovery document, `Event.eventLabelId` | **Superseded, and worth knowing before phase 2 writes a color.** `eventLabelId` "supersedes the index-based colorId property" and refers to a label defined on the calendar (`Calendar.labelProperties`). Both are written off for now; §8b's row says so rather than leaving the newer field unmentioned |
 | 30 | A daylight-saving transition is an hour | tzdata, through `internal/recur`'s table tests | **Refuted.** Australia/Lord_Howe shifts by 30 minutes, so the week containing its transition is 168h30m. The expansion walks dates and carries the wall clock, so the size of the shift never enters the arithmetic — the test asserts the gap to prove the transition was really there |
-| 31 | `events.instances` takes any event id | Discovery document; **live, 2026-09-15** | **Answered, and it is none of the three guesses.** Google returns **200 and expands the occurrence the id names**. A cancelled occurrence expands to nothing, so the call succeeds with an *empty list* — and `list_instances` reported "No occurrences" for a series that has three. A refusal was owed and the API never gives one, so the server reads the id's shape instead: an event id is base32hex (row 21), so an `_` cannot occur in one, and `{id}_{yyyymmdd}[T{hhmmss}Z]` is refused up front with `[invalid]` naming the series. `caltest` reproduces the 200 rather than the 400 it used to guess. What Google does for a plain non-recurring event is still unprobed and still a choice in the fake |
+| 31 | `events.instances` takes any event id | Discovery document; **live, 2026-09-15** | **Answered, and it is none of the three guesses.** Google returns **200 and expands the occurrence the id names**. A canceled occurrence expands to nothing, so the call succeeds with an *empty list* — and `list_instances` reported "No occurrences" for a series that has three. A refusal was owed and the API never gives one, so the server reads the id's shape instead: an event id is base32hex (row 21), so an `_` cannot occur in one, and `{id}_{yyyymmdd}[T{hhmmss}Z]` is refused up front with `[invalid]` naming the series. `caltest` reproduces the 200 rather than the 400 it used to guess. What Google does for a plain non-recurring event is still unprobed and still a choice in the fake |
 | 32 | `EXDATE` and `RDATE` carry a `TZID` parameter, or a `VALUE=DATE` form on an all-day series | RFC 5545 §3.8.5, and the shape Google returns in `recurrence` | **Asserted from the specification, not probed live. Tier 3.** `internal/recur` parses both and resolves a bare local time in the series' own zone. An all-day point stays a date and yields no instant, which is §4.1 again. A series carrying anything this package cannot expand — `EXRULE`, a second `RRULE`, a frequency below DAILY — is refused rather than expanded, because a count that is quietly too large is the number a caller would put in front of a user |
 | 26 | Redirecting the config directory and the environment isolates a test | Live, the hard way, 2026-09-15 | **Refuted, having been written down here first.** The OS keyring cannot be redirected by either, so `go test ./cmd/...` found the maintainer's real refresh token under the default profile, revoked the grant at Google and deleted it. `TestMain` now substitutes the keyring for the whole package, with a decoy test that fails if that is ever dropped. The sibling servers carry the same warning; having it in the source did not prevent it |
 | 36 | An account can hold as many calendars as a test needs | **Live, 2026-09-16** | **Refuted, and it closes a spike by making it unrunnable.** Spike I's readable half creates 51 calendars to ask whether the free/busy ceiling counts only calendars it can expand. Google refused the **39th**: HTTP 403, `reason: quotaExceeded`, "Calendar usage limits exceeded". So the readable half cannot be run on an account at all, and §2.10's ceiling stays unsettled for readable calendars by decision rather than by neglect. **Two consequences beyond the spike.** The limit is on *creation* and is not refunded by deleting — the 38 calendars were deleted and the quota stayed spent, so a later run can fail to create even its one scratch calendar until Google resets it. And phase 3's `create_calendar` meets this exact 403: `classify` already maps `quotaExceeded` to `[rate_limited]`, which is correct and retryable, but the message reads "Google is rate limiting this account", which invites an immediate retry of something that may not succeed for a day. Phase 3 owes that message a better sentence |
 | 37 | Deleting an event releases its id for reuse | **Live, 2026-09-16** | **Refuted.** A re-insert under a deleted event's id is answered 409. The live driver had fixed seed ids and emptied its scratch calendar before seeding; the emptying succeeded and the seed still failed. Ids are generated per run now — Go's `strconv.FormatInt(n, 32)` uses `0123456789abcdefghijklmnopqrstuv`, which is exactly base32hex's alphabet, so a formatted integer is a legal event id by construction rather than by inspection (row 21) |
 | 38 | "This and following" preserves exceptions after the target | Recurring-events guide; **spike E live, 2026-09-16** | **Refuted, as the guide says and §4.2 warns.** An eight-occurrence weekly series with its sixth occurrence moved 30 minutes later, split at the fourth: the original kept `COUNT=3`, the new series took `COUNT=5`, and the moved occurrence returned at its scheduled time. The exception was **reset**. `this_and_following` must say so in its result, because nobody expects it. The split was computed by `Set.Split` in `internal/recur`, so phase 1's arithmetic is confirmed against Google rather than against itself |
 | 39 | A duplicate client-generated id may pass undetected at creation (§2.11) | **Spike F live, 2026-09-16** | **Not reproduced, and the class stays anyway.** Two inserts of one id in flight together: one 200, one 409. The collision was caught. `ambiguous_outcome` is not retired, for two reasons worth keeping: the discovery document declines to *guarantee* detection, so a single observation is not a promise; and the class also covers the retry after a transport failure, where the caller never saw the first answer and Google's 409 would be reporting the caller's own event back at it. One fewer reason to fear the class, not a reason to drop it |
-| 40 | `externalOnly` means "guests outside your organisation" | Discovery document, `events.insert.sendUpdates`, revision 20260826; **spike A live, 2026-09-16** | **Confirmed by the API and refuted by its own documentation — the probe wins (hard rule 13).** The enum description says "Notifications are sent to **non-Google Calendar** guests only", and this document was corrected to match it. Then spike A put one guest inside the organiser's Workspace domain and one outside it on a consumer Gmail account, and inserted the same event three times. Under `externalOnly` the **out-of-domain guest was mailed and the same-domain guest was not** — even though both demonstrably use Google Calendar, which is the axis the description names. The real axis is the organiser's Workspace domain. §4.3's `dry_run` can therefore split its count exactly, from the organiser's own primary calendar id, and does. **Two corrections in one day from one parameter description**: it is the second field in this phase whose published description was the misleading thing, after `showDeleted` (row 33) |
+| 40 | `externalOnly` means "guests outside your organization" | Discovery document, `events.insert.sendUpdates`, revision 20260826; **spike A live, 2026-09-16** | **Confirmed by the API and refuted by its own documentation — the probe wins (hard rule 13).** The enum description says "Notifications are sent to **non-Google Calendar** guests only", and this document was corrected to match it. Then spike A put one guest inside the organizer's Workspace domain and one outside it on a consumer Gmail account, and inserted the same event three times. Under `externalOnly` the **out-of-domain guest was mailed and the same-domain guest was not** — even though both demonstrably use Google Calendar, which is the axis the description names. The real axis is the organizer's Workspace domain. §4.3's `dry_run` can therefore split its count exactly, from the organizer's own primary calendar id, and does. **Two corrections in one day from one parameter description**: it is the second field in this phase whose published description was the misleading thing, after `showDeleted` (row 33) |
 | 41 | `none` still sends some mail (§2.6) | **Spike A live, 2026-09-16** | **Not reproduced, and the rule stands anyway.** Two inserts carrying `sendUpdates=none` with two guests mailed neither of them. Google's warning is that mail "might still be sent", not that it is, so one silent run is not a promise of silence — §4.3 rule 3 keeps its refusal to report `none` as silence for the same reason spike F did not retire `ambiguous_outcome` (row 39). What this does remove is the fear that `none` is routinely noisy: it is not, on this shape of write. **Caveat held deliberately:** the out-of-domain guest also did not receive the `all` invitation, which it should have, so something filtered mail on that side and the absence of the `none` mail there is not clean evidence. The same-domain observation is clean, because that guest did receive `all` |
 | 42 | `all` notifies all guests | **Spike A live, four runs, 2026-09-16** | **Confirmed — and the three runs that seemed to refute it were measuring the receiver.** An out-of-domain Gmail guest received `externalOnly` every time and `all` never, across three runs and both orderings, which was recorded here as "the API accepted the invitation and did not deliver it". The fourth run put a **non-Google address on the same events as that Gmail address**, so one send could be watched at two receivers: the non-Google guest received **both** `all` and `externalOnly`; the Gmail guest received only `externalOnly`. Same event, same moment, one delivered and one not — so Google sent the `all` notification and Gmail did not surface it. **The correction matters more than the finding.** Three consistent runs were consistent because the instrument was, and repetition looked like evidence. What broke it was not a fourth run but a second receiver, which is the only thing that could separate sending from delivery |
-| 43 | Deleting an event removes it from the guests' calendars | **Live, 2026-09-16** | **Refuted when `sendUpdates=none`, and it is the sharpest argument §4.3 has.** An event created with two guests was deleted with `sendUpdates=none`. It is gone from the organiser's calendar — confirmed by listing that calendar, which now holds only later events — and it is **still on a guest's calendar**, showing both attendees and awaiting a response. The organiser believes the meeting is cancelled; the guest still has it. Found because the live driver was doing it: its own cleanup deleted guest-carrying probe events with `none` for a day and left them on two real calendars. The driver now cancels anything with attendees using `all`. For phase 2 this is `cancel_event` with `notify: none`, and §4.3's refusal to treat `none` as harmless now rests on a demonstration rather than on a warning in a document |
-| 44 | `sendUpdates=none` on insert can lose an event (§2.7) | **Spike B live, 2026-09-16** | **Confirmed, and it is structural rather than a defect.** A non-Google address was invited to an event inserted with `none`. It received nothing — in a run where the same address demonstrably did receive both `all` and `externalOnly` minutes earlier, so the channel was working. A guest outside Google Calendar has no calendar for the event to appear in, so mail is the only way they can learn of it, and `none` removes the only way. The event exists, with them attached, and they cannot discover it by any means. That is §2.7's "events being lost altogether for some users" with the mechanism visible. §4.3 refuses `none` when a guest is outside the organiser's domain rather than warning about it, because a warning is something a caller skims |
-| 45 | `leaks-history` protects the repository before it goes public | **Run for the first time, 2026-09-16** | **It could never have passed.** The allow-list carried `@noreply.anthropic.com`; the address in every commit's attribution trailer is `noreply@anthropic.com`, the other shape. So the gate failed on fourteen of fifteen commit messages, and had done since the first commit — unnoticed because it is the one gate `make check` deliberately does not run, being reserved for "before going public". A gate nobody runs is a gate nobody knows is broken, which is the same lesson as the three gates phase 1 found named but absent, one level further out: that failure was a list claiming a gate existed, this one is a gate that exists and was never executed. The entry is added as §9.1 requires, argued rather than widened: a vendor's non-routable no-reply address in a Co-Authored-By trailer, structurally identical to the GitHub noreply already allowed, saying nothing about a deployer, an organisation or anyone's calendar |
+| 43 | Deleting an event removes it from the guests' calendars | **Live, 2026-09-16** | **Refuted when `sendUpdates=none`, and it is the sharpest argument §4.3 has.** An event created with two guests was deleted with `sendUpdates=none`. It is gone from the organizer's calendar — confirmed by listing that calendar, which now holds only later events — and it is **still on a guest's calendar**, showing both attendees and awaiting a response. The organizer believes the meeting is canceled; the guest still has it. Found because the live driver was doing it: its own cleanup deleted guest-carrying probe events with `none` for a day and left them on two real calendars. The driver now cancels anything with attendees using `all`. For phase 2 this is `cancel_event` with `notify: none`, and §4.3's refusal to treat `none` as harmless now rests on a demonstration rather than on a warning in a document |
+| 44 | `sendUpdates=none` on insert can lose an event (§2.7) | **Spike B live, 2026-09-16** | **Confirmed, and it is structural rather than a defect.** A non-Google address was invited to an event inserted with `none`. It received nothing — in a run where the same address demonstrably did receive both `all` and `externalOnly` minutes earlier, so the channel was working. A guest outside Google Calendar has no calendar for the event to appear in, so mail is the only way they can learn of it, and `none` removes the only way. The event exists, with them attached, and they cannot discover it by any means. That is §2.7's "events being lost altogether for some users" with the mechanism visible. §4.3 refuses `none` when a guest is outside the organizer's domain rather than warning about it, because a warning is something a caller skims |
+| 45 | `leaks-history` protects the repository before it goes public | **Run for the first time, 2026-09-16** | **It could never have passed.** The allow-list carried `@noreply.anthropic.com`; the address in every commit's attribution trailer is `noreply@anthropic.com`, the other shape. So the gate failed on fourteen of fifteen commit messages, and had done since the first commit — unnoticed because it is the one gate `make check` deliberately does not run, being reserved for "before going public". A gate nobody runs is a gate nobody knows is broken, which is the same lesson as the three gates phase 1 found named but absent, one level further out: that failure was a list claiming a gate existed, this one is a gate that exists and was never executed. The entry is added as §9.1 requires, argued rather than widened: a vendor's non-routable no-reply address in a Co-Authored-By trailer, structurally identical to the GitHub noreply already allowed, saying nothing about a deployer, an organization or anyone's calendar |
 | 46 | `make check` passing locally means it passes on a fresh clone | **First CI run, 2026-09-16** | **Refuted twice in one run, and neither failure was platform-specific in the way "CI has never run on macOS or Windows" implied.** The `staleness` gate failed on **all three** platforms, Ubuntu included, because `internal/plan`, `scripts/evals` and a third under `scripts/` existed locally as **empty directories** and git does not carry those. The gate had been passing on a working tree that no clone could reproduce — including every contributor's. It also caught a real documentation error on the way: that third directory never existed at all — the live probes live in `scripts/livecal` — and both this document and CLAUDE.md had said otherwise since phase 0. The gate now accepts a path a later phase builds only when the text names that phase, so a plan and a stale reference are told apart by the author rather than guessed at. Separately, `gofmt` listed every `.go` file on Windows: git checked the tree out with CRLF and Go's tooling assumes LF, so a `.gitattributes` pins `eol=lf`. **The lesson is the empty directories**: a gate is only as honest as the tree it runs on, and a local tree is not the artifact anybody else gets |
 | 47 | The file fallback's 0600 protects the refresh token on every platform | **First CI run on Windows, 2026-09-16**; Go's `os` documentation; `golang.org/x/sys/windows` | **Refuted, and the warning was asserting it.** Go's file modes do not map to Windows ACLs — on Windows the mode only decides the read-only attribute — so the token file was written 0600 and landed at **0666**, readable by any account on the machine, while both warnings said "mode 0600" on every read and every save. A sentence a user would rely on, false on one of three supported platforms, and the same failure as promising `none` means silence (§4.3 rule 3): claiming a guarantee the platform declines to make. **Fixed rather than documented away.** The file is given an explicit DACL granting only the current user's SID, set with `PROTECTED_DACL_SECURITY_INFORMATION` so the entries inherited from the parent directory are replaced rather than added to — a grant without that flag widens access instead of restricting it. Administrators and SYSTEM are deliberately not named: they can take ownership regardless, so listing them would only make the list longer. The ACL is applied after the rename, because on Windows it belongs to the file at its final path. A Windows-only test reads the list back and asserts it is protected and holds exactly one entry, rather than trusting the call that set it |
-| 48 | `events.move` returns the moved event, so its response describes where the event landed | **Live, 2026-09-16** | **Refuted, and it made a successful move read as a cancellation.** A move that worked answered with `status: cancelled`, so the result rendered `[cancelled]` next to an event that had just been moved — the one word a caller would act on, and the exact opposite of what happened. Reading the event on the DESTINATION immediately afterwards showed it confirmed and intact, which is how the response was caught lying rather than the move. `move_event` reads the event back from the destination now and owns the extra request in its count. Every gate was green; only the transcript showed it, which is §13's whole claim about green gates |
-| 49 | `events.move` cannot carry `If-Match`, because it is a POST with no body and nothing documents the header | **Spike J live, 2026-09-16** | **Refuted: it is HONOURED.** A stale etag on a move is refused with **412**. The server had been sending none and saying in the result that this was the one write without the protection — an assumption stated honestly and still wrong. §4.4 has no exception now, `move_event` takes an etag and a `force` flag like every other write, and the fake refuses a stale one so the behaviour is held offline. The lesson is narrow and repeatable: "the documentation does not say" is a question, not an answer, and asking cost one probe |
+| 48 | `events.move` returns the moved event, so its response describes where the event landed | **Live, 2026-09-16** | **Refuted, and it made a successful move read as a cancellation.** A move that worked answered with `status: cancelled`, so the result rendered `[canceled]` next to an event that had just been moved — the one word a caller would act on, and the exact opposite of what happened. Reading the event on the DESTINATION immediately afterward showed it confirmed and intact, which is how the response was caught lying rather than the move. `move_event` reads the event back from the destination now and owns the extra request in its count. Every gate was green; only the transcript showed it, which is §13's whole claim about green gates |
+| 49 | `events.move` cannot carry `If-Match`, because it is a POST with no body and nothing documents the header | **Spike J live, 2026-09-16** | **Refuted: it is HONORED.** A stale etag on a move is refused with **412**. The server had been sending none and saying in the result that this was the one write without the protection — an assumption stated honestly and still wrong. §4.4 has no exception now, `move_event` takes an etag and a `force` flag like every other write, and the fake refuses a stale one so the behavior is held offline. The lesson is narrow and repeatable: "the documentation does not say" is a question, not an answer, and asking cost one probe |
 | 50 | Google's `self` flag marks the signed-in account on its own attendee row | **Live, 2026-09-16** | **Refuted on a secondary calendar, and it made a write that reached nobody demand a notification decision.** The driver put the account on its own event, on a calendar that account owns, and the attendee came back WITHOUT `self` — so §4.3.2's "a write that reaches nobody does not ask" counted the caller as their own guest and `respond_to_event` was refused with "this write reaches 1 guest". The flag appears to be relative to the calendar in the request rather than to the authenticated user, and a secondary calendar is not a person; that mechanism is a reading of one observation and the fix does not rest on it. `model.Event.Guests` takes the account's own address and excludes it whatever the flag says |
 | 51 | `acl.delete` takes a `sendNotifications` like the other ACL writes, so `unshare_calendar` needs a `notify` | Discovery document, `calendar.acl.delete` and `calendar.acl.patch`, revision 20260826, refetched 2026-09-16 | **Refuted, and it removed a parameter rather than adding one.** `acl.delete` publishes no `sendNotifications` at all, and `acl.patch`'s own description says it plainly: "Note that there are no notifications on access removal." So there is no choice to offer. `unshare_calendar` takes no `notify`, and its result says what the API's silence means for a person: they are not told, they find the calendar gone. A `notify` parameter there would have been a switch wired to nothing, reported as though it had done something — the same failure as reporting `none` as silence (§4.3 rule 3), with the wire empty instead of ambiguous |
 | 52 | §4.3's three choices carry over to the ACL tools unchanged | Discovery document, `calendar.acl.insert.sendNotifications`, revision 20260826 | **Half refuted: the requirement carries, the vocabulary does not.** `sendUpdates` on an event is an enum of three; `sendNotifications` on a rule is a **boolean**, so `external_only` has nothing to map to. It is refused as `[unsupported]` rather than rounded, because rounding it emails either more people or fewer than the caller asked for, and neither is the thing they said. The requirement itself carries and is stricter here: there is no "reaches nobody" exemption, because a group address expands to people this server cannot count and a domain rule covers everybody in one — the reach of a sharing change is not knowable from here, so the choice is always the caller's (§4.3) |
@@ -2596,11 +2596,11 @@ what §15 exists to settle, and they are marked.
 | 54 | A calendar notification has a delivery method worth exposing as a choice | Discovery document, `CalendarNotification.method`, revision 20260826 | **Refuted: there is exactly one.** "The possible value is: 'email'." So `manage_calendar` takes notification TYPES — creation, change, cancellation, response, agenda — and fills the method in, rather than offering a parameter with one option and letting a caller wonder what the others are. The same reading settled the other half: `notificationSettings` is written whole, so the tool replaces the list rather than adding to it, and an empty list turns every notification off |
 | 55 | A user can remove any calendar from their own calendar list | **Live, 2026-09-16** | **Refuted for a calendar you own, and nothing published says so.** `calendarList.delete` on a calendar this account had just created answered **403: "The data owner of a calendar cannot remove such a calendar from their calendar list."** So `manage_calendar`'s unsubscribe could not work on any calendar the caller made, and the tool offered it anyway. It is translated now into the two things that do work — `hidden:true` to keep it out of the way, `delete_calendar` to remove it for everybody — and classified `[unsupported]`, because no retry and no permission changes it. **Not pre-empted**, deliberately: Google's own role description separates the `owner` ROLE from the single data OWNER, and the `dataOwner` field is written off in §8b for being an address nothing here needs, so the API stays the authority on who that is and this server translates its answer. The live driver cannot exercise the working path at all — every calendar it has is one it made — so unsubscribing from somebody else's calendar is held offline against the fake and said so in §16 |
 | 56 | `calendars.clear` empties whichever calendar it is given | **Spike K live, 2026-09-16** | **Refused on a secondary calendar: 400.** Google's description says "Clears a primary calendar" and this server refused anything else on the strength of that prose, which rule 13 does not accept on its own. The probe put an event on a calendar the driver owns, cleared it, and counted both sides — because a 2xx alone would have settled nothing, which is the mistake spike I made once. The refusal `clear_calendar` gives is the API's rule now rather than this server's caution, and §7.5 says which. The third possibility, accepted-and-did-nothing, is the one this was written to catch and did not happen |
-| 57 | `If-Match` is honoured on the calendar and sharing writes (§2.4, §4.4) | **Spike L live, 2026-09-16** | **Confirmed on both, with a stale etag: 412 from `calendars.patch` and 412 from `acl.patch`.** §2.4 says ETags work across this API, but spike J had just shown that "the general rule" and "this method" are separate questions — `events.move` honours the header while nothing published says it applies. So the four methods phase 3 added were sending `If-Match` on an assumption. They are not any more: §4.4 covers the calendar and sharing writes as it covers the event ones, and the results may say so. The discriminator is the same one spike J needed — a CURRENT etag would have succeeded whether or not the header is read |
+| 57 | `If-Match` is honored on the calendar and sharing writes (§2.4, §4.4) | **Spike L live, 2026-09-16** | **Confirmed on both, with a stale etag: 412 from `calendars.patch` and 412 from `acl.patch`.** §2.4 says ETags work across this API, but spike J had just shown that "the general rule" and "this method" are separate questions — `events.move` honors the header while nothing published says it applies. So the four methods phase 3 added were sending `If-Match` on an assumption. They are not any more: §4.4 covers the calendar and sharing writes as it covers the event ones, and the results may say so. The discriminator is the same one spike J needed — a CURRENT etag would have succeeded whether or not the header is read |
 | 58 | A patch that writes a field the value it already holds still moves the resource's etag | **Live, 2026-09-16, second run** | **Refuted for `calendars.patch`, and it broke a spike to find out.** Spike L patched the scratch calendar's description to a fixed string, which on the second run was the value already there; Google returned the SAME etag, so no stale one could be built and the spike reported undetermined on a question it had answered an hour earlier. The claim appears in `internal/plan`'s own comments as the reason a no-op field is never sent, and one observation now contradicts it on one resource. **The rule it justifies survives the refutation on its own merits**: not sending a field that has not changed saves nothing to argue about, keeps the change list honest about what the write did, and costs nothing — so the comments say that instead of asserting a bump nobody has verified. Whether `events.patch` behaves the same way is **unprobed**, and the comment there says so rather than guessing. The spike's own text now carries the run's mark, because a probe that only works on a calendar it has never touched is a probe that works once |
 | 59 | A URI template variable matches a calendar id | RFC 6570; the SDK's matcher, probed locally 2026-09-16 | **Refuted, and it would have made every secondary calendar unreachable.** `gcal://calendars/{calendar_id}` uses simple expansion, which matches unreserved characters only — and every secondary calendar id is an ADDRESS. The obvious URI, with the at sign written as itself, matches nothing and the read comes back "not found", while the percent-encoded form works; a model writing the id it was just given by `list_calendars` gets the first one. The templates use reserved expansion (`{+calendar_id}`) now, which matches both. That has a second consequence worth stating: reserved expansion also matches a slash, so the calendar template matches an EVENT URI too, and the SDK routes a read to the first template that matches. Both templates therefore share one handler that parses the URI itself, rather than depending on the order two registrations happen to be in |
 | 60 | Conference data is generated asynchronously, so an insert answers with a pending request and no link | Discovery document, `ConferenceData.createRequest` and `ConferenceRequestStatus`, revision 20260826; **spike M live, 2026-09-16** | **Refuted as the usual case, and the published one is kept anyway.** The insert answered `status: "success"` with the video entry point already in it — no waiting, no second read. The documentation says the data "is generated asynchronously" and publishes "pending" as a status, so the slower answer is a thing the API may do; one observation does not retire it, for the same reason spike F did not retire `ambiguous_outcome`. What changes is every sentence that said a caller usually has to read the event again: the link normally arrives with the event, `create_event` reports what came back rather than what it asked for, and "still being made" is the other answer rather than the expected one |
-| 61 | Conference data in an insert body is honoured | Discovery document, `events.insert.conferenceDataVersion`, revision 20260826; **spike M live, 2026-09-16** | **Refuted without the version parameter, and it fails silently.** `conferenceDataVersion` defaults to 0, which "ignores conference data in the event's body": the probe sent the same body twice, once with the parameter and once without, and the version-less insert answered **200 with the event created and no conference at all**. Success, with the one thing the caller asked for missing and nothing in the response saying so. The client sets the parameter from the BODY rather than taking it from each caller, so a call site cannot forget it, and `caltest` drops conference data without it exactly as Google does — a fake that accepted it would let this ship |
+| 61 | Conference data in an insert body is honored | Discovery document, `events.insert.conferenceDataVersion`, revision 20260826; **spike M live, 2026-09-16** | **Refuted without the version parameter, and it fails silently.** `conferenceDataVersion` defaults to 0, which "ignores conference data in the event's body": the probe sent the same body twice, once with the parameter and once without, and the version-less insert answered **200 with the event created and no conference at all**. Success, with the one thing the caller asked for missing and nothing in the response saying so. The client sets the parameter from the BODY rather than taking it from each caller, so a call site cannot forget it, and `caltest` drops conference data without it exactly as Google does — a fake that accepted it would let this ship |
 | 62 | The release scaffolding §16 lists as done exists | **The tree, 2026-09-16** | **Refuted: there is no `.goreleaser.yaml` and no release workflow.** §16's phase 0 entry names "goreleaser, CI, CodeQL and release workflows" among the things it built; CI and CodeQL exist and the other two never did. Nothing noticed because nothing references them: the staleness gate checks paths named in backticks in the docs, and a claim in prose naming no path is invisible to it. This is the same shape as the three gates phase 1 found named but absent, and as the empty directories of row 46 — a list of things is not the things. The bundle this phase built is therefore packed by `make mcpb-pack` and installed by hand; wiring it into a signed release is owed, and §16 says so where it used to be claimed. **Closed in phase 5**, which built both, added the `release` gate so the config is held against the packer on every commit, and rewrote phase 0's list to name what it actually built |
 | 63 | A `this_and_following` split expands the series in the event's own zone | **Review, 2026-09-16; two reproduction attempts** | **Refuted as written, and the consequence is UNPROVEN.** The split reads the parent through `model.ParseWhen`, which re-renders the instant into the zone the CALL asked to be shown in and drops the wire `timeZone`; `recur.ExpandTimes` then takes its wall clock and its day walk from that. So a series read with a `time_zone` other than its own expands from a different anchor, and the head count that becomes the truncated series' `COUNT=` is computed over a different set of instants. Two attempts to make that change the answer — a weekly `BYDAY=MO` series in Asia/Tokyo split while shown in America/Los_Angeles, and a daily one near local midnight — produced the SAME rule on both sides, because the generated set and the target instant shift together and a rule's gap is wider than the shift. Recorded rather than fixed: the mechanism is real, the harm is not demonstrated, and threading the event's own zone through `Set.Split`, `Set.Reach` and `cancelFollowing` is a change to phase 2's write path that no test here can currently hold. Anybody picking it up should start with a rule whose LOCAL day walk changes the number of matches — `BYMONTHDAY=31`, or `BYDAY=-1SU` near a month boundary |
 | 64 | goreleaser writes the macOS universal binary somewhere a `dist/*darwin*universal*/` glob matches | **A snapshot build, 2026-09-16** | **Refuted, and the packer could never have worked.** The directory is `dist/<id>_darwin_all/<binary>` — the id comes FIRST, so a glob reading "darwin then universal" resolves to nothing, and `mcpb-pack` would have failed on the macOS binary at the most expensive moment there is. Phase 4 wrote that glob against a tool that did not exist yet, which is why no gate could hold it; the fix is `dist/*universal*darwin*/` and, more to the point, `gates release`, which derives every directory the build matrix produces and requires each staged glob to match exactly ONE of them. The same run confirmed the other three globs resolve, and that a glob of `dist/*darwin*/` would match three directories rather than none — the failure that packs the wrong binary rather than no binary |
@@ -2611,14 +2611,14 @@ what §15 exists to settle, and they are marked.
 | 69 | The tool-pin half of `make pins` checks what its comment says | **Probed, 2026-09-16** | **Refuted twice over, in the first version written.** It split steps by indentation and then read EVERY line of a step for the input, so a `version:` under `env:` satisfied the goreleaser pin — and `version` is the most collidable input name there is. It also understood block sequences only, so a workflow written in flow style produced no steps, no installers and **no problems**: "looked at nothing" printing the sentence "found nothing", which is the one failure `scripts/gates` exists to refuse, committed inside the gate written to refuse it. Both were found by running the code rather than reading it. There is one workflow reader now, a YAML parse in `scripts/gates/workflow.go`, shared with the release gate; both failures are regression cases, and `pinGate` asserts a floor on how many installers it SAW rather than only on how many were wrong |
 | 70 | Deriving the documented-path roots from the repository's own top-level entries is the general fix for an allow-list of them | **Tried and reverted, 2026-09-16** | **Refuted: it is circular, and weaker than the list it replaced.** `checkPaths` treats a backticked token as a path only if its first segment is a root the repository has — so a file that does NOT exist has no such root, is filed as prose, and excuses itself. The motivating case proves it: `.goreleaser.yaml` named in the docs while no such file existed would be skipped rather than flagged, which is exactly how §16 could call the release built for four phases. A probe caught it immediately, having watched the shape-based version flag the same token. The rule is therefore SHAPE, never existence — a path under a source directory, or a root file with one of the extensions a root file here actually has. `.txt` and `.json` are excluded by name because `checksums.txt` and `manifest.json` are documented and live in a release archive and a bundle rather than in this repository |
 | 71 | A universal binary is named by the `binary` of the build it joins | **Probed with the two renamed apart, 2026-09-17** | **Refuted: it is named by `universal_binaries[].name_template`, which defaults to the PROJECT name.** A snapshot with `binary: gcal-probe` wrote `gcal-probe` into every ordinary target's directory and `google-calendar-mcp` into `..._darwin_all`. The release gate took that name from the build, so it was right only while `project_name` and `binary` happened to be the same string: renaming the project alone would have moved the macOS file, left the gate green and failed `mcpb-pack` at tag time — the same failure as row 64, reached through the gate written to prevent it. Found by `/code-review high`, which reasoned it out, and settled by the probe rather than by the reasoning |
-| 72 | `nextSyncToken` comes back on every page of a sync read | **Discovery document, `events.list.syncToken`, revision 20260826** | **Refuted: "the LAST page of results".** So a read that stops at §4.7's budget has no token at all, and a server that handed one over anyway would give the caller a token covering pages it never saw — silent, permanent data loss from the caller's point of view, and exactly the shape this repository exists to refuse. `list_changes` therefore reports "there is NO sync token yet" in the text and clears the field, rather than treating a missing token as an empty one. The same paragraph settles three more: deletions are always in the result and `showDeleted` may not be false; `iCalUID`, `orderBy`, `privateExtendedProperty`, `q`, `sharedExtendedProperty`, `timeMin`, `timeMax` and `updatedMin` are all refused alongside a token, so the tool offers none of them; and "all other query parameters should be the same as for the initial synchronization", which is why a baseline reads with `showDeleted` true and labels what it finds "already cancelled" rather than "deleted" |
-| 73 | A baseline sync read reaches the last page, and therefore gets a token, within the event budget | **Live, 2026-09-17; spike N** | **Refuted, and it made `list_changes` useless on a real calendar.** The first live run of phase 6 failed: the baseline came back with NO token. Spike N asked the API directly with six parameter sets and every one answered `nextPageToken` set and `nextSyncToken` absent — including the BARE request, and including one with `items: 0`, which is Google applying the page size before it filters. Paging to the real last page took **3 pages and 527 rows** on a scratch calendar holding twelve live events: the rest were cancelled tombstones left by earlier runs, which `showDeleted=true` must return and sync cannot be built without. So the token exists, arrives on the last page exactly as row 72 says, and the 250-event budget stopped the read three pages short of it — for ever, on any calendar with a deletion history. The fix distinguishes the two reads: a BASELINE pages past its budget, because its rows are not changes and the token covers them, and reports how many it passed over; an INCREMENTAL read still stops, because there every row is a change the caller has not seen and handing over a token would mark them as delivered. Nothing about this was visible against the fake, which had a dozen events and no history |
-| 74 | A transcript is safe to paste once addresses, ids and links are redacted | **Read, 2026-09-17** | **Refuted again, and by this phase's own tool.** `list_changes` prints the sync token, and the live transcript carried a real one from the account. It is a cursor rather than a credential — it grants nothing — but it is account state with the entropy of a secret, and the leak gate refuses a string of that shape in the tree, which is the same judgement. It has no shape of its own to anchor a rule on, so the redactor anchors on the LABEL this server's own renderer prints in front of it, which is a firmer anchor than a shape: it cannot drift without the renderer changing. Row 34 found the same class in display names and fixed it with scope; this one had a label available |
+| 72 | `nextSyncToken` comes back on every page of a sync read | **Discovery document, `events.list.syncToken`, revision 20260826** | **Refuted: "the LAST page of results".** So a read that stops at §4.7's budget has no token at all, and a server that handed one over anyway would give the caller a token covering pages it never saw — silent, permanent data loss from the caller's point of view, and exactly the shape this repository exists to refuse. `list_changes` therefore reports "there is NO sync token yet" in the text and clears the field, rather than treating a missing token as an empty one. The same paragraph settles three more: deletions are always in the result and `showDeleted` may not be false; `iCalUID`, `orderBy`, `privateExtendedProperty`, `q`, `sharedExtendedProperty`, `timeMin`, `timeMax` and `updatedMin` are all refused alongside a token, so the tool offers none of them; and "all other query parameters should be the same as for the initial synchronization", which is why a baseline reads with `showDeleted` true and labels what it finds "already canceled" rather than "deleted" |
+| 73 | A baseline sync read reaches the last page, and therefore gets a token, within the event budget | **Live, 2026-09-17; spike N** | **Refuted, and it made `list_changes` useless on a real calendar.** The first live run of phase 6 failed: the baseline came back with NO token. Spike N asked the API directly with six parameter sets and every one answered `nextPageToken` set and `nextSyncToken` absent — including the BARE request, and including one with `items: 0`, which is Google applying the page size before it filters. Paging to the real last page took **3 pages and 527 rows** on a scratch calendar holding twelve live events: the rest were canceled tombstones left by earlier runs, which `showDeleted=true` must return and sync cannot be built without. So the token exists, arrives on the last page exactly as row 72 says, and the 250-event budget stopped the read three pages short of it — forever, on any calendar with a deletion history. The fix distinguishes the two reads: a BASELINE pages past its budget, because its rows are not changes and the token covers them, and reports how many it passed over; an INCREMENTAL read still stops, because there every row is a change the caller has not seen and handing over a token would mark them as delivered. Nothing about this was visible against the fake, which had a dozen events and no history |
+| 74 | A transcript is safe to paste once addresses, ids and links are redacted | **Read, 2026-09-17** | **Refuted again, and by this phase's own tool.** `list_changes` prints the sync token, and the live transcript carried a real one from the account. It is a cursor rather than a credential — it grants nothing — but it is account state with the entropy of a secret, and the leak gate refuses a string of that shape in the tree, which is the same judgment. It has no shape of its own to anchor a rule on, so the redactor anchors on the LABEL this server's own renderer prints in front of it, which is a firmer anchor than a shape: it cannot drift without the renderer changing. Row 34 found the same class in display names and fixed it with scope; this one had a label available |
 | 75 | CodeQL's `go/regex/missing-regexp-anchor` applies to the redactor's URL rules | **CodeQL on pull request 7, checked by probe, 2026-09-17** | **Rejected as written, and it found a real defect anyway.** The rule is for a regex that VALIDATES a URL, where matching anywhere lets an attacker embed an allowed host in a longer string and bypass the check. The redactor does the opposite: it has to find a link WHEREVER it appears, and anchoring `meetRe` would stop it matching a link mid-sentence, which is where every link in a transcript is. Anchoring would therefore turn a working rule into a leak. But the line was worth the visit: a probe found the rule under-matching three ways — an upper-case URL, a plain `http://` one, and `meet.google.com/lookup/<code>`, where it stopped at the second slash and redacted the host while printing the meeting code. All three put a joinable meeting into a transcript. Fixed, with the three as regression cases, and the alert dismissed as a false positive with this reasoning rather than silenced. **The general lesson: a scanner's rule carries an assumption about how the code is used, and "validate" and "redact" want opposite answers from the same question** |
-| 76 | A newer version of a dependency is a safer version of it | **The licence gate, 2026-09-17** | **Refuted, and the gate was right to refuse.** Bumping the indirect `segmentio/asm` from v1.1.3 to v1.2.1 failed `make licenses` on every package in it. The cause is not a missing licence: the module RELICENSED from MIT to **MIT No Attribution** (MIT-0), which is strictly MORE permissive — it drops the attribution requirement. `go-licenses` cannot classify MIT-0, so it reports an empty licence name, and an allow-list of `Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC` refuses an empty name as it should. Widening the list would not even work, because there is no name to add. The bump is reverted rather than argued around: nothing needed it, no advisory drove it, and the version in place is the one the direct dependency asks for. **The rule this leaves: a gate that refuses what it cannot classify is working, and "the licence got more permissive" is not a reason to teach it to pass an unknown.** |
+| 76 | A newer version of a dependency is a safer version of it | **The license gate, 2026-09-17** | **Refuted, and the gate was right to refuse.** Bumping the indirect `segmentio/asm` from v1.1.3 to v1.2.1 failed `make licenses` on every package in it. The cause is not a missing license: the module RELICENSED from MIT to **MIT No Attribution** (MIT-0), which is strictly MORE permissive — it drops the attribution requirement. `go-licenses` cannot classify MIT-0, so it reports an empty license name, and an allow-list of `Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC` refuses an empty name as it should. Widening the list would not even work, because there is no name to add. The bump is reverted rather than argued around: nothing needed it, no advisory drove it, and the version in place is the one the direct dependency asks for. **The rule this leaves: a gate that refuses what it cannot classify is working, and "the license got more permissive" is not a reason to teach it to pass an unknown.** |
 | 77 | The bundle manifest's `manifest_version` is current, because it agrees with its own `$schema` and four sibling repositories use it | **The published mcpb schemas, fetched 2026-09-17** | **Rejected as evidence, and the version kept anyway.** The 0.3 bump was adopted because four other repositories were on it, which is a sibling and not a source — hard rule 13. Fetched: `mcpb-manifest-v0.2`, `v0.3` and `v0.4` are served and `v0.5` is not, so this manifest was one version behind while every check on it passed. Diffing 0.3 against 0.4 is what settled it: the ONLY difference is a `uv` server type added to the `server.type` enum, and this bundle's type is `binary`, so 0.4 buys nothing and would declare a format no desktop here has been seen to install. 0.3 stays, deliberately. Two things changed instead: `$schema` now names a tag rather than `main`, because the path pins the FORMAT and the ref pins the BYTES — the rule is an allow-list on the whole URL, upstream's path at a full tag or a commit SHA, because a blacklist of branch names passes a partial tag like `v2.1`, which upstream re-points as it releases; the schema at `v2.1.2` is byte-identical to `main` today, which is the point, since nothing would say if it stopped being — and the gate has a FLOOR, because claims that hold a document against itself are all satisfied by a stale one: 0.2 beside a 0.2 schema is self-consistent, which is exactly the shape that spread through four repositories |
-| 33 | `showDeleted=false` means Google filters cancelled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the cancelled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters cancelled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
-| 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behaviour*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
+| 33 | `showDeleted=false` means Google filters canceled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the canceled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters canceled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
+| 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behavior*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |
 
 ### Deviations from the shared Go MCP server standard

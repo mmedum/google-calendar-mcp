@@ -5,8 +5,8 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/mmedum/google-calendar-mcp/internal/config"
-	"github.com/mmedum/google-calendar-mcp/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/credentials"
 )
 
 func keyringNotFound() error { return keyring.ErrNotFound }

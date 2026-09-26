@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // ErrInvalid wraps every parse and validation failure here.
@@ -132,7 +132,7 @@ type Point struct {
 	Wall time.Time
 	Zone string
 	// loc is Zone already resolved. time.LoadLocation reads and parses a
-	// zoneinfo file on every call and Go does not memoise it, so a line
+	// zoneinfo file on every call and Go does not memoize it, so a line
 	// listing twenty excluded dates under one TZID would otherwise read
 	// the same file twenty times, inside a loop over input this package
 	// does not control.

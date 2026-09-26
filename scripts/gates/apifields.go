@@ -34,7 +34,7 @@ var fieldResources = []string{"Event", "Calendar", "CalendarListEntry", "AclRule
 //
 //  1. a published field with no verdict fails;
 //  2. a verdict for a field the API no longer publishes fails;
-//  3. a verdict of `modelled` whose Go field does not exist fails, and a
+//  3. a verdict of `modeled` whose Go field does not exist fails, and a
 //     Go field with no verdict fails — so the record cannot drift from
 //     internal/gcal in either direction.
 func apiFieldsGate() error {
@@ -67,7 +67,7 @@ func apiFieldsGate() error {
 	if err != nil {
 		return err
 	}
-	modelled, err := modelledFields()
+	modeled, err := modeledFields()
 	if err != nil {
 		return err
 	}
@@ -84,26 +84,26 @@ func apiFieldsGate() error {
 			continue
 		}
 		switch v.verdict {
-		case "modelled":
-			if !modelled[name] {
-				bad = append(bad, fmt.Sprintf("%s (line %d): recorded as modelled, but internal/gcal has no field "+
+		case "modeled":
+			if !modeled[name] {
+				bad = append(bad, fmt.Sprintf("%s (line %d): recorded as modeled, but internal/gcal has no field "+
 					"with that json tag", name, v.line))
 			}
 		case "out":
 			if strings.TrimSpace(v.reason) == "" {
 				bad = append(bad, fmt.Sprintf("%s (line %d): written off with no reason", name, v.line))
 			}
-			if modelled[name] {
+			if modeled[name] {
 				bad = append(bad, fmt.Sprintf("%s (line %d): written off, but internal/gcal models it — "+
 					"the record says this server ignores a field it reads", name, v.line))
 			}
 		default:
-			bad = append(bad, fmt.Sprintf("%s (line %d): verdict %q is neither modelled nor out", name, v.line, v.verdict))
+			bad = append(bad, fmt.Sprintf("%s (line %d): verdict %q is neither modeled nor out", name, v.line, v.verdict))
 		}
 	}
 	// And the direction that catches a field added to the wire types
 	// without a decision behind it.
-	for name := range modelled {
+	for name := range modeled {
 		if _, ok := verdicts[name]; !ok {
 			bad = append(bad, fmt.Sprintf("%s: internal/gcal models it and testdata/api-fields.tsv has no row", name))
 		}
@@ -117,7 +117,7 @@ func apiFieldsGate() error {
 	if len(missing) > 0 {
 		problems = append(problems, "published fields with no verdict in testdata/api-fields.tsv:\n  "+
 			strings.Join(missing, "\n  ")+
-			"\n  (Google publishes a field and nobody decided about it. Add a row saying modelled or out, with why.)")
+			"\n  (Google publishes a field and nobody decided about it. Add a row saying modeled or out, with why.)")
 	}
 	if len(stale) > 0 {
 		problems = append(problems, "verdicts for fields the API no longer publishes:\n  "+strings.Join(stale, "\n  "))
@@ -131,13 +131,13 @@ func apiFieldsGate() error {
 
 	in, out := 0, 0
 	for _, v := range verdicts {
-		if v.verdict == "modelled" {
+		if v.verdict == "modeled" {
 			in++
 		} else {
 			out++
 		}
 	}
-	fmt.Printf("  %d fields across %d resources: %d modelled, %d written off\n",
+	fmt.Printf("  %d fields across %d resources: %d modeled, %d written off\n",
 		len(published), len(surface.Schemas), in, out)
 	return nil
 }
@@ -163,13 +163,13 @@ func loadFieldVerdicts() (map[string]fieldVerdict, error) {
 	return out, nil
 }
 
-// modelledFields reads internal/gcal and returns the json tags of the
+// modeledFields reads internal/gcal and returns the json tags of the
 // fields each of the four resources actually carries.
 //
 // It reads the source rather than a hand-kept list, which is the whole
 // point: a field added to the struct and forgotten in the record is
 // exactly the drift this gate exists to catch.
-func modelledFields() (map[string]bool, error) {
+func modeledFields() (map[string]bool, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filepath.Join("internal", "gcal", "gcal.go"), nil, 0)
 	if err != nil {
@@ -209,7 +209,7 @@ func modelledFields() (map[string]bool, error) {
 		return true
 	})
 	if len(out) < 20 {
-		return nil, fmt.Errorf("found only %d modelled fields in internal/gcal; the parser is not reading the types", len(out))
+		return nil, fmt.Errorf("found only %d modeled fields in internal/gcal; the parser is not reading the types", len(out))
 	}
 	return out, nil
 }

@@ -8,13 +8,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/internal/config"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/server"
-	"github.com/mmedum/google-calendar-mcp/internal/service"
-	"github.com/mmedum/google-calendar-mcp/internal/tools"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/server"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/tools"
 )
 
 func listTools(t *testing.T, cfg config.Config) []*mcp.Tool {
@@ -508,8 +508,8 @@ func TestEveryToolAnswers(t *testing.T) {
 			"from": "2026-03-16", "to": "2026-03-31", "no_expand": true,
 		}, "series"},
 		{"list_events", map[string]any{
-			"from": "2026-03-18", "to": "2026-03-19", "show_cancelled": true,
-		}, "cancelled"},
+			"from": "2026-03-18", "to": "2026-03-19", "show_canceled": true,
+		}, "canceled"},
 		{"list_events", map[string]any{
 			"from": "2026-03-16", "to": "2026-03-17", "time_zone": "America/Chicago",
 		}, "America/Chicago"},
@@ -522,8 +522,8 @@ func TestEveryToolAnswers(t *testing.T) {
 			"calendar": "primary", "event_id": "ev-weekly",
 		}, "occurrence"},
 		{"list_instances", map[string]any{
-			"calendar": "primary", "event_id": "ev-weekly", "show_cancelled": true,
-		}, "CANCELLED"},
+			"calendar": "primary", "event_id": "ev-weekly", "show_canceled": true,
+		}, "CANCELED"},
 		{"list_instances", map[string]any{
 			"calendar": "primary", "event_id": "ev-weekly",
 			"from": "2026-03-20", "to": "2026-03-26",
@@ -780,7 +780,7 @@ func TestTheWriteToolsWorkThroughTheProtocol(t *testing.T) {
 		}, "Moved"},
 		{"cancel_event", map[string]any{
 			"calendar": "primary", "event_id": "ev-transparent",
-		}, "Cancelled"},
+		}, "Canceled"},
 	}
 	for _, c := range calls {
 		t.Run(c.name+"/"+c.want, func(t *testing.T) {

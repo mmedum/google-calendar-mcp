@@ -19,10 +19,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // Schedule is everything a read of events produced.
@@ -154,8 +154,8 @@ func Title(e model.Event) string {
 // to one view and not the other is the same defect waiting to happen.
 func commonTags(e model.Event) []string {
 	var tags []string
-	if e.Cancelled() {
-		tags = append(tags, "cancelled")
+	if e.Canceled() {
+		tags = append(tags, "canceled")
 	}
 	if e.Transparent {
 		// Worth saying: it is on the calendar and does not make the
@@ -242,7 +242,7 @@ func Recurrence(rules []string) string {
 	set, err := recur.Parse(rules)
 	if err != nil {
 		// An unreadable rule is shown as itself. A caller who wrote it
-		// recognises their own line, and a wrong explanation is worse
+		// recognizes their own line, and a wrong explanation is worse
 		// than none.
 		if len(rules) > 0 {
 			return rules[0]
@@ -346,7 +346,7 @@ type Instances struct {
 	Truncated     bool
 	NextPageToken string
 	Requests      int
-	ShowCancelled bool
+	ShowCanceled  bool
 }
 
 // Text renders the occurrences of a series.
@@ -384,12 +384,12 @@ func (i Instances) Text() string {
 		}
 	}
 	b.WriteString(".\n")
-	if !i.ShowCancelled {
-		// A cancelled occurrence is how one date is removed from a
+	if !i.ShowCanceled {
+		// A canceled occurrence is how one date is removed from a
 		// series, so its absence is a fact about the series rather than
 		// a detail. A caller who does not know it is hidden reads this
 		// list as "these are the dates" when one of them is gone.
-		b.WriteString("Cancelled occurrences are hidden; pass show_cancelled to see which dates were removed.\n")
+		b.WriteString("Canceled occurrences are hidden; pass show_canceled to see which dates were removed.\n")
 	}
 	if i.Requests > 1 {
 		fmt.Fprintf(&b, "(%d API requests)\n", i.Requests)
@@ -414,13 +414,13 @@ func InstanceLine(e model.Event, z when.Zone) string {
 	b.WriteString(Title(e))
 
 	// The id first, because addressing one occurrence is what a caller
-	// comes here for. "cancelled" is replaced with a longer line: in a
+	// comes here for. "canceled" is replaced with a longer line: in a
 	// series it does not mean the meeting was called off, it means this
 	// date was taken out.
 	tags := []string{"id " + e.ID}
 	for _, t := range commonTags(e) {
-		if t == "cancelled" {
-			t = "CANCELLED — this date was removed from the series"
+		if t == "canceled" {
+			t = "CANCELED — this date was removed from the series"
 		}
 		tags = append(tags, t)
 	}

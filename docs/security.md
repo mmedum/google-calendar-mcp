@@ -2,7 +2,7 @@
 
 ## What never enters this repository
 
-No organisation names, calendar ids or URLs, account or attendee email
+No organization names, calendar ids or URLs, account or attendee email
 addresses, Cloud project ids, OAuth client ids or secrets, and no event
 title, description, location or guest list from a real calendar. This
 holds for code, docs, fixtures, transcripts, commit messages, pull
@@ -18,7 +18,7 @@ Two rules make that structural rather than a matter of care:
    builds everything it returns. A fixture copied from a live response is
    itself the leak, whatever a scanner says about it.
 2. **The live driver reads only what it wrote**, on a calendar it creates
-   for the run and deletes afterwards.
+   for the run and deletes afterward.
 
 `make leaks` scans the working tree and `make leaks-history` scans every
 blob and commit message. The rules are an allow-list anchored on shapes

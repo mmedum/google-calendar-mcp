@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // WriteReport is everything a write produced (§4.9).
@@ -43,7 +43,7 @@ type WriteReport struct {
 	Notify string
 	// Notes carry the consequences a caller does not expect — the reset
 	// exceptions of a this_and_following write, the guests who still
-	// hold a cancelled meeting.
+	// hold a canceled meeting.
 	Notes []string
 	// Requests is how many API calls this cost. §4.7's exceptions are
 	// the writes that are two calls, and this is where they say so.
@@ -57,7 +57,7 @@ type WriteReport struct {
 var verbs = map[string][2]string{
 	VerbCreate:      {"Created", "Would create"},
 	VerbUpdate:      {"Updated", "Would update"},
-	VerbCancel:      {"Cancelled", "Would cancel"},
+	VerbCancel:      {"Canceled", "Would cancel"},
 	VerbMove:        {"Moved", "Would move"},
 	VerbAnswer:      {"Answered", "Would answer"},
 	VerbSubscribe:   {"Subscribed to", "Would subscribe to"},
@@ -131,7 +131,7 @@ func (w WriteReport) Text() string {
 	if w.After != nil {
 		fmt.Fprintf(&b, "  after:  %s\n", dated(*w.After, w.Zone))
 	} else {
-		b.WriteString("  after:  (cancelled)\n")
+		b.WriteString("  after:  (canceled)\n")
 	}
 
 	if len(w.Changes) > 0 {

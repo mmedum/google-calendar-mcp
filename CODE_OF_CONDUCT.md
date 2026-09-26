@@ -11,17 +11,17 @@ religion, or sexual identity and orientation.
 
 ## Our standards
 
-Examples of behaviour that contributes to a positive environment:
+Examples of behavior that contributes to a positive environment:
 
 - Demonstrating empathy and kindness toward other people
 - Being respectful of differing opinions, viewpoints and experiences
 - Giving and gracefully accepting constructive feedback
-- Accepting responsibility and apologising to those affected by our
+- Accepting responsibility and apologizing to those affected by our
   mistakes, and learning from the experience
 
-Examples of unacceptable behaviour:
+Examples of unacceptable behavior:
 
-- The use of sexualised language or imagery, and sexual attention or
+- The use of sexualized language or imagery, and sexual attention or
   advances of any kind
 - Trolling, insulting or derogatory comments, and personal or political
   attacks
@@ -31,7 +31,7 @@ Examples of unacceptable behaviour:
 
 ## Enforcement
 
-Instances of abusive, harassing or otherwise unacceptable behaviour may
+Instances of abusive, harassing or otherwise unacceptable behavior may
 be reported to the maintainers through a GitHub issue or a private
 security advisory. All complaints will be reviewed and investigated
 promptly and fairly.

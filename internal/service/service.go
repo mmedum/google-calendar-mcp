@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/internal/config"
-	"github.com/mmedum/google-calendar-mcp/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/internal/model"
-	"github.com/mmedum/google-calendar-mcp/internal/render"
-	"github.com/mmedum/google-calendar-mcp/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
 )
 
 // Service holds the client and the policy.
@@ -156,7 +156,7 @@ func (s *Service) Calendars(ctx context.Context, showHidden bool) ([]model.Calen
 }
 
 // allCalendars reads every subscribed calendar once per process,
-// hidden ones included, and filters afterwards.
+// hidden ones included, and filters afterward.
 //
 // One list, not two. The first version cached only the list WITHOUT
 // hidden calendars, and every caller that wanted the full one — which
@@ -339,8 +339,8 @@ type ListOptions struct {
 	Expand bool
 	// Query is the free-text q. Undocumented and unscoped (§2).
 	Query string
-	// ShowCancelled includes cancelled events (§2.13).
-	ShowCancelled bool
+	// ShowCanceled includes canceled events (§2.13).
+	ShowCanceled bool
 	// MaxEvents overrides the configured budget.
 	MaxEvents int
 	PageToken string
@@ -415,7 +415,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 	}
 
 	// The budget bounds the whole result, so it is shared out before the
-	// calendars are read rather than applied to the pile afterwards. A
+	// calendars are read rather than applied to the pile afterward. A
 	// calendar with little on it leaves its share unused, which costs a
 	// round trip on a continuation and never costs an event: the
 	// alternative discards what has already been paged past. Computed
@@ -489,7 +489,7 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		TimeMax:      win.End.String(),
 		SingleEvents: o.Expand,
 		Query:        o.Query,
-		ShowDeleted:  o.ShowCancelled,
+		ShowDeleted:  o.ShowCanceled,
 		TimeZone:     zone.Name(),
 		MaxResults:   250,
 		PageToken:    pageToken,
@@ -499,7 +499,7 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		opts.OrderBy = "startTime"
 	}
 
-	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, o.ShowCancelled, opts,
+	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, o.ShowCanceled, opts,
 		func(ctx context.Context, opts gapi.EventsListOptions) (*gcal.EventList, error) {
 			return s.API.ListEvents(ctx, c.ID, opts)
 		})
@@ -567,15 +567,15 @@ func decodeCursor(tok string) (map[string]string, error) {
 	return c.Cals, nil
 }
 
-// showCancelled is the caller's promise, passed in rather than read off
+// showCanceled is the caller's promise, passed in rather than read off
 // opts.ShowDeleted. The two are not the same knob: ShowDeleted is what
 // this server asked Google for, and the defect being fixed here is
 // exactly that the server treated the request field as if it were the
-// promise. Phase 2 needs to ask for cancelled occurrences without
-// putting them in a result — a cancelled instance is an exception, and
+// promise. Phase 2 needs to ask for canceled occurrences without
+// putting them in a result — a canceled instance is an exception, and
 // §4.2's `this_and_following` has to see them.
 func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, budget int,
-	showCancelled bool, opts gapi.EventsListOptions,
+	showCanceled bool, opts gapi.EventsListOptions,
 	fetch func(context.Context, gapi.EventsListOptions) (*gcal.EventList, error),
 ) (events []model.Event, requests int, nextToken string, err error) {
 	// Never ask for more than the budget will keep.
@@ -591,9 +591,9 @@ func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, 
 	}
 	// The budget bounds what the read DRAINS, not what survives the
 	// filter below. Counting kept events let every dropped row buy
-	// another page: a window whose first twenty rows were cancelled cost
+	// another page: a window whose first twenty rows were canceled cost
 	// twenty-one requests to return one event, which is §4.7 failing
-	// where the result cannot show it. A page that is mostly cancelled
+	// where the result cannot show it. A page that is mostly canceled
 	// now comes back short, truncated and resumable — §4.5's bargain.
 	drained := 0
 	for {
@@ -605,7 +605,7 @@ func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, 
 		drained += len(page.Items)
 		for _, raw := range page.Items {
 			// Asked before the conversion, on the wire value: a
-			// cancelled row is discarded, so parsing its three times
+			// canceled row is discarded, so parsing its three times
 			// and building a model.Event is work spent on nothing — and
 			// Google sends these bare, so a conversion error on one
 			// would fail a read over an event nobody asked for.
@@ -617,7 +617,7 @@ func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, 
 			// both False." One arrives with no start and no summary, so
 			// a series read rendered a row with no date and no title
 			// and counted it among the results (§18).
-			if !showCancelled && raw.Status == gcal.StatusCancelled {
+			if !showCanceled && raw.Status == gcal.StatusCanceled {
 				continue
 			}
 			e, cerr := model.FromEvent(calendarID, raw, &zone)
@@ -776,7 +776,7 @@ func (s *Service) SettingsSummary(ctx context.Context) (SettingsResult, error) {
 	out.Format24Hour, _ = st.Lookup(gcal.SettingFormat24Hour)
 	out.Locale, _ = st.Lookup(gcal.SettingLocale)
 
-	// Colours are a separate call and a nicety: a failure here must not
+	// Colors are a separate call and a nicety: a failure here must not
 	// take down the tool whose real job is reporting the time zone.
 	if colors, err := s.API.GetColors(ctx); err == nil {
 		if len(colors.Event) > 0 {
@@ -787,7 +787,7 @@ func (s *Service) SettingsSummary(ctx context.Context) (SettingsResult, error) {
 		}
 		// The calendar palette is a different set of ids from the event
 		// one, and manage_calendar's color_id indexes THIS one. Reporting
-		// only the event colours left that parameter with no published
+		// only the event colors left that parameter with no published
 		// source for its values.
 		if len(colors.Calendar) > 0 {
 			out.CalendarColors = map[string]string{}
@@ -813,19 +813,19 @@ func (s *Service) SettingsSummary(ctx context.Context) (SettingsResult, error) {
 		fmt.Fprintf(&b, "Locale: %s\n", out.Locale)
 	}
 	if n := len(out.EventColors); n > 0 {
-		fmt.Fprintf(&b, "%d event colours available, ids %s.\n", n, colourIDs(out.EventColors))
+		fmt.Fprintf(&b, "%d event colors available, ids %s.\n", n, colorIDs(out.EventColors))
 	}
 	if n := len(out.CalendarColors); n > 0 {
-		fmt.Fprintf(&b, "%d calendar colours available, ids %s — these are what manage_calendar's "+
-			"color_id takes.\n", n, colourIDs(out.CalendarColors))
+		fmt.Fprintf(&b, "%d calendar colors available, ids %s — these are what manage_calendar's "+
+			"color_id takes.\n", n, colorIDs(out.CalendarColors))
 	}
 	out.text = b.String()
 	return out, nil
 }
 
-// colourIDs lists a palette's ids in numeric order, because a map
+// colorIDs lists a palette's ids in numeric order, because a map
 // iterates in none and a caller needs to know which ids exist.
-func colourIDs(palette map[string]string) string {
+func colorIDs(palette map[string]string) string {
 	ids := make([]string, 0, len(palette))
 	for id := range palette {
 		ids = append(ids, id)
@@ -869,11 +869,11 @@ type InstanceOptions struct {
 	// window.
 	From string
 	To   string
-	// ShowCancelled reveals the occurrences that were removed from the
-	// series, which is what a cancelled instance is (§2.13).
-	ShowCancelled bool
-	MaxEvents     int
-	PageToken     string
+	// ShowCanceled reveals the occurrences that were removed from the
+	// series, which is what a canceled instance is (§2.13).
+	ShowCanceled bool
+	MaxEvents    int
+	PageToken    string
 }
 
 // Instances expands one series into its occurrences.
@@ -908,11 +908,11 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 
 	out := render.Instances{
 		SeriesID: o.EventID, CalendarID: c.ID, Zone: zone,
-		ShowCancelled: o.ShowCancelled,
+		ShowCanceled: o.ShowCanceled,
 	}
 	opts := gapi.EventsListOptions{
 		TimeZone: zone.Name(), MaxResults: 250,
-		ShowDeleted: o.ShowCancelled, PageToken: o.PageToken,
+		ShowDeleted: o.ShowCanceled, PageToken: o.PageToken,
 	}
 
 	hasFrom, hasTo := strings.TrimSpace(o.From) != "", strings.TrimSpace(o.To) != ""
@@ -935,7 +935,7 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 		budget = s.Cfg.MaxEvents
 	}
 
-	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, o.ShowCancelled, opts,
+	events, requests, token, err := s.drain(ctx, c.ID, zone, budget, o.ShowCanceled, opts,
 		func(ctx context.Context, opts gapi.EventsListOptions) (*gcal.EventList, error) {
 			return s.API.ListInstances(ctx, c.ID, o.EventID, opts)
 		})
@@ -958,7 +958,7 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	// Ordered AFTER the cut, never before.
 	//
 	// Google does not return occurrences in date order — the live run
-	// got a cancelled 24 March after 7 April — and a list of dates out
+	// got a canceled 24 March after 7 April — and a list of dates out
 	// of order is hard to read for the question this tool answers, which
 	// is "which dates does this series have". But sorting before the
 	// budget cut would keep a different SET than the page token accounts

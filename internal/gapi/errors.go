@@ -186,7 +186,7 @@ func classify(status int, reason, message string) (Class, string) {
 func classifyTransport(err error) *Error {
 	switch {
 	case errors.Is(err, context.Canceled):
-		return Wrap(ClassUnavailable, err, "the request was cancelled")
+		return Wrap(ClassUnavailable, err, "the request was canceled")
 	case errors.Is(err, context.DeadlineExceeded):
 		return Wrap(ClassUnavailable, err, "the request timed out")
 	default:
@@ -232,7 +232,7 @@ func stripURL(err error) string {
 // than a gate switched off. The three entries here were blocked,
 // ambiguous_outcome and unsupported, all of them the write path's:
 // blocked is §4.3.4's refusal of `none` for a guest outside the
-// organiser's domain; ambiguous_outcome is an insert whose answer never
+// organizer's domain; ambiguous_outcome is an insert whose answer never
 // arrived (§2.11); unsupported is "this and following" where this server
 // cannot build it out of two calls (§2.8). Every one of the twelve
 // classes is now emitted by code somebody can run.

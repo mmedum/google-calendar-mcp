@@ -5,6 +5,6 @@ times are in Europe/Copenhagen, the calendar's own time zone
 
   2026-03-17 Tue  14:00-15:00  Weekly review  [id ev-weekly_20260317T130000Z]
   2026-03-31 Tue  15:00-16:00  Weekly review  [id ev-weekly_20260331T130000Z; moved from 14:00]
-  2026-04-07 Tue  14:00-15:00  Weekly review  [id ev-weekly_20260407T120000Z; CANCELLED — this date was removed from the series]
+  2026-04-07 Tue  14:00-15:00  Weekly review  [id ev-weekly_20260407T120000Z; CANCELED — this date was removed from the series]
 
 3 occurrences.
