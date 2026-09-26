@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-26
+
 ### Added
 
 - `make mcpb` and `gates server-json` validate their documents against
@@ -926,7 +928,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.2...v2.0.0
 [1.0.2]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mmedum/google-calendar-mcp/releases/tag/v1.0.0

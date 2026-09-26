@@ -1,6 +1,6 @@
 # Architecture — google-calendar-mcp
 
-**Status: v1.0.2 (2026-09-18); v1.0.1 was the canary and it ran.** Phases 0 to 4 —
+**Status: v2.0.0 (2026-09-26).** Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
 writes, `If-Match`, the client-generated id and `dry_run`; the two calendar
