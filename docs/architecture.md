@@ -1,9 +1,11 @@
 # Architecture — google-calendar-mcp
 
-**Status: v3.0.0 (2026-09-30).** Phase 7 asks the person through the client before
-the four writes of §9a; it is breaking, so the module path is `/v3`. Unproven again
-since v2.0.0: the release pipeline under the new module path, and the
-`cancel_event` question against a real guest, which is tested offline only.
+**Status: v3.0.0 (2026-09-30), released and verified from outside:** checksums,
+the cosign signature and the provenance attestation, each also against a tampered
+copy, the version in five places, the registry entry, and the Go proxy resolving
+`/v3`. Phase 7 asks the person through the client before the four writes of §9a.
+Still unproven: the `cancel_event` question against a real guest, which is tested
+offline only.
  Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
