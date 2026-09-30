@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The server asks the person through the client before `delete_calendar`, `clear_calendar`, a `share_calendar` that publishes a calendar, opens it to a domain or makes an owner, and a `cancel_event` that emails guests. Only an accept lets the write go ahead.
+- `GCAL_REQUIRE_PROMPT=true` refuses those writes when the client cannot ask.
+
+### Changed
+
+- **Breaking:** a client that declares elicitation and does not accept, including one answering with nobody present, gets `[blocked]` on those writes.
+
+### Fixed
+
+- `delete_calendar` and `clear_calendar` with `dry_run` no longer need `confirm`.
+- The recorded tool-schema baseline covers all twenty-one tools, at SDK v1.8.0.
+
 ## [2.0.0] - 2026-09-26
 
 ### Added

@@ -173,7 +173,8 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	out.Printf("filled with %d invented events; the occurrence on %s was canceled\n\n",
 		len(seedEvents()), canceled)
 
-	sess, err := startServer(ctx, bin, profile)
+	asked := &person{out: out}
+	sess, err := startServer(ctx, bin, profile, asked)
 	if err != nil {
 		out.Printf("could not start the server: %v\n", err)
 		return 2
@@ -278,6 +279,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}
 	}
 
+	out.Printf("\n%d question(s) put to the person, %d declined\n", asked.asked, asked.declined)
 	out.Printf("\n%d steps, %d failed, %d undetermined\n", r.total, r.failed, r.undetermined)
 	if r.failed > 0 {
 		out.Printf("\nRead the transcript above rather than this count. A sibling's driver twice\n")
@@ -403,13 +405,19 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 		}
 	}
 	args := st.reads()
+	before := s.person.asked
+	s.person.next = st.answer
 	res, err := s.callFor(ctx, st, st.arguments())
+	s.person.next = ""
 	if err != nil {
 		r.failed++
 		r.out.Printf("FAIL  %-28s transport: %v\n", st.name, err)
 		return
 	}
 	verdict, note := st.check(res)
+	if st.answer != "" && s.person.asked == before {
+		verdict, note = fail, "the server did not ask the person, and this step answers "+st.answer
+	}
 	switch verdict {
 	case pass:
 		r.out.Printf("ok    %-28s %s\n", st.name, note)
@@ -462,6 +470,9 @@ type step struct {
 	// chain rather than the first.
 	skip  func() string
 	check func(callResult) (verdict, string)
+	// answer is what the person answers the server's question on this
+	// step, which must then be asked; empty accepts any question.
+	answer string
 }
 
 // reads is what the §9.1 print decision is made from: the calendars

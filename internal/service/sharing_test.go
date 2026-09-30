@@ -74,7 +74,7 @@ func TestListSharingSaysWhenTheScopeIsMissing(t *testing.T) {
 func TestShareCalendarGrantsAccessAndShowsExposureBothWays(t *testing.T) {
 	svc, fake := calendarSeed(t)
 
-	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "all",
 	})
@@ -109,7 +109,7 @@ func TestShareCalendarGrantsAccessAndShowsExposureBothWays(t *testing.T) {
 func TestShareCalendarSendsFalseRatherThanNothing(t *testing.T) {
 	svc, fake := calendarSeed(t)
 
-	if _, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	if _, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "none",
 	}); err != nil {
@@ -124,7 +124,7 @@ func TestShareCalendarSendsFalseRatherThanNothing(t *testing.T) {
 
 func TestShareCalendarRequiresNotify(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader",
 	})
@@ -138,7 +138,7 @@ func TestShareCalendarRequiresNotify(t *testing.T) {
 // either value would email the wrong set of people.
 func TestShareCalendarRefusesExternalOnly(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "external_only",
 	})
@@ -152,7 +152,7 @@ func TestShareCalendarRefusesExternalOnly(t *testing.T) {
 func TestShareCalendarRefusesThePublicScopeWithoutTheFlag(t *testing.T) {
 	svc, fake := calendarSeed(t)
 
-	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test", Who: "anyone", Role: "reader", Notify: "none",
 	})
 	if cls := classOf(t, err); cls != gapi.ClassBlocked {
@@ -168,7 +168,7 @@ func TestShareCalendarRefusesThePublicScopeWithoutTheFlag(t *testing.T) {
 func TestShareCalendarPublishesWithTheFlagAndSaysSo(t *testing.T) {
 	svc, _ := calendarSeed(t)
 
-	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test", Who: "anyone", Role: "reader",
 		Notify: "none", AllowPublic: true,
 	})
@@ -191,7 +191,7 @@ func TestShareCalendarPatchesAnExistingRule(t *testing.T) {
 		gcal.AclRule{ID: "user:colleague@example.test", Role: gcal.RoleReader,
 			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "colleague@example.test"}})
 
-	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "writer", Notify: "all",
 	})
@@ -229,7 +229,7 @@ func TestShareCalendarWritesNothingWhenTheAccessIsAlreadyThere(t *testing.T) {
 		gcal.AclRule{ID: "user:colleague@example.test", Role: gcal.RoleReader,
 			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "colleague@example.test"}})
 
-	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "all",
 	})
@@ -254,7 +254,7 @@ func TestShareCalendarWritesNothingWhenTheAccessIsAlreadyThere(t *testing.T) {
 func TestShareCalendarSaysHowItReadTheAddress(t *testing.T) {
 	svc, _ := calendarSeed(t)
 
-	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "none",
 	})
@@ -271,7 +271,7 @@ func TestShareCalendarSaysHowItReadTheAddress(t *testing.T) {
 
 func TestShareCalendarRefusesWithoutOwnerAccess(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "readonly@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "none",
 	})
@@ -283,7 +283,7 @@ func TestShareCalendarRefusesWithoutOwnerAccess(t *testing.T) {
 func TestShareCalendarDryRunWritesNothingAndShowsTheResult(t *testing.T) {
 	svc, fake := calendarSeed(t)
 
-	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "all", DryRun: true,
 	})

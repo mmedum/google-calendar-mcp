@@ -309,6 +309,23 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
+			// §9a: making somebody an owner asks the person. Declined, so
+			// nothing reaches Google and the address cannot be emailed.
+			name: "share_calendar owner declined",
+			tool: "share_calendar",
+			argsFn: args(map[string]any{
+				"who": probeGuest, "scope_type": "user", "role": "owner", "notify": "none",
+			}),
+			skip:   c.needProbe,
+			answer: "decline",
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "not confirmed by the person") {
+					return fail, "an owner grant the person declined was not refused: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked]: the person declined"
+			},
+		},
+		{
 			// A second share for the same audience is a role change, and
 			// it must be a patch rather than a second rule.
 			name: "share_calendar changes a role",
@@ -397,6 +414,24 @@ func calendarSteps(c *calendarState) []step {
 					return fail, "the refusal does not say what would be destroyed"
 				}
 				return pass, "refused with [blocked], naming what would go"
+			},
+		},
+		{
+			// §9a: the flag registers the tool, the call confirms, and
+			// the person is asked as well. Declined, nothing goes.
+			name:   "delete_calendar declined",
+			tool:   "delete_calendar",
+			argsFn: args(map[string]any{"confirm": true}),
+			skip:   c.needProbe,
+			answer: "decline",
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "A CALENDAR WAS DELETED THAT THE PERSON DECLINED"
+				}
+				if !strings.Contains(r.text, "[blocked]") || !strings.Contains(r.text, "not confirmed by the person") {
+					return fail, "the refusal is not the person's: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked]: the person declined"
 			},
 		},
 		{

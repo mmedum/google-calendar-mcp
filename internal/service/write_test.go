@@ -10,6 +10,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
 	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
 )
 
@@ -69,6 +70,15 @@ func writeSeed(t *testing.T) (*service.Service, *caltest.Server) {
 	fake.Settings = []gcal.Setting{{ID: gcal.SettingTimezone, Value: tz}}
 	return newService(t, fake), fake
 }
+
+// accepting is a person who confirms every question, for tests of what a
+// write does once it is confirmed.
+type accepting struct{}
+
+func (accepting) Ask(context.Context, render.Question) error { return nil }
+
+// accepted is a context whose asking writes are confirmed.
+func accepted() context.Context { return service.WithAsker(context.Background(), accepting{}) }
 
 func classOf(t *testing.T, err error) gapi.Class {
 	t.Helper()
@@ -424,7 +434,7 @@ func TestAWriteToAReadOnlyCalendarIsForbidden(t *testing.T) {
 // §7.4: two API shapes behind one verb, and the result names which.
 func TestCancelingAWholeEventDeletesIt(t *testing.T) {
 	svc, fake := writeSeed(t)
-	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001",
 	})
 	if err != nil {
@@ -441,7 +451,7 @@ func TestCancelingAWholeEventDeletesIt(t *testing.T) {
 
 func TestCancelingOneOccurrenceIsAStatusPatch(t *testing.T) {
 	svc, fake := writeSeed(t)
-	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evseries001_20260324T130000Z", Scope: "instance",
 	})
 	if err != nil {
@@ -464,7 +474,7 @@ func TestCancelingOneOccurrenceIsAStatusPatch(t *testing.T) {
 // result says so, because that is the sentence a caller most needs.
 func TestCancelingQuietlySaysTheGuestsStillHaveIt(t *testing.T) {
 	svc, _ := writeSeed(t)
-	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evguests001", Notify: "all",
 	})
 	if err != nil {
@@ -477,7 +487,7 @@ func TestCancelingQuietlySaysTheGuestsStillHaveIt(t *testing.T) {
 	svc2, _ := writeSeed(t)
 	// Every guest inside the domain, so `none` is allowed and the
 	// warning is the protection instead.
-	quiet, err := svc2.CancelEvent(context.Background(), service.CancelOptions{
+	quiet, err := svc2.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evinvite001", Notify: "none",
 	})
 	if err != nil {
@@ -495,7 +505,7 @@ func TestCancelingSomethingAlreadyCanceledIsAConflict(t *testing.T) {
 	gone.Status = gcal.StatusCanceled
 	fake.AddEvent("me@example.test", gone)
 
-	_, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+	_, err := svc.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evgone00001",
 	})
 	if got := classOf(t, err); got != gapi.ClassConflict {
@@ -507,7 +517,7 @@ func TestCancelingSomethingAlreadyCanceledIsAConflict(t *testing.T) {
 // again, so the pattern collapses to truncating the original.
 func TestCancelingThisAndFollowingIsOneCall(t *testing.T) {
 	svc, fake := writeSeed(t)
-	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evseries001_20260331T120000Z", Scope: "this_and_following",
 	})
 	if err != nil {
@@ -678,7 +688,7 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 			return err
 		}, "list, settings, read, patch"},
 		{"cancel", 4, func(s *service.Service) error {
-			_, err := s.CancelEvent(context.Background(), service.CancelOptions{
+			_, err := s.CancelEvent(accepted(), service.CancelOptions{
 				Calendar: "primary", EventID: "evsolo00001",
 			})
 			return err
@@ -909,7 +919,7 @@ func TestTheReportedRequestCountIsTheTruth(t *testing.T) {
 			return o.Requests, err
 		}},
 		{"cancel", func(s *service.Service) (int, error) {
-			o, err := s.CancelEvent(context.Background(), service.CancelOptions{
+			o, err := s.CancelEvent(accepted(), service.CancelOptions{
 				Calendar: "primary", EventID: "evsolo00001",
 			})
 			return o.Requests, err
@@ -1050,7 +1060,7 @@ func TestCancelThisAndFollowingOnAnAllDaySeries(t *testing.T) {
 	occ.OriginalStartTime = &gcal.EventDateTime{Date: "2026-03-24"}
 	fake.AddEvent("me@example.test", occ)
 
-	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evallday002", OriginalStart: "2026-03-24",
 		Scope: "this_and_following",
 	})
@@ -1144,7 +1154,7 @@ func TestADryRunProjectsTheChange(t *testing.T) {
 		t.Fatalf("the before side was projected too: %+v", out.Before)
 	}
 
-	c, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+	c, err := svc.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001", DryRun: true,
 	})
 	if err != nil {
@@ -1161,7 +1171,7 @@ func TestADryRunProjectsTheChange(t *testing.T) {
 func TestAConcurrentEditOnADeleteIsStaleNotGone(t *testing.T) {
 	svc, fake := writeSeed(t)
 	fake.Fail["DELETE /calendars/me@example.test/events/evsolo00001"] = 412
-	_, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+	_, err := svc.CancelEvent(accepted(), service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001",
 	})
 	if got := classOf(t, err); got != gapi.ClassStale {
@@ -1495,7 +1505,7 @@ func TestTheCrowdWarningCountsWhatGoogleCounts(t *testing.T) {
 // is overwritten is gone.
 func TestEveryForcedWriteSaysSo(t *testing.T) {
 	svc, _ := writeSeed(t)
-	ctx := context.Background()
+	ctx := accepted()
 
 	canceled, err := svc.CancelEvent(ctx, service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001", Force: true, DryRun: true,

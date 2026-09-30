@@ -208,6 +208,13 @@ quietly.
   Removing access notifies nobody, because Google offers no way to ask
   for it: they are not told, they find the calendar gone.
 - `GCAL_SHARING=off` removes the three sharing tools entirely.
+- When your client supports MCP elicitation, the server asks you itself
+  before it deletes or clears a calendar, publishes one, opens one to a
+  whole domain, makes somebody an owner, or cancels an event in a way
+  that emails its guests. Only your Accept lets the write go ahead;
+  anything else is `[blocked]`. A client that cannot ask gets no
+  question, unless `GCAL_REQUIRE_PROMPT=true`, which refuses those
+  writes instead.
 - Logs carry the method, tool, outcome, duration and a truncated calendar
   id. Never an email address, event title, description, location or
   search term. A debug log is safe to paste into a bug report by

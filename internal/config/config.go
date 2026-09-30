@@ -93,7 +93,11 @@ type Config struct {
 	// removes them, as GDRIVE_SHARING=off does in the sibling Drive
 	// server. Sharing a calendar is the outward-facing half of this
 	// server and some deployments want it gone entirely.
-	Sharing          bool
+	Sharing bool
+	// RequirePrompt refuses the writes that ask the person when the
+	// client cannot ask, rather than letting the call's own arguments
+	// stand in for the person.
+	RequirePrompt    bool
 	MaxEvents        int
 	MaxCalendars     int
 	Concurrency      int
@@ -111,6 +115,7 @@ type Settings struct {
 	ReadOnly          string
 	EnableDestructive string
 	Sharing           string
+	RequirePrompt     string
 	MaxEvents         string
 	MaxCalendars      string
 	Concurrency       string
@@ -140,6 +145,8 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.ReadOnly, "read-only", "READONLY", "false", "register only read tools and request read-only scopes")
 	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar and clear_calendar; each still needs confirm on the call")
 	def(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools: on, off")
+	def(&s.RequirePrompt, "require-prompt", "REQUIRE_PROMPT", "false",
+		"refuse the writes that ask the person when the client cannot ask them")
 	def(&s.MaxEvents, "max-events", "MAX_EVENTS", strconv.Itoa(DefaultMaxEvents), "default event budget for a read")
 	def(&s.MaxCalendars, "max-calendars", "MAX_CALENDARS", strconv.Itoa(DefaultMaxCalendars), "how many calendars one call may fan out across")
 	def(&s.Concurrency, "concurrency", "CONCURRENCY", strconv.Itoa(DefaultConcurrency), "requests in flight during a fan-out")
@@ -188,6 +195,9 @@ func (s *Settings) Build() (Config, error) {
 	// spells it GDRIVE_SHARING=off and a user moving between the two
 	// should not have to learn a second spelling.
 	if c.Sharing, err = parseOnOff("sharing", s.Sharing); err != nil {
+		errs = append(errs, err)
+	}
+	if c.RequirePrompt, err = parseBool("require-prompt", s.RequirePrompt); err != nil {
 		errs = append(errs, err)
 	}
 

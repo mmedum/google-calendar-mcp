@@ -437,7 +437,7 @@ func TestARenameInvalidatesTheCalendarCache(t *testing.T) {
 
 func TestDeleteCalendarNeedsConfirm(t *testing.T) {
 	svc, fake := calendarSeed(t)
-	_, err := svc.DeleteCalendar(context.Background(), service.DestructiveOptions{
+	_, err := svc.DeleteCalendar(accepted(), service.DestructiveOptions{
 		Calendar: "team@group.calendar.example.test",
 	})
 	if cls := classOf(t, err); cls != gapi.ClassBlocked {
@@ -450,7 +450,7 @@ func TestDeleteCalendarNeedsConfirm(t *testing.T) {
 
 func TestDeleteCalendarRemovesItWithConfirm(t *testing.T) {
 	svc, fake := calendarSeed(t)
-	got, err := svc.DeleteCalendar(context.Background(), service.DestructiveOptions{
+	got, err := svc.DeleteCalendar(accepted(), service.DestructiveOptions{
 		Calendar: "team@group.calendar.example.test", Confirm: true,
 	})
 	if err != nil {
@@ -468,7 +468,7 @@ func TestDeleteCalendarRemovesItWithConfirm(t *testing.T) {
 // here, with the sentence that says what to do instead.
 func TestDeleteCalendarRefusesThePrimary(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.DeleteCalendar(context.Background(), service.DestructiveOptions{
+	_, err := svc.DeleteCalendar(accepted(), service.DestructiveOptions{
 		Calendar: "primary", Confirm: true,
 	})
 	if cls := classOf(t, err); cls != gapi.ClassUnsupported {
@@ -481,7 +481,7 @@ func TestDeleteCalendarRefusesThePrimary(t *testing.T) {
 
 func TestDeleteCalendarRefusesWhatThisAccountDoesNotOwn(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.DeleteCalendar(context.Background(), service.DestructiveOptions{
+	_, err := svc.DeleteCalendar(accepted(), service.DestructiveOptions{
 		Calendar: "readonly@group.calendar.example.test", Confirm: true,
 	})
 	if cls := classOf(t, err); cls != gapi.ClassForbidden {
@@ -489,10 +489,12 @@ func TestDeleteCalendarRefusesWhatThisAccountDoesNotOwn(t *testing.T) {
 	}
 }
 
+// A dry run needs no confirm: it writes nothing, and a preview that had
+// to be confirmed first would show nothing a caller can use.
 func TestDeleteCalendarDryRunKeepsIt(t *testing.T) {
 	svc, fake := calendarSeed(t)
-	got, err := svc.DeleteCalendar(context.Background(), service.DestructiveOptions{
-		Calendar: "team@group.calendar.example.test", Confirm: true, DryRun: true,
+	got, err := svc.DeleteCalendar(accepted(), service.DestructiveOptions{
+		Calendar: "team@group.calendar.example.test", DryRun: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -512,7 +514,7 @@ func TestClearCalendarEmptiesThePrimary(t *testing.T) {
 	fake.AddEvent("me@example.test", caltest.Timed("evclear0001", "Something",
 		"2026-03-16T09:00:00+01:00", "2026-03-16T09:30:00+01:00", "Europe/Copenhagen"))
 
-	got, err := svc.ClearCalendar(context.Background(), service.DestructiveOptions{
+	got, err := svc.ClearCalendar(accepted(), service.DestructiveOptions{
 		Calendar: "primary", Confirm: true,
 	})
 	if err != nil {
@@ -534,7 +536,7 @@ func TestClearCalendarNeedsConfirm(t *testing.T) {
 	fake.AddEvent("me@example.test", caltest.Timed("evclear0002", "Something",
 		"2026-03-16T09:00:00+01:00", "2026-03-16T09:30:00+01:00", "Europe/Copenhagen"))
 
-	_, err := svc.ClearCalendar(context.Background(), service.DestructiveOptions{Calendar: "primary"})
+	_, err := svc.ClearCalendar(accepted(), service.DestructiveOptions{Calendar: "primary"})
 	if cls := classOf(t, err); cls != gapi.ClassBlocked {
 		t.Fatalf("class %s, want blocked", cls)
 	}
@@ -543,11 +545,28 @@ func TestClearCalendarNeedsConfirm(t *testing.T) {
 	}
 }
 
+func TestClearCalendarDryRunNeedsNoConfirm(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	fake.AddEvent("me@example.test", caltest.Timed("evclear0003", "Something",
+		"2026-03-16T09:00:00+01:00", "2026-03-16T09:30:00+01:00", "Europe/Copenhagen"))
+
+	got, err := svc.ClearCalendar(accepted(), service.DestructiveOptions{Calendar: "primary", DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.Events["me@example.test"]) == 0 {
+		t.Fatal("a dry run cleared the calendar")
+	}
+	if !strings.Contains(got.Said(), "Would") {
+		t.Fatalf("a dry run reported %q", got.Said())
+	}
+}
+
 // Google documents clear as clearing a PRIMARY calendar, so a secondary
 // one is refused rather than sent and hoped for.
 func TestClearCalendarRefusesASecondaryCalendar(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.ClearCalendar(context.Background(), service.DestructiveOptions{
+	_, err := svc.ClearCalendar(accepted(), service.DestructiveOptions{
 		Calendar: "team@group.calendar.example.test", Confirm: true,
 	})
 	if cls := classOf(t, err); cls != gapi.ClassUnsupported {
@@ -587,7 +606,7 @@ func TestEachWriteCarriesItsOwnResourcesETag(t *testing.T) {
 	t.Run("delete carries the calendar's", func(t *testing.T) {
 		svc, fake := calendarSeed(t)
 		want := etagsApart(t, fake, id)[0]
-		if _, err := svc.DeleteCalendar(context.Background(), service.DestructiveOptions{
+		if _, err := svc.DeleteCalendar(accepted(), service.DestructiveOptions{
 			Calendar: id, Confirm: true,
 		}); err != nil {
 			t.Fatal(err)
@@ -598,7 +617,7 @@ func TestEachWriteCarriesItsOwnResourcesETag(t *testing.T) {
 	t.Run("clear carries the calendar's", func(t *testing.T) {
 		svc, fake := calendarSeed(t)
 		want := etagsApart(t, fake, "me@example.test")[0]
-		if _, err := svc.ClearCalendar(context.Background(), service.DestructiveOptions{
+		if _, err := svc.ClearCalendar(accepted(), service.DestructiveOptions{
 			Calendar: "primary", Confirm: true,
 		}); err != nil {
 			t.Fatal(err)
@@ -693,14 +712,14 @@ func TestTheCalendarWritesSpendWhatTheySay(t *testing.T) {
 			return got.Requests, err
 		}},
 		{name: "share_calendar", spend: 3, call: func(svc *service.Service) (int, error) {
-			got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+			got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
 				Calendar: "team@group.calendar.example.test",
 				Who:      "colleague@example.test", Role: "reader", Notify: "none",
 			})
 			return got.Requests, err
 		}},
 		{name: "delete_calendar", spend: 3, call: func(svc *service.Service) (int, error) {
-			got, err := svc.DeleteCalendar(context.Background(), service.DestructiveOptions{
+			got, err := svc.DeleteCalendar(accepted(), service.DestructiveOptions{
 				Calendar: "team@group.calendar.example.test", Confirm: true,
 			})
 			return got.Requests, err

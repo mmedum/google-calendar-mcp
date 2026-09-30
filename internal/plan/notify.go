@@ -194,7 +194,7 @@ func Notification(v string, r Reach) (Decision, error) {
 				" warned about. Such a guest may have no Google Calendar for the event to appear in, so email is"+
 				" the only way they can learn of it — the event would exist with them attached and they could not"+
 				" find it. Pass notify:external_only to reach exactly them, or notify:all",
-			ErrBlocked, r.External, r.Guests, isare(r.External))
+			ErrBlocked, r.External, r.Guests, IsAre(r.External))
 	}
 	return Decision{Notify: choice, Asked: true, Reach: r}, nil
 }
@@ -227,6 +227,20 @@ func (d Decision) SendUpdatesFor() string {
 		return ""
 	}
 	return d.Notify.SendUpdates()
+}
+
+// Emails reports whether this decision asks Google to email at least
+// one guest.
+func (d Decision) Emails() bool {
+	switch {
+	case !d.Asked:
+		return false
+	case d.Notify == NotifyAll:
+		return d.Reach.Guests > 0
+	case d.Notify == NotifyExternalOnly:
+		return d.Reach.External > 0
+	}
+	return false
 }
 
 // Report is what a result says about notification (§4.9).
@@ -268,7 +282,8 @@ func People(n int) string {
 	return "guests"
 }
 
-func isare(n int) string {
+// IsAre is "is" or "are". Exported for the same reason as People.
+func IsAre(n int) string {
 	if n == 1 {
 		return "is"
 	}
