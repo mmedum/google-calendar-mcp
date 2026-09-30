@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
 )
 
 // The sharing tools (§7.6): list_sharing, share_calendar,
@@ -239,6 +239,13 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 		return report, nil
 	}
 
+	previous := ""
+	if had {
+		previous = existing.Role
+	}
+	if err := askShare(ctx, cal, audience, role, previous, notify); err != nil {
+		return render.SharingReport{}, err
+	}
 	var written *gcal.AclRule
 	if had {
 		written, err = s.API.PatchACL(ctx, cal.ID, existing.RuleID, &gcal.AclPatch{Role: &role},
@@ -373,4 +380,23 @@ func withoutRule(before []model.Sharing, ruleID string) []model.Sharing {
 
 func sameAudience(a, b model.Sharing) bool {
 	return gcal.SameScope(a.Scope(), b.Scope())
+}
+
+// askShare asks the person before a grant that reaches past one named
+// person: the public internet, a whole domain, or a new owner (§9a). A
+// grant to a named person or group below owner asks nothing.
+func askShare(ctx context.Context, cal model.Calendar, audience plan.Audience, role, previous string, notify bool) error {
+	public := audience.Scope.IsPublic()
+	domain := audience.Scope.Type == gcal.ScopeTypeDomain
+	if !public && !domain && role != gcal.RoleOwner {
+		return nil
+	}
+	return ask(ctx, render.AskShare(render.Share{
+		CalendarID: cal.ID, Title: cal.Title,
+		Public: public, Domain: domain, Who: audience.Scope.Value, ScopeType: audience.Scope.Type,
+		Previous: previous,
+		// Google emails a person or a group it names; nobody is emailed
+		// about a public or a domain rule.
+		Role: role, Emails: notify && !public && !domain,
+	}))
 }

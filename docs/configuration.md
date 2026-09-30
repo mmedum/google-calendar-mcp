@@ -17,6 +17,7 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_READONLY` | `-read-only` | `false` | Register only read tools, and request only read scopes so the API itself refuses a write. |
 | `GCAL_ENABLE_DESTRUCTIVE` | `-enable-destructive` | `false` | Register `delete_calendar` and `clear_calendar`. Each still needs `confirm` on the call. |
 | `GCAL_SHARING` | `-sharing` | `on` | `on` or `off`. Off removes the calendar sharing tools entirely. |
+| `GCAL_REQUIRE_PROMPT` | `-require-prompt` | `false` | Refuse the writes that ask the person when the client cannot ask them, instead of letting the call's own arguments stand in. |
 | `GCAL_MAX_EVENTS` | `-max-events` | `250` | Default event budget for one read. The result says when it truncated. |
 | `GCAL_MAX_CALENDARS` | `-max-calendars` | `25` | How many calendars one call may fan out across, for the reads that cost one request per calendar: `list_events` and `search_events`. Maximum 50. |
 | `GCAL_CONCURRENCY` | `-concurrency` | `4` | Requests in flight during a fan-out. |

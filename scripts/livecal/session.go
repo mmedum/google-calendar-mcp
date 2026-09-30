@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
 )
 
 // session drives the built binary over stdio, the way a client does.
@@ -26,6 +29,40 @@ type session struct {
 	stderr *strings.Builder
 	mu     sync.Mutex
 	nextID int
+	// person answers the questions the server puts to the person.
+	person *person
+}
+
+// person is who the server asks before a write it cannot take back
+// (§9a). It prints every question into the transcript and accepts,
+// unless a step has queued another answer.
+type person struct {
+	out *redact.Printer
+	// next is the answer to the next question, accept when empty; that
+	// question spends it.
+	next     string
+	asked    int
+	declined int
+}
+
+func (p *person) answer(message string) string {
+	p.asked++
+	a := p.next
+	p.next = ""
+	if a == "" {
+		a = "accept"
+	}
+	if a != "accept" {
+		p.declined++
+	}
+	p.out.Printf("      the server asked the person:\n")
+	for _, line := range strings.Split(strings.TrimSpace(message), "\n") {
+		if line != "" {
+			p.out.Printf("        %s\n", line)
+		}
+	}
+	p.out.Printf("      the person answered: %s\n", a)
+	return a
 }
 
 type callResult struct {
@@ -33,7 +70,7 @@ type callResult struct {
 	isError bool
 }
 
-func startServer(ctx context.Context, bin, profile string) (*session, error) {
+func startServer(ctx context.Context, bin, profile string, p *person) (*session, error) {
 	cmd := exec.CommandContext(ctx, bin)
 	// The server must read the same login the driver set up with, or the
 	// two halves of the run would be looking at different accounts.
@@ -64,11 +101,15 @@ func startServer(ctx context.Context, bin, profile string) (*session, error) {
 
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
-	s := &session{cmd: cmd, stdin: stdin, out: sc, stderr: stderr, nextID: 1}
+	s := &session{cmd: cmd, stdin: stdin, out: sc, stderr: stderr, nextID: 1, person: p}
 
+	// The driver declares form elicitation, so the server asks it before
+	// each write that asks the person, the way a client with a person at
+	// it would be asked. On 2025-06-18 the server asks inside the call,
+	// with elicitation/create.
 	if _, err := s.request(ctx, "initialize", map[string]any{
 		"protocolVersion": "2025-06-18",
-		"capabilities":    map[string]any{},
+		"capabilities":    map[string]any{"elicitation": map[string]any{"form": map[string]any{}}},
 		"clientInfo":      map[string]any{"name": "livecal", "version": "0"},
 	}); err != nil {
 		return nil, err
@@ -121,7 +162,11 @@ func (s *session) request(ctx context.Context, method string, params any) (json.
 			continue
 		}
 		var frame struct {
-			ID     int             `json:"id"`
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Message string `json:"message"`
+			} `json:"params"`
 			Result json.RawMessage `json:"result"`
 			Error  *struct {
 				Message string `json:"message"`
@@ -133,7 +178,14 @@ func (s *session) request(ctx context.Context, method string, params any) (json.
 			// report nonsense.
 			return nil, fmt.Errorf("stdout carried something that is not a JSON-RPC frame: %q", line)
 		}
-		if frame.ID != id {
+		if frame.Method != "" && len(frame.ID) > 0 {
+			// The server's own request, made while this call waits on it.
+			if err := s.answer(frame.ID, frame.Method, frame.Params.Message); err != nil {
+				return nil, fmt.Errorf("answer %s: %w", frame.Method, err)
+			}
+			continue
+		}
+		if string(frame.ID) != strconv.Itoa(id) {
 			continue
 		}
 		if frame.Error != nil {
@@ -145,6 +197,33 @@ func (s *session) request(ctx context.Context, method string, params any) (json.
 		return nil, err
 	}
 	return nil, fmt.Errorf("%s: the server closed without answering (stderr: %s)", method, s.stderr.String())
+}
+
+// answer replies to one request the server sent: ping with an empty
+// result, elicitation/create through the person, anything else with
+// method-not-found.
+func (s *session) answer(id json.RawMessage, method, message string) error {
+	frame := map[string]any{"jsonrpc": "2.0", "id": id}
+	switch {
+	case method == "ping":
+		frame["result"] = map[string]any{}
+	case method == "elicitation/create" && s.person != nil:
+		result := map[string]any{"action": s.person.answer(message)}
+		if result["action"] == "accept" {
+			// The question's form has no fields (§9a): the accept is the
+			// answer.
+			result["content"] = map[string]any{}
+		}
+		frame["result"] = result
+	default:
+		frame["error"] = map[string]any{"code": -32601, "message": "this client does not take " + method}
+	}
+	b, err := json.Marshal(frame)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(s.stdin, "%s\n", b)
+	return err
 }
 
 // call invokes one tool and returns the text half plus whether the

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
 )
 
 // Phase 3's two spikes. Both are the shape rule 13 asks for: a

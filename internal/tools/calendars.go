@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
 )
 
 // The sentences every calendar and sharing tool has to say, written once
@@ -109,6 +109,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"`allow_public: true`: removing the rule later stops new readers and takes nothing back from " +
 			"whoever already looked. " + shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
 		Kind: Sharing,
+		Asks: true,
 		Handle: func(ctx context.Context, in shareCalendarIn) (service.SharingResult, error) {
 			out, err := d.Service.ShareCalendar(ctx, service.ShareOptions{
 				Calendar: in.Calendar, Who: in.Who, ScopeType: in.ScopeType, Role: in.Role,
@@ -152,6 +153,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"that one. To empty a calendar and keep it, use clear_calendar; to remove it from your list " +
 			"without deleting it, use manage_calendar with unsubscribe. " + dryRunHelp,
 		Kind: Destructive,
+		Asks: true,
 		Handle: func(ctx context.Context, in destructiveIn) (service.CalendarWriteResult, error) {
 			out, err := d.Service.DeleteCalendar(ctx, service.DestructiveOptions{
 				Calendar: in.Calendar, Confirm: in.Confirm, DryRun: in.DryRun,
@@ -173,6 +175,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"It works only on the primary calendar, which is what Google documents it for; another calendar " +
 			"is refused, and delete_calendar removes one of those whole. " + dryRunHelp,
 		Kind: Destructive,
+		Asks: true,
 		Handle: func(ctx context.Context, in destructiveIn) (service.CalendarWriteResult, error) {
 			out, err := d.Service.ClearCalendar(ctx, service.DestructiveOptions{
 				Calendar: in.Calendar, Confirm: in.Confirm, DryRun: in.DryRun,

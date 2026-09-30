@@ -13,9 +13,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/tools"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/tools"
 )
 
 // Name is the MCP server name.
@@ -23,7 +23,7 @@ const Name = "google-calendar-mcp"
 
 // SDKVersion is recorded in schema dumps, so a diff caused by an SDK
 // upgrade can be told apart from a change to the tool surface.
-const SDKVersion = "v1.7.0"
+const SDKVersion = "v1.8.0"
 
 const instructions = "Google Calendar tools. This server answers *when*: calendars, the events on them, and who " +
 	"is free. What a meeting produces — a recording, a notes document, an attachment — belongs to the Drive and " +
@@ -42,7 +42,10 @@ const instructions = "Google Calendar tools. This server answers *when*: calenda
 	"search found nothing, not that nothing exists — fall back to list_events when you need certainty. " +
 	"Never answer \"are they free\" from a list of events: events you cannot see the details of are still busy, " +
 	"and an event marked free is not. That is what check_availability is for, and it reports a calendar it could " +
-	"not read as unknown rather than as free."
+	"not read as unknown rather than as free. " +
+	"Before deleting or clearing a calendar, publishing one, opening one to a whole domain, making somebody an " +
+	"owner, or canceling an event in a way that emails its guests, the server also asks the person through the " +
+	"client when it can; a call they did not confirm is [blocked], and is not made again unless they ask."
 
 // Deps are what the server needs.
 type Deps struct {

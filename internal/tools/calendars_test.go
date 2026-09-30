@@ -7,7 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/tools"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/tools"
 )
 
 // §7.6: GCAL_SHARING=off removes the sharing surface — the read among

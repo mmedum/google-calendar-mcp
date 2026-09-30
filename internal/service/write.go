@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 // The write path. Five tools, one shape: resolve the calendar and the
@@ -996,10 +996,36 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 	}
 	report.Notes = append(report.Notes, guestsStillHaveIt(decision))
 
+	// Asked only when the cancellation emails somebody: that email cannot
+	// be taken back, and a cancel nobody hears about is frequent and
+	// private (§9a).
+	confirm := func() error {
+		if !decision.Emails() {
+			return nil
+		}
+		// this_and_following writes to the series and starts at the
+		// occurrence, which is what the person has to see.
+		// It is shown from its scheduled start, which is where the series
+		// is cut even when that occurrence was moved.
+		shown := targetModel
+		if scope == recur.ScopeThisAndFollowing {
+			shown = before
+			shown.Start, shown.End = scheduledStart(before), model.When{}
+		}
+		var guests []string
+		for _, a := range targetModel.Guests(env.organizer) {
+			guests = append(guests, a.Email)
+		}
+		return ask(ctx, render.AskCancel(render.Cancel{
+			CalendarID: env.cal.ID, Calendar: env.cal.Title, Event: shown, Zone: env.zone,
+			Scope: string(scope), Decision: decision, Guests: guests,
+		}))
+	}
+
 	switch scope {
 	case recur.ScopeThisAndFollowing:
 		return s.cancelFollowing(ctx, env, target, targetModel, before, etag,
-			decision.SendUpdatesFor(), report)
+			decision.SendUpdatesFor(), report, confirm)
 	case recur.ScopeInstance:
 		report.Changes = []plan.Change{{Field: "status", From: targetModel.Status, To: gcal.StatusCanceled}}
 		report.Notes = append(report.Notes,
@@ -1013,6 +1039,9 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 			}
 			report.After, report.Requests = &after, gapi.Requests(ctx)
 			return report, nil
+		}
+		if err := confirm(); err != nil {
+			return render.WriteReport{}, err
 		}
 		updated, perr := s.API.PatchEvent(ctx, env.cal.ID, target.ID,
 			&gcal.EventPatch{Status: &status}, decision.SendUpdatesFor(), etag)
@@ -1043,6 +1072,9 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 			report.Requests = gapi.Requests(ctx)
 			return report, nil
 		}
+		if err := confirm(); err != nil {
+			return render.WriteReport{}, err
+		}
 		derr := s.API.DeleteEvent(ctx, env.cal.ID, target.ID, decision.SendUpdatesFor(), etag)
 		if derr != nil {
 			return render.WriteReport{}, alreadyGone(derr)
@@ -1060,7 +1092,7 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 // belonged to, which is what the caller asked for here rather than a
 // surprise.
 func (s *Service) cancelFollowing(ctx context.Context, env *writeEnv, parentRaw gcal.Event,
-	parent, target model.Event, etag, sendUpdates string, report render.WriteReport,
+	parent, target model.Event, etag, sendUpdates string, report render.WriteReport, confirm func() error,
 ) (render.WriteReport, error) {
 	if !target.IsInstance() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
@@ -1095,6 +1127,9 @@ func (s *Service) cancelFollowing(ctx context.Context, env *writeEnv, parentRaw 
 	if report.DryRun {
 		report.After, report.Requests = &parent, gapi.Requests(ctx)
 		return report, nil
+	}
+	if err := confirm(); err != nil {
+		return render.WriteReport{}, err
 	}
 	lines := []string{rule}
 	updated, err := s.API.PatchEvent(ctx, env.cal.ID, parent.ID,

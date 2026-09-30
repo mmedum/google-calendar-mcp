@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-30
+
+### Added
+
+- The server asks the person through the client before `delete_calendar`, `clear_calendar`, a `share_calendar` that publishes a calendar, opens it to a domain or makes an owner, and a `cancel_event` that emails guests. Only an accept lets the write go ahead.
+- `GCAL_REQUIRE_PROMPT=true` refuses those writes when the client cannot ask.
+
+### Changed
+
+- **Breaking:** a client that declares elicitation and does not accept, including one answering with nobody present, gets `[blocked]` on those writes.
+- **Breaking:** the module path is `github.com/mmedum/google-calendar-mcp/v3`; install with `go install github.com/mmedum/google-calendar-mcp/v3/cmd/google-calendar-mcp@latest`.
+
+### Fixed
+
+- `delete_calendar` and `clear_calendar` with `dry_run` no longer need `confirm`.
+- The recorded tool-schema baseline covers all twenty-one tools, at SDK v1.8.0.
+
 ## [2.0.0] - 2026-09-26
 
 ### Added
@@ -928,7 +945,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.2...v2.0.0
 [1.0.2]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.0...v1.0.1

@@ -5,7 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
 )
 
 // The three sentences every write tool has to say, written once here
@@ -105,6 +105,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"Read that rule twice here: canceling with no notification removes the meeting from YOUR " +
 			"calendar and leaves it on your guests'. They will still turn up. " + etagHelp + " " + dryRunHelp,
 		Kind: Canceling,
+		Asks: true,
 		Handle: func(ctx context.Context, in cancelEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CancelEvent(ctx, service.CancelOptions{
 				Calendar: in.Calendar, EventID: in.EventID, OriginalStart: in.OriginalStart,

@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/userconfig"
 )
 
 // isolate points the package at a temporary directory. Every test in

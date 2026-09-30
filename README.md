@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mmedum/google-calendar-mcp)](https://github.com/mmedum/google-calendar-mcp/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp/v2.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp/v3.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp/v3)
 
 An MCP server for Google Calendar. One binary, stdio, per-user OAuth
 against your own Google account.
@@ -44,7 +44,7 @@ tools are listed below, and the phase plan and what is still owed are in
 ## Install
 
 ```
-go install github.com/mmedum/google-calendar-mcp/v2/cmd/google-calendar-mcp@latest
+go install github.com/mmedum/google-calendar-mcp/v3/cmd/google-calendar-mcp@latest
 ```
 
 Or download an archive from the releases page.
@@ -208,6 +208,13 @@ quietly.
   Removing access notifies nobody, because Google offers no way to ask
   for it: they are not told, they find the calendar gone.
 - `GCAL_SHARING=off` removes the three sharing tools entirely.
+- When your client supports MCP elicitation, the server asks you itself
+  before it deletes or clears a calendar, publishes one, opens one to a
+  whole domain, makes somebody an owner, or cancels an event in a way
+  that emails its guests. Only your Accept lets the write go ahead;
+  anything else is `[blocked]`. A client that cannot ask gets no
+  question, unless `GCAL_REQUIRE_PROMPT=true`, which refuses those
+  writes instead.
 - Logs carry the method, tool, outcome, duration and a truncated calendar
   id. Never an email address, event title, description, location or
   search term. A debug log is safe to paste into a bug report by

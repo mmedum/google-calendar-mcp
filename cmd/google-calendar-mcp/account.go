@@ -12,12 +12,12 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/userconfig"
 )
 
 // keyringBackend is the credential store's keyring.

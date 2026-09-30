@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
 )
 
 // fakeKeyring stands in for the OS keyring. Every test in this file

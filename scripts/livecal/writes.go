@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 )
 
 // The write steps (§16, phase 2). This is the phase §16 says needs the

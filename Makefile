@@ -6,7 +6,7 @@ GO        ?= go
 EXE       := $(if $(filter Windows_NT,$(OS)),.exe,)
 BIN       ?= ./google-calendar-mcp$(EXE)
 VERSION   ?= dev
-PKG        = github.com/mmedum/google-calendar-mcp/v2
+PKG        = github.com/mmedum/google-calendar-mcp/v3
 LDFLAGS    = -s -w -X $(PKG)/internal/version.Version=$(VERSION)
 COVER_MIN ?= 80
 # Where the release's binaries are, what version the bundle claims, and

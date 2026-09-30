@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 )
 
 // Server is an in-memory Calendar.

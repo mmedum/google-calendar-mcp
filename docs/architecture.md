@@ -1,6 +1,10 @@
 # Architecture — google-calendar-mcp
 
-**Status: v2.0.0 (2026-09-26).** Phases 0 to 4 —
+**Status: v3.0.0 (2026-09-30).** Phase 7 asks the person through the client before
+the four writes of §9a; it is breaking, so the module path is `/v3`. Unproven again
+since v2.0.0: the release pipeline under the new module path, and the
+`cancel_event` question against a real guest, which is tested offline only.
+ Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
 writes, `If-Match`, the client-generated id and `dry_run`; the two calendar
@@ -1189,6 +1193,87 @@ canceling a series can never be a slip of the wrist, and §4.3's required
 **Read-only mode** (`GCAL_READONLY=true`) registers only the eight read
 tools and requests only the read scopes.
 
+### 9a. A write that cannot be taken back is confirmed by the person
+
+`confirm: true` and `allow_public: true` are arguments the model writes,
+and a persuaded model writes them too. So when the client can ask, the
+server asks the person itself, through MCP form elicitation, before four
+writes:
+
+- `delete_calendar` and `clear_calendar`, always;
+- `share_calendar` when the rule publishes the calendar, opens it to a
+  whole domain, or makes somebody an owner;
+- `cancel_event` when it emails at least one guest: `notify` is `all`
+  with a guest, or `external_only` with a guest outside the organizer's
+  domain. The email cannot be recalled. A cancel nobody is emailed about
+  is frequent and private, and asks nothing, which keeps §9's argument
+  for leaving the tool ungated.
+
+1. **A second gate, not a replacement.** The arguments stay and are
+   checked first. A call a guard refuses asks nothing. The question comes
+   after every read and every other guard, just before the write, so it
+   shows what the write would do.
+2. **Accepting is the confirmation.** The form has no fields (§18 row
+   79). Anything but `accept` — decline, cancel, an error, an answer
+   after its question expired — is `[blocked]`, refused before the retry
+   reads anything, and nothing is written. The refusal says the call was
+   "not confirmed by the person" and names the client's answer. It never
+   says the person declined: a client can answer with nobody present
+   (§18 row 80). So an unattended client that declares elicitation cannot
+   make these writes. That is the change 3.0.0 marks as breaking.
+3. **No question possible.** A client that declares no form elicitation
+   gets no question, and the arguments are the guard, as before.
+   `GCAL_REQUIRE_PROMPT=true` refuses those writes as `[blocked]`
+   instead.
+4. **A dry run never asks**, and needs no `confirm` either. Before this
+   phase `delete_calendar` and `clear_calendar` checked `confirm` ahead of
+   `dry_run`, so a preview had to be confirmed first.
+5. **What the question says.** The tool, the target and the consequence,
+   in the server's words: a calendar by its title; a share by who it
+   reaches and the role; a cancellation by the event's title, the
+   calendar, when it starts with its zone, the scope, and how many guests
+   are emailed and how many of them are outside the organization. Text
+   from Calendar or from the call stands in a code span, on one line,
+   made inert as in the sibling servers: invisible characters
+   removed, every quote and backtick lookalike made a plain single quote,
+   every link shape broken wherever it starts and in any script, cut at
+   120 characters, and said in words when nothing is left to show. A
+   blank line between lines keeps them apart where a client draws
+   Markdown (§18 row 81). Nothing is phrased as an instruction from the
+   calendar.
+6. **One handler on every protocol.** The handler returns the question as
+   an input request, the multi-round-trip pattern of 2026-07-28. Before
+   that revision the SDK asks with `elicitation/create` and calls the
+   handler again within the same request (§18 row 78). A client failure
+   there is a JSON-RPC error inside the SDK, and middleware turns it into
+   `[blocked]`.
+7. **The answer is bound to its question.** `requestState` is signed with
+   HMAC-SHA256 under a key drawn per process. It carries the tool, a hash
+   of the arguments, a hash of what the question binds — its text and the
+   ids the write addresses — a nonce and an expiry. A retry is refused
+   when its state is forged, for another call, expired or already used,
+   and answers on a call with no state are refused. The retry reads
+   again; if the question it would ask differs from the one answered, it
+   is refused, and the next call asks again.
+8. **The expiry applies where the state travels.** From 2026-07-28 the
+   client carries `requestState` between the rounds, and it expires 5
+   minutes out. Before, it never leaves the process, and a slow accept
+   counts.
+9. **A failure after the answer is never "nothing written".** From the
+   start of a round that carries an accept, a call that fails without a
+   result is `[ambiguous_outcome]`: verdict `written` when the handler
+   returned from its write, `unknown` otherwise. A failure while the
+   question is still out is `[blocked]`.
+10. **Asking costs the reads again.** The retry repeats every read before
+    the write; the result's request count says so.
+11. **Logs** say `person_asked` and `person_answered` with the tool and
+    the client's action, never the question.
+12. **Held in one place.** A tool asks by `Asks` on its definition, which
+    `add` turns into the per-call asker. The service asks at its write,
+    and a write reached with no way to ask is refused. A test finds every
+    tool that takes `confirm` from the published schemas and holds each:
+    declined, nothing written; accepted, one write.
+
 ## 10. Auth, config, process model
 
 Settled by the standard's §3b and not re-derived: loopback IP literal on
@@ -2342,6 +2427,22 @@ could not know is that `[stale]`'s generic advice — read again and retry
 — is wrong here and loops. The tool replaces the message: ask again with
 no token, and treat what you were holding as unreliable rather than old.
 
+**Phase 7 — asking the person (v3.0.0). Built 2026-09-30.** The server
+asks the person through the client before `delete_calendar`,
+`clear_calendar`, a `share_calendar` that publishes, opens a calendar to
+a domain or makes an owner, and a `cancel_event` that emails guests
+(§9a). The set is the one the maintainer chose from the family's
+elicitation review: the core writes, plus `cancel_event` only when it
+notifies. Two defects fixed first: `delete_calendar` and `clear_calendar`
+checked `confirm` before `dry_run`, and the recorded schema baseline was
+thirteen tools at SDK v1.7.0. The live driver now declares elicitation,
+prints every question into the transcript, accepts, and declines twice:
+one `delete_calendar` and one owner share.
+
+Breaking, so 3.0.0: a client that declares elicitation and answers with
+nobody present, as `claude -p` does, can no longer make these writes.
+The module path moves to `/v3`.
+
 ### 16a. Found by review, and fixed
 
 Five defects the phase 1 review turned up in code phases 0 and 1 had
@@ -2392,6 +2493,28 @@ because the shape of the mistake is the useful part.
    client-supplied id on insert will need them in phase 2. The grammar
    is a grammar and not a policy: `get_event` still accepts an
    occurrence id, because that is how one occurrence is addressed.
+
+**Phase 7's review.** No path reaches Google without the ask, and the
+binding held against forged, cross-call, expired and replayed states.
+Fixed from it:
+
+6. **A share's answer did not bind who the rule is for.** The same
+   address can be read as a person or a group between the two rounds when
+   `scope_type` is left out. The scope type and the rule's previous role
+   are now bound, and a role change says what it changes from.
+7. **A cancellation's answer bound the guest counts, not the guests.** A
+   guest swapped between the rounds would have been emailed unseen. The
+   sorted addresses are now bound, and never shown.
+8. **The question misnamed two scopes.** One occurrence read like the
+   whole event, and `this_and_following` showed a moved occurrence's new
+   time rather than the scheduled start the series is cut at.
+9. **The failure mapping after an answer was untested.** A test now holds
+   `[blocked]` while the question is out and `[ambiguous_outcome]` from
+   the accept on, and a client that answers with an error.
+
+Written down, not changed: a share to a group below owner asks nothing,
+although a group can be as large as a domain. The asking set is the one
+the maintainer chose.
 
 ## 17. Open decisions
 
@@ -2620,6 +2743,10 @@ what §15 exists to settle, and they are marked.
 | 33 | `showDeleted=false` means Google filters canceled events out | Discovery document, `events.list.showDeleted`; **live, 2026-09-15** | **Refuted, in the one case the parameter names itself.** "Cancelled instances of recurring events (but not the underlying recurring event) will still be included if showDeleted and singleEvents are both False." The server passed the parameter and trusted it, so a `no_expand` read returned the canceled occurrence — and Google sends such an instance **bare**, with an id, a status, its series and its original date but no start and no summary. It rendered as a row with no date and no title and was counted among the results. The service filters canceled events itself now, in `drain`, where the budget counts what the caller sees. `caltest` had been hiding them, which is why no test caught it |
 | 35 | An occurrence id is `{seriesId}_{yyyymmdd}[T{hhmmss}Z]`, and the split is safe because an event id cannot contain `_` | **Live, 2026-09-15**, plus row 21 | **Confirmed, and it had to be, because a user-visible refusal now rests on it.** `events.instances` returned ids of exactly that shape (`…_20260317T130000Z`), and row 21 establishes that an event id is base32hex — `a`–`v` and the digits — so `_` cannot occur in one. `list_instances` refuses an id matching the shape and names both the series and the occurrence's start. Recorded as its own row because row 31 establishes the API's *behavior*, not the id *grammar*, and the live driver's own comment declines to compose an instance id on the grounds that the format is undocumented — the server adopts it, so it owes the verdict. Both halves of the rule now live in `internal/gcal` — `ValidEventID` and `SplitOccurrenceID` — beside the wire types they describe, which is where §2.11's client-supplied id on insert will need them in phase 2. The live driver calls the same function it used to keep its own copy of |
 | 34 | The transcript redactor makes the live driver's output safe to paste | The first live run of phase 1, read | **Refuted for one step, and the gap is structural.** The redactor is anchored on *shapes* — an `@` with a dot-suffixed domain, a known URL prefix, a token's literal prefix (§9.1) — and **a display name has no shape**. `list_calendars` is the one step that reads past the calendar the driver created, and its body printed a dozen of the account's real calendar titles, one of them a private rename. No rule could have caught them. So the fix is scope, not pattern: a step marked `wholeAccount` never prints its body, on success or on failure, and its check reports what it verified instead. §9.1's promise — the driver reads only what it wrote — now holds for what reaches the terminal, which is where it was being broken |
+| 78 | The Go SDK asks the same way on every protocol this server serves | MCP Go SDK v1.8.0 source, `mcp/server.go` L440-446 and L1614-1627, read 2026-09-30 | **Refuted.** From 2026-07-28 a server-initiated `elicitation/create` is refused: "return an InputRequests map instead". A handler that returns `InputRequests` gets no structured output marshaled, so one handler serves every protocol by returning the question, and the SDK asks with `elicitation/create` itself before 2026-07-28 (§9a) |
+| 79 | A form elicitation must ask for at least one field | MCP Go SDK v1.8.0 `validateElicitSchema`, `mcp/client.go` L923-950, read 2026-09-30; tier 2 for the specification's `ElicitRequestFormParams` in 2025-06-18, 2025-11-25 and 2026-07-28, and a person's check in Claude Code 2.1.284, from a sibling server's evidence log | **Refuted.** The schema must be an object and its properties may be absent; the SDK accepts `properties: {}`. A person who pressed Accept on a form with one checkbox, unticked, meant to confirm; the form has no fields and the accept is the answer |
+| 80 | A client that declares elicitation has a person to answer it | Tier 2, from a sibling server's evidence log: `claude -p` 2.1.284 against a probe, and the Codex source at `codex-rs/codex-mcp/src/elicitation.rs` | **Refuted.** `claude -p` declares it and answers `cancel` in milliseconds; Codex under approval policy `never` with full access accepts a fieldless form. So a refusal never says the person declined, and an unattended client that declares elicitation cannot make these writes |
+| 81 | A client draws a question as plain text | Tier 2, from a sibling server's evidence log: VS Code's `mcpElicitationService.ts` builds the message as a `MarkdownString` | **Refuted.** Calendar text in a question stands in a code span, and the server's own lines hold no Markdown (§9a) |
 
 ### Deviations from the shared Go MCP server standard
 
