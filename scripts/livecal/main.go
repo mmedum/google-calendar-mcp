@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 func main() {

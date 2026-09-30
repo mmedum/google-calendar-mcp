@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
 )
 
 // Asker puts a question to the person using the server before a write

@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 func zone(t *testing.T) when.Zone {

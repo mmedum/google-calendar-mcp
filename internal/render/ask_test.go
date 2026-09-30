@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 // Text from Calendar reaches a question in one code span that it cannot

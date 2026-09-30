@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
 )
 
 func build(t *testing.T, env map[string]string, args ...string) (config.Config, error) {

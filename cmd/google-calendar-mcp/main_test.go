@@ -14,7 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
 )
 
 // isolate points the profile state at a temporary directory. Every test

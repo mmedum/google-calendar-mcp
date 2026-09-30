@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
 )
 
 func TestParseAudienceReadsAnAddressAsOnePerson(t *testing.T) {

@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 // The write path. Five tools, one shape: resolve the calendar and the

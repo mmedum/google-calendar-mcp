@@ -1,11 +1,11 @@
 {
-  "fetched": "2026-09-26",
+  "fetched": "2026-09-30",
   "note": "Written by `gates api-diff`; nobody edits this. One verdict per method lives in testdata/api-coverage.tsv and one per field in testdata/api-fields.tsv.",
   "apis": [
     {
       "api": "calendar",
       "version": "v3",
-      "revision": "20260826",
+      "revision": "20260925",
       "url": "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"
     }
   ],

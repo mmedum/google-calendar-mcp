@@ -16,11 +16,11 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/userconfig"
 )
 
 // The scratch calendar's contents. Everything here is invented: the

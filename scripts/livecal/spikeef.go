@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 // spikeE answers §15's "this and following" question, and it is the one

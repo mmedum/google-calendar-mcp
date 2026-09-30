@@ -19,13 +19,13 @@ func TestGithubRepoStripsTheMajorVersion(t *testing.T) {
 		// Go requires the /vN from v2 onward and it is not part of the
 		// repository name. Refusing it would fail the release at the
 		// tag, in public, the day this module goes to v2.
-		{module: "github.com/mmedum/google-calendar-mcp/v2", owner: "mmedum", repo: "google-calendar-mcp"},
+		{module: "github.com/mmedum/google-calendar-mcp/v3", owner: "mmedum", repo: "google-calendar-mcp"},
 		{module: "github.com/mmedum/google-calendar-mcp/v17", owner: "mmedum", repo: "google-calendar-mcp"},
 		// /v1 is not a thing a module path carries, so it is a path
 		// segment like any other and the shape is wrong.
 		{module: "github.com/mmedum/google-calendar-mcp/v1", wantErr: true},
 		// Only one suffix comes off, and only a major version.
-		{module: "github.com/mmedum/google-calendar-mcp/v2/v2", wantErr: true},
+		{module: "github.com/mmedum/google-calendar-mcp/v3/v2", wantErr: true},
 		{module: "github.com/mmedum/google-calendar-mcp/internal", wantErr: true},
 		{module: "example.invalid/mmedum/thing", wantErr: true},
 		{module: "github.com/mmedum", wantErr: true},
@@ -238,13 +238,13 @@ func TestTheVersionMayCarryItsVOrNot(t *testing.T) {
 	path := checksums(t, oneBundle)
 
 	var withV, without bytes.Buffer
-	if err := serverJSON("v2.3.4", path, &withV); err != nil {
+	if err := serverJSON("v3.2.1", path, &withV); err != nil {
 		t.Fatal(err)
 	}
-	if err := serverJSON("2.3.4", path, &without); err != nil {
+	if err := serverJSON("3.2.1", path, &without); err != nil {
 		t.Fatal(err)
 	}
 	if withV.String() != without.String() {
-		t.Fatalf("v2.3.4 and 2.3.4 produced different entries:\n%s\n%s", withV.String(), without.String())
+		t.Fatalf("v3.2.1 and 3.2.1 produced different entries:\n%s\n%s", withV.String(), without.String())
 	}
 }

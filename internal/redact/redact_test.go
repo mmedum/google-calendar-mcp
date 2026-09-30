@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
 )
 
 // The fixtures below are assembled at run time rather than written out

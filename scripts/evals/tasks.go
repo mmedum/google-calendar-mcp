@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 )
 
 // task is one thing a model has to get right.

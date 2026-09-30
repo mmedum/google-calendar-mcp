@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 // Zones, chosen for what each one proves (the same set internal/when

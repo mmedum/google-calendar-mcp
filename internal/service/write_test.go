@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/render"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
 )
 
 // writeSeed is a calendar whose event ids are legal base32hex (§2.11).

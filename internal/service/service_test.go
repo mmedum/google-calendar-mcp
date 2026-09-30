@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v2/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
 )
 
 func newService(t *testing.T, s *caltest.Server) *service.Service {

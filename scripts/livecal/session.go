@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
 )
 
 // session drives the built binary over stdio, the way a client does.

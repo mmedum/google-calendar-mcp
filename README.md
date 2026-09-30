@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mmedum/google-calendar-mcp)](https://github.com/mmedum/google-calendar-mcp/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp/v2.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp/v2)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp/v3.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp/v3)
 
 An MCP server for Google Calendar. One binary, stdio, per-user OAuth
 against your own Google account.
@@ -44,7 +44,7 @@ tools are listed below, and the phase plan and what is still owed are in
 ## Install
 
 ```
-go install github.com/mmedum/google-calendar-mcp/v2/cmd/google-calendar-mcp@latest
+go install github.com/mmedum/google-calendar-mcp/v3/cmd/google-calendar-mcp@latest
 ```
 
 Or download an archive from the releases page.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v2/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 func mustHours(t *testing.T, from, to string, days []string) when.Hours {
