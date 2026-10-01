@@ -1,6 +1,6 @@
 # Architecture — google-calendar-mcp
 
-**Status: v3.0.0 (2026-09-30), released and verified from outside:** checksums,
+**Status: v3.0.1 (2026-10-01), released and verified from outside:** checksums,
 the cosign signature and the provenance attestation, each also against a tampered
 copy, the version in five places, the registry entry, and the Go proxy resolving
 `/v3`. Phase 7 asks the person through the client before the four writes of §9a.
