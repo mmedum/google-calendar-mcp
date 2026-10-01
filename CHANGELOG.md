@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `move_event` and `share_calendar` report `[ambiguous_outcome]` instead of `[unavailable]` when Google answers a 5xx or no answer arrives, since the write may have landed and a repeat share emails the person twice.
+- A delete retried after a 5xx that then finds nothing reports `[ambiguous_outcome]` instead of `[not_found]`, since the first attempt most likely landed.
+
 ## [3.0.0] - 2026-09-30
 
 ### Added

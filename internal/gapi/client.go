@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -105,6 +106,10 @@ func (c *Client) do(ctx context.Context, r request, out any) error {
 	if attempts < 0 {
 		attempts = 0
 	}
+	// mayHaveLanded records that an earlier attempt failed in a way that
+	// may have reached Google: a 5xx or a failure with no answer. A 429
+	// does not count, because Google did not act on it.
+	mayHaveLanded := false
 	for attempt := 0; ; attempt++ {
 		err := c.once(ctx, r, out)
 		if err == nil {
@@ -112,9 +117,18 @@ func (c *Client) do(ctx context.Context, r request, out any) error {
 		}
 		last = err
 
+		if mayHaveLanded && r.method == http.MethodDelete {
+			if gerr := goneAfterRetry(err); gerr != nil {
+				return gerr
+			}
+		}
+
 		cls, ok := ClassOf(err)
 		if !ok || !cls.Retryable() || !r.idempotent || attempt >= attempts {
 			return err
+		}
+		if cls == ClassUnavailable {
+			mayHaveLanded = true
 		}
 		if werr := c.sleep(ctx, backoff(attempt)); werr != nil {
 			return last
@@ -186,6 +200,25 @@ func (c *Client) once(ctx context.Context, r request, out any) error {
 		return Wrap(ClassUnavailable, err, "Google's response was not the JSON this server expected")
 	}
 	return nil
+}
+
+// goneAfterRetry reports a delete whose retry found nothing to delete.
+//
+// The earlier attempt got no trustworthy answer, so it most likely did
+// the deleting itself. [not_found] would tell the caller the thing never
+// existed; the honest answer is that the delete may have been applied
+// and the state should be read before anything else.
+func goneAfterRetry(err error) *Error {
+	var e *Error
+	if !errors.As(err, &e) || (e.Status != http.StatusNotFound && e.Status != http.StatusGone) {
+		return nil
+	}
+	return &Error{
+		Class: ClassAmbiguousOutcome, Status: e.Status, Reason: e.Reason, err: err,
+		Message: "an earlier attempt of this delete failed without an answer, and the retry found nothing " +
+			"left to delete, so that first attempt has most likely been applied. Read it again to confirm " +
+			"before doing anything else",
+	}
 }
 
 func decodeError(status int, data []byte) *Error {
@@ -508,8 +541,8 @@ func (c *Client) PatchEvent(ctx context.Context, calendarID, eventID string,
 // DeleteEvent removes an event whole.
 //
 // Retried, because a repeat of a delete that already landed answers 404
-// or 410 rather than removing something else. The service turns that
-// into "already gone" rather than a failure.
+// or 410 rather than removing something else. do reports that 404 as
+// [ambiguous_outcome], since the first attempt most likely landed.
 func (c *Client) DeleteEvent(ctx context.Context, calendarID, eventID, sendUpdates, etag string) error {
 	q := url.Values{}
 	if sendUpdates != "" {

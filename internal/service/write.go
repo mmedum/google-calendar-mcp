@@ -466,6 +466,20 @@ func insertError(err error, id, calendarID string) error {
 		e.Message, id, calendarID)
 }
 
+// moveError produces [ambiguous_outcome] for a move that may have
+// landed. events.move is not retried (§11), and a caller told
+// [unavailable] would move again into a 404 on the old calendar.
+func moveError(err error, id, destination string) error {
+	e, maybe := maybeLanded(err)
+	if !maybe {
+		return err
+	}
+	return gapi.Wrap(gapi.ClassAmbiguousOutcome, err,
+		"this event may or may not have been moved: the request failed without an answer this server can "+
+			"trust (%s). Read %s on calendar %s with get_event before trying again",
+		e.Message, id, destination)
+}
+
 // ------------------------------------------------------------- updating
 
 // UpdateOptions is what update_event takes.
@@ -1298,7 +1312,7 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 	}
 	moved, err := s.API.MoveEvent(ctx, env.cal.ID, target.ID, dest.ID, decision.SendUpdatesFor(), etag)
 	if err != nil {
-		return render.WriteReport{}, err
+		return render.WriteReport{}, moveError(err, target.ID, dest.ID)
 	}
 	// The event is READ BACK from the destination rather than taken from
 	// the move's own response, and the live run is why: a successful
