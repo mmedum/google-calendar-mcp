@@ -1528,3 +1528,32 @@ func TestEveryForcedWriteSaysSo(t *testing.T) {
 		t.Fatalf("a forced RSVP does not say it was forced:\n%s", answered.Text())
 	}
 }
+
+// §11: events.move is a POST that is not retried, so a move Google
+// answered with a 5xx may have landed. Plain [unavailable] tells a model
+// to retry; the class has to send it to look on the destination first.
+func TestAMoveThatMayHaveLandedIsAmbiguous(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.Fail["POST /calendars/me@example.test/events/evsolo00001/move"] = 503
+	_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+		Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+	})
+	if got := classOf(t, err); got != gapi.ClassAmbiguousOutcome {
+		t.Fatalf("got [%s], want [ambiguous_outcome]: %v", got, err)
+	}
+	if !strings.Contains(err.Error(), "get_event") {
+		t.Errorf("the message must say how to look: %v", err)
+	}
+}
+
+// A 4xx definitely did not land, so a refused move keeps its own class.
+func TestAMoveGoogleRefusedIsNotAmbiguous(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.Fail["POST /calendars/me@example.test/events/evsolo00001/move"] = 400
+	_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+		Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+	})
+	if got := classOf(t, err); got != gapi.ClassInvalid {
+		t.Fatalf("got [%s], want [invalid]: %v", got, err)
+	}
+}
