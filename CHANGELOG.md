@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-10-01
+
 ### Fixed
 
 - `move_event` and `share_calendar` report `[ambiguous_outcome]` instead of `[unavailable]` when Google answers a 5xx or no answer arrives, since the write may have landed and a repeat share emails the person twice.
@@ -950,7 +952,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...HEAD
+[3.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.2...v2.0.0
 [1.0.2]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.1...v1.0.2
