@@ -1322,7 +1322,14 @@ guarantee collision detection, so an ambiguous failure is reported as
 `ambiguous_outcome` with the id it used, so the caller can look rather
 than double-book.
 
-`events.move` is a POST that is not idempotent and is not retried.
+`events.move` and `acl.insert` are POSTs that are not idempotent and are not
+retried. A 5xx or a lost answer on either is `ambiguous_outcome`: a repeat
+move lands on a 404, and a repeat share emails the person twice (§18 row 82).
+
+A DELETE is retried, so its retry can find nothing left to delete. After a
+5xx or a lost answer that 404 or 410 is `ambiguous_outcome`, not
+`not_found`: the first attempt most likely landed. After a 429 it stays
+`not_found` (§18 row 82).
 
 **`events.patch` IS retried, and the cost is a duplicate notification.**
 A patch is a stated end state, so a retry lands in the same place — but
@@ -2749,6 +2756,7 @@ what §15 exists to settle, and they are marked.
 | 79 | A form elicitation must ask for at least one field | MCP Go SDK v1.8.0 `validateElicitSchema`, `mcp/client.go` L923-950, read 2026-09-30; tier 2 for the specification's `ElicitRequestFormParams` in 2025-06-18, 2025-11-25 and 2026-07-28, and a person's check in Claude Code 2.1.284, from a sibling server's evidence log | **Refuted.** The schema must be an object and its properties may be absent; the SDK accepts `properties: {}`. A person who pressed Accept on a form with one checkbox, unticked, meant to confirm; the form has no fields and the accept is the answer |
 | 80 | A client that declares elicitation has a person to answer it | Tier 2, from a sibling server's evidence log: `claude -p` 2.1.284 against a probe, and the Codex source at `codex-rs/codex-mcp/src/elicitation.rs` | **Refuted.** `claude -p` declares it and answers `cancel` in milliseconds; Codex under approval policy `never` with full access accepts a fieldless form. So a refusal never says the person declined, and an unattended client that declares elicitation cannot make these writes |
 | 81 | A client draws a question as plain text | Tier 2, from a sibling server's evidence log: VS Code's `mcpElicitationService.ts` builds the message as a `MarkdownString` | **Refuted.** Calendar text in a question stands in a code span, and the server's own lines hold no Markdown (§9a) |
+| 82 | A 503 on a write may be retried, and a 404 on a retried delete means it was never there | `google/rpc/code.proto` in googleapis, `UNAVAILABLE`, read 2026-10-01: "Note that it is not always safe to retry non-idempotent operations", HTTP mapping 503 | **Refuted for both.** A 5xx or a lost answer on `events.move` or `acl.insert` is `[ambiguous_outcome]`, like `events.insert` and `calendars.insert`, never `[unavailable]`, which invites a retry. A delete whose first attempt got a 5xx or no answer and whose retry got 404 or 410 is `[ambiguous_outcome]`: that first attempt most likely landed. A 404 after a 429 stays `[not_found]`, since Google did not act on the 429 |
 
 ### Deviations from the shared Go MCP server standard
 

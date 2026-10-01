@@ -315,19 +315,60 @@ func TestListInstancesPassesItsOptions(t *testing.T) {
 	}
 }
 
-func TestListEventsPassesEveryOption(t *testing.T) {
-	fake := caltest.Seed()
-	c := client(fake.Start())
-	defer fake.Close()
-
-	_, err := c.ListEvents(context.Background(), "primary", gapi.EventsListOptions{
+// Every option reaches the wire under Google's own parameter name, and
+// an option left empty is not sent at all.
+func TestOptionsReachTheWire(t *testing.T) {
+	var gotQuery, gotIfMatch string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery, gotIfMatch = r.URL.RawQuery, r.Header.Get("If-Match")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := client(srv.URL)
+	ctx := context.Background()
+	every := gapi.EventsListOptions{
 		TimeMin: "2026-03-01T00:00:00Z", TimeMax: "2026-04-01T00:00:00Z",
 		SingleEvents: true, OrderBy: "startTime", Query: "sync",
-		MaxResults: 5, PageToken: "", ShowDeleted: true, TimeZone: "UTC",
-		EventTypes: []string{"default"}, ICalUID: "uid", UpdatedMin: "2026-01-01T00:00:00Z",
-	})
-	if err != nil {
-		t.Fatalf("ListEvents with every option: %v", err)
+		MaxResults: 5, PageToken: "p2", ShowDeleted: true, TimeZone: "UTC",
+		EventTypes: []string{"default", "focusTime"}, ICalUID: "uid", UpdatedMin: "2026-01-01T00:00:00Z",
+	}
+	cases := []struct {
+		name, query, ifMatch string
+		call                 func() error
+	}{
+		{"list_events every option",
+			"eventTypes=default&eventTypes=focusTime&iCalUID=uid&maxResults=5&orderBy=startTime&pageToken=p2" +
+				"&q=sync&showDeleted=true&singleEvents=true&timeMax=2026-04-01T00%3A00%3A00Z" +
+				"&timeMin=2026-03-01T00%3A00%3A00Z&timeZone=UTC&updatedMin=2026-01-01T00%3A00%3A00Z", "",
+			func() error { _, err := c.ListEvents(ctx, "primary", every); return err }},
+		{"list_events no option", "", "",
+			func() error { _, err := c.ListEvents(ctx, "primary", gapi.EventsListOptions{}); return err }},
+		{"list_instances every option",
+			"maxResults=5&pageToken=p2&showDeleted=true&timeMax=2026-04-01T00%3A00%3A00Z" +
+				"&timeMin=2026-03-01T00%3A00%3A00Z&timeZone=UTC", "",
+			func() error { _, err := c.ListInstances(ctx, "primary", "ev", every); return err }},
+		{"list_instances no option", "", "",
+			func() error { _, err := c.ListInstances(ctx, "primary", "ev", gapi.EventsListOptions{}); return err }},
+		{"acl page", "maxResults=250&pageToken=p2", "",
+			func() error { _, err := c.ListACL(ctx, "primary", "p2"); return err }},
+		{"acl first page", "maxResults=250", "",
+			func() error { _, err := c.ListACL(ctx, "primary", ""); return err }},
+		{"delete with a choice", "sendUpdates=all", `"e1"`,
+			func() error { return c.DeleteEvent(ctx, "primary", "ev", "all", `"e1"`) }},
+		{"delete without one", "", "",
+			func() error { return c.DeleteEvent(ctx, "primary", "ev", "", "") }},
+	}
+	for _, tc := range cases {
+		gotQuery, gotIfMatch = "<none>", "<none>"
+		if err := tc.call(); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if gotQuery != tc.query {
+			t.Errorf("%s: query\n got %s\nwant %s", tc.name, gotQuery, tc.query)
+		}
+		if gotIfMatch != tc.ifMatch {
+			t.Errorf("%s: If-Match %q, want %q", tc.name, gotIfMatch, tc.ifMatch)
+		}
 	}
 }
 
@@ -376,12 +417,30 @@ func TestHiddenCalendarsAreOptional(t *testing.T) {
 	}
 }
 
-func TestBackoffIsBoundedAndJittered(t *testing.T) {
-	// Google's own algorithm: min((2^n) + jitter, 32s). The cap matters
-	// more than the curve — an unbounded backoff turns a rate limit into
-	// a hang.
-	if gapi.MaxBackoff != 32*time.Second {
-		t.Fatalf("MaxBackoff = %s; Google's guide caps at 32s", gapi.MaxBackoff)
+// Google's own algorithm: min((2^n) + jitter, 32s), jitter under a
+// second. The cap matters more than the curve: an unbounded backoff
+// turns a rate limit into a hang.
+func TestBackoffDoublesAndIsCapped(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	c := client(srv.URL)
+	c.MaxRetries = 7
+	var waits []time.Duration
+	c.Sleep = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	_, _ = c.GetCalendar(context.Background(), "primary")
+
+	floors := []time.Duration{1, 2, 4, 8, 16, 32, 32}
+	if len(waits) != len(floors) {
+		t.Fatalf("waited %d times, want %d", len(waits), len(floors))
+	}
+	for i, f := range floors {
+		lo := f * time.Second
+		if waits[i] < lo || waits[i] >= lo+time.Second {
+			t.Errorf("wait %d = %s, want in [%s, %s)", i, waits[i], lo, lo+time.Second)
+		}
 	}
 }
 
@@ -483,5 +542,120 @@ func TestListInstancesOfAnOccurrenceID(t *testing.T) {
 	}
 	if len(shown.Items) != 1 {
 		t.Fatalf("showDeleted returned %d items, want the canceled occurrence", len(shown.Items))
+	}
+}
+
+// §11: a POST that creates is sent once. Google's code.proto says of
+// UNAVAILABLE that it is "not always safe to retry non-idempotent
+// operations", so a 503 is no reason to send the insert again.
+func TestANonIdempotentWriteIsSentOnce(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusServiceUnavailable} {
+		var hits atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			hits.Add(1)
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"error":{"code":503,"message":"down"}}`))
+		}))
+		c := client(srv.URL)
+		c.MaxRetries = 4
+		_, err := c.InsertEvent(context.Background(), "primary", &gcal.Event{ID: "abc"}, "all")
+		srv.Close()
+		if err == nil {
+			t.Fatalf("status %d: expected an error", status)
+		}
+		if hits.Load() != 1 {
+			t.Fatalf("status %d: the insert was sent %d times, want 1", status, hits.Load())
+		}
+	}
+}
+
+// A connection that drops after the request was written is the worst
+// case: Google may have acted on it. The insert is still sent once.
+func TestANonIdempotentWriteIsNotRepeatedAfterADroppedConnection(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}))
+	defer srv.Close()
+
+	c := client(srv.URL)
+	c.MaxRetries = 4
+	_, err := c.InsertEvent(context.Background(), "primary", &gcal.Event{ID: "abc"}, "all")
+	if err == nil {
+		t.Fatal("expected a transport failure")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("the insert was sent %d times, want 1", hits.Load())
+	}
+}
+
+// A delete whose first attempt got a 5xx and whose retry got 404 most
+// likely removed the thing itself. [not_found] would say it never
+// existed; the honest class is ambiguous_outcome.
+func TestADeleteRetriedIntoNotFoundIsAmbiguous(t *testing.T) {
+	for _, gone := range []int{http.StatusNotFound, http.StatusGone} {
+		var hits atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if hits.Add(1) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"error":{"code":503,"message":"down"}}`))
+				return
+			}
+			w.WriteHeader(gone)
+			_, _ = w.Write([]byte(`{"error":{"code":404,"message":"Not Found"}}`))
+		}))
+		c := client(srv.URL)
+		c.MaxRetries = 4
+		err := c.DeleteEvent(context.Background(), "primary", "abc", "", "")
+		srv.Close()
+		if cls, _ := gapi.ClassOf(err); cls != gapi.ClassAmbiguousOutcome {
+			t.Fatalf("status %d after a 503: class %q, want ambiguous_outcome: %v", gone, cls, err)
+		}
+		if hits.Load() != 2 {
+			t.Fatalf("made %d attempts, want 2", hits.Load())
+		}
+	}
+}
+
+// The same 404 on a FIRST attempt is plain not_found: nothing this
+// server sent could have removed it.
+func TestADeleteThatFindsNothingFirstIsNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":404,"message":"Not Found"}}`))
+	}))
+	defer srv.Close()
+
+	c := client(srv.URL)
+	c.MaxRetries = 4
+	err := c.DeleteEvent(context.Background(), "primary", "abc", "", "")
+	if cls, _ := gapi.ClassOf(err); cls != gapi.ClassNotFound {
+		t.Fatalf("class %q, want not_found: %v", cls, err)
+	}
+}
+
+// A 429 means Google did not act, so the 404 after it is the truth.
+func TestADeleteRetriedAfterARateLimitIntoNotFoundIsNotFound(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if hits.Add(1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"code":429,"message":"slow down"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":404,"message":"Not Found"}}`))
+	}))
+	defer srv.Close()
+
+	c := client(srv.URL)
+	c.MaxRetries = 4
+	err := c.DeleteEvent(context.Background(), "primary", "abc", "", "")
+	if cls, _ := gapi.ClassOf(err); cls != gapi.ClassNotFound {
+		t.Fatalf("class %q, want not_found: %v", cls, err)
 	}
 }

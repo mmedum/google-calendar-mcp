@@ -254,6 +254,7 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 		written, err = s.API.InsertACL(ctx, cal.ID, &gcal.AclRule{
 			Role: role, Scope: audience.Scope,
 		}, notify)
+		err = shareError(err, cal.ID)
 	}
 	if err != nil {
 		return render.SharingReport{}, err
@@ -263,6 +264,24 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 	report.After = withRule(before, changed)
 	report.Requests = gapi.Requests(ctx)
 	return report, nil
+}
+
+// shareError produces [ambiguous_outcome] for an acl.insert that may
+// have landed. It is a POST and is not retried (§11): a repeat with
+// notify on emails the person a second time.
+func shareError(err error, calendarID string) error {
+	if err == nil {
+		return nil
+	}
+	e, maybe := maybeLanded(err)
+	if !maybe {
+		return err
+	}
+	return gapi.Wrap(gapi.ClassAmbiguousOutcome, err,
+		"this access may or may not have been granted: the request failed without an answer this server "+
+			"can trust (%s). Run list_sharing on %s before trying again, because a repeat can email the "+
+			"person twice",
+		e.Message, calendarID)
 }
 
 // UnshareOptions is what unshare_calendar takes.

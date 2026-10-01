@@ -456,3 +456,36 @@ func TestAPlainForbiddenIsNotReportedAsAMissingScope(t *testing.T) {
 		t.Fatalf("a 403 that no login can fix tells the caller to log in again: %v", err)
 	}
 }
+
+// acl.insert is a POST that is not retried, and a repeat with
+// sendNotifications=true emails the person a second time. So a 5xx
+// sends the caller to list_sharing, never back to share_calendar.
+func TestAShareThatMayHaveLandedIsAmbiguous(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	fake.Fail["POST /calendars/team@group.calendar.example.test/acl"] = 503
+
+	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+		Calendar: "team@group.calendar.example.test",
+		Who:      "colleague@example.test", Role: "reader", Notify: "all",
+	})
+	if cls := classOf(t, err); cls != gapi.ClassAmbiguousOutcome {
+		t.Fatalf("class %s, want ambiguous_outcome: %v", cls, err)
+	}
+	if !strings.Contains(err.Error(), "list_sharing") {
+		t.Errorf("the message must say how to look: %v", err)
+	}
+}
+
+// A 4xx definitely did not land, so a refused share keeps its own class.
+func TestAShareGoogleRefusedIsNotAmbiguous(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	fake.Fail["POST /calendars/team@group.calendar.example.test/acl"] = 400
+
+	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+		Calendar: "team@group.calendar.example.test",
+		Who:      "colleague@example.test", Role: "reader", Notify: "all",
+	})
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class %s, want invalid: %v", cls, err)
+	}
+}

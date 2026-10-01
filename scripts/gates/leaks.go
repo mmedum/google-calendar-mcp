@@ -89,7 +89,9 @@ func leakRules() []leakRule {
 			re:   regexp.MustCompile(`\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b`),
 			allow: []*regexp.Regexp{
 				// RFC 2606 reserves these and they can never resolve.
-				regexp.MustCompile(`@([A-Za-z0-9.\-]+\.)?(example|test|invalid|localhost)(\.[A-Za-z]{2,})?$`),
+				// Anchored on the reserved label being LAST: test.com and
+				// example.dk are real domains somebody can own.
+				regexp.MustCompile(`@([A-Za-z0-9.\-]+\.)?(example\.(com|net|org)|example|test|invalid|localhost)$`),
 				regexp.MustCompile(`@group\.calendar\.example\.test$`),
 				// The project's own contact points.
 				regexp.MustCompile(`@users\.noreply\.github\.com$`),
