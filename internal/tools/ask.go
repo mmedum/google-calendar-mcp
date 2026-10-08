@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,12 +67,15 @@ type asking struct {
 	mu    sync.Mutex
 	used  map[string]int64 // nonce → when it expires, in Unix seconds
 	tools map[string]bool  // the tools registered to ask
+	// always are the tools that ask before every write, not only when a
+	// condition holds; interactionHint reads them.
+	always map[string]bool
 }
 
 func newAsking(lg *slog.Logger) *asking {
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
-	return &asking{key: key, lg: lg, used: map[string]int64{}, tools: map[string]bool{}}
+	return &asking{key: key, lg: lg, used: map[string]int64{}, tools: map[string]bool{}, always: map[string]bool{}}
 }
 
 // asks reports whether the tool was registered to ask.
@@ -190,11 +194,7 @@ func (a *asking) personFor(req *mcp.CallToolRequest, tool string, in any, requir
 	if req == nil {
 		return p, nil
 	}
-	if c := req.ClientCapabilities(); c != nil && c.Elicitation != nil {
-		// Form is what an empty elicitation capability declares; only a
-		// client that declares URL alone cannot show a form.
-		p.canAsk = c.Elicitation.Form != nil || c.Elicitation.URL == nil
-	}
+	p.canAsk = canAsk(req.ClientCapabilities())
 	if req.Session != nil {
 		if ip := req.Session.InitializeParams(); ip != nil {
 			p.travels = ip.ProtocolVersion >= statelessProtocol
@@ -319,6 +319,66 @@ func (a *asking) markAsks(tool string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.tools[tool] = true
+}
+
+// canAsk reports whether a client can put a question to the person. Form
+// is what an empty elicitation capability declares; only a client that
+// declares URL alone cannot show a form.
+func canAsk(c *mcp.ClientCapabilities) bool {
+	return c != nil && c.Elicitation != nil && (c.Elicitation.Form != nil || c.Elicitation.URL == nil)
+}
+
+// markAlways records a tool that asks before every write.
+func (a *asking) markAlways(tool string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.always[tool] = true
+}
+
+// interactionKey is Claude Code's mark for a tool it must prompt for on
+// every call, in every permission mode, with no allow rule to skip it.
+const interactionKey = "anthropic/requiresUserInteraction"
+
+// interactionHint is receiving middleware for tools/list. A tool that
+// asks the person before every write loses the mark when the client can
+// ask: the server's question is the confirmation then, and it shows what
+// the write destroys, where the client's prompt shows the arguments. The
+// mark stays for a client that cannot ask, whose own prompt is then the
+// only one. destructiveHint stays either way, as the client's soft gate.
+// With both, the person would answer twice for one call.
+func interactionHint(a *asking) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			res, err := next(ctx, method, req)
+			list, ok := res.(*mcp.ListToolsResult)
+			if err != nil || !ok {
+				return res, err
+			}
+			lr, ok := req.(*mcp.ListToolsRequest)
+			if !ok || !canAsk(lr.ClientCapabilities()) {
+				return res, err
+			}
+			a.mu.Lock()
+			always := maps.Clone(a.always)
+			a.mu.Unlock()
+			// The tools are the server's own; copy before changing one.
+			out := *list
+			out.Tools = make([]*mcp.Tool, len(list.Tools))
+			for i, t := range list.Tools {
+				out.Tools[i] = t
+				if _, marked := t.Meta[interactionKey]; marked && always[t.Name] {
+					c := *t
+					c.Meta = maps.Clone(t.Meta)
+					delete(c.Meta, interactionKey)
+					if len(c.Meta) == 0 {
+						c.Meta = nil
+					}
+					out.Tools[i] = &c
+				}
+			}
+			return &out, nil
+		}
+	}
 }
 
 // The stages of one tools/call that asked, for askFailures: what a

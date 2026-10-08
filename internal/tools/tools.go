@@ -89,7 +89,7 @@ func Register(s *mcp.Server, d Deps) {
 		d.Logger = slog.New(slog.DiscardHandler)
 	}
 	d.asking = newAsking(d.Logger)
-	s.AddReceivingMiddleware(askFailures(d.asking))
+	s.AddReceivingMiddleware(askFailures(d.asking), interactionHint(d.asking))
 	registerRead(s, d)
 	registerWrite(s, d)
 	registerCalendars(s, d)
@@ -130,11 +130,16 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 		// explicit: a host in auto-approve runs an annotated tool without
 		// prompting, so the real gate is that this tool is unregistered
 		// unless the flag is set.
-		tool.Meta = mcp.Meta{"anthropic/requiresUserInteraction": true}
+		tool.Meta = mcp.Meta{interactionKey: true}
 	}
 	if def.Asks {
 		d.asking.markAsks(def.Name)
 		tool.Description += asksNote
+		// Every destructive tool that asks, asks before every write, so
+		// the server's question can stand in for the mark.
+		if def.Kind == Destructive {
+			d.asking.markAlways(def.Name)
+		}
 	}
 	mcp.AddTool(s, tool, func(ctx contextContext, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		var zero Out

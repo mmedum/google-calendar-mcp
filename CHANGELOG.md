@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- A delete asks once in Claude Code, not twice. In a client that can ask the person, `delete_calendar` and `clear_calendar` no longer carry the `requiresUserInteraction` mark; the server's own question, which shows what the call destroys, is the confirmation. To see only that question, add both tools to Claude Code's allow list.
+
 ## [3.0.1] - 2026-10-01
 
 ### Fixed

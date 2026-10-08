@@ -1226,7 +1226,12 @@ writes:
 3. **No question possible.** A client that declares no form elicitation
    gets no question, and the arguments are the guard, as before.
    `GCAL_REQUIRE_PROMPT=true` refuses those writes as `[blocked]`
-   instead.
+   instead. Only such a client sees Claude Code's
+   `requiresUserInteraction` mark on `delete_calendar` and
+   `clear_calendar`: `tools/list` drops it when the request declares form
+   elicitation, so the person answers once, to the question that says
+   what the write destroys. `destructiveHint` stays as the client's
+   allow-listable prompt.
 4. **A dry run never asks**, and needs no `confirm` either. Before this
    phase `delete_calendar` and `clear_calendar` checked `confirm` ahead of
    `dry_run`, so a preview had to be confirmed first.
@@ -2757,6 +2762,7 @@ what §15 exists to settle, and they are marked.
 | 80 | A client that declares elicitation has a person to answer it | Tier 2, from a sibling server's evidence log: `claude -p` 2.1.284 against a probe, and the Codex source at `codex-rs/codex-mcp/src/elicitation.rs` | **Refuted.** `claude -p` declares it and answers `cancel` in milliseconds; Codex under approval policy `never` with full access accepts a fieldless form. So a refusal never says the person declined, and an unattended client that declares elicitation cannot make these writes |
 | 81 | A client draws a question as plain text | Tier 2, from a sibling server's evidence log: VS Code's `mcpElicitationService.ts` builds the message as a `MarkdownString` | **Refuted.** Calendar text in a question stands in a code span, and the server's own lines hold no Markdown (§9a) |
 | 82 | A 503 on a write may be retried, and a 404 on a retried delete means it was never there | `google/rpc/code.proto` in googleapis, `UNAVAILABLE`, read 2026-10-01: "Note that it is not always safe to retry non-idempotent operations", HTTP mapping 503 | **Refuted for both.** A 5xx or a lost answer on `events.move` or `acl.insert` is `[ambiguous_outcome]`, like `events.insert` and `calendars.insert`, never `[unavailable]`, which invites a retry. A delete whose first attempt got a 5xx or no answer and whose retry got 404 or 410 is `[ambiguous_outcome]`: that first attempt most likely landed. A 404 after a 429 stays `[not_found]`, since Google did not act on the 429 |
+| 83 | A destructive tool should carry both `requiresUserInteraction` and the server's own question | Tier 2: the owner was asked twice for one delete in google-docs-mcp (2026-10-09); the MCP spec, GitHub's `delete_repository`, Supabase, and Claude Code's own documentation of the mark | **Refuted.** No source recommends two hard gates for one call; GitHub and Supabase confirm with `destructiveHint` plus a form elicitation, and Claude Code scopes the mark to "tools whose permission prompt is itself the point". The mark is now sent only to a client that cannot ask |
 
 ### Deviations from the shared Go MCP server standard
 

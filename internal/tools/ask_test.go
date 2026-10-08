@@ -533,3 +533,36 @@ func TestARoleChangeAsks(t *testing.T) {
 		}
 	}
 }
+
+// A tool that asks the person before every write carries Claude Code's
+// requiresUserInteraction mark only for a client that cannot ask; with
+// both, the person would answer twice for one call. The two are every
+// tool here that both carries the mark and asks every time: a new name
+// needs a look at whether it really asks every time.
+func TestTheMarkIsForAClientThatCannotAsk(t *testing.T) {
+	marked := func(cs *mcp.ClientSession) string {
+		t.Helper()
+		res, err := cs.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, tool := range res.Tools {
+			if tool.Meta["anthropic/requiresUserInteraction"] == true {
+				out = append(out, tool.Name)
+			}
+		}
+		slices.Sort(out)
+		return strings.Join(out, " ")
+	}
+	for _, protocol := range protocols {
+		cs, _ := connect(t, everything(), protocol, &person{action: "accept"})
+		if got := marked(cs); got != "" {
+			t.Errorf("%s, a client that can ask: marked %q, want none", protocol, got)
+		}
+		cs, _ = connect(t, everything(), protocol, nil)
+		if got, want := marked(cs), "clear_calendar delete_calendar"; got != want {
+			t.Errorf("%s, a client that cannot ask: marked %q, want %q", protocol, got, want)
+		}
+	}
+}
