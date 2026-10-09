@@ -138,7 +138,7 @@ func TestUnknownNotifyIsRefusedWithTheChoices(t *testing.T) {
 func TestReachOfEventIgnoresResourcesAndSelf(t *testing.T) {
 	e := model.Event{Attendees: []model.Attendee{
 		{Email: "me@example.test", Self: true},
-		{Email: "room@example.test", Resource: true},
+		{Email: "room-sample@resource.calendar.google.com", Resource: true},
 		{Email: "colleague@example.test"},
 		{Email: "outside@elsewhere.test"},
 	}}
@@ -235,7 +235,7 @@ func TestARoomIsNotAGuest(t *testing.T) {
 		"resource.calendar.google.com@example.test": false,
 		"person@example.test":                       false,
 	} {
-		if plan.IsRoom(addr) != room {
+		if model.IsRoom(addr) != room {
 			t.Errorf("IsRoom(%q) = %t, want %t", addr, !room, room)
 		}
 	}

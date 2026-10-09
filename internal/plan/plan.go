@@ -15,6 +15,7 @@ package plan
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
@@ -257,8 +258,16 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 	return e, nil
 }
 
-// adding is the attendees the draft adds: its guests, then its rooms
-// marked as resources.
+// Invites is every address the draft adds, rooms included. The reach
+// count decides what a room is by its address (model.IsRoom), so a
+// person passed as a room is still counted as somebody the write
+// reaches.
+func (d Draft) Invites() []string {
+	return append(slices.Clone(d.AddGuests), d.AddRooms...)
+}
+
+// adding is the attendees the draft adds: its guests, then its rooms,
+// with every room marked as a resource whichever list carried it.
 func (d Draft) adding() ([]gcal.EventAttendee, error) {
 	var out []gcal.EventAttendee
 	for _, list := range []struct {
@@ -274,7 +283,7 @@ func (d Draft) adding() ([]gcal.EventAttendee, error) {
 			if err := validAddress(a, list.what); err != nil {
 				return nil, err
 			}
-			out = append(out, gcal.EventAttendee{Email: a, Resource: list.room})
+			out = append(out, gcal.EventAttendee{Email: a, Resource: list.room || model.IsRoom(a)})
 		}
 	}
 	return out, nil

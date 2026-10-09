@@ -221,10 +221,14 @@ func (e Event) Moved() bool {
 //
 // An empty account falls back to the flag alone, which is what a
 // renderer has: it is describing an event, not deciding a refusal.
+//
+// A room is decided by its address (IsRoom), not by Google's `resource`
+// flag: the flag holds whatever the write that added the attendee said,
+// so a person added as a room would carry it and never be counted.
 func (e Event) Guests(account string) []Attendee {
 	out := make([]Attendee, 0, len(e.Attendees))
 	for _, a := range e.Attendees {
-		if a.Self || a.Resource {
+		if a.Self || IsRoom(a.Email) {
 			continue
 		}
 		if account != "" && strings.EqualFold(a.Email, account) {
@@ -238,6 +242,21 @@ func (e Event) Guests(account string) []Attendee {
 // GuestCount is how many people would be reached. The count goes in a
 // refusal; the addresses never do (§9).
 func (e Event) GuestCount(account string) int { return len(e.Guests(account)) }
+
+// roomDomain is where Google puts the address of every room and other
+// resource it makes. Google publishes no shape for that address
+// (`resourceEmail` is "generated"), so this is observed rather than
+// documented (§18), and both ways it could be wrong are safe: a room it
+// misses counts as a guest, as rooms did before; and only Google issues
+// addresses under google.com, so no person is taken for a room.
+const roomDomain = "resource.calendar.google.com"
+
+// IsRoom reports whether an address is a room's or another resource's.
+// It is the one rule for that, whichever list the address came in.
+func IsRoom(address string) bool {
+	i := strings.LastIndex(address, "@")
+	return i >= 0 && strings.EqualFold(strings.TrimSpace(address[i+1:]), roomDomain)
+}
 
 // Attendee is one guest.
 type Attendee struct {

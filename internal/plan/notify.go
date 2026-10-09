@@ -116,7 +116,7 @@ func ReachOfEvent(organizer, account string, e model.Event, adding ...string) Re
 	}
 	for _, a := range adding {
 		a = strings.TrimSpace(a)
-		if a == "" || seen[strings.ToLower(a)] || IsRoom(a) {
+		if a == "" || seen[strings.ToLower(a)] || model.IsRoom(a) {
 			continue
 		}
 		seen[strings.ToLower(a)] = true
@@ -138,7 +138,7 @@ func ReachOfAddresses(organizer string, addresses []string) Reach {
 	r := Reach{domain: domainOf(organizer)}
 	for _, a := range addresses {
 		a = strings.TrimSpace(a)
-		if a == "" || strings.EqualFold(a, organizer) || IsRoom(a) {
+		if a == "" || strings.EqualFold(a, organizer) || model.IsRoom(a) {
 			continue
 		}
 		r.Guests++
@@ -148,17 +148,6 @@ func ReachOfAddresses(organizer string, addresses []string) Reach {
 	}
 	return r
 }
-
-// roomDomain is where Google puts the address of every room and other
-// resource it makes. Google publishes no shape for that address
-// (`resourceEmail` is "generated"), so this is observed rather than
-// documented (§18), and both ways it could be wrong are safe: a room it
-// misses counts as a guest, as rooms did before; and only Google issues
-// addresses under google.com, so no person is taken for a room.
-const roomDomain = "resource.calendar.google.com"
-
-// IsRoom reports whether an address is a room's or another resource's.
-func IsRoom(address string) bool { return domainOf(address) == roomDomain }
 
 // isExternal reports whether an address sits outside the organizer's
 // domain.

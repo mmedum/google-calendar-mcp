@@ -349,7 +349,7 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 		draft.Recurrence = &lines
 	}
 
-	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organizer, o.Guests))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organizer, draft.Invites()))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -523,7 +523,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if draft.Empty() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
 			"update_event was given nothing to change. Pass at least one of title, description, location, "+
-				"start, end, recurrence, guests or free_not_busy")
+				"start, end, recurrence, add_guests, remove_guests, add_rooms or free_not_busy")
 	}
 	ctx, env, err := s.prepare(ctx, o.Calendar, o.TimeZone)
 	if err != nil {
@@ -558,7 +558,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel, o.AddGuests...))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel, draft.Invites()...))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -708,7 +708,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, parent, o.AddGuests...))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, parent, draft.Invites()...))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}

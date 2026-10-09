@@ -123,11 +123,13 @@ func TestReachesPeopleExcludesSelfAndRooms(t *testing.T) {
 	}{
 		{"nobody", nil, false, 0},
 		{"only me", []model.Attendee{{Email: "me@example.test", Self: true}}, false, 0},
-		{"only a room", []model.Attendee{{Email: "room@example.test", Resource: true}}, false, 0},
+		{"only a room", []model.Attendee{{Email: "room-sample@resource.calendar.google.com", Resource: true}}, false, 0},
+		{"a room added as a guest", []model.Attendee{{Email: "room-sample@resource.calendar.google.com"}}, false, 0},
+		{"a person added as a room", []model.Attendee{{Email: "partner@elsewhere.test", Resource: true}}, true, 1},
 		{"a real guest", []model.Attendee{{Email: "guest@example.test"}}, true, 1},
 		{"me, a room and two guests", []model.Attendee{
 			{Email: "me@example.test", Self: true},
-			{Email: "room@example.test", Resource: true},
+			{Email: "room-sample@resource.calendar.google.com", Resource: true},
 			{Email: "a@example.test"}, {Email: "b@example.test"},
 		}, true, 2},
 	}

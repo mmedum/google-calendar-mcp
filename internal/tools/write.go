@@ -177,7 +177,7 @@ type createEventIn struct {
 	Description string   `json:"description,omitempty" jsonschema:"Longer text on the event."`
 	Location    string   `json:"location,omitempty" jsonschema:"Where it is."`
 	Guests      []string `json:"guests,omitempty" jsonschema:"Email addresses to invite. Passing any of these makes notify required."`
-	Rooms       []string `json:"rooms,omitempty" jsonschema:"Addresses of rooms or other resources to book. A room is not a guest, so it does not make notify required."`
+	Rooms       []string `json:"rooms,omitempty" jsonschema:"Addresses of rooms or other resources to book. A room is not a guest, so it does not make notify required; an address here that is not a room's still counts as one."`
 	Recurrence  []string `json:"recurrence,omitempty" jsonschema:"RFC 5545 lines, such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10."`
 	FreeNotBusy bool     `json:"free_not_busy,omitempty" jsonschema:"Mark the time as free rather than busy, so it does not block availability."`
 	Conference  bool     `json:"conference,omitempty" jsonschema:"Ask Google for a Google Meet link. Usually in the answer; if it says the link is still being made, read the event again for it."`
@@ -200,10 +200,10 @@ type updateEventIn struct {
 	Recurrence   *[]string `json:"recurrence,omitempty" jsonschema:"New RFC 5545 lines. An empty list stops the event repeating."`
 	AddGuests    []string  `json:"add_guests,omitempty" jsonschema:"Email addresses to invite, added to the guests already there."`
 	RemoveGuests []string  `json:"remove_guests,omitempty" jsonschema:"Email addresses to uninvite, rooms included."`
-	AddRooms     []string  `json:"add_rooms,omitempty" jsonschema:"Addresses of rooms or other resources to book. A room is not a guest."`
+	AddRooms     []string  `json:"add_rooms,omitempty" jsonschema:"Addresses of rooms or other resources to book. A room is not a guest; an address here that is not a room's still counts as one."`
 	FreeNotBusy  *bool     `json:"free_not_busy,omitempty" jsonschema:"Mark the time free rather than busy."`
 
-	Notify string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests."`
+	Notify string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests or the call adds one."`
 	ETag   string `json:"etag,omitempty" jsonschema:"The etag from the get_event you decided on. The write is refused as stale if it moved since."`
 	Force  bool   `json:"force,omitempty" jsonschema:"Write with If-Match: * — overwrite whatever it says now, rather than being refused if somebody changed it."`
 	DryRun bool   `json:"dry_run,omitempty" jsonschema:"Report what would change and who would be emailed, without writing."`

@@ -170,7 +170,7 @@ func TestCreateEventPassesTheNotifyChoiceThrough(t *testing.T) {
 
 // A room is booked as a resource and reaches nobody, whether it comes as
 // a room or as a guest address; so notify is not asked for, and none is
-// not refused.
+// not refused, on the create or on any write after it.
 func TestCreateEventBooksRoomsWithoutReachingAnybody(t *testing.T) {
 	const room = "room-sample@resource.calendar.google.com"
 	for _, o := range []service.CreateOptions{
@@ -184,11 +184,43 @@ func TestCreateEventBooksRoomsWithoutReachingAnybody(t *testing.T) {
 			t.Fatalf("%+v: %v", o, err)
 		}
 		created := fake.Events["me@example.test"][out.After.ID]
-		if len(created.Attendees) != 1 || created.Attendees[0].Email != room || created.Attendees[0].Resource != (len(o.Rooms) > 0) {
+		if len(created.Attendees) != 1 || created.Attendees[0].Email != room || !created.Attendees[0].Resource {
 			t.Fatalf("%+v: attendees %+v", o, created.Attendees)
 		}
 		if got := fake.Wrote()[0].SendUpdates; got != o.Notify {
 			t.Fatalf("%+v: sent sendUpdates=%q", o, got)
+		}
+		if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+			Calendar: "primary", EventID: out.After.ID, Title: strptr("Renamed"), Notify: "none",
+		}); err != nil {
+			t.Fatalf("%+v: a later update with none: %v", o, err)
+		}
+	}
+}
+
+// A person's address is somebody the write reaches whichever list it
+// comes in: passed as a room, it still asks for notify and refuses none
+// for somebody outside the domain (§4.3.4).
+func TestAPersonPassedAsARoomIsStillReached(t *testing.T) {
+	outside := []string{"partner@elsewhere.test"}
+	for _, notify := range []string{"", "none"} {
+		svc, fake := writeSeed(t)
+		_, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+			Calendar: "primary", Title: "Not a room", Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+			Rooms: outside, Notify: notify,
+		})
+		want := map[string]gapi.Class{"": gapi.ClassInvalid, "none": gapi.ClassBlocked}[notify]
+		if classOf(t, err) != want {
+			t.Fatalf("create with notify %q: %v, want %s", notify, err, want)
+		}
+		_, err = svc.UpdateEvent(context.Background(), service.UpdateOptions{
+			Calendar: "primary", EventID: "evsolo00001", AddRooms: outside, Notify: notify,
+		})
+		if classOf(t, err) != want {
+			t.Fatalf("update with notify %q: %v, want %s", notify, err, want)
+		}
+		if len(fake.Wrote()) != 0 {
+			t.Fatalf("refusals wrote %+v", fake.Wrote())
 		}
 	}
 }
