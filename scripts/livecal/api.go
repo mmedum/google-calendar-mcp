@@ -33,6 +33,10 @@ const (
 	weeklyTitle   = "Livecal weekly probe"
 	canceledTitle = "Livecal canceled probe"
 	searchTerm    = "Livecal"
+	// splitKey and splitValue are the private extended property the
+	// weekly series carries into a split.
+	splitKey   = "livecalSplit"
+	splitValue = "carried"
 )
 
 // Event ids are base32hex: lowercase a-v and the digits, 5 to 1024
@@ -348,6 +352,19 @@ func (a *liveAPI) getEvent(ctx context.Context, cal, id string) (instanceRow, er
 	return row, err
 }
 
+// privateProperty reads one private extended property off an event. No
+// tool shows one, so this is the only way to see whether a split kept
+// it.
+func (a *liveAPI) privateProperty(ctx context.Context, cal, id, key string) (string, error) {
+	var out struct {
+		ExtendedProperties struct {
+			Private map[string]string `json:"private"`
+		} `json:"extendedProperties"`
+	}
+	err := a.do(ctx, http.MethodGet, "/calendars/"+cal+"/events/"+id, nil, &out)
+	return out.ExtendedProperties.Private[key], err
+}
+
 func (a *liveAPI) deleteCalendar(ctx context.Context, id string) error {
 	return a.do(ctx, http.MethodDelete, "/calendars/"+id, nil, nil)
 }
@@ -412,13 +429,18 @@ func seedEvents() []seedEvent {
 		},
 		{
 			// A weekly series crossing the 29 March European transition,
-			// carrying its zone so the wall clock holds.
+			// carrying its zone so the wall clock holds. The private
+			// extended property is a field the server does not model,
+			// so the split step can check the new series kept it.
 			id: weeklyID,
 			body: map[string]any{
 				"id": weeklyID, "summary": weeklyTitle,
 				"start":      zoned("2026-03-17T14:00:00+01:00"),
 				"end":        zoned("2026-03-17T15:00:00+01:00"),
 				"recurrence": []string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"},
+				"extendedProperties": map[string]any{
+					"private": map[string]any{splitKey: splitValue},
+				},
 			},
 		},
 		{

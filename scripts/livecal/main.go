@@ -206,7 +206,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	}
 
 	spikeDest = dest
-	writes := &writeState{dest: dest, self: self}
+	writes := &writeState{dest: dest, self: self, api: api}
 	// The only address in this run that belongs to another person. It is
 	// read from the environment and never written anywhere: not to a
 	// file, not to the transcript (the redactor masks it by shape), and

@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -739,9 +742,9 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 			"the new series if somebody had moved a later date.")
 	if droppedConference {
 		report.Notes = append(report.Notes,
-			"The original series had a conference attached and the NEW series does not. This server does "+
-				"not write conference data yet, so the later occurrences have no meeting link — add one in "+
-				"Calendar if people were joining that way.")
+			"The original series had a conference attached and the NEW series does not. A split does not "+
+				"copy a conference, so the later occurrences have no meeting link — add one in Calendar if "+
+				"people were joining that way.")
 	}
 
 	if o.DryRun {
@@ -827,10 +830,12 @@ func insertMessage(err error) string {
 // splitBody builds the new series a this_and_following write inserts.
 //
 // It carries the parent's content forward — the guests, the description,
-// the transparency — because "this and following" means the same event
-// from here on, with the change applied. What it does NOT carry is the
-// parent's id, its etag or its instance exceptions: those belong to the
-// event being left behind.
+// the transparency, and every field this server does not model, such as
+// attachments, extended properties and a status event's details —
+// because "this and following" means the same event from here on, with
+// the change applied. What it does NOT carry is the parent's id, its
+// etag or its instance exceptions: those belong to the event being left
+// behind.
 func splitBody(parent gcal.Event, target model.Event, draft plan.Draft, rule string,
 	zone when.Zone,
 ) (gcal.Event, []plan.Change, bool, error) {
@@ -846,6 +851,11 @@ func splitBody(parent gcal.Event, target model.Event, draft plan.Draft, rule str
 	body.Created, body.Updated, body.ICalUID, body.Sequence = "", "", "", 0
 	body.RecurringEventID, body.OriginalStartTime = "", nil
 	body.Recurrence = []string{rule}
+	// A copy, so the parent's own map is left as it was read.
+	body.Unmodeled = maps.Clone(parent.Unmodeled)
+	maps.DeleteFunc(body.Unmodeled, func(name string, _ json.RawMessage) bool {
+		return slices.Contains(leftBehind, name)
+	})
 	// The conference is NOT carried, and the result says so rather than
 	// letting it vanish.
 	//
@@ -875,6 +885,13 @@ func splitBody(parent gcal.Event, target model.Event, draft plan.Draft, rule str
 	patch.ApplyTo(&body)
 	return body, changes, droppedConference, nil
 }
+
+// leftBehind are the unmodeled fields a split does not carry to the new
+// series. Google sets each of them itself, and none is the event's
+// content: the resource kind, the copy lock, the deprecated gadget that
+// now only reports birthday data, and the old link to the conference the
+// split deliberately drops.
+var leftBehind = []string{"kind", "locked", "gadget", "hangoutLink"}
 
 // occurrenceSpan is where the new series starts and ends: the target
 // occurrence's scheduled slot, keeping the series' own duration.

@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -932,6 +933,71 @@ func TestAScopeReachesTheEventItNames(t *testing.T) {
 			t.Fatalf("answered %+v; scope:series must answer for the whole series", w)
 		}
 	})
+}
+
+// The new series of a this_and_following write is the parent copied, so
+// it keeps the fields this server has no struct field for. It used to be
+// built from the decoded fields alone: attachments and another
+// application's properties were lost, and a working-location series went
+// to Google without the details a create needs (§18 row 88).
+func TestASplitCarriesWhatThisServerDoesNotModel(t *testing.T) {
+	svc, fake := writeSeed(t)
+	var series gcal.Event
+	if err := json.Unmarshal([]byte(`{
+		"id": "evoffice001", "summary": "Office days", "status": "confirmed",
+		"kind": "calendar#event", "eventType": "workingLocation",
+		"visibility": "public", "transparency": "transparent",
+		"start": {"dateTime": "2026-03-17T09:00:00+01:00", "timeZone": "Europe/Copenhagen"},
+		"end": {"dateTime": "2026-03-17T17:00:00+01:00", "timeZone": "Europe/Copenhagen"},
+		"recurrence": ["RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"],
+		"hangoutLink": "https://meet.example.test/aaaa-bbbb-ccc",
+		"workingLocationProperties": {"type": "officeLocation", "officeLocation": {"label": "Sample building"}},
+		"extendedProperties": {"private": {"sampleKey": "sampleValue"}},
+		"attachments": [{"fileUrl": "https://drive.example.test/AAAAfile1", "title": "Sample agenda"}],
+		"eventLabelId": "AAAAlabel1"
+	}`), &series); err != nil {
+		t.Fatal(err)
+	}
+	fake.AddEvent("me@example.test", &series)
+	occ := caltest.Instance("evoffice001_20260331T070000Z", "evoffice001", "Office days",
+		"2026-03-31T09:00:00+02:00", "2026-03-31T17:00:00+02:00", "Europe/Copenhagen",
+		"2026-03-31T09:00:00+02:00")
+	occ.EventType = gcal.EventTypeWorkingLocation
+	fake.AddEvent("me@example.test", occ)
+
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evoffice001_20260331T070000Z",
+		Scope: "this_and_following", Title: strptr("Office days, later"),
+	}); err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	w := fake.Wrote()
+	if len(w) != 2 || w[1].Method != "insert" {
+		t.Fatalf("want a truncate and an insert, got %+v", w)
+	}
+	data, err := json.Marshal(fake.Events["me@example.test"][w[1].EventID])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"workingLocationProperties": `{"type":"officeLocation","officeLocation":{"label":"Sample building"}}`,
+		"extendedProperties":        `{"private":{"sampleKey":"sampleValue"}}`,
+		"attachments":               `[{"fileUrl":"https://drive.example.test/AAAAfile1","title":"Sample agenda"}]`,
+		"eventLabelId":              `"AAAAlabel1"`,
+	} {
+		if got := string(fields[name]); got != want {
+			t.Errorf("the new series has %s %s, want the parent's %s", name, got, want)
+		}
+	}
+	for _, name := range []string{"kind", "hangoutLink"} {
+		if got, ok := fields[name]; ok {
+			t.Errorf("the new series carries the old event's %s %s", name, got)
+		}
+	}
 }
 
 // §4.3.3: a two-call write asks for the same notification on both calls.

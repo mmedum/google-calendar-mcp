@@ -71,6 +71,9 @@ type writeState struct {
 	// use it are the only ones here that put an event in somebody else's
 	// calendar, so they check both before doing anything.
 	guest string
+	// api reads what no tool shows, for the steps that must check a
+	// field the server does not model.
+	api *liveAPI
 }
 
 // seedRSVP puts an event on the scratch calendar with this account as a
@@ -490,6 +493,36 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the result does not say it was two calls (§4.7)"
 				}
 				return pass, "original truncated, new series started, reset stated"
+			},
+		},
+		{
+			// §4.2: the new series is the old one copied, fields the
+			// server does not model included. The seed put a private
+			// extended property on the series, and only a direct read
+			// can see it.
+			name: "the split keeps what it does not model",
+			tool: "get_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.splitFrom})
+			},
+			skip: func() string {
+				if w.splitFrom == "" {
+					return "the split did not report the new series"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				got, err := w.api.privateProperty(context.Background(), scratch, w.splitFrom, splitKey)
+				if err != nil {
+					return fail, "could not read the new series: " + truncate(err.Error(), 200)
+				}
+				if got != splitValue {
+					return fail, "the new series lost the private extended property the series carried"
+				}
+				return pass, "the new series kept the series' private extended property"
 			},
 		},
 		{

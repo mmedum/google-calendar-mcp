@@ -18,6 +18,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -111,6 +113,82 @@ type Event struct {
 
 	// ETag backs If-Match on every write (§4.4).
 	ETag string `json:"etag,omitempty"`
+
+	// Unmodeled is every field Google sent that the fields above do not
+	// name, kept as Google sent it. No result shows it. It exists so an
+	// event copied whole keeps what this package does not understand:
+	// the new series of a this_and_following split (§2.8) is the parent
+	// copied, and decoding into the fields above alone dropped its
+	// attachments, another application's extended properties and a
+	// working location's details — which Google needs to create one.
+	Unmodeled map[string]json.RawMessage `json:"-"`
+}
+
+// eventFields are the JSON names Event models, read off its tags once,
+// so a field added above is never also kept in Unmodeled.
+var eventFields = func() map[string]bool {
+	out := map[string]bool{}
+	t := reflect.TypeFor[Event]()
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			out[name] = true
+		}
+	}
+	return out
+}()
+
+// UnmarshalJSON decodes the modeled fields and keeps the rest in
+// Unmodeled. A modeled name never reaches Unmodeled, so a field the
+// struct clears on purpose, such as a description, cannot come back
+// from a copy.
+func (e *Event) UnmarshalJSON(data []byte) error {
+	// JSON null leaves the event as it was, as it does for any struct.
+	if string(data) == "null" {
+		return nil
+	}
+	type plain Event
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	maps.DeleteFunc(all, func(name string, _ json.RawMessage) bool { return eventFields[name] })
+	if len(all) == 0 {
+		all = nil
+	}
+	*e = Event(p)
+	e.Unmodeled = all
+	return nil
+}
+
+// MarshalJSON writes the modeled fields and then what Unmodeled kept.
+func (e Event) MarshalJSON() ([]byte, error) {
+	type plain Event
+	data, err := json.Marshal(plain(e))
+	if err != nil || len(e.Unmodeled) == 0 {
+		return data, err
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return nil, err
+	}
+	maps.Copy(all, e.Unmodeled)
+	return json.Marshal(all)
+}
+
+// HasAttachments reports whether the event carries file attachments,
+// which Google keeps only when the write says it supports them.
+func (e Event) HasAttachments() bool { return len(e.Unmodeled["attachments"]) > 0 }
+
+// HasLabel reports whether the event names an event label, which Google
+// reads only when the write says it supports labels.
+func (e Event) HasLabel() bool {
+	var id string
+	return json.Unmarshal(e.Unmodeled["eventLabelId"], &id) == nil && id != ""
 }
 
 // EventPerson is the creator or organizer of an event.

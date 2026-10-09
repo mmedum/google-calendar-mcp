@@ -515,7 +515,11 @@ Every event write takes a required `scope`:
 - **`this_and_following`** — the two-call pattern of §2.8. The server
   performs it, and its result says in plain words that **exceptions
   after the target instance were reset**, because Google's guide says
-  they are and no caller expects it.
+  they are and no caller expects it. The new series is the original
+  copied whole, fields this server does not model included:
+  attachments, a label, other applications' extended properties and a
+  status event's details. It leaves behind the conference, which the
+  result says, and what Google sets itself (§18 row 88).
 
 There is no default. A write against an event that has a
 `recurringEventId` or a `recurrence` field and no `scope` is refused with
@@ -1141,6 +1145,12 @@ unnoticed. Since 2026-10-09 `api-diff` records every schema the four
 reach by `$ref`, twenty of them, and the record holds 148 fields. A wire
 type is matched to its schema by name, and the five unexported types
 that read the raw conference data by a list in the gate.
+
+**For an event, `out` means not read, not lost.** An event keeps every
+field it does not model, as Google sent it, so a write that copies an
+event whole — the new series of a split (§4.2) — carries those fields
+too. A calendar, a sharing rule and a nested object such as a guest do
+not; their `out` fields are dropped.
 
 ## 9. Confidentiality, security, safety
 
@@ -2817,6 +2827,7 @@ what §15 exists to settle, and they are marked.
 | 85 | A client names a room by flagging the attendee as a resource | Calendar discovery revision 20261002, `EventAttendee.resource`: "Whether the attendee is a resource. Can only be set when the attendee is added to the event for the first time." | **Confirmed in the reference; not yet seen live with a real room**, which the driver cannot create. `create_event` takes `rooms` and `update_event` `add_rooms`, sent with `resource: true`, as is a room's address given as a guest. The flag does not decide who is counted: it holds whatever the call that added the attendee said, so a person passed as a room would carry it and slip past §4.3.4. The address decides, by row 84 |
 | 86 | A write reaches the guests the event already has | Read against §4.3, 2026-10-09 | **Refuted: it reaches the guests it adds too.** `update_event` counted the event as read, so adding a guest to an event with none asked for no `notify`, and `none` went through for a guest outside the domain. The count now includes the guests a write adds, on both halves of a series split |
 | 87 | Free/busy answers for a group under `calendars`, like any other id | Calendar discovery revision 20261002: `items[].id` is "The identifier of a calendar or a group"; the reply's `groups` is "Expansion of groups", each a list of member calendar ids; `groupExpansionMax` "An error is returned for a group with more members than this value. Maximum value is 100." | **Refuted by the reference: a group answers under `groups`**, and the server read only `calendars`, so every group came back unknown. A group's answer is now its members' busy time merged, sent with `groupExpansionMax: 100`; one member unread, an expansion error or no members makes it unknown, never free (§4.6). `calendarExpansionMax` caps the calendars one request answers at 50, a group's members included, so the calendars a group pushes past it are asked about again on their own, up to 200. A live check waits on a probe outside the driver, which prints counts only, because a group is other people's calendars and the driver reads only its own |
+| 88 | The new series of a split can be built from the fields this server models | Calendar discovery revision 20261005, read 2026-10-09: `Event.attachments` "In order to modify attachments the supportsAttachments request parameter should be set to true"; `eventLabelId` "To set or change this property, you need to specify eventLabelVersion=1"; the status-events guide: to create a working location, "Include the workingLocationProperties field" | **Refuted.** The copy was decoded into the modeled fields, so the new series lost the parent's attachments, label, extended properties and status details, and a working-location series went to Google without the details its guide says a create needs. An event now keeps every field it does not model, the split carries them, and the insert sets `supportsAttachments=true` when it carries files and `eventLabelVersion=1` when it carries a label. It leaves `kind`, `locked`, `gadget` and `hangoutLink` behind, which Google sets itself. **Not yet probed live, tier 3:** that Google refuses a status event created without its details; that it drops attachments and a label sent without their parameter rather than refusing them; that it accepts the other carried fields on an insert, such as `privateCopy`, `source` and an attachment's read-only `fileId`; and whether creating an out-of-office series that declines conflicts declines them again. The fake holds the first two. A refusal costs more than before, because it lands after the truncate, as `[ambiguous_outcome]`. The live driver checks that a private extended property survives a split. A split carrying an attachment is owed; one carrying a working location needs a recurring status event on the primary calendar, which §9.1 does not allow the driver |
 
 ### Deviations from the shared Go MCP server standard
 

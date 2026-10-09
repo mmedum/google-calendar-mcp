@@ -363,6 +363,24 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	if e.Status == "" {
 		e.Status = gcal.StatusConfirmed
 	}
+	// Google's status-events guide creates each status type with its own
+	// details block. That a create without it is refused is believed
+	// rather than probed, and the message is this fake's own (§18 row 88).
+	if block, ok := statusDetails[e.EventType]; ok && len(e.Unmodeled[block]) == 0 {
+		writeErr(w, http.StatusBadRequest, "invalid", "A "+e.EventType+" event needs "+block)
+		return
+	}
+	// "In order to modify attachments the supportsAttachments request
+	// parameter should be set to true." That they are dropped without it,
+	// rather than refused, is believed rather than probed (§18 row 88).
+	if r.URL.Query().Get("supportsAttachments") != "true" {
+		delete(e.Unmodeled, "attachments")
+	}
+	// Version 0 of eventLabelVersion "assumes no event label support",
+	// so a label sent without version 1 is dropped.
+	if r.URL.Query().Get("eventLabelVersion") != "1" {
+		delete(e.Unmodeled, "eventLabelId")
+	}
 	if len(e.ConferenceData) > 0 {
 		// Version 0 — the default — "ignores conference data in the
 		// event's body", so the fake drops it exactly as Google does.
@@ -383,6 +401,14 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	s.bumpSync(calID, e)
 	s.mu.Unlock()
 	writeJSON(w, e)
+}
+
+// statusDetails names the details block each status event type is
+// created with.
+var statusDetails = map[string]string{
+	gcal.EventTypeFocusTime:       "focusTimeProperties",
+	gcal.EventTypeOutOfOffice:     "outOfOfficeProperties",
+	gcal.EventTypeWorkingLocation: "workingLocationProperties",
 }
 
 // patchEvent is events.patch, under If-Match.
