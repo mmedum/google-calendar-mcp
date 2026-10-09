@@ -529,27 +529,56 @@ func TestAGroupPastFiftyCalendarsIsAnswered(t *testing.T) {
 		{"a group of 10 beside 45 calendars", append([]string{group}, members(55)[10:]...), 10, 2},
 		{"a group of 100", []string{group}, 100, 2},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			svc, fake := seeded(t)
-			fake.Groups[group] = members(tc.members)
-			last := members(tc.members)[tc.members-1]
-			fake.Busy[last] = []gcal.TimePeriod{{Start: "2026-03-16T09:00:00+01:00", End: "2026-03-16T10:00:00+01:00"}}
-			o := day("2026-03-16", "2026-03-16")
-			o.Calendars = tc.calendars
-			got, err := svc.Availability(context.Background(), o)
-			if err != nil {
-				t.Fatalf("Availability: %v", err)
+		// Google does not say whether a calendar past the cap is left out
+		// or answered tooManyCalendarsRequested, so both are held.
+		for _, asErrors := range []bool{false, true} {
+			name := tc.name + ", past the cap left out"
+			if asErrors {
+				name = tc.name + ", past the cap answered tooManyCalendarsRequested"
 			}
-			if got.Unknown() != 0 {
-				t.Fatalf("%d answers unknown: %+v", got.Unknown(), got.Answers[0])
-			}
-			if a := got.Answers[0]; len(a.Busy) != 1 || a.Busy[0].Start.T.Format("15:04") != "09:00" {
-				t.Fatalf("the group's answer is %+v, want its last member's 09:00 block", a)
-			}
-			if got.Requests != tc.requests {
-				t.Fatalf("made %d requests, want %d", got.Requests, tc.requests)
-			}
-		})
+			t.Run(name, func(t *testing.T) {
+				svc, fake := seeded(t)
+				fake.PastCapAsErrors = asErrors
+				fake.Groups[group] = members(tc.members)
+				last := members(tc.members)[tc.members-1]
+				fake.Busy[last] = []gcal.TimePeriod{{Start: "2026-03-16T09:00:00+01:00", End: "2026-03-16T10:00:00+01:00"}}
+				o := day("2026-03-16", "2026-03-16")
+				o.Calendars = tc.calendars
+				got, err := svc.Availability(context.Background(), o)
+				if err != nil {
+					t.Fatalf("Availability: %v", err)
+				}
+				if got.Unknown() != 0 {
+					t.Fatalf("%d answers unknown: %+v", got.Unknown(), got.Answers[0])
+				}
+				if a := got.Answers[0]; len(a.Busy) != 1 || a.Busy[0].Start.T.Format("15:04") != "09:00" {
+					t.Fatalf("the group's answer is %+v, want its last member's 09:00 block", a)
+				}
+				if got.Requests != tc.requests {
+					t.Fatalf("made %d requests, want %d", got.Requests, tc.requests)
+				}
+			})
+		}
+	}
+}
+
+// A calendar Google answers tooManyCalendarsRequested on the second ask
+// too is unknown, with a reason a person can read, never free.
+func TestACalendarStillPastTheCapIsUnknown(t *testing.T) {
+	svc, fake := seeded(t)
+	fake.FreeBusyErrors["team@group.calendar.example.test"] = "tooManyCalendarsRequested"
+	o := day("2026-03-16", "2026-03-16")
+	o.Calendars = []string{"team@group.calendar.example.test"}
+	got, err := svc.Availability(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Availability: %v", err)
+	}
+	a := got.Answers[0]
+	if !a.Unknown || a.Reason != "Google answered for too many calendars at once to include this one" {
+		t.Fatalf("got %+v, want unknown with the reason in words", a)
+	}
+	if got.Requests != 2 {
+		t.Fatalf("made %d requests, want the first and one more ask", got.Requests)
 	}
 }
 

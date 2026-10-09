@@ -1331,13 +1331,17 @@ const maxGroupMembers = 100
 // enough for two groups of the most Google expands.
 const maxAskedAgain = 2 * maxGroupMembers
 
-// unanswered is every calendar the response has no slot for, a
-// group's members included, in the order asked and each once.
+// unanswered is every calendar the response has no answer for, a
+// group's members included, in the order asked and each once. A slot
+// whose error is tooManyCalendarsRequested is no answer: Google
+// documents that reason as "The number of calendars requested is too
+// large for a single query", and does not say whether a calendar past
+// the cap comes back that way or not at all (§18 row 100).
 func unanswered(ids []string, resp *gcal.FreeBusyResponse) []string {
 	var out []string
 	seen := map[string]bool{}
 	ask := func(id string) {
-		if _, answered := resp.Calendars[id]; !answered && !seen[id] {
+		if cal, answered := resp.Calendars[id]; (!answered || pastCap(cal)) && !seen[id] {
 			seen[id] = true
 			out = append(out, id)
 		}
@@ -1353,6 +1357,16 @@ func unanswered(ids []string, resp *gcal.FreeBusyResponse) []string {
 		}
 	}
 	return out
+}
+
+// tooManyCalendars is the reason Google gives a calendar a query asked
+// about with too many others.
+const tooManyCalendars = "tooManyCalendarsRequested"
+
+// pastCap reports whether a calendar's slot says it was past the query's
+// cap rather than read.
+func pastCap(cal gcal.FreeBusyCalendar) bool {
+	return slices.ContainsFunc(cal.Errors, func(e gcal.FreeBusyError) bool { return e.Reason == tooManyCalendars })
 }
 
 // answerFor turns one calendar's or group's slot in the response into an
@@ -1443,6 +1457,8 @@ func freeBusyReason(e gcal.FreeBusyError) string {
 		return "Google failed to read it; try again"
 	case "rateLimitExceeded", "quotaExceeded":
 		return "Google is rate limiting this account"
+	case tooManyCalendars:
+		return "Google answered for too many calendars at once to include this one"
 	case "":
 		return "Google reported an error without a reason"
 	default:

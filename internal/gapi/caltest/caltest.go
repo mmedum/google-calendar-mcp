@@ -54,6 +54,11 @@ type Server struct {
 	// error; the reason the fake gives it is its own.
 	Groups      map[string][]string
 	GroupErrors map[string]string
+	// PastCapAsErrors answers a calendar past calendarExpansionMax with
+	// the error tooManyCalendarsRequested, where by default it is left
+	// out. Google documents the reason and not which it does (§18 row
+	// 100), so the server is tested against both.
+	PastCapAsErrors bool
 	// FreeBusyAsked is the last free/busy request served.
 	FreeBusyAsked gcal.FreeBusyRequest
 	// Settings the user has.
@@ -1599,16 +1604,28 @@ func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
 		Calendars: map[string]gcal.FreeBusyCalendar{},
 	}
 	// calendarExpansionMax caps the calendars answered, a group's
-	// members included, at 50 at most (discovery). What Google drops
-	// past the cap is undocumented; the fake answers in the order asked.
+	// members included, at 50 at most (discovery). Which calendars Google
+	// leaves unanswered past the cap, and how, is undocumented; the fake
+	// answers in the order asked, and leaves the rest out or answers
+	// them tooManyCalendarsRequested (PastCapAsErrors).
 	answerable := 50
 	if n := req.CalendarExpansionMax; n > 0 && n < answerable {
 		answerable = n
 	}
+	answered := 0
 	calendar := func(id string) {
-		if s.FreeBusyOmit[id] || len(out.Calendars) >= answerable {
+		if _, done := out.Calendars[id]; done || s.FreeBusyOmit[id] {
 			return
 		}
+		if answered >= answerable {
+			if s.PastCapAsErrors {
+				out.Calendars[id] = gcal.FreeBusyCalendar{
+					Errors: []gcal.FreeBusyError{{Domain: "calendar", Reason: "tooManyCalendarsRequested"}},
+				}
+			}
+			return
+		}
+		answered++
 		if reason, bad := s.FreeBusyErrors[id]; bad {
 			out.Calendars[id] = gcal.FreeBusyCalendar{
 				Errors: []gcal.FreeBusyError{{Domain: "calendar", Reason: reason}},
