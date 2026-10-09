@@ -303,6 +303,28 @@ func TestBuildServiceFailsWithoutCredentialsAndTheServerStartsAnyway(t *testing.
 	_ = credentials.EnvVar
 }
 
+// TestTheServerStartsSignedInAfterLogin is the other half: once login
+// has stored a token, the server starts with it. It only lists the
+// tools, so nothing reaches Google.
+func TestTheServerStartsSignedInAfterLogin(t *testing.T) {
+	_, env := setupLogin(t)
+	var out, errOut bytes.Buffer
+	if err := run([]string{"login"}, strings.NewReader(""), &out, &errOut, env); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	frames, stderr := serveSession(t, env, initMessages, 2)
+	if len(frames) < 2 {
+		t.Fatalf("read %d frames, expected 2", len(frames))
+	}
+	if !strings.Contains(stderr, "serving") {
+		t.Fatalf("the server did not log its start:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "without credentials") {
+		t.Fatalf("the server ignored the token login stored:\n%s", stderr)
+	}
+}
+
 // TestLoginNamesTheAccountWithoutAnEmailScope.
 //
 // tokeninfo returns an email only when an email scope was granted, and

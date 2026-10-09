@@ -3,8 +3,10 @@ package caltest_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
@@ -195,5 +197,234 @@ func TestConferenceDataIsIgnoredWithoutTheVersion(t *testing.T) {
 	got := post("?conferenceDataVersion=1")
 	if c := gcal.ReadConference(got.ConferenceData); !c.Pending() {
 		t.Fatalf("an insert with the version did not come back pending: %+v", c)
+	}
+}
+
+// eventTypes is an enum in the discovery document, so the fake refuses a
+// value outside it. The service refuses one first; this holds the fake
+// to the same rule for whatever else calls it.
+func TestAnEventTypeOutsideTheEnumIsRefused(t *testing.T) {
+	s := caltest.Seed()
+	base := s.Start()
+	defer s.Close()
+
+	status := func(types string) int {
+		t.Helper()
+		resp, err := http.Get(base + "/calendars/primary/events?eventTypes=" + types)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := status("meeting"); got != http.StatusBadRequest {
+		t.Fatalf("eventTypes=meeting answered %d, want 400", got)
+	}
+	if got := status("outOfOffice"); got != http.StatusOK {
+		t.Fatalf("eventTypes=outOfOffice answered %d, want 200", got)
+	}
+}
+
+// updatedMin, from the discovery document: "entries deleted since this
+// time will always be included regardless of showDeleted", and it is one
+// of the parameters "that cannot be specified together with
+// nextSyncToken". The fake holds both, so a server that leaned on
+// showDeleted, or sent the two together, fails here first.
+func TestUpdatedMinIncludesDeletionsAndRefusesASyncToken(t *testing.T) {
+	s := caltest.Seed()
+	s.Now = func() time.Time { return time.Date(2026, 3, 12, 8, 0, 0, 0, time.UTC) }
+	base := s.Start()
+	defer s.Close()
+	s.Remove("primary", "ev-transparent")
+
+	get := func(query string) (int, gcal.EventList) {
+		t.Helper()
+		resp, err := http.Get(base + "/calendars/primary/events?" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out gcal.EventList
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+
+	status, list := get("updatedMin=2026-03-11T00:00:00Z")
+	if status != http.StatusOK {
+		t.Fatalf("updatedMin alone answered %d, want 200", status)
+	}
+	var ids []string
+	for _, e := range list.Items {
+		ids = append(ids, e.ID+":"+e.Status)
+	}
+	if got := strings.Join(ids, ","); got != "ev-transparent:cancelled" {
+		t.Fatalf("got %s, want only the deletion, without showDeleted", got)
+	}
+	if status, _ := get("updatedMin=2026-03-11T00:00:00Z&syncToken=caltest-sync-0"); status != http.StatusBadRequest {
+		t.Fatalf("updatedMin with a sync token answered %d, want 400", status)
+	}
+}
+
+// q matches the fields the discovery document names, so a search for a
+// guest's address, the organizer's name, a location or a working
+// location's label finds the event, and one for text in none of them
+// does not.
+func TestQMatchesTheFieldsGoogleDocuments(t *testing.T) {
+	s := caltest.Seed()
+	e := caltest.Timed("ev-office", "Desk day", "2026-03-16T08:00:00+01:00", "2026-03-16T17:00:00+01:00",
+		"Europe/Copenhagen")
+	e.Location = "Room seven"
+	e.Organizer = &gcal.EventPerson{Email: "host@example.test", DisplayName: "Sample Host"}
+	e.Attendees = []gcal.EventAttendee{{Email: "guest@example.test", DisplayName: "Sample Guest"}}
+	e.WorkingLocationProperties = json.RawMessage(`{"officeLocation":{"buildingId":"north","label":"Annex"}}`)
+	s.AddEvent("primary", e)
+	base := s.Start()
+	defer s.Close()
+
+	found := func(q string) bool {
+		t.Helper()
+		resp, err := http.Get(base + "/calendars/primary/events?q=" + url.QueryEscape(q))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var list gcal.EventList
+		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range list.Items {
+			if it.ID == "ev-office" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, q := range []string{"room seven", "guest@example.test", "Sample Guest", "Sample Host",
+		"host@example.test", "north", "annex"} {
+		if !found(q) {
+			t.Errorf("q=%q did not find the event", q)
+		}
+	}
+	if found("nowhere on the event") {
+		t.Error("q matched text that is in none of the documented fields")
+	}
+}
+
+// Google's reminder limits and its two visibility rules on one
+// occurrence, held by the fake for whatever calls it: the service
+// refuses the first before sending, and never sends the ignored one.
+func TestRemindersAndVisibilityFollowGooglesRules(t *testing.T) {
+	s := caltest.Seed()
+	base := s.Start()
+	defer s.Close()
+
+	send := func(method, path, body string) int {
+		t.Helper()
+		req, err := http.NewRequest(method, base+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("If-Match", "*")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	for name, body := range map[string]string{
+		"default with overrides": `{"reminders":{"useDefault":true,"overrides":[{"method":"popup","minutes":10}]}}`,
+		"six reminders": `{"reminders":{"useDefault":false,"overrides":[{"method":"popup","minutes":1},` +
+			`{"method":"popup","minutes":2},{"method":"popup","minutes":3},{"method":"popup","minutes":4},` +
+			`{"method":"popup","minutes":5},{"method":"popup","minutes":6}]}}`,
+		"past four weeks": `{"reminders":{"useDefault":false,"overrides":[{"method":"email","minutes":40321}]}}`,
+		"sms":             `{"reminders":{"useDefault":false,"overrides":[{"method":"sms","minutes":10}]}}`,
+		"visibility":      `{"visibility":"secret"}`,
+	} {
+		if got := send(http.MethodPatch, "/calendars/primary/events/ev-standup", body); got != http.StatusBadRequest {
+			t.Errorf("%s: answered %d, want 400", name, got)
+		}
+	}
+
+	occurrence := "/calendars/primary/events/ev-weekly_20260324T130000Z"
+	if got := send(http.MethodPatch, occurrence, `{"visibility":"private"}`); got != http.StatusOK {
+		t.Fatalf("a private occurrence answered %d", got)
+	}
+	if v := s.Events["primary"]["ev-weekly"].Visibility; v != gcal.VisibilityPrivate {
+		t.Fatalf("a more restrictive occurrence left the series %q", v)
+	}
+	if got := send(http.MethodPatch, occurrence, `{"visibility":"public"}`); got != http.StatusOK {
+		t.Fatalf("a public occurrence answered %d", got)
+	}
+	if v := s.Events["primary"]["ev-weekly_20260324T130000Z"].Visibility; v != gcal.VisibilityPrivate {
+		t.Fatalf("a less restrictive occurrence was applied: %q", v)
+	}
+}
+
+// The fake refuses a status event Google's guide says Google refuses: on
+// a secondary calendar, without its details, an all-day out-of-office or
+// focus time, a free one, a working location that is not public and
+// free, and an all-day one longer than a day. A patch that would leave an
+// event like that is refused too: an update "must maintain the required
+// fields".
+func TestStatusEventsFollowGooglesGuide(t *testing.T) {
+	s := caltest.Seed()
+	s.AddCalendar("team@group.calendar.example.test", "Sample Team", "Europe/Copenhagen", gcal.RoleOwner, false)
+	base := s.Start()
+	defer s.Close()
+
+	send := func(method, path, body string) int {
+		t.Helper()
+		req, err := http.NewRequest(method, base+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("If-Match", "*")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	const timed = `"start":{"dateTime":"2026-04-01T09:00:00+02:00"},"end":{"dateTime":"2026-04-01T17:00:00+02:00"}`
+	const away = `"eventType":"outOfOffice","outOfOfficeProperties":{"autoDeclineMode":"declineNone"}`
+	const home = `"eventType":"workingLocation","workingLocationProperties":{"type":"homeOffice","homeOffice":{}}`
+	for name, tc := range map[string]struct {
+		calendar, body string
+		want           int
+	}{
+		"out of office": {"primary", `{` + away + `,` + timed + `}`, http.StatusOK},
+		"on a secondary calendar": {"team@group.calendar.example.test", `{` + away + `,` + timed + `}`,
+			http.StatusBadRequest},
+		"without its details": {"primary", `{"eventType":"focusTime",` + timed + `}`, http.StatusBadRequest},
+		"all day": {"primary", `{` + away + `,"start":{"date":"2026-04-01"},"end":{"date":"2026-04-02"}}`,
+			http.StatusBadRequest},
+		"free":                   {"primary", `{` + away + `,"transparency":"transparent",` + timed + `}`, http.StatusBadRequest},
+		"a working location":     {"primary", `{` + home + `,"visibility":"public","transparency":"transparent",` + timed + `}`, http.StatusOK},
+		"a busy working place":   {"primary", `{` + home + `,"visibility":"public",` + timed + `}`, http.StatusBadRequest},
+		"a hidden working place": {"primary", `{` + home + `,"transparency":"transparent",` + timed + `}`, http.StatusBadRequest},
+		"a working place for two days": {"primary", `{` + home + `,"visibility":"public","transparency":"transparent",` +
+			`"start":{"date":"2026-04-01"},"end":{"date":"2026-04-03"}}`, http.StatusBadRequest},
+	} {
+		if got := send(http.MethodPost, "/calendars/"+tc.calendar+"/events", tc.body); got != tc.want {
+			t.Errorf("%s: answered %d, want %d", name, got, tc.want)
+		}
+	}
+
+	var made string
+	for id, e := range s.Events["primary"] {
+		if e.EventType == gcal.EventTypeOutOfOffice {
+			made = id
+		}
+	}
+	if made == "" {
+		t.Fatal("the out-of-office event was not stored")
+	}
+	if got := send(http.MethodPatch, "/calendars/primary/events/"+made, `{"transparency":"transparent"}`); got != http.StatusBadRequest {
+		t.Errorf("a patch making it free answered %d, want 400", got)
+	}
+	if got := send(http.MethodPatch, "/calendars/primary/events/"+made, `{"summary":"Away, renamed"}`); got != http.StatusOK {
+		t.Errorf("a patch keeping the required fields answered %d, want 200", got)
 	}
 }

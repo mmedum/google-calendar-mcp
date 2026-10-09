@@ -1,5 +1,5 @@
 # One verdict per published field of the four resources whose fields
-# decide what this server can do. `gates api-fields` holds this,
+# decide what this server can do, and of every schema they reach by $ref. `gates api-fields` holds this,
 # testdata/api-surface.json and internal/gcal to each other, and runs in
 # make check with no network.
 #
@@ -15,50 +15,50 @@
 # the phase that will model the field.
 #
 # resource	field	verdict	reason
-Event	anyoneCanAddSelf	out	deprecated in Google's own field description
-Event	attachments	out	a file on an event belongs to the Drive API and to the server built on it; this one answers when, not what (§1)
+Event	anyoneCanAddSelf	out	deprecated in Google's own field description. A split carries it whole (§4.2)
+Event	attachments	modeled	shown on reads, never written: the card lists each file with the Drive file id that hands it to a Drive server, and a list row counts them. A split carries them whole, with supportsAttachments (§4.2, §7.2)
 Event	attendees	modeled	the guest list, and the reason notify is required on any write that can reach a person (§4.3)
 Event	attendeesOmitted	modeled	Google truncated the list; a renderer that ignores it shows a meeting as smaller than it is
-Event	birthdayProperties	out	immutable, and only on eventType=birthday. The renderer marks such events so a model does not try to reschedule one (§2.12)
+Event	birthdayProperties	out	immutable, and only on eventType=birthday. The renderer marks such events so a model does not try to reschedule one (§2.12). A split carries it whole (§4.2)
 Event	colorId	modeled	resolved to a color name through colors.get, because "colorId 5" tells a person nothing
-Event	conferenceData	modeled	read as raw JSON and round-tripped, so a shape this server does not model survives a write; create_event asks for a Meet link through it (§17.3)
+Event	conferenceData	modeled	read as raw JSON and never sent back: a patch leaves it alone, so a shape this server does not model survives a write, and a series split drops it and says so; create_event and update_event's add_conference send a create request through it, and the second refuses an event that has one (§17.3)
 Event	created	modeled	shown on an event card
 Event	creator	modeled	who made it; with organizer it decides whether an edit or an RSVP is the right call
 Event	description	modeled	content, renderer only (§9)
 Event	end	modeled	the other half (§4.1)
 Event	endTimeUnspecified	modeled	Google invented the end, so a duration computed from it is fiction; the renderer says so
 Event	etag	modeled	If-Match on every write, which is how a patch cannot overwrite what it did not see (§4.4)
-Event	eventLabelId	out	supersedes colorId and refers to a label defined on the calendar. Labels are a calendar-level surface this server does not manage (see Calendar.labelProperties); revisit with color writing
+Event	eventLabelId	out	supersedes colorId and refers to a label defined on the calendar. Labels are a calendar-level surface this server does not manage (see Calendar.labelProperties); revisit with color writing. A split carries it whole, with eventLabelVersion=1 (§4.2)
 Event	eventType	modeled	a birthday or an out-of-office is not a meeting, and the type cannot be changed after creation (§2.12)
-Event	extendedProperties	out	an application's private key-value store on an event. This server has no state to keep there, and reading another application's keys is not something to do by default
-Event	focusTimeProperties	out	only on eventType=focusTime, which this server reads and marks but does not create (§2.12)
+Event	extendedProperties	out	an application's private key-value store on an event. This server has no state to keep there, and reading another application's keys is not something to do by default. A split carries them whole (§4.2)
+Event	focusTimeProperties	modeled	read on every event, and set by create_event's event_type focusTime with auto_decline, decline_message and chat_status. Kept raw, as conferenceData is, so a read and a split copy carry the block whole (§7.4, §18 row 99)
 Event	gadget	out	deprecated by Google, and per its own description now only carries birthday calendar metadata
-Event	guestsCanInviteOthers	modeled	what a guest may do; a write that drops it widens or narrows access silently
-Event	guestsCanModify	modeled	as guestsCanInviteOthers
+Event	guestsCanInviteOthers	modeled	as guestsCanModify; Google's default is true, so false is carried as a pointer
+Event	guestsCanModify	modeled	what a guest may do: get_event shows it with Google's default filled in, and create_event and update_event set it; a write that drops it widens or narrows access silently
 Event	guestsCanSeeOtherGuests	modeled	as guestsCanInviteOthers, and this one decides whether the guest list is visible at all
 Event	hangoutLink	out	read-only and superseded by conferenceData, which is modeled
 Event	htmlLink	modeled	the link a person opens to see the event in Calendar
-Event	iCalUID	modeled	accepted on lookup through events.list, never used as an address: one uid covers a whole series (§6.2)
+Event	iCalUID	modeled	accepted on lookup through events.list as list_events' ical_uid, never used as an address: one uid covers a whole series (§6.2, §18 row 94)
 Event	id	modeled	the address, and client-generated on insert so a retry is nearly idempotent (§2.11)
 Event	kind	out	a constant string naming the resource type; the code already knows what it asked for
 Event	location	modeled	content, renderer only (§9)
 Event	locked	out	read-only, and a locked event refuses the write anyway — the API's refusal says more than a pre-check would
 Event	organizer	modeled	who owns the event, which is what respond_to_event and move_event turn on
 Event	originalStartTime	modeled	identifies an instance even after it has been moved, which is why it addresses one (§6.2)
-Event	outOfOfficeProperties	out	only on eventType=outOfOffice, read and marked but not created (§2.12)
-Event	privateCopy	out	immutable, and set by propagation machinery this server does not take part in
+Event	outOfOfficeProperties	modeled	read on every event, and set by create_event's event_type outOfOffice with auto_decline and decline_message. Kept raw, so a read and a split copy carry the block whole (§7.4, §18 row 99)
+Event	privateCopy	out	immutable, and set when an event is created; this server never sets it, and a split carries the parent's whole (§4.2)
 Event	recurrence	modeled	the RRULE, EXDATE and RDATE lines, parsed by internal/recur and sent as the caller's own strings (§6.4)
 Event	recurringEventId	modeled	names the series an instance belongs to, and is what makes a scope required on a write (§4.2)
-Event	reminders	modeled	the per-event override of the calendar's defaults
+Event	reminders	modeled	this account's reminders, which Google keeps per person: shown on every event, set by create_event and update_event, and a write that changes only them reaches nobody (§7.4)
 Event	sequence	modeled	the iCalendar revision; carried through a patch so a write does not reset it
-Event	source	out	the page or message an event was created from, visible only to its creator; no tool here shows provenance
+Event	source	out	the page or message an event was created from, visible only to its creator; no tool here shows provenance. A split carries it whole (§4.2)
 Event	start	modeled	half of the time model: date XOR dateTime, never converted (§4.1)
 Event	status	modeled	canceled events are hidden by default and a canceled instance is how one date leaves a series (§2.13)
 Event	summary	modeled	the title; content, so it reaches a renderer and never a log (§9)
 Event	transparency	modeled	an event marked free does not make somebody busy: the reason availability cannot come from a list (§4.6)
 Event	updated	modeled	shown on an event card, and the answer to "has this changed since I looked"
-Event	visibility	modeled	a private event reads differently depending on the caller's role, and the renderer must not imply it read the details
-Event	workingLocationProperties	out	only on eventType=workingLocation. It is the API's nearest thing to working hours and is not one: §17.2 ships a working-hours mask the CALLER states, and reading somebody's office days off this field would be a different claim
+Event	visibility	modeled	shown as a private or public tag, and a private event with no title reads as one whose title may be hidden; set by create_event and update_event, with Google's rule for one occurrence held (§7.4)
+Event	workingLocationProperties	modeled	read on every event, and set by create_event's event_type workingLocation with working_location and working_location_label. Kept raw, so a read and a split copy carry the block whole. Still not working hours, which the caller states (§7.4, §17.2, §18 row 99)
 Calendar	autoAcceptInvitations	out	only meaningful on a Workspace resource calendar, which this server does not administer (§1)
 Calendar	conferenceProperties	modeled	which conference types a calendar allows. create_event refuses a Meet link on a calendar whose published list does not name hangoutsMeet, rather than letting Google answer 200 with a failed request and an event that exists (§17.3)
 Calendar	dataOwner	out	read-only, and an email address: it is exactly the kind of field §9 keeps out of logs and results, and nothing here needs it
@@ -76,7 +76,7 @@ CalendarListEntry	backgroundColor	modeled	the color actually shown, which colorI
 CalendarListEntry	colorId	modeled	a per-user override, set by manage_calendar (§7.5); the ids come from the calendar palette in colors.get, which get_settings reports
 CalendarListEntry	conferenceProperties	modeled	as Calendar.conferenceProperties. Carried here too, so the calendar list this server already holds answers the question without a second request
 CalendarListEntry	dataOwner	out	read-only, and an email address nothing here needs (§9)
-CalendarListEntry	defaultReminders	modeled	the calendar's default reminders, which an event inherits
+CalendarListEntry	defaultReminders	modeled	the calendar's default reminders, which an event that uses them gets; get_calendar lists them
 CalendarListEntry	deleted	modeled	a deleted entry is skipped when the list is read
 CalendarListEntry	description	modeled	shown by get_calendar
 CalendarListEntry	etag	modeled	If-Match on a calendarList patch (§4.4)
@@ -96,3 +96,74 @@ AclRule	id	modeled	the rule's address, which unshare_calendar deletes by
 AclRule	kind	out	a constant string naming the resource type
 AclRule	role	modeled	what the rule grants, explained rather than echoed because writerWithoutPrivateAccess is not self-explanatory (§7.6)
 AclRule	scope	modeled	who the rule applies to, including the default scope that means the public internet (§7.6)
+
+# The schemas the four reach by $ref. A field Google adds to an attendee
+# or a reminder is as much a capability as one on the event, and one did
+# go by unnoticed before these rows existed (EventAttendee.asyncOperation).
+CalendarNotification	method	modeled	how a notification is delivered; manage_calendar always writes email (§7.5)
+CalendarNotification	type	modeled	which change this user is emailed about, as manage_calendar sets it (§7.5)
+ConferenceData	conferenceId	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
+ConferenceData	conferenceSolution	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
+ConferenceData	createRequest	modeled	the Meet link request create_event sends, read back for its status (§17.3)
+ConferenceData	entryPoints	modeled	where a conference is joined; the video entry point is the link a result shows
+ConferenceData	notes	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
+ConferenceData	parameters	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
+ConferenceData	signature	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
+ConferenceParameters	addOnParameters	out	parameters for a third-party conferencing add-on, which this server does not create (§17.3)
+ConferenceParametersAddOnParameters	parameters	out	as ConferenceParameters.addOnParameters
+ConferenceProperties	allowedConferenceSolutionTypes	modeled	the conference types a calendar allows; create_event refuses a Meet link where hangoutsMeet is not one
+ConferenceRequestStatus	statusCode	modeled	pending, success or failure of the Meet link request, which a result reports as such (§17.3)
+ConferenceSolution	iconUri	out	the conferencing product's own name and icon, kept raw and not shown
+ConferenceSolution	key	out	the conferencing product's own name and icon, kept raw and not shown
+ConferenceSolution	name	out	the conferencing product's own name and icon, kept raw and not shown
+ConferenceSolutionKey	type	modeled	hangoutsMeet, the one solution create_event asks for
+CreateConferenceRequest	conferenceSolutionKey	modeled	names the solution asked for
+CreateConferenceRequest	requestId	modeled	the event's own id, so a retried insert cannot make a second conference (§2.11)
+CreateConferenceRequest	status	modeled	read to say whether the link is ready, coming or failed
+EntryPoint	accessCode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	entryPointFeatures	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	entryPointType	modeled	picks the video entry point out of the phone and SIP ones
+EntryPoint	label	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	meetingCode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	passcode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	password	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	pin	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	regionCode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	uri	modeled	the link a person clicks
+EventAttachment	fileId	modeled	the Drive file id, shown as file_id: what hands the file to a Drive server (§7.2)
+EventAttachment	fileUrl	modeled	the link to open the file, shown as url, and what a split sends to add it to the new series
+EventAttachment	iconLink	modeled	never shown; carried so a split hands back the attachment it read
+EventAttachment	mimeType	modeled	shown as mime_type, so a caller knows what kind of file it is before asking for it
+EventAttachment	title	modeled	text somebody else wrote, like a description: shown as written, never logged (§9)
+EventAttendee	additionalGuests	modeled	carried whole through a guest-list patch, so a guest's +1 is kept (§4.4)
+EventAttendee	asyncOperation	out	read-only, added by Google after this record began: a group guest whose members Google is still listing. Not read; the guest count takes the group as one guest either way
+EventAttendee	comment	modeled	an RSVP note, kept when respond_to_event changes the answer
+EventAttendee	displayName	modeled	shown beside the address
+EventAttendee	email	modeled	who the guest is; counted in a refusal, never logged (§9); sent bare, though a caller may give a mailbox with a display name (§18 row 93)
+EventAttendee	id	modeled	carried whole through a guest-list patch
+EventAttendee	optional	modeled	carried whole through a guest-list patch, shown on get_event, and set by create_event's optional_guests and update_event's add_optional_guests (§18 row 92)
+EventAttendee	organizer	modeled	marks the organizer's own row
+EventAttendee	resource	modeled	a room or other resource, sent for create_event's rooms, update_event's add_rooms and a room's address given as a guest; who counts toward notify is decided by the address, not this flag (§4.3, §18 rows 84, 85)
+EventAttendee	responseStatus	modeled	the RSVP, shown and set by respond_to_event
+EventAttendee	self	modeled	the account's own row, which is not trusted alone (§18 row 50)
+EventBirthdayProperties	contact	out	as Event.birthdayProperties: immutable, and only on a birthday event (§2.12)
+EventBirthdayProperties	customTypeName	out	as Event.birthdayProperties: immutable, and only on a birthday event (§2.12)
+EventBirthdayProperties	type	out	as Event.birthdayProperties: immutable, and only on a birthday event (§2.12)
+EventDateTime	date	modeled	an all-day event's date, which never becomes an instant (§4.1)
+EventDateTime	dateTime	modeled	a timed event's instant
+EventDateTime	timeZone	modeled	the zone a recurring event needs (§2.2), sent on every timed write
+EventFocusTimeProperties	autoDeclineMode	modeled	auto_decline none, new or all; required on create, with no default, and all asks the person (§7.4, §9a)
+EventFocusTimeProperties	chatStatus	modeled	chat_status available or do_not_disturb (§7.4)
+EventFocusTimeProperties	declineMessage	modeled	decline_message, the account's own text: shown, never logged (§7.4, §9)
+EventLabel	backgroundColor	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
+EventLabel	id	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
+EventLabel	name	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
+EventOutOfOfficeProperties	autoDeclineMode	modeled	auto_decline none, new or all; required on create, with no default, and all asks the person (§7.4, §9a)
+EventOutOfOfficeProperties	declineMessage	modeled	decline_message, the account's own text: shown, never logged (§7.4, §9)
+EventReminder	method	modeled	a reminder's channel, popup or email, carried as Event.reminders and CalendarListEntry.defaultReminders are
+EventReminder	minutes	modeled	how long before a reminder fires, carried with its method
+EventWorkingLocationProperties	customLocation	modeled	working_location custom, with its label as working_location_label (§7.4)
+EventWorkingLocationProperties	homeOffice	modeled	working_location home; published as any, and sent empty (§7.4, §18 row 99)
+EventWorkingLocationProperties	officeLocation	modeled	working_location office, with its label as working_location_label. The building, floor and desk ids are carried and not set, since they name the organization's resources (§7.4)
+EventWorkingLocationProperties	type	modeled	which of the three blocks holds the details; read from the block when Google leaves it out (§7.4)
+LabelProperties	eventLabels	out	as Calendar.labelProperties

@@ -8,8 +8,9 @@ import (
 )
 
 // Asker puts a question to the person using the server before a write
-// that cannot be undone, that widens who can see a calendar, or that
-// emails guests a cancellation (§9a). Ask returns nil when the write may
+// that cannot be undone, that widens who can see a calendar, that emails
+// guests a cancellation, or that declines every meeting a status event
+// overlaps (§9a). Ask returns nil when the write may
 // go ahead, and an error to return in its place otherwise; the tools
 // layer installs one per call, for the tools that ask.
 type Asker interface {

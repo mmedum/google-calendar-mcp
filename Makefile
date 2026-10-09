@@ -21,7 +21,7 @@ GATES     ?= ./.gates$(EXE)
 # fetches them — not whatever is on the PATH. A distribution's
 # golangci-lint built with an older Go refuses this module outright, and
 # says so as "can't load config", which names the wrong thing.
-GOLANGCI_LINT ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+GOLANGCI_LINT ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 GOVULNCHECK   ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
 GOLICENSES    ?= github.com/google/go-licenses@v1.6.0
 # The module path is zricethezav, not gitleaks: the project moved
@@ -58,8 +58,9 @@ lint:
 	$(GO) run $(GOLANGCI_LINT) run
 
 .PHONY: test
-test: ## Unit tests with the race detector and coverage
+test: ## Unit tests with the race detector and coverage, and the live driver's offline guard tests
 	$(GO) test -race -coverpkg=./internal/...,./cmd/... -coverprofile=cov.out -covermode=atomic ./...
+	$(GO) test -race -tags=live ./scripts/livecal
 
 .PHONY: gates
 gates: ## Build the repository's own checks
@@ -129,11 +130,11 @@ schemas: build ## Dump the tool schemas
 	$(BIN) --dump-schemas > schemas.json
 
 .PHONY: schema-diff
-schema-diff: build gates ## Diff the tool schemas against the last tag, else the recorded baseline
+schema-diff: build gates ## Diff the tool schemas against the newest release's recorded baseline
 	@$(GATES) schema-diff $(BIN)
 
 .PHONY: schema-baseline
-schema-baseline: build gates ## Record the current tool surface as the baseline (deliberate; manual)
+schema-baseline: build gates ## Record the release being cut as the baseline: VERSION=vX.Y.Z, in its release commit
 	@$(GATES) schema-baseline $(BIN)
 
 .PHONY: smoke

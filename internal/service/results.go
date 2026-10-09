@@ -103,6 +103,10 @@ func sharingOut(rules []model.Sharing) []SharingOut {
 type CalendarResult struct {
 	Calendar    CalendarOut `json:"calendar"`
 	Description string      `json:"description,omitempty"`
+	// DefaultReminders are what this account gets for an event here that
+	// uses the calendar's own. Absent when the calendar is not on this
+	// account's list, the only place Google keeps them.
+	DefaultReminders *DefaultRemindersOut `json:"default_reminders,omitempty"`
 	// Sharing is empty when the ACL scope was not granted, and Note says
 	// so rather than letting an empty list read as "shared with nobody"
 	// (§2.15).
@@ -141,6 +145,9 @@ func (r CalendarResult) Render() string {
 	if r.Description != "" {
 		fmt.Fprintf(&b, "  %s\n", r.Description)
 	}
+	if d := r.DefaultReminders; d != nil {
+		fmt.Fprintf(&b, "  default reminders: %s\n", render.Reminders(model.Reminders{Popup: d.Popup, Email: d.Email}))
+	}
 	b.WriteString("\n")
 	if r.Note != "" {
 		b.WriteString(r.Note + "\n")
@@ -168,11 +175,16 @@ func sharingModel(rows []SharingOut) []model.Sharing {
 
 // ScheduleResult is list_events and search_events.
 type ScheduleResult struct {
-	Window        WindowOut  `json:"window"`
-	TimeZone      string     `json:"time_zone"`
-	ZoneSource    string     `json:"time_zone_source"`
-	Calendars     []string   `json:"calendars"`
-	Expanded      bool       `json:"recurring_expanded"`
+	Window     WindowOut `json:"window"`
+	TimeZone   string    `json:"time_zone"`
+	ZoneSource string    `json:"time_zone_source"`
+	Calendars  []string  `json:"calendars"`
+	Expanded   bool      `json:"recurring_expanded"`
+	// EventTypes echoes the type filter, absent when the read had none,
+	// so a caller can tell a short list from a filtered one.
+	EventTypes []string `json:"event_types,omitempty"`
+	// ICalUID echoes the UID filter, absent when the read had none.
+	ICalUID       string     `json:"ical_uid,omitempty"`
 	Events        []EventOut `json:"events"`
 	Shown         int        `json:"shown"`
 	Matched       int        `json:"matched"`
@@ -225,7 +237,59 @@ type EventOut struct {
 	// reported as an event that does not.
 	ConferenceURI    string `json:"conference_uri,omitempty"`
 	ConferenceStatus string `json:"conference_status,omitempty"`
-	ETag             string `json:"etag,omitempty"`
+	// AttachmentCount is how many files are on the event. get_event
+	// lists them.
+	AttachmentCount int `json:"attachment_count,omitempty"`
+	// Visibility is Google's value: public, private, or confidential,
+	// which Google keeps for compatibility and means private. Absent
+	// means the calendar's default.
+	Visibility string `json:"visibility,omitempty"`
+	// Reminders are this account's own, absent when Google sent none.
+	Reminders *RemindersOut `json:"reminders,omitempty"`
+	// A status event's settings, in the words create_event takes:
+	// auto_decline is none, new or all; chat_status available or
+	// do_not_disturb; working_location home, office or custom, with the
+	// office's or the place's name as its label. A value Google adds
+	// later is shown as Google spells it. The decline message is the
+	// account's own text.
+	AutoDecline          string `json:"auto_decline,omitempty"`
+	DeclineMessage       string `json:"decline_message,omitempty"`
+	ChatStatus           string `json:"chat_status,omitempty"`
+	WorkingLocation      string `json:"working_location,omitempty"`
+	WorkingLocationLabel string `json:"working_location_label,omitempty"`
+	ETag                 string `json:"etag,omitempty"`
+}
+
+// RemindersOut is when this account is reminded of an event, in minutes
+// before it starts. Google keeps reminders per person.
+type RemindersOut struct {
+	// Default says the calendar's own reminders apply, which
+	// get_calendar lists. When it is false, Popup and Email are the whole
+	// set, and both empty means no reminders at all.
+	Default bool  `json:"default"`
+	Popup   []int `json:"popup,omitempty"`
+	Email   []int `json:"email,omitempty"`
+}
+
+// DefaultRemindersOut is a calendar's own reminders, in minutes before an
+// event starts. Both lists empty means none.
+type DefaultRemindersOut struct {
+	Popup []int `json:"popup"`
+	Email []int `json:"email"`
+}
+
+func newDefaultRemindersOut(r *model.Reminders) *DefaultRemindersOut {
+	if r == nil {
+		return nil
+	}
+	out := &DefaultRemindersOut{Popup: r.Popup, Email: r.Email}
+	if out.Popup == nil {
+		out.Popup = []int{}
+	}
+	if out.Email == nil {
+		out.Email = []int{}
+	}
+	return out
 }
 
 // Render implements Rendered.
@@ -239,6 +303,8 @@ func NewScheduleResult(s render.Schedule) ScheduleResult {
 		ZoneSource:    string(s.Zone.Source),
 		Calendars:     s.Calendars,
 		Expanded:      s.Expanded,
+		EventTypes:    s.EventTypes,
+		ICalUID:       s.ICalUID,
 		Shown:         len(s.Events),
 		Matched:       s.Matched,
 		Truncated:     s.Truncated,
@@ -261,8 +327,17 @@ func NewEventOut(e model.Event) EventOut {
 		SeriesID: e.SeriesID, Transparent: e.Transparent,
 		GuestCount: e.GuestCount(""), GuestsTruncated: e.AttendeesTruncated,
 		Organizer: e.Organizer, Link: e.Link, ETag: e.ETag,
-		AllDay:        e.Start.AllDay,
-		ConferenceURI: e.Conference.URI,
+		AllDay:          e.Start.AllDay,
+		ConferenceURI:   e.Conference.URI,
+		AttachmentCount: len(e.Attachments),
+		Visibility:      e.Visibility,
+	}
+	if r := e.Reminders; r != nil {
+		o.Reminders = &RemindersOut{Default: r.Default, Popup: r.Popup, Email: r.Email}
+	}
+	if d := e.StatusDetails; d != nil {
+		o.AutoDecline, o.DeclineMessage, o.ChatStatus = d.AutoDecline, d.DeclineMessage, d.ChatStatus
+		o.WorkingLocation, o.WorkingLocationLabel = d.WorkingLocation, d.WorkingLocationLabel
 	}
 	// The same four states the text renders, so a client reading only
 	// this block reaches the same conclusion. "other" is a state rather
@@ -302,8 +377,25 @@ type EventResult struct {
 	TimeZone   string        `json:"time_zone"`
 	ZoneSource string        `json:"time_zone_source"`
 	Attendees  []AttendeeOut `json:"attendees,omitempty"`
+	// Attachments are the files on the event. This server never opens
+	// one; file_id is what a Drive server takes.
+	Attachments []AttachmentOut `json:"attachments,omitempty"`
+	// What a guest may do, with Google's defaults filled in: a guest can
+	// invite others and see the guest list, and cannot change the event.
+	GuestsCanModify         bool `json:"guests_can_modify"`
+	GuestsCanInviteOthers   bool `json:"guests_can_invite_others"`
+	GuestsCanSeeOtherGuests bool `json:"guests_can_see_other_guests"`
 
 	text string
+}
+
+// AttachmentOut is one file on an event. Its title is text somebody else
+// wrote, shown as it was written.
+type AttachmentOut struct {
+	Title    string `json:"title,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	URL      string `json:"url,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
 }
 
 // AttendeeOut is one guest.
@@ -324,11 +416,18 @@ func (r EventResult) Render() string { return r.text }
 func NewEventResult(e model.Event, z when.Zone) EventResult {
 	out := EventResult{
 		Event: NewEventOut(e), TimeZone: z.Name(), ZoneSource: string(z.Source),
+		GuestsCanModify: e.GuestsCanModify, GuestsCanInviteOthers: e.GuestsCanInviteOthers,
+		GuestsCanSeeOtherGuests: e.GuestsCanSeeOtherGuests,
 	}
 	for _, a := range e.Attendees {
 		out.Attendees = append(out.Attendees, AttendeeOut{
 			Email: a.Email, Name: a.Name, Response: a.Response,
 			Optional: a.Optional, Resource: a.Resource, Self: a.Self, Organizer: a.Organizer,
+		})
+	}
+	for _, a := range e.Attachments {
+		out.Attachments = append(out.Attachments, AttachmentOut{
+			Title: a.Title, FileID: a.FileID, URL: a.URL, MimeType: a.MimeType,
 		})
 	}
 
@@ -338,6 +437,12 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 	fmt.Fprintf(&b, "id: %s on calendar %s\n", e.ID, e.CalendarID)
 	if line := render.ConferenceLine(e.Conference); line != "" {
 		fmt.Fprintf(&b, "%s\n", line)
+	}
+	if e.Reminders != nil {
+		fmt.Fprintf(&b, "your reminders: %s\n", render.Reminders(*e.Reminders))
+	}
+	if d := e.StatusDetails; d != nil && d.DeclineMessage != "" {
+		fmt.Fprintf(&b, "decline message: %s\n", d.DeclineMessage)
 	}
 	if e.Description != "" {
 		fmt.Fprintf(&b, "\n%s\n", e.Description)
@@ -369,6 +474,12 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 		if e.AttendeesTruncated {
 			b.WriteString("  (Google truncated this guest list)\n")
 		}
+	}
+	if line := render.GuestPermissions(e); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
+	}
+	if len(e.Attachments) > 0 {
+		b.WriteString(render.Attachments(e.Attachments))
 	}
 	if e.IsInstance() {
 		fmt.Fprintf(&b, "\nOne occurrence of series %s.\n", e.SeriesID)
@@ -496,6 +607,10 @@ type AvailabilityOut struct {
 	Busy       []IntervalOut `json:"busy"`
 	Unknown    bool          `json:"unknown,omitempty"`
 	Reason     string        `json:"unknown_reason,omitempty"`
+	// Group is set for a group's address, and GroupMembers is how many
+	// calendars Google expanded it to: none when it could not.
+	Group        bool `json:"group,omitempty"`
+	GroupMembers int  `json:"group_members,omitempty"`
 }
 
 // IntervalOut is a span, absolute at both ends and with its length said
@@ -521,7 +636,10 @@ func NewAvailabilityResult(rep render.AvailabilityReport) AvailabilityResult {
 		text: rep.Text(),
 	}
 	for _, a := range rep.Answers {
-		ans := AvailabilityOut{CalendarID: a.CalendarID, Unknown: a.Unknown, Reason: a.Reason}
+		ans := AvailabilityOut{
+			CalendarID: a.CalendarID, Unknown: a.Unknown, Reason: a.Reason,
+			Group: a.Group, GroupMembers: a.Members,
+		}
 		for _, b := range a.Busy {
 			ans.Busy = append(ans.Busy, interval(b.Start, b.End))
 		}
@@ -705,8 +823,12 @@ type ChangesResult struct {
 
 	// Baseline says no token was supplied, so this is the starting
 	// point rather than a report of changes.
-	Baseline bool       `json:"baseline"`
-	Changed  []EventOut `json:"changed"`
+	Baseline bool `json:"baseline"`
+	// UpdatedSince echoes the moment an updated_since read asked from,
+	// as an absolute instant, so a date the caller passed can be checked
+	// against the zone it was read in.
+	UpdatedSince string     `json:"updated_since,omitempty"`
+	Changed      []EventOut `json:"changed"`
 	// Deleted carries ids only. Google's answer for a deleted event has
 	// no title and no times, and inventing them would be this server
 	// claiming to know what it does not.
@@ -744,6 +866,9 @@ func NewChangesResult(in render.Changes) ChangesResult {
 		Requests: in.Requests, Skipped: in.Skipped,
 		Deleted: in.Deleted,
 		text:    in.Text(),
+	}
+	if !in.Since.IsZero() {
+		out.UpdatedSince = in.Since.String()
 	}
 	for _, e := range in.Changed {
 		out.Changed = append(out.Changed, NewEventOut(e))

@@ -138,7 +138,7 @@ func TestUnknownNotifyIsRefusedWithTheChoices(t *testing.T) {
 func TestReachOfEventIgnoresResourcesAndSelf(t *testing.T) {
 	e := model.Event{Attendees: []model.Attendee{
 		{Email: "me@example.test", Self: true},
-		{Email: "room@example.test", Resource: true},
+		{Email: "room-sample@resource.calendar.google.com", Resource: true},
 		{Email: "colleague@example.test"},
 		{Email: "outside@elsewhere.test"},
 	}}
@@ -213,5 +213,49 @@ func TestAChoiceOnAWriteThatReachesNobodyStillReportsNobody(t *testing.T) {
 	// is what the caller asked for.
 	if d.SendUpdatesFor() != gcal.SendUpdatesNone {
 		t.Fatalf("the caller's choice was dropped: %q", d.SendUpdatesFor())
+	}
+}
+
+// A room's address is Google's own, under resource.calendar.google.com,
+// and a room is not a person: booking one reaches nobody, so it neither
+// makes notify required nor counts as a guest outside the organization.
+func TestARoomIsNotAGuest(t *testing.T) {
+	r := plan.ReachOfAddresses("me@example.test", []string{"room-sample@resource.calendar.google.com", "colleague@example.test"})
+	if r.Guests != 1 || r.External != 0 {
+		t.Fatalf("got %+v, want 1 guest and none outside", r)
+	}
+	if _, err := plan.Notification("none", r); err != nil {
+		t.Fatalf("none with a room and a colleague: %v", err)
+	}
+	if r := plan.ReachOfAddresses("me@example.test", []string{"ROOM-SAMPLE@Resource.Calendar.Google.com"}); r.Any() {
+		t.Fatalf("a room alone reached %+v", r)
+	}
+	for addr, room := range map[string]bool{
+		"room-sample@resource.calendar.google.com":  true,
+		"resource.calendar.google.com@example.test": false,
+		"person@example.test":                       false,
+	} {
+		if model.IsRoom(addr) != room {
+			t.Errorf("IsRoom(%q) = %t, want %t", addr, !room, room)
+		}
+	}
+}
+
+// A write that adds guests reaches them: adding an outside guest to an
+// event with none must ask, and must refuse none (§4.3.2, §4.3.4).
+// Somebody already on the event, the account, and a room add nobody.
+func TestReachOfEventCountsTheGuestsTheWriteAdds(t *testing.T) {
+	e := model.Event{Attendees: []model.Attendee{{Email: "colleague@example.test"}}}
+	r := plan.ReachOfEvent("me@example.test", "me@example.test", e,
+		"outside@elsewhere.test", "Colleague@example.test", "me@example.test", "room-sample@resource.calendar.google.com", " ", "outside@elsewhere.test")
+	if r.Guests != 2 || r.External != 1 {
+		t.Fatalf("got %+v, want 2 guests and 1 outside", r)
+	}
+	alone := plan.ReachOfEvent("me@example.test", "me@example.test", model.Event{}, "outside@elsewhere.test")
+	if _, err := plan.Notification("", alone); !errors.Is(err, plan.ErrInvalid) {
+		t.Fatalf("adding a guest without notify: %v, want a refusal", err)
+	}
+	if _, err := plan.Notification("none", alone); !errors.Is(err, plan.ErrBlocked) {
+		t.Fatalf("adding an outside guest with none: %v, want [blocked]", err)
 	}
 }

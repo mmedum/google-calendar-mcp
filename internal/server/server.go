@@ -27,7 +27,8 @@ const SDKVersion = "v1.8.0"
 
 const instructions = "Google Calendar tools. This server answers *when*: calendars, the events on them, and who " +
 	"is free. What a meeting produces — a recording, a notes document, an attachment — belongs to the Drive and " +
-	"Docs servers. " +
+	"Docs servers. get_event lists the files attached to an event with each one's Drive file id, which is what " +
+	"those servers take; this server never opens a file. " +
 	"Start with list_calendars: every other tool takes a calendar, the ids come from there, and it reports each " +
 	"calendar's time zone, which is what times are read against. " +
 	"Time is the thing to be careful about here. An all-day event is a DATE and has no time of day; it is never " +
@@ -38,14 +39,16 @@ const instructions = "Google Calendar tools. This server answers *when*: calenda
 	"before calling. " +
 	"list_events with expand=true gives each occurrence of a repeating event; with no_expand it gives the series " +
 	"once with its rule. Ask for what you mean: they answer different questions. " +
-	"search_events is Google's undocumented free-text match with no field syntax, so an empty result means the " +
+	"search_events matches free text against the fields Google documents, such as the title, location and " +
+	"guests, with no field syntax. How it matches words is not documented, so an empty result means the " +
 	"search found nothing, not that nothing exists — fall back to list_events when you need certainty. " +
 	"Never answer \"are they free\" from a list of events: events you cannot see the details of are still busy, " +
 	"and an event marked free is not. That is what check_availability is for, and it reports a calendar it could " +
 	"not read as unknown rather than as free. " +
 	"Before deleting or clearing a calendar, publishing one, opening one to a whole domain, making somebody an " +
-	"owner, or canceling an event in a way that emails its guests, the server also asks the person through the " +
-	"client when it can; a call they did not confirm is [blocked], and is not made again unless they ask."
+	"owner, canceling an event in a way that emails its guests, or making a status event that declines every " +
+	"meeting it overlaps or making one cover more time, the server also asks the person through the client " +
+	"when it can; a call they did not confirm is [blocked], and is not made again unless they ask."
 
 // Deps are what the server needs.
 type Deps struct {
@@ -106,7 +109,10 @@ func logCalls(lg *slog.Logger) mcp.Middleware {
 // SchemaDump is the stable description of the tool surface, for the
 // schema diff.
 type SchemaDump struct {
-	Server     string       `json:"server"`
+	Server string `json:"server"`
+	// Version is the build's, which is how the schema diff tells which
+	// release a recorded baseline holds.
+	Version    string       `json:"version"`
 	SDKVersion string       `json:"sdk_version"`
 	Tools      []SchemaTool `json:"tools"`
 	// Resources are part of the surface a client sees, so they are part
@@ -131,7 +137,10 @@ type SchemaTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
-	Annotations json.RawMessage `json:"annotations,omitempty"`
+	// OutputSchema is half the contract: a caller reads the fields it
+	// names, so dropping one breaks it as surely as dropping an input.
+	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
+	Annotations  json.RawMessage `json:"annotations,omitempty"`
 }
 
 // DumpSchemas lists every tool under the full surface.
@@ -163,12 +172,17 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 		return fmt.Errorf("server: list tools: %w", err)
 	}
 
-	dump := SchemaDump{Server: Name, SDKVersion: SDKVersion}
+	dump := SchemaDump{Server: Name, Version: d.Version, SDKVersion: SDKVersion}
 	for _, t := range res.Tools {
 		st := SchemaTool{Name: t.Name, Description: t.Description}
 		if t.InputSchema != nil {
 			if b, err := json.Marshal(t.InputSchema); err == nil {
 				st.InputSchema = b
+			}
+		}
+		if t.OutputSchema != nil {
+			if b, err := json.Marshal(t.OutputSchema); err == nil {
+				st.OutputSchema = b
 			}
 		}
 		if t.Annotations != nil {

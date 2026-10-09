@@ -15,12 +15,24 @@ import (
 
 // fieldResources are the resources §8b holds a verdict for. They are the
 // four whose fields decide what this server can do: an event, the two
-// views of a calendar, and a sharing rule.
+// views of a calendar, and a sharing rule. api-diff records them and
+// every schema they reach by $ref, since a field nested in an attendee
+// or a reminder is as much a capability as one on the event.
 //
-// The list lives here and in nothing else. api-diff records exactly
-// these from the discovery document, so a resource cannot be dropped
-// from the record by editing the snapshot.
+// The list lives here and in nothing else, so a resource cannot be
+// dropped from the record by editing the snapshot.
 var fieldResources = []string{"Event", "Calendar", "CalendarListEntry", "AclRule"}
+
+// wireSchema names the schema a wire type carries where the type is not
+// named after it. These read part of the raw conference data, which the
+// event keeps whole.
+var wireSchema = map[string]string{
+	"conferenceData":          "ConferenceData",
+	"conferenceCreateRequest": "CreateConferenceRequest",
+	"conferenceStatus":        "ConferenceRequestStatus",
+	"conferenceSolutionKey":   "ConferenceSolutionKey",
+	"conferenceEntryPoint":    "EntryPoint",
+}
 
 // apiFieldsGate is §8b: one verdict per published field.
 //
@@ -42,9 +54,12 @@ func apiFieldsGate() error {
 	if err != nil {
 		return err
 	}
-	if len(surface.Schemas) < len(fieldResources) {
-		return fmt.Errorf("the API snapshot carries %d resources, want %d (run `make api-diff`)",
-			len(surface.Schemas), len(fieldResources))
+	// By name, not by count: the snapshot also carries every schema the
+	// four reach, so a count would still pass with one of them gone.
+	for _, r := range fieldResources {
+		if !slices.ContainsFunc(surface.Schemas, func(s schemaRow) bool { return s.Resource == r }) {
+			return fmt.Errorf("the API snapshot does not carry %s (run `make api-diff`)", r)
+		}
 	}
 
 	published := map[string]bool{}
@@ -67,7 +82,11 @@ func apiFieldsGate() error {
 	if err != nil {
 		return err
 	}
-	modeled, err := modeledFields()
+	recorded := make([]string, 0, len(surface.Schemas))
+	for _, s := range surface.Schemas {
+		recorded = append(recorded, s.Resource)
+	}
+	modeled, err := modeledFields(recorded)
 	if err != nil {
 		return err
 	}
@@ -164,12 +183,12 @@ func loadFieldVerdicts() (map[string]fieldVerdict, error) {
 }
 
 // modeledFields reads internal/gcal and returns the json tags of the
-// fields each of the four resources actually carries.
+// fields each recorded schema's wire type actually carries.
 //
 // It reads the source rather than a hand-kept list, which is the whole
 // point: a field added to the struct and forgotten in the record is
 // exactly the drift this gate exists to catch.
-func modeledFields() (map[string]bool, error) {
+func modeledFields(schemas []string) (map[string]bool, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filepath.Join("internal", "gcal", "gcal.go"), nil, 0)
 	if err != nil {
@@ -183,9 +202,12 @@ func modeledFields() (map[string]bool, error) {
 			return true
 		}
 		// The wire types are named after the resources they carry, so
-		// the type name IS the resource name.
+		// the type name IS the resource name, apart from wireSchema's.
 		resource := ts.Name.Name
-		if !slices.Contains(fieldResources, resource) {
+		if s, ok := wireSchema[resource]; ok {
+			resource = s
+		}
+		if !slices.Contains(schemas, resource) {
 			return true
 		}
 		st, ok := ts.Type.(*ast.StructType)

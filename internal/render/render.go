@@ -43,6 +43,12 @@ type Schedule struct {
 	// instances (§2.9). The two return different things and a reader
 	// must know which they got.
 	Expanded bool
+	// EventTypes is the type filter the read was made with, empty when it
+	// had none. A reader must know the list leaves the other types out.
+	EventTypes []string
+	// ICalUID is the UID filter the read was made with, empty when it
+	// had none.
+	ICalUID string
 }
 
 // Text renders a schedule.
@@ -59,10 +65,24 @@ func (s Schedule) Text() string {
 	} else {
 		b.WriteString("recurring events are shown once, as a series with its rule\n")
 	}
+	if len(s.EventTypes) > 0 {
+		fmt.Fprintf(&b, "only these event types: %s\n", strings.Join(s.EventTypes, ", "))
+	}
+	if s.ICalUID != "" {
+		fmt.Fprintf(&b, "only the event with iCalendar UID %s\n", s.ICalUID)
+	}
 	b.WriteString("\n")
 
 	if len(s.Events) == 0 {
-		b.WriteString("No events in that window.\n")
+		switch {
+		case s.ICalUID != "":
+			b.WriteString("No event with that UID was found in that window. It may be on another calendar, " +
+				"or have moved outside the window.\n")
+		case len(s.EventTypes) > 0:
+			b.WriteString("No events of those types were found in that window.\n")
+		default:
+			b.WriteString("No events in that window.\n")
+		}
 		b.WriteString(s.footer())
 		return b.String()
 	}
@@ -138,11 +158,19 @@ func EventLine(e model.Event, z when.Zone) string {
 
 // Title is the event's title, or a stand-in. An empty title is a real
 // thing on a real calendar and rendering nothing for it loses the row.
+//
+// A private event's details are shown only to its guests, so an empty
+// title there may be one this account is not shown. It reads as that
+// rather than as an event nobody named.
 func Title(e model.Event) string {
-	if e.Title == "" {
+	switch {
+	case e.Title != "":
+		return e.Title
+	case e.Private():
+		return "(private: no title shown)"
+	default:
 		return "(no title)"
 	}
-	return e.Title
 }
 
 // commonTags are the marks every view of an event carries.
@@ -162,9 +190,18 @@ func commonTags(e model.Event) []string {
 		// person busy, which is the distinction §4.6 turns on.
 		tags = append(tags, "free")
 	}
+	switch {
+	case e.Private():
+		// Only the guests see the details, so a reader who is not one
+		// is seeing less than the event holds.
+		tags = append(tags, "private")
+	case e.Visibility == gcal.VisibilityPublic:
+		tags = append(tags, "public")
+	}
 	if t := eventTypeTag(e.Type); t != "" {
 		tags = append(tags, t)
 	}
+	tags = append(tags, statusTags(e.StatusDetails)...)
 	if e.EndInvented {
 		tags = append(tags, "no end time set")
 	}
@@ -174,10 +211,114 @@ func commonTags(e model.Event) []string {
 	if e.AttendeesTruncated {
 		tags = append(tags, "guest list truncated by Google")
 	}
+	if n := len(e.Attachments); n > 0 {
+		tags = append(tags, fmt.Sprintf("%d attachment%s", n, plural(n)))
+	}
 	if e.Location != "" {
 		tags = append(tags, "at "+e.Location)
 	}
 	return tags
+}
+
+// Attachments lists the files on an event, for its card.
+//
+// The title is printed as its owner wrote it, as a description is. The
+// file id comes first after it, because it is what hands the file to a
+// Drive server, and this server never opens a file itself (§1).
+func Attachments(files []model.Attachment) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nAttachments (%d):\n", len(files))
+	for _, f := range files {
+		title := f.Title
+		if title == "" {
+			title = "(no title)"
+		}
+		if f.MimeType != "" {
+			title += " (" + f.MimeType + ")"
+		}
+		fmt.Fprintf(&b, "  %s\n", title)
+		if f.FileID != "" {
+			fmt.Fprintf(&b, "    file id: %s\n", f.FileID)
+		}
+		if f.URL != "" {
+			fmt.Fprintf(&b, "    %s\n", f.URL)
+		}
+	}
+	b.WriteString("  A Drive server opens these by file id; this one does not.\n")
+	return b.String()
+}
+
+// Reminders says when somebody is reminded of an event: the calendar's
+// default ones, none, or each by channel and how long before the start.
+func Reminders(r model.Reminders) string {
+	if r.Default {
+		return "the calendar's default ones"
+	}
+	var parts []string
+	for _, m := range r.Popup {
+		parts = append(parts, "popup "+before(m))
+	}
+	for _, m := range r.Email {
+		parts = append(parts, "email "+before(m))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// before is a reminder's lead time in the largest whole unit.
+func before(minutes int) string {
+	unit := func(n int, word string) string {
+		if n == 1 {
+			return fmt.Sprintf("1 %s before", word)
+		}
+		return fmt.Sprintf("%d %ss before", n, word)
+	}
+	switch {
+	case minutes == 0:
+		return "at the start"
+	case minutes%(7*24*60) == 0:
+		return unit(minutes/(7*24*60), "week")
+	case minutes%(24*60) == 0:
+		return unit(minutes/(24*60), "day")
+	case minutes%60 == 0:
+		return unit(minutes/60, "hour")
+	default:
+		return unit(minutes, "minute")
+	}
+}
+
+// GuestPermissions says what a guest may do, for an event with guests or
+// one whose permissions are not Google's defaults.
+func GuestPermissions(e model.Event) string {
+	defaults := !e.GuestsCanModify && e.GuestsCanInviteOthers && e.GuestsCanSeeOtherGuests
+	if len(e.Attendees) == 0 && defaults {
+		return ""
+	}
+	var can, cannot []string
+	for _, p := range []struct {
+		allowed bool
+		what    string
+	}{
+		{e.GuestsCanModify, "change the event"},
+		{e.GuestsCanInviteOthers, "invite others"},
+		{e.GuestsCanSeeOtherGuests, "see the guest list"},
+	} {
+		if p.allowed {
+			can = append(can, p.what)
+		} else {
+			cannot = append(cannot, p.what)
+		}
+	}
+	var parts []string
+	if len(can) > 0 {
+		parts = append(parts, "can "+strings.Join(can, ", "))
+	}
+	if len(cannot) > 0 {
+		parts = append(parts, "cannot "+strings.Join(cannot, ", "))
+	}
+	return "guests " + strings.Join(parts, "; ")
 }
 
 // ConferenceLine is how an event says where to join it, or that there
@@ -270,6 +411,47 @@ func eventTypeTag(t string) string {
 	default:
 		return ""
 	}
+}
+
+// statusTags say what a status event does, after its type tag: which
+// invitations it declines, what Chat shows, and where the person works.
+// Declining nothing is the quiet case and has no tag. A value Google adds
+// later is shown as Google spells it.
+func statusTags(d *model.StatusDetails) []string {
+	if d == nil {
+		return nil
+	}
+	var tags []string
+	switch d.AutoDecline {
+	case "", model.AutoDeclineWords.Word(gcal.AutoDeclineNone):
+	case model.AutoDeclineWords.Word(gcal.AutoDeclineNew):
+		tags = append(tags, "declines new invitations")
+	case model.AutoDeclineWords.Word(gcal.AutoDeclineAll):
+		tags = append(tags, "declines every overlapping invitation")
+	default:
+		tags = append(tags, "declines: "+d.AutoDecline)
+	}
+	switch d.ChatStatus {
+	case "":
+	case model.ChatStatusWords.Word(gcal.ChatDoNotDisturb):
+		tags = append(tags, "chat: do not disturb")
+	default:
+		tags = append(tags, "chat: "+d.ChatStatus)
+	}
+	switch {
+	case d.WorkingLocation == "":
+	case d.WorkingLocation == model.WorkingLocationWords.Word(gcal.WorkingHome):
+		tags = append(tags, "working from home")
+	case d.WorkingLocationLabel != "":
+		tags = append(tags, "working from "+d.WorkingLocationLabel)
+	case d.WorkingLocation == "office":
+		tags = append(tags, "working from an office")
+	case d.WorkingLocation == "custom":
+		tags = append(tags, "working elsewhere")
+	default:
+		tags = append(tags, "working from "+d.WorkingLocation)
+	}
+	return tags
 }
 
 // dayKey groups events by their LOCAL day. It takes no zone: an event's
@@ -488,13 +670,23 @@ func (r AvailabilityReport) Text() string {
 	fmt.Fprintf(&b, "%s\n%s\n\n", r.Window, r.Zone.Explain())
 
 	for _, a := range r.Answers {
-		fmt.Fprintf(&b, "%s\n", a.CalendarID)
+		what := "calendar"
+		switch {
+		case a.Group && a.Members > 0:
+			what = "group"
+			fmt.Fprintf(&b, "%s (a group of %d calendar%s)\n", a.CalendarID, a.Members, plural(a.Members))
+		case a.Group:
+			what = "group"
+			fmt.Fprintf(&b, "%s (a group)\n", a.CalendarID)
+		default:
+			fmt.Fprintf(&b, "%s\n", a.CalendarID)
+		}
 		switch {
 		case a.Unknown:
 			// Never "free". §4.6: a model that cannot tell these apart
 			// will book over somebody.
-			fmt.Fprintf(&b, "  UNKNOWN — this calendar could not be read (%s). "+
-				"Do not treat this as free.\n", a.Reason)
+			fmt.Fprintf(&b, "  UNKNOWN — this %s could not be read (%s). "+
+				"Do not treat this as free.\n", what, a.Reason)
 		case len(a.Busy) == 0:
 			b.WriteString("  free for the whole window\n")
 		default:

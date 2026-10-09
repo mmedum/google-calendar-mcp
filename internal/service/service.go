@@ -9,9 +9,12 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -23,6 +26,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
@@ -337,10 +341,18 @@ type ListOptions struct {
 	To   string
 	// Expand chooses instances over series parents (§2.9).
 	Expand bool
-	// Query is the free-text q. Undocumented and unscoped (§2).
+	// Query is the free-text q, matched against fields Google documents,
+	// with no field syntax (§2).
 	Query string
 	// ShowCanceled includes canceled events (§2.13).
 	ShowCanceled bool
+	// EventTypes keeps only events of these types. Empty means every
+	// type, which is what Google does when the filter is left out.
+	EventTypes []string
+	// ICalUID keeps only the event with this iCalendar UID, the one an
+	// invitation carries. Every occurrence of a series shares it. It is
+	// a filter within the window, never an address (§6.2).
+	ICalUID string
 	// MaxEvents overrides the configured budget.
 	MaxEvents int
 	PageToken string
@@ -351,6 +363,12 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 	if err := s.ready(); err != nil {
 		return render.Schedule{}, err
 	}
+	types, err := eventTypes(o.EventTypes)
+	if err != nil {
+		return render.Schedule{}, err
+	}
+	o.EventTypes = types
+	o.ICalUID = strings.TrimSpace(o.ICalUID)
 	refs := o.Calendars
 	if len(refs) == 0 {
 		refs = []string{"primary"}
@@ -391,7 +409,8 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		budget = s.Cfg.MaxEvents
 	}
 
-	resume, err := decodeCursor(o.PageToken)
+	query := queryOf(o, win)
+	resume, err := decodeCursor(o.PageToken, query)
 	if err != nil {
 		return render.Schedule{}, err
 	}
@@ -426,7 +445,9 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		perCalendar = 1
 	}
 
-	sched := render.Schedule{Window: win, Zone: zone, Expanded: o.Expand}
+	sched := render.Schedule{
+		Window: win, Zone: zone, Expanded: o.Expand, EventTypes: o.EventTypes, ICalUID: o.ICalUID,
+	}
 	for _, c := range cals {
 		sched.Calendars = append(sched.Calendars, c.Title)
 	}
@@ -463,7 +484,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 			next[cals[i].ID] = r.token
 		}
 	}
-	sched.NextPageToken = encodeCursor(next)
+	sched.NextPageToken = encodeCursor(next, query)
 
 	sort.Slice(sched.Events, func(i, j int) bool {
 		return sortKey(sched.Events[i]) < sortKey(sched.Events[j])
@@ -491,6 +512,8 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		Query:        o.Query,
 		ShowDeleted:  o.ShowCanceled,
 		TimeZone:     zone.Name(),
+		EventTypes:   o.EventTypes,
+		ICalUID:      o.ICalUID,
 		MaxResults:   250,
 		PageToken:    pageToken,
 	}
@@ -506,13 +529,6 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 	return events, requests, token, err
 }
 
-// drain reads pages until the budget is reached or the pages run out.
-//
-// It is §4.5's completeness policy in one place: stop at the budget
-// rather than draining a year of events to throw them away, and hand
-// back the token so the caller can say how to continue. The two read
-// paths had a copy each and had already drifted on what "truncated"
-// means.
 // pageCursor is what `next_page_token` actually carries.
 //
 // One call can read several calendars, and a Google page token is scoped
@@ -527,46 +543,137 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 // continuation skips it rather than reading it again. It stays a single
 // opaque string, so the tool schema is unchanged and a caller still just
 // passes back what it was given.
+//
+// It also holds the query the read was made with: every input that
+// decides which events Google returns. Google resumes a token only for
+// the query that issued it, so a continuation with another one would
+// skip or repeat rows while its result named the new one. Each is
+// refused by name.
 type pageCursor struct {
-	V    int               `json:"v"`
-	Cals map[string]string `json:"c"`
+	V     int               `json:"v"`
+	Cals  map[string]string `json:"c"`
+	Query listQuery         `json:"q"`
 }
 
-const pageCursorVersion = 1
+// listQuery is what a schedule read asked Google for, as a cursor binds
+// it. The search text is kept as a hash: a page token is handed to the
+// caller and may land in a transcript, and a search term is content.
+type listQuery struct {
+	Types    []string `json:"t,omitempty"`
+	UID      string   `json:"u,omitempty"`
+	Text     string   `json:"s,omitempty"`
+	From     string   `json:"f"`
+	To       string   `json:"e"`
+	Series   bool     `json:"x,omitempty"`
+	Canceled bool     `json:"d,omitempty"`
+}
 
-func encodeCursor(tokens map[string]string) string {
+// queryOf is the query o makes over win.
+func queryOf(o ListOptions, win when.Window) listQuery {
+	q := listQuery{
+		Types: o.EventTypes, UID: o.ICalUID, Series: !o.Expand, Canceled: o.ShowCanceled,
+		From: instantKey(win.Start), To: instantKey(win.End),
+	}
+	if o.Query != "" {
+		q.Text = digest(o.Query)
+	}
+	return q
+}
+
+// instantKey is a moment as a cursor binds it: the instant, whatever zone
+// it was read in.
+func instantKey(z when.Zoned) string { return z.T.UTC().Format(time.RFC3339) }
+
+// digest is a short SHA-256 of s, for binding a value a cursor must not
+// carry.
+func digest(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:8])
+}
+
+// pageCursorVersion is 2 from the cursor that binds the whole query. A
+// token from before is refused as one this server did not issue, and
+// the read starts again.
+const pageCursorVersion = 2
+
+func encodeCursor(tokens map[string]string, q listQuery) string {
 	if len(tokens) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(pageCursor{V: pageCursorVersion, Cals: tokens})
+	return encodeToken(pageCursor{V: pageCursorVersion, Cals: tokens, Query: q})
+}
+
+// decodeCursor returns the per-calendar tokens, or nil for a first read.
+// It refuses a token issued for another query, naming what differs.
+func decodeCursor(tok string, q listQuery) (map[string]string, error) {
+	if strings.TrimSpace(tok) == "" {
+		return nil, nil
+	}
+	var c pageCursor
+	if !decodeToken(tok, &c) || c.V != pageCursorVersion || len(c.Cals) == 0 {
+		return nil, errForeignToken
+	}
+	was := c.Query
+	again := "or omit the token to start again"
+	switch {
+	case !slices.Equal(was.Types, q.Types):
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for event_types [%s], not [%s]. Pass the same event_types, %s",
+			strings.Join(was.Types, ", "), strings.Join(q.Types, ", "), again)
+	case was.UID != q.UID:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for ical_uid %q, not %q. Pass the same ical_uid, %s", was.UID, q.UID, again)
+	case was.Text != q.Text:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for another search text. Pass the same query, %s", again)
+	case was.From != q.From || was.To != q.To:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for the window %s to %s, not %s to %s. Pass the same from, to and "+
+				"time_zone, %s", was.From, was.To, q.From, q.To, again)
+	case was.Series != q.Series:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued with no_expand %t, not %t. Pass the same no_expand, %s",
+			was.Series, q.Series, again)
+	case was.Canceled != q.Canceled:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued with show_canceled %t, not %t. Pass the same show_canceled, %s",
+			was.Canceled, q.Canceled, again)
+	}
+	return c.Cals, nil
+}
+
+// errForeignToken refuses a page token this server did not issue, or
+// issued in another shape.
+var errForeignToken = gapi.Errf(gapi.ClassInvalid,
+	"page_token is not one this server issued. Pass back the next_page_token from a previous read with "+
+		"the same arguments, unchanged, or omit it to start again")
+
+// encodeToken is v as an opaque page token: JSON, base64url.
+func encodeToken(v any) string {
+	b, err := json.Marshal(v)
 	if err != nil {
-		// Unreachable for a map of strings, and a lost token is better
-		// than a bad one: an empty cursor reads as "nothing more", which
-		// Truncated still contradicts.
+		// Unreachable for this package's cursors, and a lost token is
+		// better than a bad one: an empty cursor reads as "nothing
+		// more", which the result's truncation still contradicts.
 		return ""
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// decodeCursor returns the per-calendar tokens, or nil for a first read.
-func decodeCursor(tok string) (map[string]string, error) {
-	if strings.TrimSpace(tok) == "" {
-		return nil, nil
-	}
-	bad := gapi.Errf(gapi.ClassInvalid,
-		"page_token is not one this server issued. Pass back the next_page_token from a previous "+
-			"read of the same calendars, unchanged, or omit it to start again")
+// decodeToken reads a page token encodeToken made into v.
+func decodeToken(tok string, v any) bool {
 	raw, err := base64.RawURLEncoding.DecodeString(tok)
-	if err != nil {
-		return nil, bad
-	}
-	var c pageCursor
-	if err := json.Unmarshal(raw, &c); err != nil || c.V != pageCursorVersion || len(c.Cals) == 0 {
-		return nil, bad
-	}
-	return c.Cals, nil
+	return err == nil && json.Unmarshal(raw, v) == nil
 }
 
+// drain reads pages until the budget is reached or the pages run out.
+//
+// It is §4.5's completeness policy in one place: stop at the budget
+// rather than draining a year of events to throw them away, and hand
+// back the token so the caller can say how to continue. The two read
+// paths had a copy each and had already drifted on what "truncated"
+// means.
+//
 // showCanceled is the caller's promise, passed in rather than read off
 // opts.ShowDeleted. The two are not the same knob: ShowDeleted is what
 // this server asked Google for, and the defect being fixed here is
@@ -631,6 +738,35 @@ func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, 
 		}
 		opts.PageToken = page.NextPageToken
 	}
+}
+
+// filterTypes are the types events.list can filter on, in Google's
+// spelling, which is also how a read reports an event's type.
+var filterTypes = []string{
+	gcal.EventTypeDefault, gcal.EventTypeBirthday, gcal.EventTypeFocusTime,
+	gcal.EventTypeFromGmail, gcal.EventTypeOutOfOffice, gcal.EventTypeWorkingLocation,
+}
+
+// eventTypes checks a type filter against Google's six and spells each
+// one as Google does, in Google's order, each once. Case does not
+// matter, so one filter given two ways comes out the same.
+func eventTypes(asked []string) ([]string, error) {
+	keep := map[string]bool{}
+	for _, a := range asked {
+		i := slices.IndexFunc(filterTypes, func(t string) bool { return strings.EqualFold(t, strings.TrimSpace(a)) })
+		if i < 0 {
+			return nil, gapi.Errf(gapi.ClassInvalid,
+				"%q is not an event type. event_types takes %s", a, strings.Join(filterTypes, ", "))
+		}
+		keep[filterTypes[i]] = true
+	}
+	var out []string
+	for _, t := range filterTypes {
+		if keep[t] {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 // GetEvent reads one event.
@@ -737,8 +873,9 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 		return CalendarResult{}, err
 	}
 	out := CalendarResult{
-		Calendar:    NewCalendarsResult([]model.Calendar{c}).Calendars[0],
-		Description: c.Description,
+		Calendar:         NewCalendarsResult([]model.Calendar{c}).Calendars[0],
+		Description:      c.Description,
+		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders),
 	}
 	if !s.Cfg.Sharing {
 		out.Note = "Sharing tools are off in this server (GCAL_SHARING=off), so the sharing list was not read."
@@ -912,8 +1049,10 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	}
 	opts := gapi.EventsListOptions{
 		TimeZone: zone.Name(), MaxResults: 250,
-		ShowDeleted: o.ShowCanceled, PageToken: o.PageToken,
+		ShowDeleted: o.ShowCanceled,
 	}
+	read := instancesCursor{V: instancesCursorVersion, Series: digest(c.ID + "\x00" + o.EventID),
+		Canceled: o.ShowCanceled}
 
 	hasFrom, hasTo := strings.TrimSpace(o.From) != "", strings.TrimSpace(o.To) != ""
 	switch {
@@ -928,6 +1067,10 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 		}
 		out.Window = &win
 		opts.TimeMin, opts.TimeMax = win.Start.String(), win.End.String()
+		read.From, read.To = instantKey(win.Start), instantKey(win.End)
+	}
+	if opts.PageToken, err = read.resume(o.PageToken); err != nil {
+		return render.Instances{}, err
 	}
 
 	budget := o.MaxEvents
@@ -943,7 +1086,7 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	if err != nil {
 		return render.Instances{}, instancesError(err, o.EventID)
 	}
-	out.Events, out.NextPageToken = events, token
+	out.Events, out.NextPageToken = events, read.next(token)
 	for _, e := range events {
 		if out.Title == "" {
 			out.Title = e.Title
@@ -972,6 +1115,64 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	// either the budget cut the list, or a page is still waiting.
 	out.Truncated = len(events) > budget || out.NextPageToken != ""
 	return out, nil
+}
+
+// instancesCursor is what list_instances' next_page_token carries:
+// Google's page token, and the read that issued it. Series is a digest of
+// the calendar and series ids. From and To are the window's instants,
+// both empty for the whole series.
+type instancesCursor struct {
+	V        int    `json:"v"`
+	Page     string `json:"p"`
+	Series   string `json:"i"`
+	From     string `json:"f,omitempty"`
+	To       string `json:"e,omitempty"`
+	Canceled bool   `json:"d,omitempty"`
+}
+
+const instancesCursorVersion = 1
+
+// next is Google's page token as this read hands it back, or "".
+func (c instancesCursor) next(page string) string {
+	if page == "" {
+		return ""
+	}
+	c.Page = page
+	return encodeToken(c)
+}
+
+// resume returns Google's page token from tok, or "" for a first page.
+// It refuses a token issued for another read, naming what differs.
+func (c instancesCursor) resume(tok string) (string, error) {
+	if strings.TrimSpace(tok) == "" {
+		return "", nil
+	}
+	var was instancesCursor
+	if !decodeToken(tok, &was) || was.V != instancesCursorVersion || was.Page == "" {
+		return "", errForeignToken
+	}
+	again := "or omit the token to start again"
+	span := func(c instancesCursor) string {
+		if c.From == "" {
+			return "the whole series"
+		}
+		return "the window " + c.From + " to " + c.To
+	}
+	switch {
+	case was.Series != c.Series:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for another series. Pass the calendar and event_id it was issued "+
+				"for, %s", again)
+	case was.From != c.From || was.To != c.To:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for %s, not %s. Pass the same from, to and time_zone, %s",
+			span(was), span(c), again)
+	case was.Canceled != c.Canceled:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued with show_canceled %t, not %t. Pass the same show_canceled, %s",
+			was.Canceled, c.Canceled, again)
+	}
+	return was.Page, nil
 }
 
 // instancesError says where the id should have come from.
@@ -1061,22 +1262,41 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 
 	// §2.10 caps one query at 50 calendars, so more than that is more
 	// than one request — and §4.7 says the result reports how many.
-	for batch := range slices.Chunk(ids, FreeBusyBatch) {
-		req := &gcal.FreeBusyRequest{
-			TimeMin: win.Start.String(), TimeMax: win.End.String(),
-			TimeZone: zone.Name(), CalendarExpansionMax: FreeBusyBatch,
+	resp := &gcal.FreeBusyResponse{Calendars: map[string]gcal.FreeBusyCalendar{}, Groups: map[string]gcal.FreeBusyGroup{}}
+	query := func(ids []string) error {
+		for batch := range slices.Chunk(ids, FreeBusyBatch) {
+			req := &gcal.FreeBusyRequest{
+				TimeMin: win.Start.String(), TimeMax: win.End.String(),
+				TimeZone: zone.Name(), CalendarExpansionMax: FreeBusyBatch,
+				GroupExpansionMax: maxGroupMembers,
+			}
+			for _, id := range batch {
+				req.Items = append(req.Items, gcal.FreeBusyRequestItem{ID: id})
+			}
+			got, err := s.API.QueryFreeBusy(ctx, req)
+			report.Requests++
+			if err != nil {
+				return err
+			}
+			maps.Copy(resp.Calendars, got.Calendars)
+			maps.Copy(resp.Groups, got.Groups)
 		}
-		for _, id := range batch {
-			req.Items = append(req.Items, gcal.FreeBusyRequestItem{ID: id})
-		}
-		resp, err := s.API.QueryFreeBusy(ctx, req)
-		report.Requests++
-		if err != nil {
+		return nil
+	}
+	if err := query(ids); err != nil {
+		return render.AvailabilityReport{}, err
+	}
+	// The cap counts a group's members too, so a group of 60, or a group
+	// of 10 beside 45 calendars, leaves calendars unanswered. They are
+	// asked again on their own, up to a bound; one still unanswered is
+	// unknown, and so is its group, never free.
+	if again := unanswered(ids, resp); len(again) > 0 {
+		if err := query(again[:min(len(again), maxAskedAgain)]); err != nil {
 			return render.AvailabilityReport{}, err
 		}
-		for _, id := range batch {
-			report.Answers = append(report.Answers, answerFor(id, resp, zone))
-		}
+	}
+	for _, id := range ids {
+		report.Answers = append(report.Answers, answerFor(id, resp, zone))
 	}
 
 	var busy []model.Busy
@@ -1098,14 +1318,104 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 	return report, nil
 }
 
-// answerFor turns one calendar's slot in the response into an answer,
-// and a missing slot into "unknown" rather than into "free".
+// maxGroupMembers is the most member calendars Google expands a group
+// to; a bigger group is an error, not a partial list (discovery,
+// FreeBusyRequest.groupExpansionMax).
+const maxGroupMembers = 100
+
+// maxAskedAgain bounds the members asked about again, at four requests:
+// enough for two groups of the most Google expands.
+const maxAskedAgain = 2 * maxGroupMembers
+
+// unanswered is every calendar the response has no answer for, a
+// group's members included, in the order asked and each once. A slot
+// whose error is tooManyCalendarsRequested is no answer: Google
+// documents that reason as "The number of calendars requested is too
+// large for a single query", and does not say whether a calendar past
+// the cap comes back that way or not at all (§18 row 100).
+func unanswered(ids []string, resp *gcal.FreeBusyResponse) []string {
+	var out []string
+	seen := map[string]bool{}
+	ask := func(id string) {
+		if cal, answered := resp.Calendars[id]; (!answered || pastCap(cal)) && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, id := range ids {
+		g, isGroup := resp.Groups[id]
+		if _, isCalendar := resp.Calendars[id]; !isGroup || isCalendar {
+			ask(id)
+			continue
+		}
+		for _, m := range g.Calendars {
+			ask(m)
+		}
+	}
+	return out
+}
+
+// tooManyCalendars is the reason Google gives a calendar a query asked
+// about with too many others.
+const tooManyCalendars = "tooManyCalendarsRequested"
+
+// pastCap reports whether a calendar's slot says it was past the query's
+// cap rather than read.
+func pastCap(cal gcal.FreeBusyCalendar) bool {
+	return slices.ContainsFunc(cal.Errors, func(e gcal.FreeBusyError) bool { return e.Reason == tooManyCalendars })
+}
+
+// answerFor turns one calendar's or group's slot in the response into an
+// answer.
+func answerFor(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
+	if g, ok := resp.Groups[id]; ok {
+		if _, isCalendar := resp.Calendars[id]; !isCalendar {
+			return groupAnswer(id, g, resp, zone)
+		}
+	}
+	return calendarAnswer(id, resp, zone)
+}
+
+// groupAnswer is a group's members' busy time together. It is unknown
+// when Google could not expand the group, expanded it to nobody, or
+// could not read a member: one member unread is somebody who may be
+// busy, and a group answered as free on that is §4.6's defect.
+func groupAnswer(id string, g gcal.FreeBusyGroup, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
+	out := model.Availability{CalendarID: id, Group: true, Members: len(g.Calendars)}
+	switch {
+	case len(g.Errors) > 0:
+		out.Unknown, out.Reason = true, "Google could not expand this group: "+freeBusyReason(g.Errors[0])
+		return out
+	case len(g.Calendars) == 0:
+		out.Unknown, out.Reason = true, "Google expanded this group to no calendars"
+		return out
+	}
+	unread := 0
+	var busy []model.Busy
+	for _, m := range g.Calendars {
+		a := calendarAnswer(m, resp, zone)
+		if a.Unknown {
+			unread++
+			continue
+		}
+		busy = append(busy, a.Busy...)
+	}
+	if unread > 0 {
+		out.Unknown, out.Reason = true, fmt.Sprintf("%d of its %d calendars could not be read", unread, len(g.Calendars))
+		return out
+	}
+	out.Busy = model.Merge(busy)
+	return out
+}
+
+// calendarAnswer turns one calendar's slot in the response into an
+// answer, and a missing slot into "unknown" rather than into "free".
 //
 // A calendar Google did not answer for is the case that matters:
 // calendarExpansionMax truncating the query looks exactly like this, and
 // the difference between "no busy blocks" and "no answer" is somebody's
 // meeting.
-func answerFor(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
+func calendarAnswer(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
 	out := model.Availability{CalendarID: id}
 	cal, ok := resp.Calendars[id]
 	if !ok {
@@ -1143,6 +1453,8 @@ func freeBusyReason(e gcal.FreeBusyError) string {
 		return "Google failed to read it; try again"
 	case "rateLimitExceeded", "quotaExceeded":
 		return "Google is rate limiting this account"
+	case tooManyCalendars:
+		return "Google answered for too many calendars at once to include this one"
 	case "":
 		return "Google reported an error without a reason"
 	default:
@@ -1175,6 +1487,15 @@ func (s *Service) freeBusyTargets(ctx context.Context, refs []string) (ids []str
 	seen := map[string]bool{}
 	for _, ref := range refs {
 		ref = strings.TrimSpace(ref)
+		if strings.Contains(ref, "@") {
+			// A mailbox with a display name is asked about by its address,
+			// and the answer names the bare one.
+			bare, aerr := plan.Address(ref, "a calendar to check")
+			if aerr != nil {
+				return nil, "", classifyPlan(aerr)
+			}
+			ref = bare
+		}
 		id := ref
 		if ref == "" || strings.EqualFold(ref, "primary") || !strings.Contains(ref, "@") {
 			c, rerr := s.ResolveCalendar(ctx, ref)

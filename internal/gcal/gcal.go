@@ -16,8 +16,12 @@ package gcal
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -102,15 +106,121 @@ type Event struct {
 	// and fromGmail cannot be created at all (§2.12).
 	EventType string `json:"eventType,omitempty"`
 
-	// ConferenceData is read here and written by create_event (§17.3).
+	// The details of a status event, one block per type (§7.4). Each
+	// stays raw JSON, as conferenceData does: a read and a split copy
+	// carry the block whole, so a detail Google adds later is not lost
+	// on the way through. The types below read and write them.
+	OutOfOfficeProperties     json.RawMessage `json:"outOfOfficeProperties,omitempty"`
+	FocusTimeProperties       json.RawMessage `json:"focusTimeProperties,omitempty"`
+	WorkingLocationProperties json.RawMessage `json:"workingLocationProperties,omitempty"`
+
+	// ConferenceData is read here, and a create request is written by
+	// create_event and by update_event's add_conference (§17.3).
 	// It stays raw JSON: the union has a third-party arm this package
 	// does not model, and a read that round-trips the value whole cannot
 	// lose what it did not understand. ReadConference takes out the
 	// three fields a result needs.
 	ConferenceData json.RawMessage `json:"conferenceData,omitempty"`
 
+	// Attachments are the files on the event, usually Drive files. Reads
+	// show them and nothing here writes them, except a series split,
+	// which carries the parent's (§4.2). The file itself belongs to the
+	// Drive server; FileID is what hands it over.
+	Attachments []EventAttachment `json:"attachments,omitempty"`
+
 	// ETag backs If-Match on every write (§4.4).
 	ETag string `json:"etag,omitempty"`
+
+	// Unmodeled is every field Google sent that the fields above do not
+	// name, kept as Google sent it. No result shows it. It exists so an
+	// event copied whole keeps what this package does not understand:
+	// the new series of a this_and_following split (§2.8) is the parent
+	// copied, and decoding into the fields above alone dropped another
+	// application's extended properties and a working location's
+	// details — which Google needs to create one.
+	Unmodeled map[string]json.RawMessage `json:"-"`
+}
+
+// eventFields are the JSON names Event models, read off its tags once,
+// so a field added above is never also kept in Unmodeled.
+var eventFields = func() map[string]bool {
+	out := map[string]bool{}
+	t := reflect.TypeFor[Event]()
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			out[name] = true
+		}
+	}
+	return out
+}()
+
+// UnmarshalJSON decodes the modeled fields and keeps the rest in
+// Unmodeled. A modeled name never reaches Unmodeled, so a field the
+// struct clears on purpose, such as a description, cannot come back
+// from a copy.
+func (e *Event) UnmarshalJSON(data []byte) error {
+	// JSON null leaves the event as it was, as it does for any struct.
+	if string(data) == "null" {
+		return nil
+	}
+	type plain Event
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	maps.DeleteFunc(all, func(name string, _ json.RawMessage) bool { return eventFields[name] })
+	if len(all) == 0 {
+		all = nil
+	}
+	*e = Event(p)
+	e.Unmodeled = all
+	return nil
+}
+
+// MarshalJSON writes the modeled fields and then what Unmodeled kept.
+func (e Event) MarshalJSON() ([]byte, error) {
+	type plain Event
+	data, err := json.Marshal(plain(e))
+	if err != nil || len(e.Unmodeled) == 0 {
+		return data, err
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return nil, err
+	}
+	maps.Copy(all, e.Unmodeled)
+	return json.Marshal(all)
+}
+
+// HasAttachments reports whether the event carries file attachments,
+// which Google keeps only when the write says it supports them.
+func (e Event) HasAttachments() bool { return len(e.Attachments) > 0 }
+
+// HasLabel reports whether the event names an event label, which Google
+// reads only when the write says it supports labels.
+func (e Event) HasLabel() bool {
+	var id string
+	return json.Unmarshal(e.Unmodeled["eventLabelId"], &id) == nil && id != ""
+}
+
+// EventAttachment is one file on an event.
+//
+// Title is text somebody else wrote, like a description: it reaches a
+// renderer and never a log (§9). All five fields are carried, so a
+// split hands Google back the attachment it read, icon included.
+type EventAttachment struct {
+	// FileID is the Drive file's id, which Google sets.
+	FileID string `json:"fileId,omitempty"`
+	// FileURL is the link to the file, and what Google needs to add one.
+	FileURL  string `json:"fileUrl,omitempty"`
+	Title    string `json:"title,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	IconLink string `json:"iconLink,omitempty"`
 }
 
 // EventPerson is the creator or organizer of an event.
@@ -164,6 +274,98 @@ const (
 	EventTypeWorkingLocation = "workingLocation"
 )
 
+// ------------------------------------------------------- status events
+
+// EventOutOfOfficeProperties are an out-of-office event's details.
+type EventOutOfOfficeProperties struct {
+	AutoDeclineMode string `json:"autoDeclineMode,omitempty"`
+	// DeclineMessage is the account's own text, sent to each organizer
+	// whose invitation is declined. Content: it reaches a result and
+	// never a log (§9).
+	DeclineMessage string `json:"declineMessage,omitempty"`
+}
+
+// EventFocusTimeProperties are a focus-time event's details.
+type EventFocusTimeProperties struct {
+	AutoDeclineMode string `json:"autoDeclineMode,omitempty"`
+	// ChatStatus is what Google Chat shows during the event.
+	ChatStatus     string `json:"chatStatus,omitempty"`
+	DeclineMessage string `json:"declineMessage,omitempty"`
+}
+
+// EventWorkingLocationProperties say where the account works. Type names
+// which of the three blocks holds the details.
+type EventWorkingLocationProperties struct {
+	Type string `json:"type,omitempty"`
+	// HomeOffice is published as "any" and carries nothing.
+	HomeOffice     json.RawMessage        `json:"homeOffice,omitempty"`
+	OfficeLocation *WorkingLocationOffice `json:"officeLocation,omitempty"`
+	CustomLocation *WorkingLocationCustom `json:"customLocation,omitempty"`
+}
+
+// WorkingLocationOffice is an office. Label is what Calendar shows; the
+// ids name a building, floor and desk in the organization's resources.
+type WorkingLocationOffice struct {
+	BuildingID     string `json:"buildingId,omitempty"`
+	FloorID        string `json:"floorId,omitempty"`
+	FloorSectionID string `json:"floorSectionId,omitempty"`
+	DeskID         string `json:"deskId,omitempty"`
+	Label          string `json:"label,omitempty"`
+}
+
+// WorkingLocationCustom is somewhere else, named by its label.
+type WorkingLocationCustom struct {
+	Label string `json:"label,omitempty"`
+}
+
+// autoDeclineMode values. "all" declines meetings already accepted too,
+// and each organizer sees the decline.
+const (
+	AutoDeclineNone = "declineNone"
+	AutoDeclineAll  = "declineAllConflictingInvitations"
+	AutoDeclineNew  = "declineOnlyNewConflictingInvitations"
+)
+
+// chatStatus values on a focus-time event.
+const (
+	ChatAvailable    = "available"
+	ChatDoNotDisturb = "doNotDisturb"
+)
+
+// workingLocationProperties.type values.
+const (
+	WorkingHome   = "homeOffice"
+	WorkingOffice = "officeLocation"
+	WorkingCustom = "customLocation"
+)
+
+// StatusDetails returns the raw details block an event of its own type
+// carries, or nil.
+func (e Event) StatusDetails() json.RawMessage {
+	switch e.EventType {
+	case EventTypeOutOfOffice:
+		return e.OutOfOfficeProperties
+	case EventTypeFocusTime:
+		return e.FocusTimeProperties
+	case EventTypeWorkingLocation:
+		return e.WorkingLocationProperties
+	default:
+		return nil
+	}
+}
+
+// Raw is v as JSON, for a details block.
+func Raw(v any) json.RawMessage {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		// Unreachable: the blocks are this package's own structs of
+		// strings. Nil leaves the block out, and the fake and Google both
+		// refuse a status event without one rather than make it wrong.
+		return nil
+	}
+	return raw
+}
+
 // Transparency values. "transparent" means the event does not make the
 // person busy, which is why availability cannot be computed from an
 // event list (§4.6).
@@ -173,9 +375,17 @@ const (
 )
 
 // EventReminders is the per-event override of the calendar's defaults.
+//
+// Reminders are per person: Google documents the field as "the event's
+// reminders for the authenticated user", so another guest has their own
+// and changing them reaches nobody.
 type EventReminders struct {
-	UseDefault bool            `json:"useDefault"`
-	Overrides  []EventReminder `json:"overrides,omitempty"`
+	UseDefault bool `json:"useDefault"`
+	// Overrides is always sent, null when there are none. A patch merges
+	// an object into the one there and replaces an array, so leaving it
+	// out would keep the old reminders under a new useDefault, and null
+	// is how a patch deletes a field.
+	Overrides []EventReminder `json:"overrides"`
 }
 
 // EventReminder is one reminder.
@@ -183,6 +393,30 @@ type EventReminder struct {
 	Method  string `json:"method,omitempty"`
 	Minutes int    `json:"minutes"`
 }
+
+// The two reminder methods Google publishes.
+const (
+	ReminderPopup = "popup"
+	ReminderEmail = "email"
+)
+
+// Reminder limits, from the discovery document: minutes "between 0 and
+// 40320 (4 weeks in minutes)", and "The maximum number of override
+// reminders is 5."
+const (
+	MaxReminderMinutes = 40320
+	MaxReminders       = 5
+)
+
+// Visibility values. Confidential is Google's: "The event is private.
+// This value is provided for compatibility reasons." A read shows it as
+// it came; a write sends private instead.
+const (
+	VisibilityDefault      = "default"
+	VisibilityPublic       = "public"
+	VisibilityPrivate      = "private"
+	VisibilityConfidential = "confidential"
+)
 
 // EventList is the events.list response.
 type EventList struct {
@@ -577,6 +811,22 @@ type EventPatch struct {
 	Status       *string          `json:"status,omitempty"`
 	Transparency *string          `json:"transparency,omitempty"`
 	ColorID      *string          `json:"colorId,omitempty"`
+	Visibility   *string          `json:"visibility,omitempty"`
+	// Reminders replaces this account's reminders whole, Overrides
+	// included (see EventReminders).
+	Reminders *EventReminders `json:"reminders,omitempty"`
+	// What a guest may do. Pointers, because two of the three default
+	// to true and false has to survive the trip.
+	GuestsCanModify         *bool `json:"guestsCanModify,omitempty"`
+	GuestsCanInviteOthers   *bool `json:"guestsCanInviteOthers,omitempty"`
+	GuestsCanSeeOtherGuests *bool `json:"guestsCanSeeOtherGuests,omitempty"`
+	// ConferenceData carries only a create request, from
+	// NewConferenceRequest. Google replaces the field whole, so a patch
+	// carrying it on an event that has a conference would replace that
+	// conference; the service refuses that before building one. ApplyTo
+	// does not fold it: Google answers a request with a conference it
+	// makes, which no fold can produce.
+	ConferenceData json.RawMessage `json:"conferenceData,omitempty"`
 }
 
 // ApplyTo folds a patch into an event: what the resource looks like once
@@ -618,6 +868,24 @@ func (p EventPatch) ApplyTo(e *Event) {
 	}
 	if p.ColorID != nil {
 		e.ColorID = *p.ColorID
+	}
+	if p.Visibility != nil {
+		e.Visibility = *p.Visibility
+	}
+	if p.Reminders != nil {
+		r := *p.Reminders
+		e.Reminders = &r
+	}
+	if p.GuestsCanModify != nil {
+		e.GuestsCanModify = *p.GuestsCanModify
+	}
+	if p.GuestsCanInviteOthers != nil {
+		v := *p.GuestsCanInviteOthers
+		e.GuestsCanInviteOthers = &v
+	}
+	if p.GuestsCanSeeOtherGuests != nil {
+		v := *p.GuestsCanSeeOtherGuests
+		e.GuestsCanSeeOtherGuests = &v
 	}
 }
 
@@ -971,10 +1239,11 @@ func (c Conference) Ready() bool { return c.State() == ConferenceReady }
 // NewConferenceRequest is the body that asks Google to attach a Meet
 // conference to an event.
 //
-// requestId is the caller's, and this server passes the event id: the
+// requestId is the caller's. create_event passes the event id: the
 // discovery document says a request repeating an id is IGNORED, so a
 // retry of a create that may have landed (§2.11) cannot produce a second
-// conference. An id regenerated per attempt would.
+// conference. An id regenerated per attempt would. update_event passes
+// ConferenceRequestID, for the reason given there.
 //
 // The request only asks, and Conference carries the status rather than a
 // promise: the answer may be "success" with the link in it, which is
@@ -992,6 +1261,21 @@ func NewConferenceRequest(requestID string) json.RawMessage {
 		return nil
 	}
 	return raw
+}
+
+// ConferenceRequestID is the request id for adding a conference to an
+// event that exists: a hash of the event id and the etag of the version
+// the write is made under.
+//
+// Not the event id. A create with a conference already used that one,
+// and Google ignores a request that repeats an id, so adding a link
+// again after somebody removed the first would be ignored in silence.
+// The etag moves with every write, so each version gets its own id,
+// while a retry of the same patch, made under the same etag, repeats it
+// and cannot make a second conference.
+func ConferenceRequestID(eventID, etag string) string {
+	sum := sha256.Sum256([]byte(eventID + "\x00" + etag))
+	return hex.EncodeToString(sum[:16])
 }
 
 // ReadConference reads what a result needs out of an event's raw

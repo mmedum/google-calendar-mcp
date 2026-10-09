@@ -57,6 +57,11 @@ func registerRead(s *mcp.Server, d Deps) {
 			"\"what is on this week\". With expand=false it appears once, as a series with its recurrence rule, " +
 			"which is what you want before changing the whole series. " +
 			"Canceled events are hidden unless show_canceled is set. " +
+			"event_types keeps only some kinds of event, such as outOfOffice, and the result names the filter. " +
+			"ical_uid keeps only the event with that iCalendar UID, which is how to find the event an " +
+			"invitation email is about. Every occurrence of a repeating event shares one UID, so with expand you " +
+			"get each occurrence in the window. The window still applies: make it wide enough for a meeting " +
+			"that may have moved. " +
 			"Use search_events to find an event by text; use check_availability to find free time, because a list " +
 			"of events is not the same as being free.",
 		Kind: Read,
@@ -66,6 +71,8 @@ func registerRead(s *mcp.Server, d Deps) {
 				From: in.From, To: in.To,
 				Expand:       !in.NoExpand,
 				ShowCanceled: in.ShowCanceled,
+				EventTypes:   in.EventTypes,
+				ICalUID:      in.ICalUID,
 				MaxEvents:    in.MaxEvents, PageToken: in.PageToken,
 			})
 			if err != nil {
@@ -78,18 +85,23 @@ func registerRead(s *mcp.Server, d Deps) {
 	add(s, d, Def[searchEventsIn, service.ScheduleResult]{
 		Name: "search_events",
 		Description: "Find events matching free text in a window. " + windowHelp + " " +
-			"Important: Google's event search is undocumented free text with no field scoping — you cannot search " +
-			"\"attendee:someone\" or restrict it to titles, and Google does not say which fields it reads. " +
-			"Treat an empty result as \"this search found nothing\", not as \"there is no such event\", and fall " +
-			"back to list_events over the window when you need certainty. " +
+			"Google documents the fields the text is matched against: the title, description and location, the " +
+			"guests' and organizer's names and addresses, and a working location's labels; words such as " +
+			"\"Out of office\" also match those kinds of event, in any language. There is no field syntax: you " +
+			"cannot search \"attendee:someone\" or restrict it to titles. How words are matched is not " +
+			"documented, and an event you can see only as busy has nothing to match, so treat an empty result " +
+			"as \"this search found nothing\", not as \"there is no such event\", and fall back to list_events " +
+			"over the window when you need certainty. " +
+			"event_types narrows the search to some kinds of event, as on list_events. " +
 			"Searching several calendars costs one request each.",
 		Kind: Read,
 		Handle: func(ctx context.Context, in searchEventsIn) (service.ScheduleResult, error) {
 			sched, err := d.Service.ListEvents(ctx, service.ListOptions{
 				Calendars: in.Calendars, TimeZone: in.TimeZone,
 				From: in.From, To: in.To, Query: in.Query,
-				Expand:    true,
-				MaxEvents: in.MaxEvents, PageToken: in.PageToken,
+				Expand:     true,
+				EventTypes: in.EventTypes,
+				MaxEvents:  in.MaxEvents, PageToken: in.PageToken,
 			})
 			if err != nil {
 				return service.ScheduleResult{}, err
@@ -102,6 +114,8 @@ func registerRead(s *mcp.Server, d Deps) {
 		Name: "get_event",
 		Description: "One event in full, including its guests and their responses, its recurrence rule if it has " +
 			"one, and its etag. " + zoneHelp + " " +
+			"It lists the files attached to the event with each one's Drive file id; this server never opens a " +
+			"file, so pass the id to a Drive server to read one. " +
 			"An event id is unique per calendar and not globally, so `calendar` is required alongside it. " +
 			"Ids come from list_events or search_events.",
 		Kind: Read,
@@ -148,16 +162,24 @@ func registerRead(s *mcp.Server, d Deps) {
 			"The token comes back with the LAST page only. A baseline therefore pages all the way to the " +
 			"end to fetch one, and says how many rows it passed over on the way — they are covered by the " +
 			"token, not lost. An INCREMENTAL read stops at its budget instead and hands back no token, " +
-			"because every row there is a change you have not seen yet; continue with page_token until " +
-			"the token arrives, and never store one you did not get. " +
+			"because every row there is a change you have not seen yet; continue with page_token and the same " +
+			"sync_token until the token arrives, and never store one you did not get. " +
 			"It takes no window, no search and no ordering: Google forbids all of them alongside a sync " +
 			"token, and deleted events are always included. " +
-			"If the token has expired the call fails [stale]; ask again with no sync_token and start over.",
+			"If the token has expired the call fails [stale]; ask again with no sync_token and start over. " +
+			"updated_since asks instead for what changed since a moment, such as \"since Monday\": an RFC3339 " +
+			"time, or a yyyy-mm-dd date meaning the start of that day in time_zone, else the calendar's zone; the result " +
+			"echoes the instant it used. It cannot be combined with sync_token. Events " +
+			"deleted since then are always included. Google calls this the legacy way and says it can miss " +
+			"updates: an event whose only change was its reminders is not reported. Its last page hands back a " +
+			"sync token too, to follow the calendar from there; continue a read that stopped early with " +
+			"page_token and the same updated_since. A moment too far back fails [stale]; pass a later one.",
 		Kind: Read,
 		Handle: func(ctx context.Context, in listChangesIn) (service.ChangesResult, error) {
 			out, err := d.Service.ListChanges(ctx, service.ChangesOptions{
 				Calendar: in.Calendar, SyncToken: in.SyncToken,
-				PageToken: in.PageToken, TimeZone: in.TimeZone,
+				UpdatedSince: in.UpdatedSince,
+				PageToken:    in.PageToken, TimeZone: in.TimeZone,
 				MaxEvents: in.MaxEvents,
 			})
 			if err != nil {
@@ -174,6 +196,7 @@ func registerRead(s *mcp.Server, d Deps) {
 			"on calendars whose events you cannot read, and it respects events marked \"free\", so a list of " +
 			"events is not the same answer. " +
 			"A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. " +
+			"A group's address is answered for its members together, and is unknown if any of them is. " +
 			"The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to " +
 			"use. " +
 			"working_from, working_to and working_days mask the gaps to a working week: a window is one " +
@@ -226,20 +249,23 @@ type listEventsIn struct {
 	// Spelled as the negative so the default (expand) is the zero value.
 	// A model that omits it gets occurrences, which is what "what is on
 	// this week" means.
-	NoExpand     bool   `json:"no_expand,omitempty" jsonschema:"Return repeating events once as a series with its rule, instead of as each occurrence."`
-	ShowCanceled bool   `json:"show_canceled,omitempty" jsonschema:"Include canceled events, which are hidden by default."`
-	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
-	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+	NoExpand     bool     `json:"no_expand,omitempty" jsonschema:"Return repeating events once as a series with its rule, instead of as each occurrence."`
+	ShowCanceled bool     `json:"show_canceled,omitempty" jsonschema:"Include canceled events, which are hidden by default."`
+	EventTypes   []string `json:"event_types,omitempty" jsonschema:"Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type."`
+	ICalUID      string   `json:"ical_uid,omitempty" jsonschema:"Only the event with this iCalendar UID, such as the UID an invitation email carries. Every occurrence of a repeating event shares it."`
+	MaxEvents    int      `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
+	PageToken    string   `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token, with the same arguments; a token is refused under another query."`
 }
 
 type searchEventsIn struct {
-	Query     string   `json:"query" jsonschema:"Free text. Google decides which fields this matches; there is no field syntax."`
-	Calendars []string `json:"calendars,omitempty" jsonschema:"Calendar ids or titles. Defaults to the primary calendar."`
-	From      string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
-	To        string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
-	TimeZone  string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
-	MaxEvents int      `json:"max_events,omitempty" jsonschema:"Cap on events returned."`
-	PageToken string   `json:"page_token,omitempty" jsonschema:"Continue a truncated search, from next_page_token."`
+	Query      string   `json:"query" jsonschema:"Free text, matched against the title, description, location, and the guests' and organizer's names and addresses. There is no field syntax."`
+	Calendars  []string `json:"calendars,omitempty" jsonschema:"Calendar ids or titles. Defaults to the primary calendar."`
+	From       string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
+	To         string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
+	TimeZone   string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
+	EventTypes []string `json:"event_types,omitempty" jsonschema:"Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type."`
+	MaxEvents  int      `json:"max_events,omitempty" jsonschema:"Cap on events returned."`
+	PageToken  string   `json:"page_token,omitempty" jsonschema:"Continue a truncated search, from next_page_token, with the same arguments; a token is refused under another query."`
 }
 
 type getEventIn struct {
@@ -256,19 +282,22 @@ type listInstancesIn struct {
 	TimeZone     string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the occurrences in."`
 	ShowCanceled bool   `json:"show_canceled,omitempty" jsonschema:"Include occurrences that were canceled, which is how single dates are removed from a series."`
 	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on occurrences returned. The server has its own budget and says when it truncated."`
-	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token, with the same arguments; a token is refused under another read."`
 }
 
 type listChangesIn struct {
 	Calendar  string `json:"calendar" jsonschema:"The calendar to check for changes."`
 	SyncToken string `json:"sync_token,omitempty" jsonschema:"A token from a previous call's sync_token. Leave it out the first time to get a baseline and a token. Opaque: never build or edit one."`
-	PageToken string `json:"page_token,omitempty" jsonschema:"Continue a read that did not finish, from next_page_token. The sync token arrives with the last page."`
-	TimeZone  string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the changed events in."`
-	MaxEvents int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
+	// UpdatedSince is the legacy way in, kept apart from the token: it
+	// is refused alongside one. Its last page hands one back.
+	UpdatedSince string `json:"updated_since,omitempty" jsonschema:"Only what changed at or after this moment: RFC3339, or yyyy-mm-dd for the start of that day in time_zone, else the calendar's zone. Not with sync_token. The last page hands back a sync token to follow the calendar from there."`
+	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a read that did not finish, from next_page_token, with the same calendar and the same sync_token or updated_since. The sync token arrives with the last page."`
+	TimeZone     string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the changed events in, and to read an updated_since date in."`
+	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
 }
 
 type checkAvailabilityIn struct {
-	Calendars   []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read."`
+	Calendars   []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read, and may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used."`
 	From        string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
 	To          string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
 	TimeZone    string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`

@@ -504,6 +504,18 @@ func (c *Client) InsertEvent(ctx context.Context, calendarID string, e *gcal.Eve
 		// exactly the failure this server is built to refuse.
 		q.Set("conferenceDataVersion", "1")
 	}
+	if e.HasAttachments() {
+		// Set from the body for the same reason. The discovery document
+		// says attachments are written only by a call that sets this, so
+		// the new series of a split would lose the parent's files.
+		q.Set("supportsAttachments", "true")
+	}
+	if e.HasLabel() {
+		// And again for a label: the discovery document says version 0,
+		// the default, ignores eventLabelId and uses colorId, while
+		// version 1 reads the label. A split carries the parent's.
+		q.Set("eventLabelVersion", "1")
+	}
 	var out gcal.Event
 	if err := c.do(ctx, request{
 		method: http.MethodPost, path: "/calendars/" + esc(calendarID) + "/events",
@@ -526,6 +538,12 @@ func (c *Client) PatchEvent(ctx context.Context, calendarID, eventID string,
 	q := url.Values{}
 	if sendUpdates != "" {
 		q.Set("sendUpdates", sendUpdates)
+	}
+	if len(p.ConferenceData) > 0 {
+		// As on an insert: version 0 "ignores conference data in the
+		// event's body", so a create request without this is a 200
+		// that adds nothing.
+		q.Set("conferenceDataVersion", "1")
 	}
 	var out gcal.Event
 	if err := c.do(ctx, request{

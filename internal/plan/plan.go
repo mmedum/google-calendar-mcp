@@ -15,6 +15,8 @@ package plan
 import (
 	"errors"
 	"fmt"
+	"net/mail"
+	"slices"
 	"strings"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
@@ -69,22 +71,219 @@ type Draft struct {
 	// (§4.4).
 	AddGuests    []string
 	RemoveGuests []string
+	// AddRooms are rooms and other resources to book. They go with
+	// `resource: true`, the one way Google documents to name a resource,
+	// and only as they are added: "Can only be set when the attendee is
+	// added to the event for the first time" (EventAttendee.resource).
+	// RemoveGuests takes a room's address as well.
+	AddRooms []string
+	// AddOptional are guests invited as optional. They are reached like
+	// any other guest, so they count toward notify. A room cannot be
+	// optional. Add only: an address already on the event keeps the role
+	// it has, and AlreadyOn names it so a result can say so.
+	AddOptional []string
 
 	// Transparent marks the event as not making the person busy.
 	Transparent *bool
 
-	// Conference asks Google to attach a Google Meet link. It is only
-	// meaningful on an insert: Patch refuses it rather than dropping it
-	// silently, because adding a conference to an event that exists is
-	// a write this server does not make (§17.3).
+	// Reminders replaces this account's reminders for the event. Nil
+	// leaves them. Google keeps them per person, so a write that changes
+	// only them reaches nobody (OnlyReminders).
+	Reminders *model.Reminders
+	// Visibility is default, public or private. Nil leaves it.
+	Visibility *string
+	// What a guest may do. Nil leaves each as it is.
+	GuestsCanModify         *bool
+	GuestsCanInviteOthers   *bool
+	GuestsCanSeeOtherGuests *bool
+
+	// Conference asks Google to attach a Google Meet link: to a new event
+	// on an insert, and to an event that has none on a patch, which
+	// refuses one that has a conference because Google would replace it
+	// (§17.3).
 	Conference bool
+
+	// Status makes a new event a status event: out of office, focus time
+	// or a working location. Nil, or one naming no type and no setting,
+	// is an ordinary event. Insert only.
+	Status *Status
 }
 
 // Empty reports whether this draft asks for nothing.
 func (d Draft) Empty() bool {
 	return d.Title == nil && d.Description == nil && d.Location == nil &&
 		d.Start == "" && d.End == "" && d.Recurrence == nil &&
-		len(d.AddGuests) == 0 && len(d.RemoveGuests) == 0 && d.Transparent == nil
+		!d.touchesGuests() && d.Transparent == nil &&
+		d.Reminders == nil && d.Visibility == nil && d.GuestsCanModify == nil &&
+		d.GuestsCanInviteOthers == nil && d.GuestsCanSeeOtherGuests == nil && !d.Conference
+}
+
+// OnlyReminders reports whether the draft changes nothing but this
+// account's reminders. Google documents them as "the event's reminders
+// for the authenticated user", so such a write reaches nobody.
+func (d Draft) OnlyReminders() bool {
+	rest := d
+	rest.Reminders = nil
+	return d.Reminders != nil && rest.Empty()
+}
+
+// NewReminders reads the three reminder inputs into the set a caller asks
+// for, and is nil when none was given: back to the calendar's own, or
+// exactly the popups and emails given, in minutes before the start.
+// Giving either list replaces the whole set, so a list left out is empty
+// rather than kept. defaults puts the event back on the calendar's own
+// reminders and cannot go with a list.
+func NewReminders(defaults bool, popup, email *[]int) (*model.Reminders, error) {
+	if popup == nil && email == nil {
+		if !defaults {
+			return nil, nil
+		}
+		return &model.Reminders{Default: true}, nil
+	}
+	if defaults {
+		return nil, fmt.Errorf("%w: default_reminders puts the event back on the calendar's own reminders, "+
+			"and popup_reminders or email_reminders replaces them. Pass one or the other", ErrInvalid)
+	}
+	r := &model.Reminders{}
+	if popup != nil {
+		r.Popup = slices.Clone(*popup)
+	}
+	if email != nil {
+		r.Email = slices.Clone(*email)
+	}
+	if n := len(r.Popup) + len(r.Email); n > gcal.MaxReminders {
+		return nil, fmt.Errorf("%w: %d reminders given; Google allows at most %d on one event, popups and "+
+			"emails together", ErrInvalid, n, gcal.MaxReminders)
+	}
+	for _, list := range []struct {
+		name    string
+		minutes []int
+	}{{"popup_reminders", r.Popup}, {"email_reminders", r.Email}} {
+		seen := map[int]bool{}
+		for _, m := range list.minutes {
+			if m < 0 || m > gcal.MaxReminderMinutes {
+				return nil, fmt.Errorf("%w: %s has %d; a reminder is 0 to %d minutes before the start, "+
+					"which is four weeks", ErrInvalid, list.name, m, gcal.MaxReminderMinutes)
+			}
+			if seen[m] {
+				return nil, fmt.Errorf("%w: %s has %d twice. Give each reminder once", ErrInvalid, list.name, m)
+			}
+			seen[m] = true
+		}
+	}
+	slices.Sort(r.Popup)
+	slices.Sort(r.Email)
+	return r, nil
+}
+
+// remindersWire is a reminder set as Google takes it.
+func remindersWire(r model.Reminders) *gcal.EventReminders {
+	if r.Default {
+		return &gcal.EventReminders{UseDefault: true}
+	}
+	out := &gcal.EventReminders{}
+	for _, m := range r.Popup {
+		out.Overrides = append(out.Overrides, gcal.EventReminder{Method: gcal.ReminderPopup, Minutes: m})
+	}
+	for _, m := range r.Email {
+		out.Overrides = append(out.Overrides, gcal.EventReminder{Method: gcal.ReminderEmail, Minutes: m})
+	}
+	return out
+}
+
+// remindersText is a reminder set in the values sent, for a change line.
+// The order is fixed, so the same set read back in another order is no
+// change.
+func remindersText(r *gcal.EventReminders) string {
+	switch {
+	case r == nil:
+		return ""
+	case r.UseDefault:
+		return "calendar default"
+	case len(r.Overrides) == 0:
+		return "none"
+	}
+	sorted := slices.Clone(r.Overrides)
+	slices.SortFunc(sorted, func(a, b gcal.EventReminder) int {
+		if a.Method != b.Method {
+			// Popups first, as the inputs list them.
+			return strings.Compare(b.Method, a.Method)
+		}
+		return a.Minutes - b.Minutes
+	})
+	parts := make([]string, 0, len(sorted))
+	for _, o := range sorted {
+		parts = append(parts, fmt.Sprintf("%s %d min", o.Method, o.Minutes))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// visibilities are the values a write may send, in order of how many
+// people see the details: public to all readers of the calendar, default
+// as the calendar decides, private to the guests alone. Google ranks only
+// public below private; default in the middle is a belief (§18 row 101).
+var visibilities = []string{gcal.VisibilityPublic, gcal.VisibilityDefault, gcal.VisibilityPrivate}
+
+// visibilityRank orders a visibility from least to most restrictive. An
+// empty one is the default. One Google adds later ranks above private,
+// so a change away from it on one occurrence is refused rather than
+// guessed at.
+func visibilityRank(v string) int {
+	switch v {
+	case gcal.VisibilityConfidential:
+		return slices.Index(visibilities, gcal.VisibilityPrivate)
+	case "":
+		return slices.Index(visibilities, gcal.VisibilityDefault)
+	}
+	if i := slices.Index(visibilities, v); i >= 0 {
+		return i
+	}
+	return len(visibilities)
+}
+
+// parseVisibility reads a caller's visibility.
+func parseVisibility(v string) (string, error) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch {
+	case slices.Contains(visibilities, v):
+		return v, nil
+	case v == gcal.VisibilityConfidential:
+		return "", fmt.Errorf("%w: Google keeps confidential only for compatibility and documents it as "+
+			"\"The event is private\". Pass private", ErrInvalid)
+	default:
+		return "", fmt.Errorf("%w: %q is not a visibility. Pass default, public or private", ErrInvalid, v)
+	}
+}
+
+// InstanceVisibility applies Google's rule for a visibility set on one
+// occurrence of a series. A less restrictive one, such as private to
+// public, is ignored, so it is refused here rather than reported as done.
+// A more restrictive one is applied to every occurrence, so the note
+// says that.
+func InstanceVisibility(before, to string) (note string, err error) {
+	to, err = parseVisibility(to)
+	if err != nil {
+		return "", err
+	}
+	from := before
+	if from == "" {
+		from = gcal.VisibilityDefault
+	}
+	switch {
+	case visibilityRank(to) < visibilityRank(from):
+		return "", fmt.Errorf("%w: Google ignores a less restrictive visibility on one occurrence, so "+
+			"%s to %s here would change nothing. Set it on the whole series with scope:series", ErrUnsupported,
+			from, to)
+	case visibilityRank(to) > visibilityRank(from):
+		return fmt.Sprintf("Google applies a more restrictive visibility on one occurrence to every "+
+			"occurrence, so this makes the whole series %s, not only this one.", to), nil
+	}
+	return "", nil
+}
+
+// touchesGuests reports whether the draft changes who is on the event.
+func (d Draft) touchesGuests() bool {
+	return len(d.AddGuests) > 0 || len(d.AddOptional) > 0 || len(d.RemoveGuests) > 0 || len(d.AddRooms) > 0
 }
 
 // Change is one field a write alters, in the exact values that went over
@@ -105,14 +304,28 @@ type Change struct {
 // request. Whether such a no-op would ALSO move the etag under everybody
 // else holding one is unprobed for events: it was assumed here, and the
 // live run refuted it for calendars (§18 row 58).
+//
+// A status event takes no guests, rooms or Meet link, and comes out of
+// the patch in a shape Google takes, or the patch is refused before
+// anything is sent. A split builds its new series with this too, so the
+// series is checked before the truncate.
 func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 	var p gcal.EventPatch
 	var changes []Change
 
+	if err := d.statusGuests(before.EventType); err != nil {
+		return gcal.EventPatch{}, nil, err
+	}
 	if d.Conference {
-		return gcal.EventPatch{}, nil, fmt.Errorf("%w: a Google Meet link can only be attached when the "+
-			"event is created. This server does not add one to an event that already exists — create the "+
-			"event with conference: true, or add the link in Google Calendar", ErrUnsupported)
+		// A create request that failed holds no conference, so asking
+		// again replaces nothing anybody could join.
+		if c := gcal.ReadConference(before.ConferenceData); c.Present && !c.Failed() {
+			return gcal.EventPatch{}, nil, fmt.Errorf("%w: this event already has a conference. Google "+
+				"replaces conference data whole, so adding a Google Meet link would replace the one there. "+
+				"Read it with get_event, or change it in Google Calendar", ErrBlocked)
+		}
+		p.ConferenceData = gcal.NewConferenceRequest(gcal.ConferenceRequestID(before.ID, before.ETag))
+		changes = append(changes, Change{Field: "conference", From: "none", To: "Google Meet link requested"})
 	}
 
 	set := func(field, from, to string, dst **string) {
@@ -143,6 +356,38 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 		}
 		set("free_not_busy", from, to, &p.Transparency)
 	}
+	if d.Visibility != nil {
+		to, verr := parseVisibility(*d.Visibility)
+		if verr != nil {
+			return gcal.EventPatch{}, nil, verr
+		}
+		from := before.Visibility
+		if from == "" {
+			from = gcal.VisibilityDefault
+		}
+		set("visibility", from, to, &p.Visibility)
+	}
+	setBool := func(field string, from bool, to *bool, dst **bool) {
+		if to == nil || from == *to {
+			return
+		}
+		v := *to
+		*dst = &v
+		changes = append(changes, Change{Field: field, From: fmt.Sprint(from), To: fmt.Sprint(v)})
+	}
+	setBool("guests_can_modify", before.GuestsCanModify, d.GuestsCanModify, &p.GuestsCanModify)
+	setBool("guests_can_invite_others", orTrue(before.GuestsCanInviteOthers), d.GuestsCanInviteOthers,
+		&p.GuestsCanInviteOthers)
+	setBool("guests_can_see_other_guests", orTrue(before.GuestsCanSeeOtherGuests), d.GuestsCanSeeOtherGuests,
+		&p.GuestsCanSeeOtherGuests)
+	if d.Reminders != nil {
+		to := remindersWire(*d.Reminders)
+		from, next := remindersText(before.Reminders), remindersText(to)
+		if from != next {
+			p.Reminders = to
+			changes = append(changes, Change{Field: "reminders", From: from, To: next})
+		}
+	}
 
 	start, end, err := d.times(&before)
 	if err != nil {
@@ -172,8 +417,12 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 		}
 	}
 
-	if len(d.AddGuests) > 0 || len(d.RemoveGuests) > 0 {
-		list, gc, gerr := guestList(before.Attendees, d.AddGuests, d.RemoveGuests, before.AttendeesOmitted)
+	if d.touchesGuests() {
+		add, aerr := d.adding()
+		if aerr != nil {
+			return gcal.EventPatch{}, nil, aerr
+		}
+		list, gc, gerr := guestList(before.Attendees, add, d.RemoveGuests, before.AttendeesOmitted)
 		if gerr != nil {
 			return gcal.EventPatch{}, nil, gerr
 		}
@@ -183,6 +432,15 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 		}
 	}
 
+	if err := statusPatch(before, p); err != nil {
+		return gcal.EventPatch{}, nil, err
+	}
+	if len(changes) == 0 && len(d.AlreadyOn(before.Attendees)) > 0 {
+		return gcal.EventPatch{}, nil, fmt.Errorf(
+			"%w: nothing to change — every address given is already on the event. Adding an address "+
+				"does not change how it is invited: this server does not make a guest optional or required",
+			ErrInvalid)
+	}
 	if len(changes) == 0 {
 		return gcal.EventPatch{}, nil, fmt.Errorf(
 			"%w: nothing to change — every field given already holds that value, so there is no write to "+
@@ -220,6 +478,27 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 	if d.Transparent != nil && *d.Transparent {
 		e.Transparency = gcal.TransparencyTransparent
 	}
+	if d.Visibility != nil {
+		v, verr := parseVisibility(*d.Visibility)
+		if verr != nil {
+			return gcal.Event{}, verr
+		}
+		e.Visibility = v
+	}
+	if d.Reminders != nil {
+		e.Reminders = remindersWire(*d.Reminders)
+	}
+	if d.GuestsCanModify != nil {
+		e.GuestsCanModify = *d.GuestsCanModify
+	}
+	if d.GuestsCanInviteOthers != nil {
+		v := *d.GuestsCanInviteOthers
+		e.GuestsCanInviteOthers = &v
+	}
+	if d.GuestsCanSeeOtherGuests != nil {
+		v := *d.GuestsCanSeeOtherGuests
+		e.GuestsCanSeeOtherGuests = &v
+	}
 	if d.Recurrence != nil {
 		lines, rerr := cleanRecurrence(*d.Recurrence)
 		if rerr != nil {
@@ -239,17 +518,94 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 	if len(d.RemoveGuests) > 0 {
 		return gcal.Event{}, fmt.Errorf("%w: a new event has no guests to remove", ErrInvalid)
 	}
-	for _, g := range d.AddGuests {
-		g = strings.TrimSpace(g)
-		if g == "" {
-			continue
-		}
-		if err := validAddress(g, "a guest"); err != nil {
+	add, err := d.adding()
+	if err != nil {
+		return gcal.Event{}, err
+	}
+	e.Attendees = add
+	if d.Status != nil {
+		if err := d.Status.apply(&e, d); err != nil {
 			return gcal.Event{}, err
 		}
-		e.Attendees = append(e.Attendees, gcal.EventAttendee{Email: g})
 	}
 	return e, nil
+}
+
+// Invites is every address the draft adds, optional guests and rooms
+// included. The reach count decides what a room is by its address
+// (model.IsRoom), so a person passed as a room is still counted as
+// somebody the write reaches, and an optional guest is reached like any
+// other.
+func (d Draft) Invites() []string {
+	out := slices.Clone(d.AddGuests)
+	out = append(out, d.AddOptional...)
+	return append(out, d.AddRooms...)
+}
+
+// AlreadyOn names the addresses the draft adds that are on the event
+// already. They are left as they are — adding one does not make a guest
+// optional or required — and a result says so rather than skipping them
+// in silence. An address the draft also removes is not among them: it
+// goes and comes back.
+func (d Draft) AlreadyOn(attendees []gcal.EventAttendee) []string {
+	on := map[string]bool{}
+	for _, a := range attendees {
+		on[strings.ToLower(a.Email)] = true
+	}
+	for _, r := range d.RemoveGuests {
+		delete(on, strings.ToLower(strings.TrimSpace(r)))
+	}
+	var out []string
+	for _, a := range d.Invites() {
+		a = strings.TrimSpace(a)
+		if on[strings.ToLower(a)] {
+			delete(on, strings.ToLower(a))
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// adding is the attendees the draft adds: its guests, its optional
+// guests, then its rooms, with every room marked as a resource whichever
+// list carried it.
+func (d Draft) adding() ([]gcal.EventAttendee, error) {
+	var out []gcal.EventAttendee
+	listed := map[string]string{}
+	for _, list := range []struct {
+		addrs    []string
+		room     bool
+		optional bool
+		what     string
+	}{
+		{d.AddGuests, false, false, "a guest"},
+		{d.AddOptional, false, true, "an optional guest"},
+		{d.AddRooms, true, false, "a room"},
+	} {
+		for _, a := range list.addrs {
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			if err := validAddress(a, list.what); err != nil {
+				return nil, err
+			}
+			if list.optional && model.IsRoom(a) {
+				return nil, fmt.Errorf("%w: %q is a room's address, and a room cannot be an optional guest. "+
+					"Book it as a room", ErrInvalid, a)
+			}
+			// The same address in two lists asks for two roles at once,
+			// and which one Google keeps is not this server's to guess.
+			// Sent as given, it would be two attendees with one address.
+			key := strings.ToLower(a)
+			if prev, ok := listed[key]; ok && prev != list.what {
+				return nil, fmt.Errorf("%w: %q is given as both %s and %s. Give it once", ErrInvalid, a, prev, list.what)
+			}
+			listed[key] = list.what
+			out = append(out, gcal.EventAttendee{Email: a, Resource: list.room || model.IsRoom(a), Optional: list.optional})
+		}
+	}
+	return out, nil
 }
 
 // times turns the caller's start and end into the wire pair.
@@ -401,6 +757,9 @@ func sideGiven(hasStart bool) string {
 	return "end"
 }
 
+// orTrue reads a guest permission whose published default is true.
+func orTrue(v *bool) bool { return v == nil || *v }
+
 // moment renders one end of an event for a change line.
 func moment(e *gcal.EventDateTime) string {
 	switch {
@@ -450,7 +809,7 @@ func cleanRecurrence(lines []string) ([]string, error) {
 // count and their id, and rebuilding the array from it would erase all
 // three on every guest on the event, on any write that touched the list
 // at all. Read-modify-write means the values that were read.
-func guestList(before []gcal.EventAttendee, add, remove []string, truncated bool) ([]gcal.EventAttendee, *Change, error) {
+func guestList(before []gcal.EventAttendee, add []gcal.EventAttendee, remove []string, truncated bool) ([]gcal.EventAttendee, *Change, error) {
 	if truncated {
 		return nil, nil, fmt.Errorf(
 			"%w: Google truncated this event's guest list, so the server cannot change it without dropping the "+
@@ -480,18 +839,11 @@ func guestList(before []gcal.EventAttendee, add, remove []string, truncated bool
 	}
 	added := 0
 	for _, g := range add {
-		g = strings.TrimSpace(g)
-		if g == "" {
+		if have[strings.ToLower(g.Email)] {
 			continue
 		}
-		if err := validAddress(g, "a guest"); err != nil {
-			return nil, nil, err
-		}
-		if have[strings.ToLower(g)] {
-			continue
-		}
-		have[strings.ToLower(g)] = true
-		out = append(out, gcal.EventAttendee{Email: g})
+		have[strings.ToLower(g.Email)] = true
+		out = append(out, g)
 		added++
 	}
 	if added == 0 && removed == 0 {
@@ -503,6 +855,61 @@ func guestList(before []gcal.EventAttendee, add, remove []string, truncated bool
 		From:  fmt.Sprintf("%d", len(before)),
 		To:    fmt.Sprintf("%d (%d added, %d removed)", len(out), added, removed),
 	}, nil
+}
+
+// Address takes one address as a person or another server writes it —
+// bare, or as an RFC 5322 mailbox with a display name, such as
+// "Jane Doe" <jane@example.test> — and returns the bare address. A Gmail
+// server hands addresses over in the second form.
+//
+// The display name is dropped here and goes nowhere: not to Google, not
+// to a result, not to a log. One address per entry: a list in one string
+// is refused rather than split, because which entries the caller meant
+// as one guest is not this server's to guess.
+func Address(v, what string) (string, error) {
+	v = strings.TrimSpace(v)
+	a, err := mail.ParseAddress(v)
+	if err != nil {
+		if list, lerr := mail.ParseAddressList(v); lerr == nil && len(list) > 1 {
+			return "", fmt.Errorf("%w: %q holds %d addresses in one entry. Give each as its own entry",
+				ErrInvalid, v, len(list))
+		}
+		return "", fmt.Errorf("%w: %q is not an email address, so it cannot be %s", ErrInvalid, v, what)
+	}
+	if err := validAddress(a.Address, what); err != nil {
+		return "", err
+	}
+	return a.Address, nil
+}
+
+// BareAddresses replaces every address in the draft with the bare one
+// Address returns, and drops blank entries. It runs before anything
+// reads the lists, so the reach count, the guest list, the request and
+// the result all see one spelling.
+func (d *Draft) BareAddresses() error {
+	for _, list := range []struct {
+		addrs *[]string
+		what  string
+	}{
+		{&d.AddGuests, "a guest"},
+		{&d.AddOptional, "an optional guest"},
+		{&d.AddRooms, "a room"},
+		{&d.RemoveGuests, "a guest"},
+	} {
+		var bare []string
+		for _, a := range *list.addrs {
+			if strings.TrimSpace(a) == "" {
+				continue
+			}
+			b, err := Address(a, list.what)
+			if err != nil {
+				return err
+			}
+			bare = append(bare, b)
+		}
+		*list.addrs = bare
+	}
+	return nil
 }
 
 // validAddress refuses something that is not an address before it

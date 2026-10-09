@@ -19,18 +19,18 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make vet` | `go vet`, including the `live` build tag so tagged files keep compiling |
 | `make tidy` | `go.mod` and `go.sum` are what `go mod tidy` would write |
 | `make lint` | golangci-lint, including `forbidigo` for the stdout rule |
-| `make cover` | race tests, and an 80% floor **per package**, not on the average |
+| `make cover` | race tests, and an 80% floor **per package**, not on the average; also the live driver's guard tests, which need no account |
 | `make vuln` | govulncheck |
 | `make licenses` | the dependency license allow-list |
 | `make secrets` | gitleaks |
 | `make api-coverage` | every published API method is used or written off, with a reason |
-| `make api-fields` | every published field of the four main resources is modeled or written off, with a reason |
+| `make api-fields` | every published field of the four main resources, and of every schema they reach, is modeled or written off, with a reason |
 | `make classes` | the error vocabulary is closed **from both sides** |
 | `make leaks` | no deployer-specific data in the tree |
 | `make pins` | actions pinned to SHAs, tools pinned to versions, and a tool run locally pinned to the version the release runs |
 | `make live-cover` | every published tool has a step in the live driver |
 | `make parity` | `make check` and `ci.yml` run the same things |
-| `make schema-diff` | the tool surface against the last tag |
+| `make schema-diff` | the tool surface against the newest release's recorded baseline; fails, at any depth, on a removed tool, resource or field, an input that takes fewer types or loses a listed value or is newly required, an output that may return another type or be missing where it was required, or a baseline that is not the newest release's; reports an output that may carry a new listed value |
 | `make smoke` | the binary over stdio, and a clean exit on disconnect |
 | `make mcpb` | the bundle manifest describes the bundle the packer stages |
 | `make release` | `.goreleaser.yaml` builds what the packer stages, and signs and uploads it; `release.yml` runs `gates release-tag` before goreleaser |
@@ -83,6 +83,24 @@ What it does to the account, so nothing is a surprise:
   address it shares a calendar with is in `example.test`, which cannot
   resolve. `-spike-notify` is what arms the steps and spikes that mail a
   real person, and they say so before they run.
+- `GCAL_LIVE_ATTACHMENT` arms the attachment steps. Set it to the link of
+  a Drive file you made for the purpose, with an invented name and
+  nothing in it. The driver attaches it to its weekly series under its
+  own title, reads it back, and checks a split keeps it. It cannot make a
+  Drive file with this server's scopes, so without the variable those
+  steps are skipped and owed.
+- It makes **one status event on your primary calendar**, because no
+  other calendar can hold one: about a year ahead, titled "Livecal status
+  probe", declining nothing, and deleted by its id before the run ends.
+  Ctrl-C or SIGTERM stops the steps, not the cleanup, and says what to
+  delete if you stop it a second time. The server runs in a process
+  group of its own, so the call in flight finishes; a step the stop cuts
+  short counts as not run, never as failed. Nothing else there is written; a
+  guard in the driver refuses it, on the server's tools and on its own
+  calls, a move's destination included, and `make cover` tests the guard
+  without an account. `-status-type` picks out of office (the default),
+  focus time or a working location. If the run prints a warning that it
+  could not delete it, delete what the warning names by hand.
 - `-show <substring>` prints the redacted body of every step whose name
   contains it. A pass/fail line cannot show a result that is confidently
   wrong, which is how the last three phases each found a defect.
@@ -113,7 +131,7 @@ implements it, or `out` with why not.
 ## Adding a wire field
 
 `make api-fields` fails on a field of `Event`, `Calendar`,
-`CalendarListEntry` or `AclRule` that `internal/gcal` carries with no row
+`CalendarListEntry`, `AclRule` or a schema they reach that `internal/gcal` carries with no row
 in `testdata/api-fields.tsv`, and on a row saying `out` for a field the
 code actually reads. Fields come from the discovery document through
 `make api-diff`, so a field Google adds arrives as a gate failure naming

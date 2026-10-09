@@ -123,8 +123,31 @@ func TestEventLineTags(t *testing.T) {
 		{"invented end", func(e *model.Event) { e.EndInvented = true }, "no end time set"},
 		{"birthday is not a meeting", func(e *model.Event) { e.Type = gcal.EventTypeBirthday }, "birthday"},
 		{"out of office", func(e *model.Event) { e.Type = gcal.EventTypeOutOfOffice }, "out of office"},
+		{"declining every overlapping invitation", func(e *model.Event) {
+			e.Type, e.StatusDetails = gcal.EventTypeOutOfOffice, &model.StatusDetails{AutoDecline: "all"}
+		}, "[out of office; declines every overlapping invitation]"},
+		{"focus time declining new ones, chat muted", func(e *model.Event) {
+			e.Type = gcal.EventTypeFocusTime
+			e.StatusDetails = &model.StatusDetails{AutoDecline: "new", ChatStatus: "do_not_disturb"}
+		}, "[focus time; declines new invitations; chat: do not disturb]"},
+		{"working from an office by name", func(e *model.Event) {
+			e.Type = gcal.EventTypeWorkingLocation
+			e.StatusDetails = &model.StatusDetails{WorkingLocation: "office", WorkingLocationLabel: "Annex"}
+		}, "[working location; working from Annex]"},
+		{"working from home", func(e *model.Event) {
+			e.Type, e.StatusDetails = gcal.EventTypeWorkingLocation, &model.StatusDetails{WorkingLocation: "home"}
+		}, "[working location; working from home]"},
 		{"from gmail cannot be edited", func(e *model.Event) { e.Type = gcal.EventTypeFromGmail }, "cannot be edited"},
 		{"location", func(e *model.Event) { e.Location = "Room 4" }, "at Room 4"},
+		{"attachments are counted", func(e *model.Event) {
+			e.Attachments = []model.Attachment{{Title: "Sample agenda"}, {Title: "Sample notes"}}
+		}, "2 attachments"},
+		{"private", func(e *model.Event) { e.Visibility = gcal.VisibilityPrivate }, "[private]"},
+		{"confidential reads as private", func(e *model.Event) { e.Visibility = gcal.VisibilityConfidential }, "[private]"},
+		{"public", func(e *model.Event) { e.Visibility = gcal.VisibilityPublic }, "[public]"},
+		{"a private event's missing title may be hidden", func(e *model.Event) {
+			e.Title, e.Visibility = "", gcal.VisibilityPrivate
+		}, "(private: no title shown)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -322,13 +345,14 @@ func TestBothLineRenderersCarryTheSameTags(t *testing.T) {
 	e.Transparent = true
 	e.Location = "Room 4"
 	e.Attendees = []model.Attendee{{Email: "a@example.test"}}
+	e.Attachments = []model.Attachment{{Title: "Sample agenda"}}
 
 	schedule := render.EventLine(e, z)
 	instance := render.InstanceLine(e, z)
 
 	for _, want := range []string{
 		"out of office", "no end time set", "guest list truncated by Google",
-		"free", "at Room 4", "1 guest",
+		"free", "at Room 4", "1 guest", "1 attachment;",
 	} {
 		if !strings.Contains(schedule, want) {
 			t.Fatalf("EventLine does not mention %q:\n%s", want, schedule)
@@ -406,5 +430,44 @@ func TestAnAllDayBusyBlockDoesNotReadAsZeroLength(t *testing.T) {
 	}
 	if !strings.Contains(text, "2026-03-20 00:00 to 2026-03-21 00:00") {
 		t.Fatalf("a busy block crossing midnight does not carry the end's date:\n%s", text)
+	}
+}
+
+// A reminder reads in the largest whole unit, and the two other states
+// are said in words.
+func TestRemindersReadInWholeUnits(t *testing.T) {
+	for _, c := range []struct {
+		in   model.Reminders
+		want string
+	}{
+		{model.Reminders{Default: true}, "the calendar's default ones"},
+		{model.Reminders{}, "none"},
+		{model.Reminders{Popup: []int{0, 1, 59, 60, 90}}, "popup at the start, popup 1 minute before, " +
+			"popup 59 minutes before, popup 1 hour before, popup 90 minutes before"},
+		{model.Reminders{Email: []int{1440, 2880, 10080, 40320}}, "email 1 day before, email 2 days before, " +
+			"email 1 week before, email 4 weeks before"},
+	} {
+		if got := render.Reminders(c.in); got != c.want {
+			t.Errorf("Reminders(%+v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// What a guest may do is said for an event with guests, and for one
+// whose permissions are not Google's defaults; a solo event with the
+// defaults says nothing.
+func TestGuestPermissions(t *testing.T) {
+	defaults := model.Event{GuestsCanInviteOthers: true, GuestsCanSeeOtherGuests: true}
+	if got := render.GuestPermissions(defaults); got != "" {
+		t.Fatalf("a solo event with the defaults says %q", got)
+	}
+	withGuests := defaults
+	withGuests.Attendees = []model.Attendee{{Email: "a@example.test"}}
+	if got := render.GuestPermissions(withGuests); got != "guests can invite others, see the guest list; cannot change the event" {
+		t.Fatalf("got %q", got)
+	}
+	locked := model.Event{}
+	if got := render.GuestPermissions(locked); got != "guests cannot change the event, invite others, see the guest list" {
+		t.Fatalf("got %q", got)
 	}
 }

@@ -489,3 +489,26 @@ func TestAShareGoogleRefusedIsNotAmbiguous(t *testing.T) {
 		t.Fatalf("class %s, want invalid: %v", cls, err)
 	}
 }
+
+// Sharing with a mailbox shares with its address: the rule carries the
+// bare one, and the display name reaches neither Google nor the result.
+func TestShareCalendarTakesAMailbox(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+		Calendar: "team@group.calendar.example.test",
+		Who:      `"Sample Colleague" <colleague@example.test>`, Role: "reader", Notify: "all",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values []string
+	for _, r := range fake.ACL["team@group.calendar.example.test"] {
+		values = append(values, r.Scope.Value)
+	}
+	if strings.Join(values, ",") != "me@example.test,colleague@example.test" {
+		t.Fatalf("rules for %v, want the bare address added", values)
+	}
+	if strings.Contains(got.Text(), "Sample Colleague") {
+		t.Fatalf("the display name reached the result:\n%s", got.Text())
+	}
+}

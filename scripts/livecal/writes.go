@@ -27,13 +27,14 @@ import (
 //     about the transcript holds for the write path too.
 
 const (
-	writeTitle   = "Livecal write probe"
-	writtenTitle = "Livecal written probe"
-	allDayWrite  = "Livecal all-day write probe"
-	dryRunTitle  = "Livecal dry run that must not exist"
-	rsvpTitle    = "Livecal rsvp probe"
-	meetTitle    = "Livecal conference probe"
-	cancelTitle  = "Livecal cancel probe"
+	writeTitle    = "Livecal write probe"
+	writtenTitle  = "Livecal written probe"
+	allDayWrite   = "Livecal all-day write probe"
+	dryRunTitle   = "Livecal dry run that must not exist"
+	rsvpTitle     = "Livecal rsvp probe"
+	meetTitle     = "Livecal conference probe"
+	cancelTitle   = "Livecal cancel probe"
+	optionalTitle = "Livecal optional guest probe"
 	// The two that reach a real person. Armed by -spike-notify, like
 	// spikes A and B, because every other step in this file is written
 	// so that it CANNOT mail anybody and these two are written so that
@@ -66,11 +67,17 @@ type writeState struct {
 	// meeting is the event created with conference: true, so the step
 	// that reads the link back knows which event to ask for.
 	meeting string
+	// optional is the event whose only guest is this account, invited
+	// as optional, so the step after it can read the role back.
+	optional string
 	// guest is a REAL person's address, from GCAL_LIVE_GUEST_INTERNAL,
 	// and it is empty unless -spike-notify armed the run. The steps that
 	// use it are the only ones here that put an event in somebody else's
 	// calendar, so they check both before doing anything.
 	guest string
+	// api reads what no tool shows, for the steps that must check a
+	// field the server does not model.
+	api *liveAPI
 }
 
 // seedRSVP puts an event on the scratch calendar with this account as a
@@ -95,6 +102,62 @@ func (a *liveAPI) seedRSVP(ctx context.Context, cal, self string) error {
 		"end":       map[string]any{"dateTime": "2026-04-08T12:00:00+02:00", "timeZone": scratchZone},
 		"attendees": []map[string]any{{"email": self}},
 	})
+}
+
+// setReminders changes only this account's reminders on the probe
+// event. It needs no notify, which is part of what it checks.
+func setReminders(on func(map[string]any) map[string]any, w *writeState, name string,
+	args map[string]any,
+) step {
+	return step{
+		name: name,
+		tool: "update_event",
+		argsFn: func() map[string]any {
+			args["event_id"] = w.created
+			return on(args)
+		},
+		skip: func() string {
+			if w.created == "" {
+				return "no probe event was created"
+			}
+			return ""
+		},
+		check: func(r callResult) (verdict, string) {
+			if r.isError {
+				return fail, "returned an error: " + truncate(r.text, 300)
+			}
+			if !strings.Contains(r.text, "Reminders are yours alone") {
+				return fail, "a reminders-only update did not say it reaches nobody"
+			}
+			return pass, "patched without notify"
+		},
+	}
+}
+
+// readReminders reads the probe event's reminders back.
+func readReminders(scratch string, w *writeState, name, want string) step {
+	return step{
+		name: name,
+		tool: "get_event",
+		argsFn: func() map[string]any {
+			return map[string]any{"calendar": scratch, "event_id": w.created}
+		},
+		skip: func() string {
+			if w.created == "" {
+				return "no probe event was created"
+			}
+			return ""
+		},
+		check: func(r callResult) (verdict, string) {
+			if r.isError {
+				return fail, "returned an error: " + truncate(r.text, 200)
+			}
+			if !strings.Contains(r.text, want+"\n") {
+				return fail, "Google kept something else: " + truncate(r.text, 400)
+			}
+			return pass, "read back as " + strings.TrimPrefix(want, "your reminders: ")
+		},
+	}
 }
 
 // field reads one value out of a write result, which is how a step hands
@@ -292,6 +355,73 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
+			// §18 row 92: an optional guest is mailed like any guest, so
+			// notify is required. Refused before a request is built, so
+			// the address below is never sent anywhere.
+			name: "notify required with an optional guest",
+			tool: "create_event",
+			args: on(map[string]any{
+				"title": "Livecal must not be created, optional",
+				"start": "2026-04-02T09:00:00+02:00", "end": "2026-04-02T10:00:00+02:00",
+				"optional_guests": []string{outsideGuest},
+			}),
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "an event with an optional guest was created without a notify decision"
+				}
+				if !strings.Contains(r.text, "[invalid]") || !strings.Contains(r.text, "1 guest") {
+					return fail, "the refusal is not [invalid] counting one guest: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid], counting the optional guest"
+			},
+		},
+		{
+			// §18 row 92: does Google keep optional: true? The only guest
+			// is this account, which reaches nobody, so none is allowed
+			// and nobody is mailed.
+			name: "create_event with an optional guest",
+			tool: "create_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"title": optionalTitle,
+					"start": "2026-04-02T11:00:00+02:00", "end": "2026-04-02T12:00:00+02:00",
+					"optional_guests": []string{w.self}, "notify": "none",
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				w.optional = field(r.text, "id: ")
+				if w.optional == "" {
+					return fail, "the result does not report the id it created"
+				}
+				return pass, "created with this account as its optional guest"
+			},
+		},
+		{
+			name: "get_event shows the optional guest",
+			tool: "get_event",
+			argsFn: func() map[string]any {
+				return map[string]any{"calendar": scratch, "event_id": w.optional}
+			},
+			skip: func() string {
+				if w.optional == "" {
+					return "the step before created nothing"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, ", optional") {
+					return fail, "the guest does not read back as optional, so Google dropped the role"
+				}
+				return pass, "Google kept the guest optional"
+			},
+		},
+		{
 			// §4.3.5: the blast radius, without the blast.
 			name: "dry_run writes nothing",
 			tool: "create_event",
@@ -351,6 +481,225 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the etag did not move after a write"
 				}
 				return pass, "patched, with a before and after and a new etag"
+			},
+		},
+		{
+			// §18 row 91: the token a read by updated_since handed back,
+			// before any write, follows the calendar. The update above is
+			// a change made after it.
+			name: "list_changes from the updated_since token",
+			tool: "list_changes",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"sync_token": sinceToken})
+			},
+			skip: func() string {
+				if sinceToken == "" {
+					return "the read by updated_since handed back no token"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if strings.Contains(r.text, "Baseline for") || !strings.Contains(r.text, "Changes on") {
+					return fail, "the result does not report itself as a change list"
+				}
+				if !strings.Contains(r.text, writtenTitle) {
+					return fail, "the event updated after the token was issued is not among the changes"
+				}
+				if afterLabel(r.text, "Next sync token: ") == "" {
+					return fail, "the read handed back no new token, so the chain stops here"
+				}
+				return pass, "the token chains: the update made after it was reported, and a new token issued"
+			},
+		},
+		{
+			// §18 row 95: q reads the location, among the fields Google
+			// documents. The update above set this one.
+			name: "search_events matches a location",
+			tool: "search_events",
+			args: map[string]any{
+				"calendars": []string{scratch}, "from": "2026-04-01", "to": "2026-04-01", "query": "Room two",
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, writtenTitle) {
+					// The index is eventually consistent, as on the
+					// read-side search step.
+					return undetermined, "the event was not found by its location; Google's index may not " +
+						"have caught up with a change made seconds ago"
+				}
+				return pass, "found the event by its location, not its title"
+			},
+		},
+		{
+			// §4.3.2 and §18 row 86: a guest the write adds is reached by
+			// it, so adding one to an event with none asks. Refused before
+			// a request is built, so the address is never sent.
+			name: "notify required when an update adds a guest",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "add_guests": []string{outsideGuest}})
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "a guest was added without a notify decision"
+				}
+				if !strings.Contains(r.text, "[invalid]") || !strings.Contains(r.text, "1 guest") {
+					return fail, "the refusal is not [invalid] naming one guest: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid], counting the guest the update adds"
+			},
+		},
+		{
+			// §4.3.4 for the same write: none is refused for an outside
+			// guest the update adds.
+			name: "none refused when an update adds an outside guest",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "add_guests": []string{outsideGuest}, "notify": "none"})
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "notify:none was accepted for an outside guest the update adds"
+				}
+				if !strings.Contains(r.text, "[blocked]") {
+					return fail, "the refusal is not classified blocked: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked]"
+			},
+		},
+		{
+			// §18 row 93: a guest given as a mailbox, as a Gmail server
+			// hands one over, is its bare address. A dry run, so the
+			// address is never sent anywhere.
+			name: "a guest given as a mailbox",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"event_id": w.created, "add_guests": []string{`"Livecal Nobody" <` + outsideGuest + `>`},
+					"notify": "external_only", "dry_run": true,
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "a mailbox was refused: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "1 added") {
+					return fail, "the dry run does not add the one guest"
+				}
+				if strings.Contains(r.text, "Livecal Nobody") {
+					return fail, "the display name reached the result"
+				}
+				return pass, "taken as its bare address, the display name dropped"
+			},
+		},
+		{
+			name: "two addresses in one entry refused",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"event_id": w.created, "add_guests": []string{outsideGuest + ", " + outsideGuest},
+					"notify": "external_only", "dry_run": true,
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[invalid]") {
+					return fail, "a list in one entry was not refused as invalid: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid]"
+			},
+		},
+		// §18 row 97: a reminders patch replaces the whole set, by an
+		// overrides list sent in full or as null, and each is read back.
+		setReminders(on, w, "reminders set", map[string]any{
+			"popup_reminders": []int{30, 10}, "email_reminders": []int{1440},
+		}),
+		readReminders(scratch, w, "reminders read back",
+			"your reminders: popup 10 minutes before, popup 30 minutes before, email 1 day before"),
+		setReminders(on, w, "one list replaces both", map[string]any{"email_reminders": []int{60}}),
+		readReminders(scratch, w, "the popups are gone", "your reminders: email 1 hour before"),
+		setReminders(on, w, "an empty list removes them", map[string]any{"popup_reminders": []int{}}),
+		readReminders(scratch, w, "no reminders read back", "your reminders: none"),
+		setReminders(on, w, "back to the calendar's", map[string]any{"default_reminders": true}),
+		readReminders(scratch, w, "the calendar's read back", "your reminders: the calendar's default ones"),
+		{
+			// §18 row 98: a patch can create a conference, under a
+			// request id that is not the event id. The probe event has
+			// no guest but this account, so nobody is reached.
+			name: "add_conference",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "add_conference": true, "notify": "none"})
+			},
+			skip: func() string {
+				if w.created == "" {
+					return "no probe event was created"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				switch {
+				case strings.Contains(r.text, "Google Meet: https://meet.google.com/"):
+					return pass, "the link came back with the patch"
+				case strings.Contains(r.text, "still making it"):
+					return pass, "reported pending rather than promising a link"
+				default:
+					return fail, "a conference was asked for and the result does not report one: " +
+						truncate(r.text, 300)
+				}
+			},
+		},
+		{
+			name: "the added link arrives",
+			tool: "get_event",
+			argsFn: func() map[string]any {
+				return map[string]any{"calendar": scratch, "event_id": w.created}
+			},
+			skip: func() string {
+				if w.created == "" {
+					return "no probe event was created"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				switch {
+				case strings.Contains(r.text, "join: https://meet.google.com/"):
+					return pass, "the event carries the link the patch asked for"
+				case strings.Contains(r.text, "still creating"):
+					return undetermined, "Google has not finished making the link"
+				default:
+					return fail, "the event has no link after add_conference: " + truncate(r.text, 300)
+				}
+			},
+		},
+		{
+			// Refused before a request: Google would replace the link.
+			name: "add_conference refused when there is one",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "add_conference": true, "notify": "none"})
+			},
+			skip: func() string {
+				if w.created == "" {
+					return "no probe event was created"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[blocked]") {
+					return fail, "a second conference request was not refused: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked]"
 			},
 		},
 		{
@@ -456,6 +805,43 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
+			// §4.2: the new series is the old one copied, fields the
+			// server does not model included. The seed put a private
+			// extended property on the series, and only a direct read
+			// can see it.
+			name: "the split keeps what the series carried",
+			tool: "get_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.splitFrom})
+			},
+			skip: func() string {
+				if w.splitFrom == "" {
+					return "the split did not report the new series"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				got, err := w.api.privateProperty(context.Background(), scratch, w.splitFrom, splitKey)
+				if err != nil {
+					return fail, "could not read the new series: " + truncate(err.Error(), 200)
+				}
+				if got != splitValue {
+					return fail, "the new series lost the private extended property the series carried"
+				}
+				if attachmentURL() == "" {
+					return pass, "the new series kept the series' private extended property; " +
+						"the attachment half is owed (" + envAttachment + " is unset)"
+				}
+				if !strings.Contains(r.text, "Attachments (1):") {
+					return fail, "the new series lost the file attached to the series"
+				}
+				return pass, "the new series kept the series' private extended property and its file"
+			},
+		},
+		{
 			// The proof that the split landed the way the result said.
 			name: "the original series is short",
 			tool: "list_instances",
@@ -478,6 +864,102 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the 17 March exception did not survive a split made after it"
 				}
 				return pass, "the earlier exception survived the split, and nothing after it remains"
+			},
+		},
+		{
+			// §18 row 97: Google applies a more restrictive visibility on
+			// one occurrence to the whole series. The result says so;
+			// the step after reads the series to see it is true.
+			name: "a private occurrence",
+			tool: "update_event",
+			args: on(map[string]any{
+				"event_id": weeklyID, "original_start": "2026-03-17T14:00:00+01:00",
+				"scope": "instance", "visibility": "private",
+			}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "makes the whole series private") {
+					return fail, "the result does not say the series changed: " + truncate(r.text, 300)
+				}
+				return pass, "made, with a note that the series changed"
+			},
+		},
+		{
+			name: "the series is private",
+			tool: "get_event",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "[private") {
+					return fail, "the series is not private, so the note the step before printed is false"
+				}
+				return pass, "one private occurrence made the series private, as the reference says"
+			},
+		},
+		{
+			// Refused before a request: Google ignores it.
+			name: "a less restrictive occurrence refused",
+			tool: "update_event",
+			args: on(map[string]any{
+				"event_id": weeklyID, "original_start": "2026-03-17T14:00:00+01:00",
+				"scope": "instance", "visibility": "public",
+			}),
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[unsupported]") {
+					return fail, "a public occurrence of a private series was not refused: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [unsupported]"
+			},
+		},
+		{
+			// §18 row 101: where default ranks is this server's belief.
+			// The series is made public, one occurrence default, and the
+			// series read: Google applies default to the series only if it
+			// ranks default above public, as the server does.
+			name: "the series made public",
+			tool: "update_event",
+			args: on(map[string]any{"event_id": weeklyID, "scope": "series", "visibility": "public"}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				return pass, "the series is public"
+			},
+		},
+		{
+			name: "a default occurrence",
+			tool: "update_event",
+			args: on(map[string]any{
+				"event_id": weeklyID, "original_start": "2026-03-17T14:00:00+01:00",
+				"scope": "instance", "visibility": "default",
+			}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "makes the whole series default") {
+					return fail, "the result does not say the series changed: " + truncate(r.text, 300)
+				}
+				return pass, "made, with a note that the series changed"
+			},
+		},
+		{
+			name: "the series is default",
+			tool: "get_event",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if strings.Contains(r.text, "[public") || strings.Contains(r.text, "; public") {
+					return fail, "the series is still public: Google does not rank default above public, so " +
+						"the note the step before printed is false (§18 row 101)"
+				}
+				return pass, "a default occurrence made a public series default, as the server ranks it"
 			},
 		},
 		{
@@ -583,7 +1065,12 @@ func writeSteps(scratch string, w *writeState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				return pass, "moved back, leaving the scratch calendar as it was"
+				// Google changes a just-moved event by itself, and the
+				// move back met that two runs in three (§18 row 103).
+				if strings.Contains(r.text, "the write was made against the fresh copy") {
+					return pass, "moved back on the second try, after Google changed the event (§18 row 103)"
+				}
+				return pass, "moved back on the first try, leaving the scratch calendar as it was"
 			},
 		},
 		{

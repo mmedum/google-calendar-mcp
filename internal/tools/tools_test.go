@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -278,15 +279,24 @@ func TestListEventsWarnsAboutTheRecurrenceChoice(t *testing.T) {
 	}
 }
 
-// TestSearchDescribesItsOwnUnreliability: Google's q is undocumented
-// free text, and a model must not read an empty result as proof.
+// TestSearchDescribesItsOwnUnreliability: Google documents which fields
+// q reads (discovery revision 20261005) but not how it matches words,
+// and an event seen only as busy has nothing to match. So the
+// description names the fields, says there is no field syntax, and
+// still says an empty result is not proof.
 func TestSearchDescribesItsOwnUnreliability(t *testing.T) {
 	tool := names(listTools(t, baseConfig()))["search_events"]
 	lower := strings.ToLower(tool.Description)
-	for _, want := range []string{"undocumented", "found nothing"} {
+	for _, want := range []string{
+		"the title, description and location", "guests' and organizer's names and addresses",
+		"no field syntax", "how words are matched is not documented", "found nothing",
+	} {
 		if !strings.Contains(lower, want) {
-			t.Fatalf("search_events does not warn that an empty result is not proof:\n%s", tool.Description)
+			t.Fatalf("search_events does not say %q:\n%s", want, tool.Description)
 		}
+	}
+	if strings.Contains(lower, "undocumented") || strings.Contains(lower, "does not say which fields") {
+		t.Fatalf("search_events still calls the searched fields undocumented:\n%s", tool.Description)
 	}
 }
 
@@ -513,9 +523,18 @@ func TestEveryToolAnswers(t *testing.T) {
 		{"list_events", map[string]any{
 			"from": "2026-03-16", "to": "2026-03-17", "time_zone": "America/Chicago",
 		}, "America/Chicago"},
+		{"list_events", map[string]any{
+			"from": "2026-03-16", "to": "2026-03-17", "event_types": []string{"default"},
+		}, "only these event types: default"},
+		{"list_events", map[string]any{
+			"from": "2026-03-16", "to": "2026-03-17", "ical_uid": "AAAAnobody@example.test",
+		}, "No event with that UID was found"},
 		{"search_events", map[string]any{
 			"query": "sync", "from": "2026-03-16", "to": "2026-03-31",
 		}, "Morning sync"},
+		{"search_events", map[string]any{
+			"query": "sync", "from": "2026-03-16", "to": "2026-03-31", "event_types": []string{"focusTime"},
+		}, "No events of those types"},
 		{"get_event", map[string]any{"calendar": "primary", "event_id": "ev-standup"}, "Morning sync"},
 		{"get_event", map[string]any{"calendar": "primary", "event_id": "ev-holiday"}, "all day"},
 		{"list_instances", map[string]any{
@@ -528,6 +547,9 @@ func TestEveryToolAnswers(t *testing.T) {
 			"calendar": "primary", "event_id": "ev-weekly",
 			"from": "2026-03-20", "to": "2026-03-26",
 		}, "2026-03-24"},
+		{"list_changes", map[string]any{
+			"calendar": "primary", "updated_since": "2026-03-16",
+		}, "since 2026-03-16T00:00:00+01:00"},
 		{"check_availability", map[string]any{"from": "2026-03-16", "to": "2026-03-16"}, "Free"},
 		{"check_availability", map[string]any{
 			"from": "2026-03-16", "to": "2026-03-16", "min_minutes": 30,
@@ -823,5 +845,42 @@ func TestAWriteRefusalArrivesAsAClassifiedToolResult(t *testing.T) {
 	}
 	if got := text(t, res); !strings.Contains(got, "[invalid]") {
 		t.Fatalf("the refusal carries no class:\n%s", got)
+	}
+}
+
+// An empty reminder list survives the protocol as given, so on
+// create_event it means no reminders rather than the calendar's own.
+func TestAnEmptyReminderListMeansNoneThroughTheProtocol(t *testing.T) {
+	fake := caltest.Seed()
+	cs, cleanup := sessionWith(t, baseConfig(), fake)
+	defer cleanup()
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "create_event",
+		Arguments: map[string]any{
+			"title": "No reminders", "start": "2026-04-01T09:00:00+02:00",
+			"end": "2026-04-01T10:00:00+02:00", "popup_reminders": []int{},
+		},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("CallTool: %v %v", err, res)
+	}
+	var out struct {
+		Event struct {
+			ID        string `json:"id"`
+			Reminders *struct {
+				Default bool `json:"default"`
+			} `json:"reminders"`
+		} `json:"event"`
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Event.Reminders == nil || out.Event.Reminders.Default {
+		t.Fatalf("got reminders %+v, want none rather than the calendar's: %s", out.Event.Reminders, raw)
+	}
+	if got := fake.Events["primary"][out.Event.ID].Reminders; got == nil || got.UseDefault || len(got.Overrides) != 0 {
+		t.Fatalf("Google was sent %+v", got)
 	}
 }

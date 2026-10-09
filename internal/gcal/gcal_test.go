@@ -47,6 +47,28 @@ func TestOmitemptyKeepsAPatchMinimal(t *testing.T) {
 	}
 }
 
+// TestAnEventKeepsWhatItDoesNotModel: a field with no struct field
+// survives a decode and an encode, so an event copied whole loses
+// nothing. A modeled field the struct clears stays cleared.
+func TestAnEventKeepsWhatItDoesNotModel(t *testing.T) {
+	var e gcal.Event
+	if err := json.Unmarshal([]byte(
+		`{"summary":"Sample","description":"Gone","extendedProperties":{"shared":{"sampleKey":"x"}}}`), &e); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.Unmodeled) != 1 {
+		t.Fatalf("Unmodeled = %v, want only extendedProperties", e.Unmodeled)
+	}
+	e.Description = ""
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"extendedProperties":{"shared":{"sampleKey":"x"}},"summary":"Sample"}`; string(b) != want {
+		t.Fatalf("encoded %s, want %s", b, want)
+	}
+}
+
 func TestAtLeastOrdersRoles(t *testing.T) {
 	cases := []struct {
 		role, want string

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +46,24 @@ func TestVersionFlag(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "google-calendar-mcp") {
 		t.Fatalf("--version printed %q", out.String())
+	}
+}
+
+// TestTheBinaryCarriesTheZoneDatabase: Windows has no zone database Go
+// can read, so a release binary without Go's own copy refuses every
+// IANA zone on a machine without Go installed.
+//
+// It asks the go command what the binary links rather than loading a
+// zone. On Linux the system database is read first, from fixed paths,
+// and ZONEINFO pointed at an empty directory does not stop that, so a
+// load would pass with or without the import.
+func TestTheBinaryCarriesTheZoneDatabase(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", ".").Output()
+	if err != nil {
+		t.Fatalf("go list -deps: %v", err)
+	}
+	if !slices.Contains(strings.Fields(string(out)), "time/tzdata") {
+		t.Fatal("the binary does not link time/tzdata, so on Windows without Go every time zone is refused")
 	}
 }
 

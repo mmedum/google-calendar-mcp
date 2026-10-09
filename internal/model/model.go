@@ -8,6 +8,7 @@
 package model
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -31,6 +32,11 @@ type Calendar struct {
 	// Conference is which conference types this calendar accepts, nil
 	// when Google said nothing about it — which is not a refusal (§17.3).
 	Conference *gcal.ConferenceProperties
+	// DefaultReminders are the reminders this account gets for an event
+	// on this calendar that uses the calendar's own. Nil when the
+	// calendar was read as a resource rather than from this account's
+	// list, which is the only place Google keeps them.
+	DefaultReminders *Reminders
 	// No etag, deliberately. A calendar is TWO resources — itself and
 	// this user's subscription to it — with an etag each, and a single
 	// field here carried whichever read had produced the value: the
@@ -49,7 +55,8 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 		ID: e.ID, Title: e.Summary, TimeZone: e.TimeZone, Role: e.AccessRole,
 		Primary: e.Primary, Selected: e.Selected, Hidden: e.Hidden,
 		ColorID: e.ColorID, Description: e.Description,
-		Conference: e.ConferenceProperties,
+		Conference:       e.ConferenceProperties,
+		DefaultReminders: remindersFrom(false, e.DefaultReminders),
 	}
 	// A rename is this user's alone: the same calendar has a different
 	// name for a colleague, so both are carried and the renderer says so.
@@ -162,6 +169,16 @@ type Event struct {
 	OriginalStart When
 
 	Transparent bool
+	// Visibility is Google's value as it came, empty for the default.
+	Visibility string
+	// Reminders are this account's own for this event, nil when Google
+	// sent none.
+	Reminders *Reminders
+	// What a guest may do, with Google's defaults filled in: a guest can
+	// invite others and see the guest list, and cannot change the event.
+	GuestsCanModify         bool
+	GuestsCanInviteOthers   bool
+	GuestsCanSeeOtherGuests bool
 	// Conference is the event's video meeting, if it has one: the link
 	// to join, or the fact that Google is still making it (§17.3).
 	Conference gcal.Conference
@@ -170,6 +187,172 @@ type Event struct {
 	AttendeesTruncated bool
 	Organizer          string
 	OrganizerSelf      bool
+	// Attachments are the files on the event. Shown, never written.
+	Attachments []Attachment
+	// StatusDetails are a status event's settings: out of office, focus
+	// time or a working location. Nil on any other event, and on one
+	// whose details Google did not send or this server cannot read.
+	StatusDetails *StatusDetails
+}
+
+// StatusDetails are a status event's settings (§7.4), in the words
+// create_event takes them in. A field that does not belong to the
+// event's type is empty.
+type StatusDetails struct {
+	// AutoDecline is none, new or all: which invitations that overlap
+	// the event Google declines.
+	AutoDecline string
+	// DeclineMessage goes to each organizer whose invitation is
+	// declined. It is the account's own text: shown, never logged (§9).
+	DeclineMessage string
+	// ChatStatus is available or do_not_disturb, on focus time only.
+	ChatStatus string
+	// WorkingLocation is home, office or custom, and
+	// WorkingLocationLabel names the office or the place.
+	WorkingLocation      string
+	WorkingLocationLabel string
+}
+
+// Words is a closed set of values with two spellings each: the one this
+// server's inputs and results use, and Google's.
+type Words [][2]string
+
+// The three vocabularies of a status event.
+var (
+	AutoDeclineWords = Words{
+		{"none", gcal.AutoDeclineNone}, {"new", gcal.AutoDeclineNew}, {"all", gcal.AutoDeclineAll},
+	}
+	ChatStatusWords      = Words{{"available", gcal.ChatAvailable}, {"do_not_disturb", gcal.ChatDoNotDisturb}}
+	WorkingLocationWords = Words{
+		{"home", gcal.WorkingHome}, {"office", gcal.WorkingOffice}, {"custom", gcal.WorkingCustom},
+	}
+)
+
+// Wire is Google's spelling of a word, and whether the word is one.
+func (w Words) Wire(word string) (string, bool) {
+	for _, p := range w {
+		if p[0] == word {
+			return p[1], true
+		}
+	}
+	return "", false
+}
+
+// Word is this server's spelling of Google's value. A value Google adds
+// later comes back as Google spells it, so a result never hides it.
+func (w Words) Word(wire string) string {
+	for _, p := range w {
+		if p[1] == wire {
+			return p[0]
+		}
+	}
+	return wire
+}
+
+// List is the words, for a refusal: "none, new or all". Every set has
+// at least two.
+func (w Words) List() string {
+	words := make([]string, 0, len(w))
+	for _, p := range w {
+		words = append(words, p[0])
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
+}
+
+// statusDetailsOf reads a status event's details block. A block this
+// server cannot read is left out rather than failing the read: the
+// caller asked about the event, and the block is the least of it.
+func statusDetailsOf(e gcal.Event) *StatusDetails {
+	raw := e.StatusDetails()
+	if len(raw) == 0 {
+		return nil
+	}
+	var d StatusDetails
+	switch e.EventType {
+	case gcal.EventTypeOutOfOffice:
+		var p gcal.EventOutOfOfficeProperties
+		if json.Unmarshal(raw, &p) != nil {
+			return nil
+		}
+		d.AutoDecline, d.DeclineMessage = AutoDeclineWords.Word(p.AutoDeclineMode), p.DeclineMessage
+	case gcal.EventTypeFocusTime:
+		var p gcal.EventFocusTimeProperties
+		if json.Unmarshal(raw, &p) != nil {
+			return nil
+		}
+		d.AutoDecline, d.DeclineMessage = AutoDeclineWords.Word(p.AutoDeclineMode), p.DeclineMessage
+		d.ChatStatus = ChatStatusWords.Word(p.ChatStatus)
+	case gcal.EventTypeWorkingLocation:
+		var p gcal.EventWorkingLocationProperties
+		if json.Unmarshal(raw, &p) != nil {
+			return nil
+		}
+		// "Any details are specified in a sub-field of the specified
+		// name", so a block without its type still says which it is.
+		kind := p.Type
+		switch {
+		case kind != "":
+		case p.OfficeLocation != nil:
+			kind = gcal.WorkingOffice
+		case p.CustomLocation != nil:
+			kind = gcal.WorkingCustom
+		case len(p.HomeOffice) > 0:
+			kind = gcal.WorkingHome
+		}
+		d.WorkingLocation = WorkingLocationWords.Word(kind)
+		switch {
+		case kind == gcal.WorkingOffice && p.OfficeLocation != nil:
+			d.WorkingLocationLabel = p.OfficeLocation.Label
+		case kind == gcal.WorkingCustom && p.CustomLocation != nil:
+			d.WorkingLocationLabel = p.CustomLocation.Label
+		}
+	}
+	return &d
+}
+
+// Attachment is one file on an event. The file belongs to the Drive
+// server, and FileID is what a caller hands it.
+type Attachment struct {
+	// Title is text somebody else wrote: content, shown and never logged
+	// (§9).
+	Title    string
+	FileID   string
+	URL      string
+	MimeType string
+}
+
+// Reminders are when this account is reminded of an event. Google keeps
+// them per person, so a guest has their own.
+type Reminders struct {
+	// Default says the calendar's own reminders apply, and Popup and
+	// Email are then empty.
+	Default bool
+	// Popup and Email are minutes before the start, ascending. Both
+	// empty, and not Default, means no reminders at all.
+	Popup []int
+	Email []int
+}
+
+// remindersFrom reads Google's reminder fields. A method Google no
+// longer publishes, such as the retired sms, is left out.
+func remindersFrom(useDefault bool, overrides []gcal.EventReminder) *Reminders {
+	r := &Reminders{Default: useDefault}
+	for _, o := range overrides {
+		switch o.Method {
+		case gcal.ReminderPopup:
+			r.Popup = append(r.Popup, o.Minutes)
+		case gcal.ReminderEmail:
+			r.Email = append(r.Email, o.Minutes)
+		}
+	}
+	sort.Ints(r.Popup)
+	sort.Ints(r.Email)
+	return r
+}
+
+// Private reports whether only the event's guests see its details.
+func (e Event) Private() bool {
+	return e.Visibility == gcal.VisibilityPrivate || e.Visibility == gcal.VisibilityConfidential
 }
 
 // IsSeries reports whether this is a recurring parent.
@@ -221,10 +404,14 @@ func (e Event) Moved() bool {
 //
 // An empty account falls back to the flag alone, which is what a
 // renderer has: it is describing an event, not deciding a refusal.
+//
+// A room is decided by its address (IsRoom), not by Google's `resource`
+// flag: the flag holds whatever the write that added the attendee said,
+// so a person added as a room would carry it and never be counted.
 func (e Event) Guests(account string) []Attendee {
 	out := make([]Attendee, 0, len(e.Attendees))
 	for _, a := range e.Attendees {
-		if a.Self || a.Resource {
+		if a.Self || IsRoom(a.Email) {
 			continue
 		}
 		if account != "" && strings.EqualFold(a.Email, account) {
@@ -238,6 +425,21 @@ func (e Event) Guests(account string) []Attendee {
 // GuestCount is how many people would be reached. The count goes in a
 // refusal; the addresses never do (§9).
 func (e Event) GuestCount(account string) int { return len(e.Guests(account)) }
+
+// roomDomain is where Google puts the address of every room and other
+// resource it makes. Google publishes no shape for that address
+// (`resourceEmail` is "generated"), so this is observed rather than
+// documented (§18), and both ways it could be wrong are safe: a room it
+// misses counts as a guest, as rooms did before; and only Google issues
+// addresses under google.com, so no person is taken for a room.
+const roomDomain = "resource.calendar.google.com"
+
+// IsRoom reports whether an address is a room's or another resource's.
+// It is the one rule for that, whichever list the address came in.
+func IsRoom(address string) bool {
+	i := strings.LastIndex(address, "@")
+	return i >= 0 && strings.EqualFold(strings.TrimSpace(address[i+1:]), roomDomain)
+}
 
 // Attendee is one guest.
 type Attendee struct {
@@ -259,8 +461,17 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		Recurrence: e.Recurrence, SeriesID: e.RecurringEventID,
 		EndInvented:        e.EndTimeUnspecified,
 		Transparent:        e.Transparency == gcal.TransparencyTransparent,
+		Visibility:         e.Visibility,
 		Conference:         gcal.ReadConference(e.ConferenceData),
 		AttendeesTruncated: e.AttendeesOmitted,
+		// Google's published defaults: false, true and true.
+		GuestsCanModify:         e.GuestsCanModify,
+		GuestsCanInviteOthers:   e.GuestsCanInviteOthers == nil || *e.GuestsCanInviteOthers,
+		GuestsCanSeeOtherGuests: e.GuestsCanSeeOtherGuests == nil || *e.GuestsCanSeeOtherGuests,
+		StatusDetails:           statusDetailsOf(e),
+	}
+	if e.Reminders != nil {
+		out.Reminders = remindersFrom(e.Reminders.UseDefault, e.Reminders.Overrides)
 	}
 	var err error
 	if out.Start, err = ParseWhen(e.Start, zone); err != nil {
@@ -280,6 +491,11 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		out.Attendees = append(out.Attendees, Attendee{
 			Email: a.Email, Name: a.DisplayName, Response: a.ResponseStatus,
 			Optional: a.Optional, Resource: a.Resource, Self: a.Self, Organizer: a.Organizer,
+		})
+	}
+	for _, a := range e.Attachments {
+		out.Attachments = append(out.Attachments, Attachment{
+			Title: a.Title, FileID: a.FileID, URL: a.FileURL, MimeType: a.MimeType,
 		})
 	}
 	return out, nil
@@ -366,6 +582,10 @@ type Availability struct {
 	Busy       []Busy
 	Unknown    bool
 	Reason     string
+	// Group is set for a group's address. Members is how many
+	// calendars Google expanded it to, which is zero when it could not.
+	Group   bool
+	Members int
 }
 
 // Merge returns the busy intervals of every calendar as one ordered,

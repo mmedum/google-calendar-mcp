@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-09
+
+### Added
+
+- `create_event` takes `rooms` and `update_event` takes `add_rooms`: rooms and other resources to book, sent to Google as resources. A room is not a guest, so it does not make `notify` required. An address there that is not a room's still counts as a guest. One address given as both a guest and a room is refused.
+- `list_events` and `search_events` take `event_types`, to keep only some kinds of event: `default`, `birthday`, `focusTime`, `fromGmail`, `outOfOffice` or `workingLocation`. The result names the filter as `event_types`.
+- `create_event` takes `optional_guests` and `update_event` takes `add_optional_guests`: guests invited as optional. They are emailed like any guest, so they make `notify` required, and `notify: none` is refused for one outside your organization. A room cannot be optional. An address already on the event keeps the role it has: the result names it under `notes`, and a call that would add nothing else is refused as having nothing to change. The same holds for `add_guests` and `add_rooms`.
+- `list_events` takes `ical_uid`, the iCalendar UID an invitation email carries, to find the event it is about. Every occurrence of a repeating event shares one UID, so each occurrence in the window comes back. The window still applies. The result names the filter as `ical_uid`.
+- An address may be given as a mailbox with a display name, such as `"Sample Person" <person@example.com>`, the way a Gmail server hands one over: in `guests`, `optional_guests`, `rooms`, `add_guests`, `add_optional_guests`, `add_rooms`, `remove_guests`, the `who` of `share_calendar` and `unshare_calendar`, and the `calendars` of `check_availability`. Only the address is used, and results show it bare. Two addresses in one entry are refused.
+- `list_changes` takes `updated_since`: what changed since a moment, as an RFC 3339 time or a date meaning the start of that day in `time_zone`, else the calendar's zone. The result echoes the instant as `updated_since`. Deleted events are always included. It cannot be combined with `sync_token`. Its last page hands back a sync token, to follow the calendar from there with `sync_token`. Continue a long read with its `page_token` and the same `updated_since`. Google calls this the legacy way to follow changes: an event whose only change was its reminders is not reported.
+- `get_event` lists the files attached to an event under `attachments`: `title`, `file_id`, `url` and `mime_type`. An event row carries `attachment_count` when the event has files. A Drive server opens a file by its `file_id`; this server never opens or changes one.
+- `create_event` and `update_event` set your reminders, the event's visibility and what guests may do. `popup_reminders` and `email_reminders` take minutes before the start, 0 to 40320, at most five in all; either one replaces the whole set, and an empty list given alone means none. `default_reminders: true` goes back to the calendar's own. `visibility` is `default`, `public` or `private`. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` take true or false. Reminders are yours alone, so an update that changes only them needs no `notify` and emails nobody, unless it splits a series with `scope: this_and_following`: that makes a new series, which reaches its guests. On one occurrence of a repeating event, a less restrictive visibility is refused, because Google ignores it, and a more restrictive one changes the whole series, which the result says.
+- `update_event` takes `add_conference`: a Google Meet link on an event that has no conference. The result says whether the link came back or Google is still making it. An event that already has a conference is refused, because Google would replace it, and so is a calendar that does not allow Meet. It cannot go with `scope: this_and_following`.
+- Every event read carries `visibility` and your `reminders`, and the text marks a private or public event. `get_event` adds `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests`, with Google's defaults filled in. `get_calendar` lists the calendar's `default_reminders`.
+- `create_event` makes status events on your primary calendar: `event_type` is `outOfOffice`, `focusTime` or `workingLocation`, spelled as reads report them. Out of office and focus time take `auto_decline`, which is required and has no default: `none`, `new` for invitations that arrive while the event stands, or `all`, which also declines the meetings you already accepted. They take `decline_message` too, and focus time takes `chat_status`, `available` or `do_not_disturb`. A working location takes `working_location`, `home`, `office` or `custom`, and `working_location_label`. The server sets the busy or free status and the visibility Google requires. Another calendar is refused, as is every shape Google's guide refuses, and guests, rooms and a Meet link are refused on a status event for now, when it is made and by `update_event` at every scope. With `auto_decline: all` the server asks you first when your client can ask; a dry run shows it without asking.
+- Every event read carries a status event's settings in the same words: `auto_decline`, `decline_message`, `chat_status`, `working_location` and `working_location_label`. The text says what the event declines, what Chat shows and where you work, and `get_event` shows the decline message.
+
+### Changed
+
+- Each tool that asks you before a write says in its description which writes it asks about, rather than "before the write". `share_calendar`, `cancel_event` and `create_event` ask only before some.
+- `search_events` and the server's instructions name the fields Google matches the search text against: the title, description and location, the guests' and organizer's names and addresses, and a working location's labels. Google now documents them. The description still says there is no field syntax and that an empty result is not proof the event does not exist.
+- A delete asks once in Claude Code, not twice. In a client that can ask the person, `delete_calendar` and `clear_calendar` no longer carry the `requiresUserInteraction` mark; the server's own question, which shows what the call destroys, is the confirmation. To see only that question, add both tools to Claude Code's allow list. A Claude Code `Elicitation` hook that accepts now confirms them alone.
+
+### Fixed
+
+- A `create_event` dry run with `conference: true` no longer reports `conference_status: no_video_entry_point`. It was reading its own request back as a conference.
+- On Windows, time zones work on a machine without Go installed. The binary now carries Go's copy of the time zone database, used only when the machine has none. Before, every time zone was refused there, so most tools failed. The binary is about 400 KB larger.
+- A room's address given as a guest no longer counts as a guest outside your organization, so `notify: none` is allowed on an event whose only guest is a room, when it is created and on every write after. The room is booked as a resource.
+- `check_availability` answers for a group's address: its members' busy time together, with how many calendars it covers, up to Google's 100. It reported every group unknown. A group with a member that cannot be read, or one Google cannot expand, is still unknown, never free. An answer for a group carries `group: true`. A calendar Google leaves unanswered because one request asked about too many, whether it is left out or answered `tooManyCalendarsRequested`, is asked about again on its own.
+- A `page_token` is refused when the call around it asks for something else. `list_events` and `search_events` bind the search text, the window, the time zone a date window is read in, `no_expand` and `show_canceled`, as well as the type and UID filters; `list_instances` binds the series, the window and `show_canceled`; `list_changes` binds the calendar and the `sync_token`. Google resumes a page token only for the query that issued it, so such a continuation could skip or repeat events. An incremental `list_changes` read continued without its `sync_token` was taken for a baseline and passed over changes. The refusal names what differs. A page token from an earlier version is refused too; start that read again.
+- `update_event` counts the guests it adds. Adding a guest to an event that had none now asks for `notify`, and `notify: none` is refused for a guest outside your organization; both went through before.
+- `update_event` with `scope: this_and_following` keeps the series' attachments, label, other apps' extended properties and a status event's details on the new series. They were dropped, so a working-location series was sent to Google without the details it needs to create one. A change to a status event, at any scope or through a split, is now held to Google's rules for one before anything is written; a split used to cut the series short and then be refused. A split whose new series declines every overlapping meeting asks you first, as `create_event` does, and a dry run shows it.
+- `update_event` asks you first, when your client can ask, before it moves an out-of-office or focus-time event that declines every meeting it overlaps, makes it longer or makes it repeat more, at any scope. Google may decline the meetings in the new time, including ones you already accepted. This went through without asking before. A change that only shortens the event asks nothing, and a dry run says what the change would decline.
+- Moving an event straight back to the calendar it came from no longer fails as `[stale]`. Google changes an event by itself moments after a move, so the next write to it was refused, two times in three. Now `update_event`, `cancel_event`, `move_event` and `respond_to_event`, called without `etag`, read the event again after such a refusal and make the write once more if it still makes the same changes, reaches the same guests and asks you the same question. The result says so. Otherwise, or with an `etag` you passed, the write is `[stale]` as before.
+
+### Security
+
+- Built with Go 1.27.2, which fixes nine advisories in `net/http`, its HTTP/2 code, `crypto/tls` and `net/textproto` that `govulncheck` found reachable from this server.
+
 ## [3.0.1] - 2026-10-01
 
 ### Fixed
@@ -952,7 +991,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.2...v2.0.0

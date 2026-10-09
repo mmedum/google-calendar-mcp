@@ -48,6 +48,13 @@ var (
 	// `meet.google.com/lookup/<code>` was redacted down to the code
 	// itself. All three leaked a joinable meeting into a transcript.
 	meetRe = regexp.MustCompile(`(?i)https?://meet\.google\.com/[^\s"'<>)\]]*`)
+	// A Drive or Docs link carries the file's id, and a file attached to
+	// an event is somebody's document. Unanchored for the same reason as
+	// the Meet rule.
+	driveRe = regexp.MustCompile(`(?i)https?://(?:drive|docs)\.google\.com/[^\s"'<>)\]]*`)
+	// A Drive file id on an event card, anchored on the label the
+	// renderer prints, since an id has no shape of its own.
+	fileIDRe = regexp.MustCompile(`(?i)(file id: ?)\S+`)
 	// A refresh token's literal prefix.
 	tokenRe = regexp.MustCompile(`\b1//[0-9A-Za-z_\-]{10,}\b`)
 	// An OAuth client id.
@@ -76,6 +83,8 @@ func String(s string) string {
 	s = calendarRe.ReplaceAllString(s, "[calendar-id]")
 	s = eventLinkRe.ReplaceAllString(s, "[calendar-url]")
 	s = meetRe.ReplaceAllString(s, "[meet-url]")
+	s = driveRe.ReplaceAllString(s, "[drive-url]")
+	s = fileIDRe.ReplaceAllString(s, "${1}[file-id]")
 	s = emailRe.ReplaceAllStringFunc(s, maskEmail)
 	return s
 }

@@ -3,9 +3,18 @@
 **Status: v3.0.1 (2026-10-01), released and verified from outside:** checksums,
 the cosign signature and the provenance attestation, each also against a tampered
 copy, the version in five places, the registry entry, and the Go proxy resolving
-`/v3`. Phase 7 asks the person through the client before the four writes of §9a.
+`/v3`. Phase 7 asks the person through the client before the writes of §9a.
 Still unproven: the `cancel_event` question against a real guest, which is tested
 offline only.
+
+**Unreleased, run live on 2026-10-09 in three passes:** everything under
+`[Unreleased]` in the CHANGELOG, which is phase 8 in §16. Spikes O and P are
+answered, and the three status types were made on the primary calendar, read
+back and deleted by id. The fixes those passes led to — a write read again
+once after Google changes a just-moved event, the sync token of a read since
+a moment, and a stop that lets the call in flight finish — wait on one more
+run. Still owed: the attachment steps (`GCAL_LIVE_ATTACHMENT`), the real-guest
+steps and spikes A and B (`-spike-notify`), the group probe, and §18 row 102.
  Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
@@ -270,7 +279,7 @@ preamble says to expect.
 document** (`www.googleapis.com/discovery/v1/apis/calendar/v3/rest`,
 revision 20260826, fetched 2026-09-15 and refetched unchanged
 2026-09-16), the Calendar guides, and the public MCP calendar servers
-named in §1. §18 is the evidence log, 77 rows. More than a third of them
+named in §1. §18 is the evidence log, 101 rows. More than a third of them
 refute an assumption this design started out holding; phase 3 added four
 before it wrote any code, one of which removed a parameter rather than
 adding one; and one reversed the single most consequential decision in
@@ -320,7 +329,9 @@ subscribed list, events and their recurrences, availability, sharing,
 colors and the user's own settings. Out (**decided**): everything a
 meeting *produces* rather than *is* — the Meet recording, the notes
 document, the file attached to an event — which belongs to the servers
-built on the Drive and Docs APIs. Google Tasks is a separate API and a
+built on the Drive and Docs APIs. Which files are attached is a fact
+about the event, so a read shows it, with the Drive file id that hands
+the file over; this server never opens or writes one (§7.2). Google Tasks is a separate API and a
 separate server. A conference attached to an event is a Calendar field
 and is in scope; the Meet API's recordings and transcripts are not
 (§17.3).
@@ -443,8 +454,9 @@ either accommodates them or lies.
   second can fail after the first succeeded.
 - **No search across calendars.** `events.list` takes one `calendarId`.
   Searching several is several requests, fanned out by this server.
-- **`q` is a free-text match, not a field query.** It has no documented
-  syntax, no field scoping and no guarantee about which fields it reads.
+- **`q` is a free-text match, not a field query.** Google documents the
+  fields it reads, but it has no field syntax, so a search cannot be
+  narrowed to one of them, and how it matches words is not documented.
   A result set from `q` is a suggestion (§7.2).
 - **No way to know whether mail was actually sent.** The API reports
   nothing about notifications. `sendUpdates` is a request, and §2.6 says
@@ -500,6 +512,13 @@ A consequence worth stating: **the server has no opinion about "today"**
 until it has resolved a zone. A tool that takes a relative window
 resolves the zone first and prints the absolute window it derived.
 
+**The binary carries the zone database.** A zone name is turned into
+rules by Go's `time.LoadLocation`, which reads the machine's database.
+Windows has none Go can read, so a release binary on a machine without Go
+refused every zone, and nearly every tool needs one. The main package
+imports Go's own copy, `time/tzdata`, which is used only when the machine
+has none. It adds about 400 KB (§18 row 96).
+
 ### 4.2 The recurrence scope is required, never inferred
 
 "Change the 10:00 standup to 10:30" is three different operations and
@@ -515,7 +534,11 @@ Every event write takes a required `scope`:
 - **`this_and_following`** — the two-call pattern of §2.8. The server
   performs it, and its result says in plain words that **exceptions
   after the target instance were reset**, because Google's guide says
-  they are and no caller expects it.
+  they are and no caller expects it. The new series is the original
+  copied whole: its attachments, a status event's details, and the
+  fields this server does not model, such as a label and other
+  applications' extended properties. It leaves behind the conference,
+  which the result says, and what Google sets itself (§18 row 88).
 
 There is no default. A write against an event that has a
 `recurringEventId` or a `recurrence` field and no `scope` is refused with
@@ -559,6 +582,12 @@ Five supporting rules:
    attendees on a calendar shared with nobody has no `notify` decision to
    make, and demanding one is friction with no safety in it. The
    parameter is required only when the write can actually reach a person.
+   A room is not a person, whether it comes as a room or as a guest
+   address (§18 rows 84, 85). The address decides that, not the
+   attendee's `resource` flag, so a person passed as a room is still
+   somebody the write reaches. A guest the write itself adds is
+   reached too (row 86), and an optional guest is a guest: Google mails
+   one like any other (row 92).
 3. **A result says what the server asked for, never what a guest
    received.** `none` is never reported as silence, because Google says
    some mail may go out anyway (§2.6). `all` is never reported as
@@ -635,13 +664,23 @@ written.
   produced the plan.** A 412 becomes `[stale]` with "re-read and try
   again", never a silent retry — a retry here would apply the caller's
   intent to a resource somebody else has since changed.
+- **One exception, said in the result: an event write whose etag is
+  the server's own read.** When the caller passed no `etag`, a 412 says
+  only that the event changed in the moment between this server's read
+  and its write, and Google makes such changes itself moments after a
+  move (§18 row 103). The write is then read again, planned again, and
+  made once more if the new plan writes the same changes, reaches the
+  same guests and asks the person the same question; otherwise it is
+  `[stale]`. A second 412 is `[stale]`, and a caller's own `etag` is
+  held as before. The calendar and sharing writes keep the plain rule.
 - **`If-Match: *` is available and is not the default.** It exists for
   the caller who genuinely means "whatever it says now", and saying so is
   an explicit flag.
 - **Guest lists are read before they are written.** Adding an attendee is
   a read-modify-write on the array, never a replacement of it, so an RSVP
-  that arrived between the read and the write is reported as `[stale]`
-  rather than overwritten.
+  that arrived between the read and the write is never overwritten: it is
+  `[stale]`, or, under the exception above, kept by the second try's
+  fresh read.
 - **`events.move` carries `If-Match` too, and finding that out is the
   argument for §15.** It is not a patch — a POST with the destination in
   the query string and no body — and nothing Google publishes says the
@@ -780,9 +819,10 @@ the series id plus `original_start` (§4.2). The server accepts both and
 says which it used, because `originalStartTime` is the stable one:
 §2 confirms it identifies the instance even after the instance is moved.
 
-`iCalUID` is accepted on lookup (`events.list` takes it) and is never
-used as the primary address: one `iCalUID` is shared by every occurrence
-of a series, which is exactly the ambiguity §4.2 exists to remove.
+`iCalUID` is accepted on lookup — `list_events` takes it as `ical_uid`,
+sent to `events.list` — and is never used as the primary address: one
+`iCalUID` is shared by every occurrence of a series, which is exactly the
+ambiguity §4.2 exists to remove.
 
 ### 6.3 Referring to a time
 
@@ -822,7 +862,7 @@ five this API forces:
 | `conflict` | the resource state refuses this operation | read and reconsider |
 | `stale` | the etag moved under you (412) | re-read and retry |
 | `ambiguous` | a title matched several calendars | pass an id |
-| `blocked` | a guard refused what the API would have allowed | pass the override, or don't |
+| `blocked` | a guard refused what the API would have allowed | pass the override the refusal names, if it names one; otherwise don't |
 | `rate_limited` | 403/429 `usageLimits` | back off (§11) |
 | `unavailable` | a transient upstream failure | retry |
 | `unsupported` | the API cannot do this | see §2 |
@@ -849,7 +889,8 @@ The zone is on this result specifically so the zone-resolution order of
 §4.1 can be followed without a second call.
 
 `get_calendar` adds the description, the sharing exposure (§7.6) and the
-default reminders.
+default reminders, which only the caller's own calendar list carries: a
+calendar read by id without a subscription shows none.
 
 ### 7.2 Reading events
 
@@ -862,16 +903,57 @@ which it got.
 
 Defaults that are decided: canceled events are excluded unless asked
 for (§2.13); `maxResults` is the API's 250 per page and the server pages
-to its own event budget (§4.5); `eventTypes` is unfiltered, but the
+to its own event budget (§4.5); `eventTypes` is unfiltered by default, but the
 renderer marks birthdays, focus-time, out-of-office and working-location
 events as what they are rather than as meetings (§2.12).
 
+Both schedule reads take `event_types`, Google's own six spellings, to
+keep only some kinds, such as `outOfOffice`. An unknown one is refused
+before a request is spent. The result names the filter in both halves,
+so a short list is not read as the whole schedule.
+
+**A page token is bound to the query that issued it.** Google resumes a
+page token only for its own query, so a continuation under another one
+would skip or repeat rows while its result named the new query. The
+schedule reads' token carries everything that decides the rows: the
+calendars, the window as two instants, `expand`, `show_canceled`,
+`event_types`, `ical_uid`, and the search text as a digest, because a
+token goes back to the caller and a search term is content.
+`list_instances`' token carries its series, window and `show_canceled`.
+A continuation that changes any of them is refused, naming what
+differs, and so is a token from an earlier version (§18 row 89).
+
+`list_events` also takes `ical_uid`, the UID an invitation email
+carries, which is how a caller holding one from a mail server finds the
+event. Every occurrence of a series shares the series' UID, so the filter
+expanded returns each occurrence in the window, and as a series returns
+the series once. The window still applies, so a meeting moved outside
+it is not found, and the empty result says so. The reference names one
+parameter it cannot go with, `syncToken`, which `list_events` never
+sends. A page token carries the UID with the rest of the query (§18
+row 94).
+
 `search_events` is `events.list` with `q`, fanned out across the named
-calendars. Its description states plainly that `q` is undocumented
-free text with no field scoping (§2), so a model treats an empty result
-as "found nothing" rather than "there is nothing".
+calendars. Google documents the fields `q` reads: the title,
+description and location, each guest's and the organizer's name and
+address, and a working location's building, desk and labels, plus
+built-in words such as "Out of office" that match those kinds of event
+in any language. The description says so. It also says there is no
+field syntax, that how words are matched is not documented, and that an
+event the caller sees only as busy has nothing to match, so a model
+still treats an empty result as "found nothing" rather than "there is
+nothing" (§18 row 95).
 
 `get_event` returns one event whole. `list_instances` expands one series.
+
+**Attachments are shown, never written.** Google returns them on a read
+with no parameter. The event card lists each with its title, type, link
+and Drive file id, and every list row counts them as
+`attachment_count`. A title is text somebody else wrote, so it is
+treated like a description: shown as written, never logged (§9). The
+file itself is the Drive server's, and the file id is what it takes.
+No tool adds or removes an attachment; a series split carries the
+parent's (§4.2, §18 row 90).
 
 ### 7.3 Availability
 
@@ -886,7 +968,11 @@ Three details are decided, all in phase 1:
 
 - **A calendar missing from the response is unknown**, exactly like one
   that errored. That is what a query truncated at `calendarExpansionMax`
-  looks like from here: no busy list, no error, no row.
+  may look like from here: no busy list, no error, no row. Google names
+  the error `tooManyCalendarsRequested` without saying whether a
+  truncated calendar gets it, so a slot carrying it counts as no answer
+  too. Either way the calendar is asked about again on its own, and one
+  still unanswered is unknown (§18 row 100).
 - **An address is not resolved before it is asked about.** Free/busy is
   the one read that works on a calendar this account cannot open, so
   resolving the reference first would refuse the query the tool exists
@@ -920,6 +1006,122 @@ API shapes behind one honest verb, with the result naming which happened.
 It is **not** behind the destructive flag: canceling a meeting is an
 ordinary calendar action, it notifies by the same `notify` rule, and
 Google keeps the record. §9 has the line.
+
+**Optional guests are added, never re-roled.** `create_event` takes
+`optional_guests` and `update_event` `add_optional_guests`, sent with
+`optional: true`. They count toward `notify` exactly as guests do, through
+the one list of addresses a write adds. A room cannot be optional, and one
+address asked for in two roles, a guest and a room included, is refused. An address the write adds that
+is already on the event keeps the role it has, and the result names it
+rather than skipping it in silence, whichever list it came in. Changing a
+guest from required to optional is a different write, and this server
+does not make it (§18 row 92).
+
+**An address may arrive as a mailbox.** A Gmail server hands addresses
+over as RFC 5322 mailboxes, `"Sample Person" <person@example.com>`, and
+the old check refused the space. Every address input — guests, optional
+guests, rooms, `remove_guests`, a share's `who` and the calendars
+`check_availability` asks about — is parsed with Go's `net/mail` and the
+bare address goes on. It is replaced before anything reads it, so the
+reach count sees the domain the address has, not the bracket after it.
+The display name goes nowhere: not to Google, not to a result, not to a
+log. One entry holds one address; a list in one string is refused rather
+than split (§18 row 93).
+
+**Reminders are the caller's own, so changing them reaches nobody.**
+Google documents `reminders` as "the event's reminders for the
+authenticated user", and a change to them does not move the event's
+`updated`. `create_event` and `update_event` take `popup_reminders` and
+`email_reminders`, in minutes before the start, and `default_reminders`
+to go back to the calendar's own. Either list replaces the whole set, and
+an empty one given alone means none. The limits are Google's: 0 to 40320
+minutes, five in all. A patch merges an object into the one there, so
+`overrides` is always sent, null when there are none, and the old ones
+cannot survive under a new `useDefault`. An update that changes only
+reminders needs no `notify` and sends no `sendUpdates`, whatever the
+guest list; the result says why. A `this_and_following` split is the
+exception: it makes a new series, which reaches its guests, so it needs
+`notify` like any other write. Every event read carries the
+caller's reminders, and `get_calendar` lists the calendar's defaults.
+
+**Visibility and the guests' permissions are the event's.** `visibility`
+is `default`, `public` or `private`. `confidential` is refused with what
+to pass instead, because Google documents it as "The event is private"
+and keeps it for compatibility; a read shows it as it came. On one
+occurrence Google ignores a less restrictive visibility and applies a
+more restrictive one to every occurrence, so the first is refused before
+a request and the second is made and the result says the whole series
+changed. Where `default` falls between `public` and `private` is this
+server's belief (§18 row 101). `guests_can_modify`, `guests_can_invite_others` and
+`guests_can_see_other_guests` are set as given; `get_event` shows all
+three with Google's defaults filled in. These reach the guests like any
+other change to the event (§18 row 97).
+
+**A Meet link can be added after the event is made.** `update_event`
+takes `add_conference`, refused with `[blocked]` on an event that has a
+conference and with `this_and_following`, because Google would do both
+and the server chooses not to, and with `[unsupported]` on a calendar
+that does not allow Meet; §17.3 has the rules and the request id.
+
+**Status events are made by `create_event`, not a tool of their own.**
+`event_type` is `outOfOffice`, `focusTime` or `workingLocation`, spelled
+as reads report it. Google's status-events guide sets the rules, and the
+server holds each before a request (§18 row 99):
+
+- Only the primary calendar holds one: "Secondary calendars can't have
+  status events." Passing `primary` or the account's own address, or
+  leaving `calendar` out, reaches it; any other calendar is
+  `[unsupported]`.
+- Out of office and focus time are timed, never all day, and opaque.
+  `auto_decline` is required for them, with no default, by §4.3's
+  reasoning: a decline reaches another person. `none` declines nothing,
+  `new` the invitations that arrive while the event stands, and `all` the
+  meetings already accepted too. `all` asks the person (§9a).
+  `decline_message` goes with a decline and is refused with `none`. Focus
+  time takes `chat_status`, `available` or `do_not_disturb`.
+- A working location is timed or one whole day, public and transparent.
+  `working_location` is `home`, `office` or `custom`, and
+  `working_location_label` names the office or the place. Home has no
+  label. The building, floor and desk ids are not set, because they name
+  the organization's own resources.
+- The server sets the transparency and visibility itself. `free_not_busy`
+  on out of office or focus time, and a visibility other than `public`
+  on a working location, are refused rather than overridden.
+- Guests, optional guests, rooms and a Meet link are refused with
+  `[blocked]`, by `create_event` and by `update_event` at every scope,
+  a split included. Google documents nothing about them on a status
+  event, so nothing is sent until a live probe shows what it does.
+  Removing a guest is not refused.
+- `update_event` holds a status event to the same shapes, at every scope
+  and on a split's new series, before anything is written: Google says an
+  update "must maintain the required fields", and a split refused after
+  its truncate leaves the series cut short. A rule the event already
+  broke when it was read is left to Google.
+- A `this_and_following` split of an out-of-office or focus-time series
+  that declines all starts a new series that declines all, and asks the
+  person first, as `create_event` does (§9a). Whether Google declines
+  again for a series it already declined for is not probed, so the new
+  series is treated as new.
+- A change that makes an out-of-office or focus-time event that declines
+  all cover time it did not asks the person first too, at any scope:
+  moved, made longer, repeated more or made to repeat. Whether Google
+  declines the meetings already in the new time is not probed, so they
+  are treated as declined (§18 row 102). A change that only shrinks the
+  time asks nothing, and neither does one that leaves the time alone.
+  The server expands the occurrences before and after from the rule and
+  asks unless each one after lies inside one before. A series longer
+  than it expands is compared on its first occurrences only when its rule
+  is unchanged. A change it cannot show to shrink, such as one to a rule
+  it does not expand, asks.
+
+The three details blocks stay raw JSON on the event, as `conferenceData`
+does, so a read and a split copy carry a detail Google adds later. Every
+read shows `event_type` and the details in the input words: `auto_decline`,
+`decline_message`, `chat_status`, `working_location` and
+`working_location_label`. A value Google adds later is shown as Google
+spells it. Changing a status event's details is not offered: Google's
+guide says an update "must maintain the required fields", and nothing
+asked for it yet.
 
 `respond_to_event` sets the caller's own `responseStatus` and comment. It
 is separate from `update_event` because RSVPing is not editing, the
@@ -1003,8 +1205,8 @@ hazard is identical.
 
 ## 8. Tool surface
 
-Twenty tools. Read-only mode registers the first eight and requests only
-the read scopes (§10).
+Twenty-one tools. Read-only mode registers the first nine and requests
+only the read scopes (§10).
 
 | Tool | API methods | Notes |
 |---|---|---|
@@ -1013,11 +1215,12 @@ the read scopes (§10).
 | `list_events` | `events.list` | `expand` vs `series` required (§7.2) |
 | `get_event` | `events.get` | |
 | `list_instances` | `events.instances` | |
-| `search_events` | `events.list` (`q`) | fanned out; `q` is unscoped (§2) |
+| `list_changes` | `events.list` (`syncToken`, `updatedMin`) | the caller holds the token; deletions included (§17.1) |
+| `search_events` | `events.list` (`q`) | fanned out; `q` has no field syntax (§2) |
 | `check_availability` | `freebusy.query` | batched at 50; free gaps (§7.3); working-hours mask (§17.2) |
 | `get_settings` | `settings.list`, `colors.get` | the user's zone and week start |
-| `create_event` | `events.insert` | client-side id (§2.11); optional Meet link (§17.3) |
-| `update_event` | `events.patch` | `scope` + `notify` + `If-Match` |
+| `create_event` | `events.insert` | client-side id (§2.11); optional Meet link (§17.3); status events (§7.4) |
+| `update_event` | `events.patch` | `scope` + `notify` + `If-Match`; `add_conference` (§17.3) |
 | `cancel_event` | `events.delete`, `events.patch` | not gated (§7.4) |
 | `move_event` | `events.move` | between calendars |
 | `respond_to_event` | `events.patch` | RSVP only (§7.4) |
@@ -1109,10 +1312,14 @@ written off.
 Methods are the coarse axis; this API keeps its capability in the `Event`
 resource, which has 44 properties. A second gate, `gates api-fields`,
 holds one verdict per published field of `Event`, `Calendar`,
-`CalendarListEntry` and `AclRule`: modeled in `internal/gcal`, or
-written off with a reason. Without it, "we support events" hides the fact
+`CalendarListEntry` and `AclRule`, and of every schema they reach by
+`$ref`: modeled in `internal/gcal`, or written off with a reason. Without it, "we support events" hides the fact
 that `attachments`, `extendedProperties`, `gadget` and the four
-event-type property blocks were never considered.
+event-type property blocks were never considered. An object Google
+declares inline rather than by `$ref`, such as an event's `creator` or
+`reminders`, has one verdict for the whole object, not one per field
+inside it. The four resources are checked by name, so none can leave the
+record by an edit to the snapshot.
 
 Phase 1 writes the record: 81 fields, 56 modeled and 25 written off,
 each with a reason. `api-diff` records the field list from the discovery
@@ -1124,6 +1331,20 @@ Phase 0 was supposed to write this record and did not, while
 `internal/gcal`'s own doc comment said a gate held the list. Nothing
 noticed, because `parity` compares `make check` with CI and both were
 equally short.
+
+The four alone were not enough. An attendee is an `EventAttendee`, a
+reminder an `EventReminder`, a Meet link a `ConferenceData`, and none of
+their fields had a row, so `EventAttendee.asyncOperation` arrived
+unnoticed. Since 2026-10-09 `api-diff` records every schema the four
+reach by `$ref`, twenty of them, and the record holds 148 fields. A wire
+type is matched to its schema by name, and the five unexported types
+that read the raw conference data by a list in the gate.
+
+**For an event, `out` means not read, not lost.** An event keeps every
+field it does not model, as Google sent it, so a write that copies an
+event whole — the new series of a split (§4.2) — carries those fields
+too. A calendar, a sharing rule and a nested object such as a guest do
+not; their `out` fields are dropped.
 
 ## 9. Confidentiality, security, safety
 
@@ -1160,6 +1381,27 @@ Two structural rules, not matters of care:
    per run for the same reason — a deleted event does not release its id,
    and Google answers a re-insert with 409.
 
+   **One narrow exception, decided by the owner on 2026-10-09.** A status
+   event can only live on the primary calendar (§7.4), so no scratch
+   calendar can test one. The driver may make exactly one status event
+   per run on the primary calendar: about a year ahead, with an invented
+   title, declining nothing, read back by its id, and deleted by its id
+   in the same run. The delete is deferred before the event is made, and
+   Ctrl-C or SIGTERM stops the steps rather than the process, so it runs
+   however the run ends; a second signal exits at once, after the first
+   has printed the title and start to delete by hand. Nothing else there
+   is written, and the driver enforces it rather than trusting each step:
+   one guard sits on both of its paths to Google, the server's tools and
+   its own REST calls. It refuses every write that names the primary
+   calendar — `primary`, the account's address, or no calendar at all,
+   as the calendar written or as a move's destination — except that one
+   create and the delete of the id it made. A create that was refused
+   leaves nothing to delete and is not reported as one. The guard's tests
+   need no account and run in `make cover`. A step on the primary
+   calendar prints no body and no text from its result, because the
+   primary calendar's title is the person's own. `-status-type` picks
+   which of the three types a run makes.
+
 The leak gate is an allow-list, and it is anchored on shapes the server's
 own generated fields cannot take — an `@` with a dot-suffixed domain, a
 known URL prefix, a literal keyword before an id — per the standard's
@@ -1192,14 +1434,14 @@ protection `cancel_event` gets instead is §4.2's required `scope`, so
 canceling a series can never be a slip of the wrist, and §4.3's required
 `notify`.
 
-**Read-only mode** (`GCAL_READONLY=true`) registers only the eight read
+**Read-only mode** (`GCAL_READONLY=true`) registers only the nine read
 tools and requests only the read scopes.
 
 ### 9a. A write that cannot be taken back is confirmed by the person
 
 `confirm: true` and `allow_public: true` are arguments the model writes,
 and a persuaded model writes them too. So when the client can ask, the
-server asks the person itself, through MCP form elicitation, before four
+server asks the person itself, through MCP form elicitation, before six
 writes:
 
 - `delete_calendar` and `clear_calendar`, always;
@@ -1209,7 +1451,19 @@ writes:
   with a guest, or `external_only` with a guest outside the organizer's
   domain. The email cannot be recalled. A cancel nobody is emailed about
   is frequent and private, and asks nothing, which keeps §9's argument
-  for leaving the tool ungated.
+  for leaving the tool ungated;
+- `create_event` when it makes an out-of-office or focus-time event with
+  `auto_decline: all`. Google declines every meeting it overlaps, the
+  accepted ones too, and each organizer sees the decline, which cannot be
+  recalled. `none` and `new` ask nothing: one declines nothing, and the
+  other only invitations that arrive while the event stands (§7.4).
+- `update_event` when it makes such an event that declines all cover
+  time it did not: moved, made longer or repeated more, at any scope.
+  Google may decline the meetings in the new time, the accepted ones too.
+  A change that only shrinks the time asks nothing (§7.4). A
+  `this_and_following` split of such a series always asks: the new series
+  is a new event that declines all, so it is asked about exactly as a
+  create is, before the truncate.
 
 1. **A second gate, not a replacement.** The arguments stay and are
    checked first. A call a guard refuses asks nothing. The question comes
@@ -1226,7 +1480,12 @@ writes:
 3. **No question possible.** A client that declares no form elicitation
    gets no question, and the arguments are the guard, as before.
    `GCAL_REQUIRE_PROMPT=true` refuses those writes as `[blocked]`
-   instead.
+   instead. Only such a client sees Claude Code's
+   `requiresUserInteraction` mark on `delete_calendar` and
+   `clear_calendar`: `tools/list` drops it when the request declares form
+   elicitation, so the person answers once, to the question that says
+   what the write destroys. `destructiveHint` stays as the client's
+   allow-listable prompt.
 4. **A dry run never asks**, and needs no `confirm` either. Before this
    phase `delete_calendar` and `clear_calendar` checked `confirm` ahead of
    `dry_run`, so a preview had to be confirmed first.
@@ -1234,7 +1493,10 @@ writes:
    in the server's words: a calendar by its title; a share by who it
    reaches and the role; a cancellation by the event's title, the
    calendar, when it starts with its zone, the scope, and how many guests
-   are emailed and how many of them are outside the organization. Text
+   are emailed and how many of them are outside the organization; a
+   status event by its kind, title and calendar, when it starts, whether
+   it repeats, and the decline message the organizers get, and a change
+   to one also by when it was and how it repeated. Text
    from Calendar or from the call stands in a code span, on one line,
    made inert as in the sibling servers: invisible characters
    removed, every quote and backtick lookalike made a plain single quote,
@@ -1419,16 +1681,34 @@ task's calendar, offers the tool list and asserts every task FAILS on a
 calendar nobody touched — a scorer that passes there is scoring nothing,
 and without this in `check` that would be found by spending money.
 
-`schema-diff` compares the built tool surface against the last tag, and
-against `testdata/schema-baseline.json` when there is no tag. The
-fallback exists because there was no tag: the gate reported "no previous
-tag" on every run from the first commit onward, which is the whole
-stretch where the surface changes most — inert exactly when it was most
-needed. `make schema-baseline` records the current surface, and
-refreshing it is the deliberate act of saying the change has been looked
-at, which is what tagging says at a larger scale. The gate reports and
-never fails: removing a tool is sometimes right, and the definition of
-done says a person reads this one.
+`schema-diff` compares the built tool surface against
+`testdata/schema-baseline.json`, the surface of the CHANGELOG's newest
+release, recorded in that release's commit by `make schema-baseline
+VERSION=vX.Y.Z`. It used to diff against the last tag, with the file as
+a fallback, and that was wrong twice: CI's checkout is shallow and has
+no tags, so CI always used the file, which nobody refreshed; and a
+deliberate break had no way through locally, because the tag always
+won. The gate fails on what breaks a caller, at any depth,
+`events[].start` as much as `events`: a tool, resource or field removed;
+an input that takes fewer types than it did, or no longer takes a value
+it listed; an output that may return a type it did not, or may be
+missing where it was required; or an input newly required where its
+parent was already there. Types are compared one way, as JSON Schema
+2020-12 reads them (validation §6.1.1): a list of types allows any of
+them, and an integer is a number. So an input that becomes nullable or takes a number for an
+integer breaks nobody, and an output that may now be null does. Anything
+else that changed is reported for a person to read, and an output that
+may carry a value it did not list, or an input newly limited to a list,
+is named: whether either breaks a caller depends on what the server did
+before. It also fails when the baseline is not the newest release's, and,
+with nothing under `[Unreleased]`, when the build differs from the
+baseline at all, which proves a release commit recorded the baseline
+rather than relabeling it. `schema-baseline` refuses a build stamped
+with another version, and a break unless the release is a new major
+version. The dump runs with nowhere to find a setting, so a `GCAL_`
+variable in the maintainer's shell cannot change the surface. The
+baseline was recorded from the v3.0.1 tag with the dump's output
+schemas backported, so outputs are held from v3.0.1 on.
 
 `mcpb`, the bundle manifest gate, is the one this list named before it
 existed. It was built in phase 4 with the bundle, and runs in `make
@@ -1676,6 +1956,35 @@ states its question and its verdict separately.
   calendars by decision. The flag stays, and stays off: the limit counts
   creations and is not refunded by deleting them, so running it spends a
   quota the driver's own scratch calendar needs (§18 rows 12 and 36).
+- **Spike O — what a read by `updatedMin` gives back.** The spike pages
+  an `updatedMin` read to its end and reports whether a token arrived;
+  if one did, it changes the driver's own timed event and syncs with it,
+  to see whether the change is reported. It also prints how Google
+  answers a moment in 2000, and whether the bound includes an event
+  written at exactly that moment. **Answered 2026-10-09, the same in
+  three runs.** The token arrives on the last page and chains: the sync
+  reported the change made after it. A moment in 2000 is 410
+  `updatedMinTooLongAgo`. An event whose `updated` equals the moment is
+  included. So `list_changes` now hands the token back, and the spike
+  fails if Google stops honoring it (§18 row 91).
+- **Spike P — status events.** Two halves. The spike asks the API
+  directly to put an out-of-office event on the scratch calendar, to see
+  whether Google refuses a status event on a secondary calendar as its
+  guide says. And under §9.1's one exception the steps make one status
+  event on the primary calendar, read it back and delete it by id, with
+  `-status-type` choosing out of office, focus time or a working location
+  per run. What Google does with guests, rooms or a Meet link on a
+  status event, whether a split of a status series declining all
+  declines again, and whether moving or lengthening one declines the
+  meetings in its new time, stay unprobed: each needs a second status
+  event, a guest or another organizer's meeting, which the exception does
+  not allow. **Answered 2026-10-09, over three runs, one type each.**
+  Google refuses a status event on a secondary calendar with 400
+  `malformedOutOfOfficeEvent`. An out-of-office event, a focus time and
+  a custom working location were each created on the primary calendar,
+  read back with their details and deleted by id, and the run stopped
+  part way deleted its status event too. The rest stays unprobed (§18
+  rows 99 and 102).
 
 ## 16. Delivery phases
 
@@ -2452,6 +2761,43 @@ Breaking, so 3.0.0: a client that declares elicitation and answers with
 nobody present, as `claude -p` does, can no longer make these writes.
 The module path moves to `/v3`.
 
+**Phase 8 — the gap analysis (unreleased). Built 2026-10-09, and run
+live the same day.** What `[Unreleased]` lists: rooms and optional guests,
+`event_types` and `ical_uid`, attachments on reads, `updated_since`,
+reminders, visibility and guest permissions, `add_conference`, status
+events on `create_event`, a group's free/busy answer, page tokens bound to
+their query, and the time zone database in the binary. Its review found a
+split of a status series that skipped the status rules and the question,
+guests sent to an existing status event, page tokens reusable under
+another query, `tooManyCalendarsRequested` read as an answer, gaps in
+the live driver's primary-calendar guard, and a status event declining all
+moved or made longer without asking; all are fixed.
+
+**The live run, 2026-10-09: three passes, one per `-status-type`, the
+third stopped part way on purpose.** All three status types were made on
+the primary calendar, read back and deleted by id. Spike P found Google
+refuses a status event on a secondary calendar, and spike O that a token
+from a read since a moment chains, so `list_changes` now hands it back.
+The visibility rank held for a `default` occurrence, `overrides: null`
+cleared reminders, `add_conference` on a patch came back with its link,
+and an optional guest stayed optional (§18 rows 89 to 101). Two passes
+of three failed `move_event back` with `[stale]`: Google changes a
+just-moved event by itself, so an event write without the caller's etag
+is now read again once (§18 row 103). The stopped pass deleted its
+status event and calendars, and counted the call in flight as failed,
+because the stop also reached the server; the driver now keeps the
+server out of it.
+
+**Next: one more live run, with the transcript read, before any
+release.** It checks the move back's second try, the sync from a read
+since a moment, and a stop that lets the call in flight finish. Still
+owed beyond that: the attachment steps, with `GCAL_LIVE_ATTACHMENT` set;
+the real-guest steps and spikes A and B, with `-spike-notify`; the group
+probe of §18 rows 87 and 100, outside the driver; and whether Google
+declines again after a status event that declines all moves (row 102).
+Rooms, a split of a status series and a move of one that declines all
+stay unproven: the driver can make none of them.
+
 ### 16a. Found by review, and fixed
 
 Five defects the phase 1 review turned up in code phases 0 and 1 had
@@ -2525,6 +2871,29 @@ Written down, not changed: a share to a group below owner asks nothing,
 although a group can be as large as a domain. The asking set is the one
 the maintainer chose.
 
+**The interaction mark's review.** A sibling server's review of the
+same change (§9a item 3) found three gaps, and all three held here.
+Fixed from it:
+
+10. **No test showed the mark is dropped from a copy.** Each client had
+    a server of its own. Now, on every protocol, one server lists for a
+    client that can ask, then for one with no elicitation and one with
+    URL elicitation alone. Dropping the mark from the server's own tool
+    fails it.
+11. **§18 row 83 left out an `Elicitation` hook.** A Claude Code hook
+    that accepts now confirms these deletes alone, where the mark used
+    to stop the call first. Row 83 and the CHANGELOG say so.
+12. **A comment said Claude Code prompts for the mark in every
+    permission mode.** The evidence is that it prompts even under an
+    allow rule, and the comment says that now.
+
+Written down, not changed: on protocol 2026-07-28 capabilities travel
+per request. A client can declare form elicitation to `tools/list` and
+none to `tools/call`, and get neither the mark nor a question. That
+gives a misbehaving client nothing it lacked: such a client answers the
+server's question itself, and can accept with nobody present (§18
+row 80).
+
 ## 17. Open decisions
 
 1. **Incremental sync.** `syncToken` is designed for a client with a
@@ -2569,6 +2938,29 @@ the maintainer chose.
    would send the caller round the same loop, so the tool replaces it:
    ask again with **no** token, and treat what you were holding as
    unreliable rather than merely old. **Decided.**
+
+   **`updated_since`, added 2026-10-09, is the one-off look back.** It
+   is `updatedMin`: what was written at or after a moment, given as
+   RFC 3339 or as a date meaning the start of that day in the resolved
+   zone, and echoed as an instant. Deleted events since then are always
+   included. It is refused alongside a token, because Google refuses
+   `updatedMin` there. Google's sync guide calls it the legacy way and
+   says it misses updates, and the reference says why one is missed: an
+   event's `updated` does not move when only its reminders change. So
+   the tool still leads with the token. A read by `updated_since` hands
+   back the token its last page carries, since spike O found that such a
+   token chains. A moment further back than Google keeps is 410
+   `updatedMinTooLongAgo`, which gets its own cure: a later moment, or a
+   baseline (§18 row 91).
+
+   **A page token says which read issued it.** `next_page_token` carries
+   Google's page token with the calendar, the sync token as a digest, and
+   the `updated_since` instant. A continuation must ask the same: the
+   same sync token, the same moment, or neither for a baseline. Anything
+   else is refused, naming what to pass. Before, a read since a moment
+   or an incremental read continued with only its page token was taken
+   for a baseline, which paged past its changes instead of reporting
+   them.
 2. **Working hours.** There is no working-hours field in the API; the
    `workingLocation` event type is adjacent but not the same thing. Free
    gaps at 03:00 are technically correct and useless. Whether the server
@@ -2611,7 +3003,8 @@ the maintainer chose.
    undecided.
 
    **Decided in phase 4: a parameter on `create_event`, and nothing
-   else.** A tool would be a second way to make an event, and the link
+   else.** *Superseded on 2026-10-09 for an existing event; see the
+   reversal below.* A tool would be a second way to make an event, and the link
    belongs to the event's creation rather than to a separate act.
    `conference: true` sends a create request whose `requestId` is the
    EVENT id, so a retry of a create whose answer was never seen (§2.11)
@@ -2631,7 +3024,27 @@ the maintainer chose.
    conference to an event that already exists is refused with what to do
    instead, rather than silently dropped: `events.patch` can carry
    conference data and this server does not write it, so saying so is the
-   honest half. **Decided, with the boundary named.**
+   honest half. **Decided, with the boundary named; reversed below.**
+
+   **Reversed 2026-10-09: `update_event` takes `add_conference`.** A
+   meeting often gets its link after it is made, and the refusal sent the
+   caller to Google Calendar for a write the API supports. The boundary
+   that mattered is kept by the rule rather than by the refusal. A patch
+   carries the create request, and the client sets the version parameter
+   from the body, as on an insert. An event that already has a
+   conference is refused, because Google replaces the field whole, so the
+   request would replace the link people are using; one whose earlier
+   request failed holds no conference and may ask again. The calendar's
+   published types are checked first, as on create. The request id is
+   **not** the event id: a create with a conference used that, and Google
+   ignores a repeated one, so asking again after somebody removed the
+   first link would be ignored in silence. It is a hash of the event id
+   and the etag the write is made under, so a retry of the same patch
+   repeats it and a later version gets a new one. A dry run names the
+   request and shows no conference. A split still mints none: the new
+   series is a new event, so `add_conference` with `this_and_following`
+   is refused, and the split's own note names `add_conference` with
+   `scope:series` as the way to add one afterward (§18 row 98).
 4. **quickAdd, argued against.** §1 writes it off and the counter-argument
    is recorded rather than lost: it is one call where the structured path
    is several, and users type strings like that. It stays out because it
@@ -2757,6 +3170,27 @@ what §15 exists to settle, and they are marked.
 | 80 | A client that declares elicitation has a person to answer it | Tier 2, from a sibling server's evidence log: `claude -p` 2.1.284 against a probe, and the Codex source at `codex-rs/codex-mcp/src/elicitation.rs` | **Refuted.** `claude -p` declares it and answers `cancel` in milliseconds; Codex under approval policy `never` with full access accepts a fieldless form. So a refusal never says the person declined, and an unattended client that declares elicitation cannot make these writes |
 | 81 | A client draws a question as plain text | Tier 2, from a sibling server's evidence log: VS Code's `mcpElicitationService.ts` builds the message as a `MarkdownString` | **Refuted.** Calendar text in a question stands in a code span, and the server's own lines hold no Markdown (§9a) |
 | 82 | A 503 on a write may be retried, and a 404 on a retried delete means it was never there | `google/rpc/code.proto` in googleapis, `UNAVAILABLE`, read 2026-10-01: "Note that it is not always safe to retry non-idempotent operations", HTTP mapping 503 | **Refuted for both.** A 5xx or a lost answer on `events.move` or `acl.insert` is `[ambiguous_outcome]`, like `events.insert` and `calendars.insert`, never `[unavailable]`, which invites a retry. A delete whose first attempt got a 5xx or no answer and whose retry got 404 or 410 is `[ambiguous_outcome]`: that first attempt most likely landed. A 404 after a 429 stays `[not_found]`, since Google did not act on the 429 |
+| 83 | A destructive tool should carry both `requiresUserInteraction` and the server's own question | Tier 2: the owner was asked twice for one delete in another server built the same way (2026-10-09); the MCP spec, GitHub's `delete_repository`, Supabase, and Claude Code's own documentation of the mark | **Refuted.** No source recommends two hard gates for one call; GitHub and Supabase confirm with `destructiveHint` plus a form elicitation, and Claude Code scopes the mark to "tools whose permission prompt is itself the point". The mark is now sent only to a client that cannot ask. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to stop the call before it reached the server |
+| 84 | A room's address has a documented shape, so a server can tell a room from a person by it | Read 2026-10-09: the Calendar API's domain-resources guide ("add its email address as an event attendee"), the Admin SDK `resources.calendars` reference (`resourceEmail`: "Generated as part of creating a new calendar resource") and the Admin help on creating resources | **Refuted: no Google source states the shape.** Every resource address is under `resource.calendar.google.com`, but only third-party tools say so. Adopted as an observation, because both ways it could be wrong are safe: a room it misses counts as a guest, as every room did before; and only Google issues addresses under google.com, so no person is taken for a room. The documented path, row 85, sits beside it |
+| 85 | A client names a room by flagging the attendee as a resource | Calendar discovery revision 20261002, `EventAttendee.resource`: "Whether the attendee is a resource. Can only be set when the attendee is added to the event for the first time." | **Confirmed in the reference; not yet seen live with a real room**, which the driver cannot create. `create_event` takes `rooms` and `update_event` `add_rooms`, sent with `resource: true`, as is a room's address given as a guest. The flag does not decide who is counted: it holds whatever the call that added the attendee said, so a person passed as a room would carry it and slip past §4.3.4. The address decides, by row 84 |
+| 86 | A write reaches the guests the event already has | Read against §4.3, 2026-10-09 | **Refuted: it reaches the guests it adds too.** `update_event` counted the event as read, so adding a guest to an event with none asked for no `notify`, and `none` went through for a guest outside the domain. The count now includes the guests a write adds, on both halves of a series split |
+| 87 | Free/busy answers for a group under `calendars`, like any other id | Calendar discovery revision 20261002: `items[].id` is "The identifier of a calendar or a group"; the reply's `groups` is "Expansion of groups", each a list of member calendar ids; `groupExpansionMax` "An error is returned for a group with more members than this value. Maximum value is 100." | **Refuted by the reference: a group answers under `groups`**, and the server read only `calendars`, so every group came back unknown. A group's answer is now its members' busy time merged, sent with `groupExpansionMax: 100`; one member unread, an expansion error or no members makes it unknown, never free (§4.6). `calendarExpansionMax` caps the calendars one request answers at 50, and this server believes a group's members count toward it, so the calendars a group pushes past it are asked about again on their own, up to 200. That belief, and what Google sends for a calendar past the cap, are row 100's. A live check waits on a probe outside the driver, which prints counts only, because a group is other people's calendars and the driver reads only its own |
+| 88 | The new series of a split can be built from the fields this server models | Calendar discovery revision 20261005, read 2026-10-09: `Event.attachments` "In order to modify attachments the supportsAttachments request parameter should be set to true"; `eventLabelId` "To set or change this property, you need to specify eventLabelVersion=1"; the status-events guide: to create a working location, "Include the workingLocationProperties field" | **Refuted.** The copy was decoded into the modeled fields, so the new series lost the parent's attachments, label, extended properties and status details, and a working-location series went to Google without the details its guide says a create needs. An event now keeps every field it does not model, the split carries them, and the insert sets `supportsAttachments=true` when it carries files and `eventLabelVersion=1` when it carries a label. It leaves `kind`, `locked`, `gadget` and `hangoutLink` behind, which Google sets itself. **Not yet probed live, tier 3:** that Google refuses a status event created without its details; that it drops attachments and a label sent without their parameter rather than refusing them; that it accepts the other carried fields on an insert, such as `privateCopy`, `source` and an attachment's read-only `fileId`; and whether creating an out-of-office series that declines conflicts declines them again. Until that is probed, a split whose new series declines all asks the person, as a create does, and every split of a status series is held to the status-event rules before the truncate. The fake holds the first two. A refusal costs more than before, because it lands after the truncate, as `[ambiguous_outcome]`. The live driver checks that a private extended property survives a split, which it did in three runs on 2026-10-09, and that a split carries an attachment when `GCAL_LIVE_ATTACHMENT` is set; without it that step is owed. A split carrying a working location needs a recurring status event on the primary calendar, which §9.1 does not allow the driver |
+| 89 | `events.list` filters by event type, and leaving the filter out returns every type | Calendar discovery revision 20261005, read 2026-10-09: `eventTypes` is repeated, an enum of `birthday`, `default`, `focusTime`, `fromGmail`, `outOfOffice` and `workingLocation`, "If unset, returns all event types." | **Confirmed in the reference, and live on 2026-10-09.** `list_events` and `search_events` take `event_types` and send each as `eventTypes`. The page token carries the filter with the rest of the query, and a continuation under another one is refused, because Google resumes a token only for the query that issued it (§7.2). The fake refuses a value outside the enum and counts an event with no type as `default`. The live steps filter the scratch calendar, whose events are all ordinary, on `focusTime` and got none, then on `default` and got them all |
+| 90 | A read returns an event's attachments without asking, and an attachment's `fileId` is the Drive file id | Calendar discovery revision 20261005, read 2026-10-09: `supportsAttachments` is a parameter of `events.insert`, `import`, `patch` and `update` only, not of `get`, `list` or `instances`; `EventAttachment.fileId` "For Google Drive files, this is the ID of the corresponding Files resource entry in the Drive API" | **Confirmed in the reference; not yet seen live, tier 3.** `get_event` lists the attachments and every event row counts them. The live driver attaches the Drive file `GCAL_LIVE_ATTACHMENT` names to the weekly series, reads it back, and checks a split carries it. Without that variable those steps are skipped and owed: the driver cannot create a Drive file with the scopes this server asks for |
+| 91 | A read by modification time is a supported way to follow a calendar, and its sync token chains | Calendar discovery revision 20261005, read 2026-10-09: `updatedMin` "Lower bound for an event's last modification time (as a RFC3339 timestamp) to filter by. When specified, entries deleted since this time will always be included regardless of showDeleted"; `Event.updated` "Updating event reminders will not cause this to change"; `syncToken` lists `updatedMin` among the parameters that "cannot be specified together with nextSyncToken". The sync guide, read 2026-10-09: the legacy way "is no longer recommended as it is more error-prone with respect to missed updates". The errors guide: 410 `updatedMinTooLongAgo`, "The requested minimum modification time lies too far in the past" | **Refuted as the way to follow a calendar; kept as a one-off look back.** `list_changes` takes `updated_since` and sends it as `updatedMin`, refused alongside `sync_token` before a request is spent. Its description and its result say what it misses. A 410 under it names a later moment or a baseline as the cure. **Confirmed for the token by spike O, live 2026-10-09, in three runs:** the last page of an `updatedMin` read carries a sync token, and a sync with it reported a change made after it. So `list_changes` hands that token back, from the last page only, and the spike fails if Google stops honoring it. The same runs answered the other two: a moment in 2000 is 410 `updatedMinTooLongAgo`, and an event whose `updated` equals the moment is included, as the fake includes it. How far back Google allows is still not known. A page token from such a read carries the moment, and a continuation without it or with another is refused. The live driver reads the scratch calendar since an hour before the run, expects the seeded events and a token, and syncs with that token after a write to see the write reported. **Not yet seen live:** that step |
+| 92 | An optional guest is a quieter guest, and adding an address already on an event is a no-op worth no mention | Calendar discovery revision 20261005, read 2026-10-09: `EventAttendee.optional` "Whether this is an optional attendee. Optional. The default is False"; the reference says nothing about optional attendees and notifications | **Refuted for the first: nothing says Google mails an optional guest less, so one counts toward `notify` like any guest.** `create_event` takes `optional_guests` and `update_event` `add_optional_guests`; a room is refused there, and so is one address in two roles. **Refuted for the second:** an address the caller asks to add as optional that is already a required guest is a role change the server does not make, and skipping it in silence reads as done. The result now names every added address the event already had. **Confirmed live on 2026-10-09:** Google keeps `optional: true` as sent. The live driver creates an event whose only optional guest is the account itself, which reaches nobody, and reads the role back |
+| 93 | An address arrives bare | RFC 5322 §3.4: `mailbox = name-addr / addr-spec`, so `"Sample Person" <person@example.com>` is one address; Calendar discovery revision 20261005, `EventAttendee.email` "must be a valid email address as per RFC5322"; Go `net/mail.ParseAddress` "parses a single RFC 5322 address" | **Refuted: a Gmail server returns the name-addr form, and the old check refused its space**, so a hand-off from mail to calendar failed. Every address input is now parsed as one mailbox and the bare address replaces it before the reach count, the request or the result reads it. A list in one entry is refused. Some strings the old check passed, such as two dots in a row, are now refused before a request rather than by Google. Nothing here depends on Google: it receives the bare address, as before. The live driver passes a mailbox to a dry run and checks the display name is not in the result |
+| 94 | `events.list` finds an event by its iCalendar UID, alongside a window | Calendar discovery revision 20261005, read 2026-10-09: `iCalUID` "Specifies an event ID in the iCalendar format to be provided in the response. Optional. Use this if you want to search for an event by its iCalendar ID"; `syncToken` lists `iCalUID` among the parameters that "cannot be specified together with nextSyncToken"; `Event.iCalUID` "in recurring events, all occurrences of one event have different ids while they all share the same iCalUIDs" | **Confirmed in the reference for the lookup and the sharing; the window is a belief.** `list_events` takes `ical_uid` and sends it as `iCalUID`. The reference forbids it only with a sync token. It says nothing about `timeMin` and `timeMax`, and **live on 2026-10-09 Google applied the window alongside it**, as the fake does. The live driver reads the UIDs Google gave the seeded timed event and weekly series, filters on each and got that event and the series' occurrences in the window, and filters on the timed event's UID over a window that leaves its day out and got nothing |
+| 95 | `q` is undocumented free text, and Google does not say which fields it reads | Calendar discovery revision 20261005, read 2026-10-09: `q` "Free text search terms to find events that match these terms in the following fields: summary, description, location, attendee's displayName, attendee's email, organizer's displayName, organizer's email, workingLocationProperties.officeLocation.buildingId, workingLocationProperties.officeLocation.deskId, workingLocationProperties.officeLocation.label, workingLocationProperties.customLocation.label", and "These search terms also match predefined keywords against all display title translations of working location, out-of-office, and focus-time events" | **Refuted: the fields are documented now.** `search_events`, the server instructions and §7.2 name them. What stays true, and stays in the description: there is no field syntax, how words are matched is not documented, and an event seen only as busy has nothing to match, so an empty result is still not proof. The fake matches the documented fields; the built-in words are not modeled |
+| 96 | A release binary resolves an IANA zone on every platform it is built for | Go 1.27.2 `time.LoadLocation`, read 2026-10-09: it looks in "the directory or uncompressed zip file named by the ZONEINFO environment variable", "on a Unix system, the system standard installation location", "$GOROOT/lib/time/zoneinfo.zip" and "the time/tzdata package, if it was imported"; `time/tzdata`: "if the time package cannot find tzdata files on the system, it will use this embedded information" | **Refuted on Windows.** Windows is not a Unix system and a user without Go has no `$GOROOT`, so the Windows archive and the bundle's Windows binary refused every zone. The main package imports `time/tzdata`: about 400 KB on each platform, used only when the machine has no database. A test asks `go list -deps` whether the binary links it, because on Linux the system database comes first and `ZONEINFO` pointed at an empty directory does not stop that, so a test that loads a zone passes either way. **Not yet seen on a Windows machine without Go, tier 3** |
+| 97 | Reminders, visibility and the guests' permissions are the event's, set like any other field | Calendar discovery revision 20261002, read 2026-10-09: `reminders` "Information about the event's reminders for the authenticated user. Note that changing reminders does not also change the updated property of the enclosing event"; `overrides` "The maximum number of override reminders is 5"; `EventReminder.minutes` "between 0 and 40320 (4 weeks in minutes)"; `visibility` "confidential - The event is private. This value is provided for compatibility reasons", and "If the new setting is more restrictive (e.g. from public to private), it is applied to all instances. If the new setting is less restrictive (e.g. from private to public), the change is ignored"; `guestsCanInviteOthers` and `guestsCanSeeOtherGuests` "The default is True". The performance guide on patch: "The modified data you send is merged into the data for the parent object", "Patch requests that contain arrays replace the existing array", "To delete a field, specify the field and set it to null" | **Refuted for reminders: they are the caller's alone**, so an update that changes only them needs no `notify` and sends no `sendUpdates`, except a split, whose new series reaches the guests. Visibility and the permissions are the event's and reach the guests as before. A less restrictive visibility on one occurrence is refused, and a more restrictive one is made with a note that the series changed. The fake holds the limits and both visibility rules, and leaves `updated` alone when only reminders change. **Confirmed live on 2026-10-09:** Google accepts a patch with `overrides: null`, and it clears the old reminders; and a more restrictive visibility on an occurrence reaches the series. The live driver sets, replaces, empties and restores reminders on its own event and reads each back, and makes one occurrence of its series private and reads the series private |
+| 98 | A conference can only be attached when an event is created | Calendar discovery revision 20261002, read 2026-10-09: `events.patch.conferenceDataVersion` "Version 1 enables support for copying of ConferenceData as well as for creating new conferences using the createRequest field of conferenceData"; `Event.conferenceData` "To persist your changes, remember to set the conferenceDataVersion request parameter to 1 for all event modification requests", and "Reusing Google Meet conference data across different events can cause access issues and expose meeting details to unintended users"; `CreateConferenceRequest.requestId` "Clients should regenerate this ID for every new request. If an ID provided is the same as for the previous request, the request is ignored" | **Refuted: a patch can create one.** `update_event` takes `add_conference`, reversing §17.3's refusal. The request id is a hash of the event id and the etag, because the event id may already have been used by the create and a repeat is ignored. An event with a conference is refused, since the field is replaced whole. A split still copies none, for the reuse warning above. The fake ignores a repeated id per event and drops the request without the version. **Confirmed live on 2026-10-09:** a patch with a create request answered with the link, as an insert does, and the link read back. **Not yet seen live, tier 3:** whether Google remembers request ids per event or across events, which decides whether the create's id would really be ignored. The live driver adds a link to its probe event, reads it back, and checks a second request is refused |
+| 99 | Status events are read-only here: create_event makes ordinary events, and the details blocks are written off | Google's status-events guide, read 2026-10-09: "Secondary calendars can't have status events"; focus time and out of office need their properties and `transparency` `opaque`, and "cannot be all-day events"; a working location needs its properties, `visibility` `public` and `transparency` `transparent`, and an all-day one "spans exactly one day"; an update "must maintain the required fields". Calendar discovery revision 20261002, fetched 2026-10-09: `autoDeclineMode` `declineNone`, `declineAllConflictingInvitations` or `declineOnlyNewConflictingInvitations`, the second declining "all conflicting meeting invitations that conflict with the event"; `chatStatus` "available or doNotDisturb"; `declineMessage` on both; `workingLocationProperties.type` `homeOffice`, `officeLocation` or `customLocation`, "Any details are specified in a sub-field of the specified name, but this field may be missing if empty", and `homeOffice` typed `any` | **Reversed: `create_event` makes all three.** `event_type` with `auto_decline` (required, no default, `all` asks the person), `decline_message`, `chat_status`, `working_location` and `working_location_label`, refused on a calendar other than the primary and in every shape the guide refuses; the server sets the transparency and visibility. The blocks are kept raw so a split still carries them whole, and every read shows them in the input words. The fake refuses what the guide refuses, on insert and on a patch. **Confirmed live on 2026-10-09, one type per run:** an out-of-office event, a focus time and a custom working location were each created on the primary calendar, read back with their details and deleted by id; and spike P found Google refuses a status event on a secondary calendar, with 400 `malformedOutOfOfficeEvent`, as the guide says. **Not yet probed live, tier 3:** the body Google takes for `home`, sent as `homeOffice: {}`; what it does with guests, rooms, optional guests and a Meet link on a status event, all refused with `[blocked]` on create and on every update until a probe; whether an organizer is emailed about an automatic decline, where the question says only that they see it; and whether a split of a series declining all declines again (row 88). The driver makes one status event per run on the primary calendar under §9.1's exception, declining nothing |
+| 100 | A calendar past `calendarExpansionMax` is left out of the free/busy answer | Calendar discovery revision 20261005, read 2026-10-09: `calendarExpansionMax` "Maximal number of calendars for which FreeBusy information is to be provided. Optional. Maximum value is 50"; `Error.reason` "tooManyCalendarsRequested - The number of calendars requested is too large for a single query" | **Not settled, tier 3.** Google names the reason and not where it lands: a calendar past the cap may be left out, or answered with that error. Nor does it say whether a group's members count toward the cap (row 87), and row 12's live run, with no cap set, saw 51 entries come back. The server treats both shapes as no answer and asks those calendars again on their own, up to 200; one still past the cap is unknown, never free, with the reason in words. The fake answers either way, and the tests hold both. A live check needs a group of more than fifty readable members, which the driver cannot make, so it waits on the group probe row 87 names; the probe should count both shapes |
+| 101 | `default` visibility ranks between `public` and `private` when Google compares one occurrence's visibility with the series' | Calendar discovery revision 20261002, read 2026-10-09: `visibility` "If the new setting is more restrictive (e.g. from public to private), it is applied to all instances. If the new setting is less restrictive (e.g. from private to public), the change is ignored"; `default` "Uses the default visibility for events on the calendar" | **Confirmed live on 2026-10-09 for one half, in three runs:** a `default` occurrence made a public series default, so Google ranks it above public. That it ranks below private is still a belief, tier 3. The reference ranks public below private and says nothing of `default`, which takes the calendar's own setting. The server and the fake both put it in the middle: private to default, and default to public, on one occurrence are refused as ignored, and public to default is made with a note that the whole series changed. Ranked otherwise by Google, the server would refuse a change Google makes, or report as made one Google ignores, the worse of the two. The live driver makes its series public, one occurrence default, and reads the series |
+| 102 | A change to an out-of-office or focus-time event that declines all declines nothing new, so only a create asks | Calendar discovery revision 20261005, read 2026-10-09: `autoDeclineMode` `declineAllConflictingInvitations`, "meaning that all conflicting meeting invitations that conflict with the event are declined", with nothing on when; `Event.start` "For a recurring event, this is the start time of the first instance". The status-events and recurring-events guides, read 2026-10-09, say nothing about an update to either | **Not settled; treated as refuted until a probe.** A move, a later end or more occurrences put meetings inside the event that were outside it, and the reference does not say they are spared. `update_event` asks the person before a change that makes such an event cover time it did not, at any scope, and a dry run says so; a change that only shrinks the time asks nothing (§7.4, §9a). The time is read from the rule, so a canceled occurrence of a series counts as covered: whether a change to the whole series brings one back is not probed either. One occurrence is judged by the details it carries when read on its own, which Google is believed to copy from its series; one read without them asks nothing. No tool changes `auto_decline` on an existing event, so a switch to `all` has no path yet; the check counts one as more. **Not yet probed live, tier 3**, and the driver cannot: its one status event declines nothing, and the probe needs another organizer's meeting on the primary calendar |
+| 103 | A 412 under the etag of this server's own read means somebody else changed the event, so it is `[stale]` | **Live, 2026-10-09**, three passes of the driver: in passes 2 and 3, `move_event back` — the driver's own event, with no guests, moved straight back from the calendar the step before had moved it to, with no `etag` from the caller — read the event and was refused with 412 under that read's etag. Pass 1 moved it back. Nothing else wrote to either scratch calendar | **Refuted: Google changes a just-moved event by itself, moments after the move.** What it changes is not known. An event write made without the caller's `etag` — update, the split's truncate, cancel, move and respond — now reads the event again after a 412, plans the write again and makes it once more, if the new plan makes the same changes, reaches the same guests and asks the person the same question. The result says so. Otherwise, and after a second 412, it is `[stale]`. A caller's `etag` stays strict, because it names the version they decided on. The calendar and sharing writes keep the plain rule: no such change has been seen there. The fake changes an event once after a read, on request. **Not yet seen live:** that the second try lands. The driver's move back says which try it took |
 
 ### Deviations from the shared Go MCP server standard
 

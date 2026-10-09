@@ -18,7 +18,10 @@ Two rules make that structural rather than a matter of care:
    builds everything it returns. A fixture copied from a live response is
    itself the leak, whatever a scanner says about it.
 2. **The live driver reads only what it wrote**, on a calendar it creates
-   for the run and deletes afterward.
+   for the run and deletes afterward. The one exception, decided on
+   2026-10-09: one status event per run on the primary calendar, a year
+   ahead, with an invented title, deleted by its id in the same run. A
+   guard in the driver refuses every other write there.
 
 `make leaks` scans the working tree and `make leaks-history` scans every
 blob and commit message. The rules are an allow-list anchored on shapes

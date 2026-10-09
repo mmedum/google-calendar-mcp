@@ -47,7 +47,7 @@ const (
 	// with the other two, because a deployment that has turned sharing
 	// off has turned off the surface, not merely the writes.
 	//
-	// Read-only mode drops it as well. §8 registers the eight read tools
+	// Read-only mode drops it as well. §8 registers the nine read tools
 	// there and this is not one of them: get_calendar already reports a
 	// calendar's exposure, so nothing is unreachable, and the read-only
 	// surface stays the list §8 names rather than the list minus a
@@ -89,7 +89,7 @@ func Register(s *mcp.Server, d Deps) {
 		d.Logger = slog.New(slog.DiscardHandler)
 	}
 	d.asking = newAsking(d.Logger)
-	s.AddReceivingMiddleware(askFailures(d.asking))
+	s.AddReceivingMiddleware(askFailures(d.asking), interactionHint(d.asking))
 	registerRead(s, d)
 	registerWrite(s, d)
 	registerCalendars(s, d)
@@ -105,9 +105,11 @@ type Def[In any, Out service.Rendered] struct {
 	Name        string
 	Description string
 	Kind        Kind
-	// Asks puts the write to the person through the client before it is
-	// made, when the service reaches its question (§9a).
-	Asks   bool
+	// Asks, when set, puts the write to the person through the client
+	// before it is made, when the service reaches its question (§9a). It
+	// says when, as the description's closing sentence reads it: "before
+	// the write", or the writes that ask.
+	Asks   string
 	Handle func(ctx contextContext, in In) (Out, error)
 }
 
@@ -130,16 +132,21 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 		// explicit: a host in auto-approve runs an annotated tool without
 		// prompting, so the real gate is that this tool is unregistered
 		// unless the flag is set.
-		tool.Meta = mcp.Meta{"anthropic/requiresUserInteraction": true}
+		tool.Meta = mcp.Meta{interactionKey: true}
 	}
-	if def.Asks {
+	if def.Asks != "" {
 		d.asking.markAsks(def.Name)
-		tool.Description += asksNote
+		tool.Description += asksNote(def.Asks)
+		// Every destructive tool that asks, asks before every write, so
+		// the server's question can stand in for the mark.
+		if def.Kind == Destructive {
+			d.asking.markAlways(def.Name)
+		}
 	}
 	mcp.AddTool(s, tool, func(ctx contextContext, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		var zero Out
 		var p *person
-		if def.Asks {
+		if def.Asks != "" {
 			var err error
 			if ctx, p, err = d.asking.begin(ctx, req, def.Name, in, d.Config.RequirePrompt); err != nil {
 				return nil, zero, fail(err)
@@ -217,9 +224,13 @@ func annotationsFor(k Kind) *mcp.ToolAnnotations {
 
 func ptr[T any](v T) *T { return &v }
 
-// asksNote closes the description of every tool that asks the person.
-const asksNote = " When the client can, the server also asks the person before the write; a call they do not " +
-	"confirm is [blocked], and is not made again unless they ask."
+// asksNote closes the description of every tool that asks the person,
+// saying when it asks: a tool that asks only before some of its writes
+// says which, so a model does not expect a question on the others.
+func asksNote(when string) string {
+	return " When the client can, the server also asks the person " + when + "; a call they do not " +
+		"confirm is [blocked], and is not made again unless they ask."
+}
 
 // fail turns an error into the tool result the standard specifies:
 // "[class] actionable message", never a protocol error.

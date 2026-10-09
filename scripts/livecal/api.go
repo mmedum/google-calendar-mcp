@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,18 @@ const (
 	weeklyTitle   = "Livecal weekly probe"
 	canceledTitle = "Livecal canceled probe"
 	searchTerm    = "Livecal"
+	// splitKey and splitValue are the private extended property the
+	// weekly series carries into a split.
+	splitKey   = "livecalSplit"
+	splitValue = "carried"
+	// attachTitle is the title the driver gives the file it attaches.
+	attachTitle = "Livecal attachment probe"
+	// envAttachment names a Drive file the account can open, as its
+	// link. The server asks for no Drive scope, so the driver cannot make
+	// a file of its own: the person running it makes one for the purpose,
+	// with an invented name and nothing in it. Unset, the attachment
+	// steps are skipped and owed.
+	envAttachment = "GCAL_LIVE_ATTACHMENT"
 )
 
 // Event ids are base32hex: lowercase a-v and the digits, 5 to 1024
@@ -136,6 +149,10 @@ func (a *liveAPI) doWithMatch(ctx context.Context, method, path, ifMatch string,
 }
 
 func (a *liveAPI) status(ctx context.Context, method, path, ifMatch string, body, out any) (int, error) {
+	// Every REST call passes the same §9.1 guard the tool calls do.
+	if err := primaryCal.rest(method, path); err != nil {
+		return 0, err
+	}
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -348,6 +365,35 @@ func (a *liveAPI) getEvent(ctx context.Context, cal, id string) (instanceRow, er
 	return row, err
 }
 
+// attachmentURL is the Drive file the attachment steps use, or "".
+func attachmentURL() string { return strings.TrimSpace(os.Getenv(envAttachment)) }
+
+// attach puts that file on an event under the driver's own title. The
+// server writes no attachment, so the driver does, and does nothing when
+// no file was named.
+func (a *liveAPI) attach(ctx context.Context, cal, id string) error {
+	link := attachmentURL()
+	if link == "" {
+		return nil
+	}
+	return a.do(ctx, http.MethodPatch,
+		"/calendars/"+cal+"/events/"+id+"?sendUpdates=none&supportsAttachments=true",
+		map[string]any{"attachments": []map[string]any{{"fileUrl": link, "title": attachTitle}}}, nil)
+}
+
+// privateProperty reads one private extended property off an event. No
+// tool shows one, so this is the only way to see whether a split kept
+// it.
+func (a *liveAPI) privateProperty(ctx context.Context, cal, id, key string) (string, error) {
+	var out struct {
+		ExtendedProperties struct {
+			Private map[string]string `json:"private"`
+		} `json:"extendedProperties"`
+	}
+	err := a.do(ctx, http.MethodGet, "/calendars/"+cal+"/events/"+id, nil, &out)
+	return out.ExtendedProperties.Private[key], err
+}
+
 func (a *liveAPI) deleteCalendar(ctx context.Context, id string) error {
 	return a.do(ctx, http.MethodDelete, "/calendars/"+id, nil, nil)
 }
@@ -412,13 +458,23 @@ func seedEvents() []seedEvent {
 		},
 		{
 			// A weekly series crossing the 29 March European transition,
-			// carrying its zone so the wall clock holds.
+			// carrying its zone so the wall clock holds. The private
+			// extended property is a field the server does not model,
+			// so the split step can check the new series kept it.
 			id: weeklyID,
 			body: map[string]any{
 				"id": weeklyID, "summary": weeklyTitle,
 				"start":      zoned("2026-03-17T14:00:00+01:00"),
 				"end":        zoned("2026-03-17T15:00:00+01:00"),
 				"recurrence": []string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"},
+				"extendedProperties": map[string]any{
+					"private": map[string]any{splitKey: splitValue},
+				},
+			},
+			// The attachment, when a file was named, so a read shows it
+			// and the split step can check the new series kept it.
+			after: func(ctx context.Context, a *liveAPI, cal string) error {
+				return a.attach(ctx, cal, weeklyID)
 			},
 		},
 		{
@@ -435,25 +491,32 @@ func seedEvents() []seedEvent {
 	}
 }
 
-func (a *liveAPI) seed(ctx context.Context, cal string) error {
+// seed fills the calendar, and returns the iCalendar UID Google gave each
+// event, by event id, from the insert's own answer.
+func (a *liveAPI) seed(ctx context.Context, cal string) (map[string]string, error) {
+	uids := map[string]string{}
 	for _, e := range seedEvents() {
 		if err := gcal.ValidEventID(e.id); err != nil {
-			return err
+			return nil, err
 		}
 		// sendUpdates=none is correct here and nowhere else: these events
 		// have no guests, so nothing can be sent, and saying so keeps the
 		// driver from ever mailing a real person.
-		if err := a.do(ctx, http.MethodPost,
-			"/calendars/"+cal+"/events?sendUpdates=none", e.body, nil); err != nil {
-			return err
+		var made struct {
+			ICalUID string `json:"iCalUID"`
 		}
+		if err := a.do(ctx, http.MethodPost,
+			"/calendars/"+cal+"/events?sendUpdates=none", e.body, &made); err != nil {
+			return nil, err
+		}
+		uids[e.id] = made.ICalUID
 		if e.after != nil {
 			if err := e.after(ctx, a, cal); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	return nil
+	return uids, nil
 }
 
 // primaryAddress is the signed-in account's own calendar id, which is
@@ -635,6 +698,10 @@ type seedState struct {
 	// canceledOccurrence is the date of the occurrence removed from the
 	// weekly series, as Google returned it.
 	canceledOccurrence string
+	// timedUID and weeklyUID are the iCalendar UIDs Google gave the
+	// timed event and the weekly series. No tool shows one; a caller
+	// holds one from an invitation email.
+	timedUID, weeklyUID string
 }
 
 // removeOneOccurrence cancels the second occurrence of the weekly

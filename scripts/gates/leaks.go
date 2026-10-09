@@ -93,6 +93,13 @@ func leakRules() []leakRule {
 				// example.dk are real domains somebody can own.
 				regexp.MustCompile(`@([A-Za-z0-9.\-]+\.)?(example\.(com|net|org)|example|test|invalid|localhost)$`),
 				regexp.MustCompile(`@group\.calendar\.example\.test$`),
+				// One synthetic room. A room's address is Google's own
+				// domain, so no reserved name can stand in for it, and
+				// the tests of room handling need the real domain.
+				// Argued rather than widened (§9.1): exactly this local
+				// part, which Google never generates (its rooms are
+				// `c_` and a long id), so no real room can match.
+				regexp.MustCompile(`(?i)^room-sample@resource\.calendar\.google\.com$`),
 				// The project's own contact points.
 				regexp.MustCompile(`@users\.noreply\.github\.com$`),
 				regexp.MustCompile(`@noreply\.anthropic\.com$`),
@@ -128,6 +135,14 @@ func leakRules() []leakRule {
 		{
 			name: "Google Calendar event URL",
 			re:   regexp.MustCompile(`https://(www\.)?google\.com/calendar/event\?eid=[A-Za-z0-9_\-]+`),
+		},
+		{
+			// A Drive or Docs link names somebody's file by its id, and an
+			// event card prints the link of every file attached. Drive ids
+			// are long; a synthetic one here is short.
+			name: "Google Drive file link",
+			re: regexp.MustCompile(`(?i:https?://(?:drive|docs)\.google\.com)/[^\s"'<>)\]]*` +
+				`(?:/d/|[?&]id=)[A-Za-z0-9_\-]{20,}`),
 		},
 		{
 			// A refresh token's literal prefix.

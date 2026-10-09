@@ -27,8 +27,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
@@ -65,6 +67,10 @@ func main() {
 	// cancels them properly, which mails the guests — so it is asked for.
 	sweep := flag.Bool("sweep-spikes", false,
 		"delete the kept spike A and B events, canceling them to their guests")
+	// The one write on the primary calendar (§9.1). One type per run, so
+	// the three are checked over three runs.
+	status := flag.String("status-type", statusKind,
+		"the one status event made on the primary calendar and deleted: outOfOffice, focusTime or workingLocation")
 	flag.Parse()
 
 	clearSpikeEvents = *sweep
@@ -75,7 +81,34 @@ func main() {
 	showFilter = *show
 
 	out := redact.New(os.Stderr)
-	code := run(context.Background(), out, *bin, *profile, *keep)
+	switch *status {
+	case "outOfOffice", "focusTime", "workingLocation":
+		statusKind = *status
+	default:
+		out.Printf("-status-type is outOfOffice, focusTime or workingLocation, not %q\n", *status)
+		os.Exit(2)
+	}
+	// Ctrl-C or SIGTERM stops the steps rather than the process, so the
+	// deferred cleanup still deletes the status event on the primary
+	// calendar and the calendars this run made (§9.1). A second signal
+	// exits at once, after the first has said what that leaves behind.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	finished := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		select {
+		case <-finished:
+			// The stop below ended the context, not a signal: a run that
+			// finished was reported as interrupted.
+			return
+		default:
+		}
+		primaryCal.interrupted(out)
+		stop()
+	}()
+	code := run(ctx, out, *bin, *profile, *keep)
+	close(finished)
+	stop()
 	os.Exit(code)
 }
 
@@ -147,7 +180,8 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}()
 	}
 
-	if err := api.seed(ctx, scratch); err != nil {
+	uids, err := api.seed(ctx, scratch)
+	if err != nil {
 		out.Printf("could not fill the scratch calendar: %v\n", err)
 		return 2
 	}
@@ -156,6 +190,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		out.Printf("could not read this account's own address: %v\n", redact.String(err.Error()))
 		return 2
 	}
+	primaryCal.setSelf(self)
 	if err := api.seedRSVP(ctx, scratch, self); err != nil {
 		out.Printf("could not seed the invitation to answer: %v\n", redact.String(err.Error()))
 		return 2
@@ -170,6 +205,10 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 2
 	}
 	state.canceledOccurrence = canceled
+	// The UIDs the ical_uid steps filter on, from the inserts' answers.
+	// One missing leaves the steps that need it skipped rather than
+	// failed.
+	state.timedUID, state.weeklyUID = uids[timedID], uids[weeklyID]
 	out.Printf("filled with %d invented events; the occurrence on %s was canceled\n\n",
 		len(seedEvents()), canceled)
 
@@ -206,7 +245,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	}
 
 	spikeDest = dest
-	writes := &writeState{dest: dest, self: self}
+	writes := &writeState{dest: dest, self: self, api: api}
 	// The only address in this run that belongs to another person. It is
 	// read from the environment and never written anywhere: not to a
 	// file, not to the transcript (the redactor masks it by shape), and
@@ -221,6 +260,12 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	// calendar half-way through being rewritten — and so the read steps'
 	// expectations stay about what the seed put there.
 	for _, st := range writeSteps(scratch, writes) {
+		r.run(ctx, sess, st)
+	}
+	// The one status event on the primary calendar (§9.1). Its delete is
+	// deferred before it is made, so it runs however the run ends.
+	defer primaryCal.cleanUp(api, out)
+	for _, st := range statusSteps(scratch) {
 		r.run(ctx, sess, st)
 	}
 
@@ -264,8 +309,15 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike L: calendar and acl If-Match", spikeL},
 		{"spike M: conference creation", spikeM},
 		{"spike N: what suppresses nextSyncToken", spikeN},
+		{"spike O: a token from updatedMin", spikeO},
+		{"spike P: a status event on a secondary", spikeP},
 	} {
 		r.total++
+		if ctx.Err() != nil {
+			r.undetermined++
+			out.Printf("?     %-28s not run: the driver was interrupted\n", sp.name)
+			continue
+		}
 		v, note := sp.run(ctx, out, api, scratch)
 		switch v {
 		case pass:
@@ -281,6 +333,10 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 
 	out.Printf("\n%d question(s) put to the person, %d declined\n", asked.asked, asked.declined)
 	out.Printf("\n%d steps, %d failed, %d undetermined\n", r.total, r.failed, r.undetermined)
+	if ctx.Err() != nil {
+		out.Printf("\nThe run was interrupted, so this count is not a result.\n")
+		return 1
+	}
 	if r.failed > 0 {
 		out.Printf("\nRead the transcript above rather than this count. A sibling's driver twice\n")
 		out.Printf("reported success while its results were wrong.\n")
@@ -315,6 +371,11 @@ var spikeNotify bool
 // clearSpikeEvents lets the cleanup remove the spike events it normally
 // preserves, canceling them to their guests on the way out.
 var clearSpikeEvents bool
+
+// sinceToken is the sync token the read by updated_since handed back. A
+// write step syncs with it after the writes have changed an event, so it
+// is shared across the two step lists.
+var sinceToken string
 
 // results tallies and prints, through the redactor only.
 type results struct {
@@ -397,6 +458,11 @@ func readsOnlyInvented(args map[string]any, invented map[string]bool) bool {
 
 func (r *results) run(ctx context.Context, s *session, st step) {
 	r.total++
+	if ctx.Err() != nil {
+		r.undetermined++
+		r.out.Printf("?     %-28s not run: the driver was interrupted\n", st.name)
+		return
+	}
 	if st.skip != nil {
 		if why := st.skip(); why != "" {
 			r.undetermined++
@@ -409,6 +475,13 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 	s.person.next = st.answer
 	res, err := s.callFor(ctx, st, st.arguments())
 	s.person.next = ""
+	if err != nil && ctx.Err() != nil {
+		// Cut short by the interrupt rather than failed by the server:
+		// what it would have answered is not known.
+		r.undetermined++
+		r.out.Printf("?     %-28s not run: the driver was interrupted during it (%v)\n", st.name, err)
+		return
+	}
 	if err != nil {
 		r.failed++
 		r.out.Printf("FAIL  %-28s transport: %v\n", st.name, err)
@@ -628,6 +701,14 @@ const (
 	scratchZone = "Europe/Copenhagen"
 )
 
+// noAttachment skips a step that needs a Drive file to attach.
+func noAttachment() string {
+	if attachmentURL() == "" {
+		return "owed: set " + envAttachment + " to the link of a Drive file made for this run"
+	}
+	return ""
+}
+
 // liveUncovered names tools that have no step here, and why.
 //
 // `gates live-cover` reads it: a tool with neither a step nor an entry
@@ -792,6 +873,114 @@ func steps(scratch string, state seedState) []step {
 						" appeared without show_canceled"
 				}
 				return pass, "series with its rule returned, no canceled instance among them"
+			},
+		},
+		{
+			// §18 row 89. Every event the seed wrote is an ordinary one,
+			// so a focus-time filter that Google honors finds none, and
+			// one it ignored would return them all.
+			name: "event_types keeps a kind out",
+			tool: "list_events",
+			args: cal(map[string]any{"event_types": []string{"focusTime"}}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "only these event types: focusTime") {
+					return fail, "the result does not name the filter"
+				}
+				if strings.Contains(r.text, timedTitle) || strings.Contains(r.text, weeklyTitle) {
+					return fail, "ordinary events came back under a focus-time filter"
+				}
+				return pass, "no ordinary event under a focus-time filter, and the filter is named"
+			},
+		},
+		{
+			name: "event_types keeps a kind in",
+			tool: "list_events",
+			args: cal(map[string]any{"event_types": []string{"default"}}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, timedTitle) || !strings.Contains(r.text, weeklyTitle) {
+					return fail, "the default filter dropped an ordinary event"
+				}
+				return pass, "the ordinary events are default events"
+			},
+		},
+		{
+			// §18 row 94. The UID an invitation carries finds its event,
+			// and only it.
+			name: "ical_uid finds one event",
+			tool: "list_events",
+			args: cal(map[string]any{"ical_uid": state.timedUID}),
+			skip: func() string {
+				if state.timedUID == "" {
+					return "the setup could not read the timed event's UID"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "only the event with iCalendar UID") {
+					return fail, "the result does not name the filter"
+				}
+				if !strings.Contains(r.text, timedTitle) || strings.Contains(r.text, weeklyTitle) {
+					return fail, "the filter did not return exactly the event with that UID"
+				}
+				return pass, "the event with that UID and nothing else"
+			},
+		},
+		{
+			// Every occurrence of a series shares the series' UID, so the
+			// filter expanded returns each one in the window.
+			name: "ical_uid gives each occurrence of a series",
+			tool: "list_events",
+			args: cal(map[string]any{"ical_uid": state.weeklyUID}),
+			skip: func() string {
+				if state.weeklyUID == "" {
+					return "the setup could not read the weekly series' UID"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if n := len(linesWith(r.text, weeklyTitle)); n < 2 || strings.Contains(r.text, timedTitle) {
+					return fail, fmt.Sprintf("%d occurrences of the series came back, and the filter should "+
+						"keep only them", n)
+				}
+				return pass, "the series' occurrences in the window, and nothing else"
+			},
+		},
+		{
+			// Unverified belief: Google applies the window alongside
+			// iCalUID. The timed event is on 16 March; a window that
+			// leaves that day out must not return it.
+			name: "ical_uid keeps to the window",
+			tool: "list_events",
+			args: map[string]any{
+				"calendars": []string{scratch}, "from": "2026-03-17", "to": "2026-03-18",
+				"ical_uid": state.timedUID,
+			},
+			skip: func() string {
+				if state.timedUID == "" {
+					return "the setup could not read the timed event's UID"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if strings.Contains(r.text, timedTitle) {
+					return fail, "Google ignored the window alongside iCalUID; the description promises it applies"
+				}
+				return pass, "the event outside the window did not come back"
 			},
 		},
 		{
@@ -961,6 +1150,46 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
+			// §18 row 90: a read shows the file on an event without
+			// asking for it, with the Drive file id that hands it over.
+			name: "get_event shows an attachment",
+			tool: "get_event",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
+			skip: noAttachment,
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "Attachments (1):") {
+					return fail, "the card does not list the file the driver attached"
+				}
+				if !strings.Contains(r.text, "file id: ") {
+					return fail, "the attachment has no Drive file id"
+				}
+				if !strings.Contains(r.text, attachTitle) {
+					return pass, "listed with its file id, under a title Google chose rather than the driver's"
+				}
+				return pass, "listed with its file id and the title the driver gave"
+			},
+		},
+		{
+			name: "a list row counts the attachment",
+			tool: "list_events",
+			args: cal(map[string]any{"no_expand": true}),
+			skip: noAttachment,
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				for _, row := range linesWith(r.text, weeklyTitle) {
+					if strings.Contains(row, "1 attachment") {
+						return pass, "the series row counts its file"
+					}
+				}
+				return fail, "the series row does not count the file attached to it"
+			},
+		},
+		{
 			// §17.1. Two calls, because the claim worth driving live is
 			// not "it lists" but "the token round-trips": the baseline
 			// hands one back, and passing it returns a quiet answer
@@ -1015,6 +1244,50 @@ func steps(scratch string, state seedState) []step {
 					return fail, "the incremental read handed back no new token, so the chain stops here"
 				}
 				return pass, "token accepted, a new one issued"
+			},
+		},
+		{
+			// §18 row 91. The seed wrote every event in this run, so an
+			// hour back covers them; Google filters, not the server.
+			name: "list_changes by updated_since",
+			tool: "list_changes",
+			args: map[string]any{
+				"calendar":      scratch,
+				"updated_since": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "since ") || strings.Contains(r.text, "Baseline for") {
+					return fail, "the result does not name the moment it read from"
+				}
+				if !strings.Contains(r.text, timedTitle) {
+					return fail, "an event the seed wrote this run is not among the changes"
+				}
+				// Spike O found Google's token from such a read chains; the
+				// write steps sync with this one after they change an event.
+				sinceToken = afterLabel(r.text, "Next sync token: ")
+				if sinceToken == "" {
+					return fail, "a read by updated_since that finished handed back no sync token"
+				}
+				return pass, "the seeded events came back as changed, with a sync token"
+			},
+		},
+		{
+			// Refused before a request: Google forbids updatedMin with a
+			// token, so the made-up token below is never sent.
+			name: "updated_since refused with a sync token",
+			tool: "list_changes",
+			args: map[string]any{
+				"calendar": scratch, "sync_token": "livecal-not-a-token", "updated_since": "2026-03-16",
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[invalid]") {
+					return fail, "updated_since and sync_token together were not refused as invalid: " +
+						truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid]"
 			},
 		},
 		{

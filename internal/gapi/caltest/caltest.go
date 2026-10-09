@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +48,19 @@ type Server struct {
 	// which is what a query truncated by calendarExpansionMax looks
 	// like: no busy list, no error, no row. It must not read as "free".
 	FreeBusyOmit map[string]bool
+	// Groups are group addresses and the member calendars free/busy
+	// expands each to; GroupErrors makes one fail to expand. Google
+	// documents only that a group bigger than groupExpansionMax is an
+	// error; the reason the fake gives it is its own.
+	Groups      map[string][]string
+	GroupErrors map[string]string
+	// PastCapAsErrors answers a calendar past calendarExpansionMax with
+	// the error tooManyCalendarsRequested, where by default it is left
+	// out. Google documents the reason and not which it does (§18 row
+	// 100), so the server is tested against both.
+	PastCapAsErrors bool
+	// FreeBusyAsked is the last free/busy request served.
+	FreeBusyAsked gcal.FreeBusyRequest
 	// Settings the user has.
 	Settings []gcal.Setting
 
@@ -89,11 +104,28 @@ type Server struct {
 	// the one thing a caller holding a token has to survive: Google
 	// discards tokens and the only cure is a full read with none.
 	SyncTokenExpired bool
+	// UpdatedMinTooLongAgo makes a read with updatedMin answer 410
+	// updatedMinTooLongAgo. How far back Google allows is not
+	// documented, so the fake does not guess a number.
+	UpdatedMinTooLongAgo bool
+
+	// Now is the clock that stamps an event's `updated` on every write,
+	// which is what updatedMin filters on. Nil is the real clock. An
+	// event this fake never wrote has no stamp, and reads as changed
+	// before any updatedMin a test asks about.
+	Now func() time.Time
 
 	mu sync.Mutex
 	// revs counts patches per event, so an etag moves on every write and
 	// a stale If-Match is refused the way Google refuses it.
 	revs map[string]int
+	// afterRead is what ChangeAfterRead set up, keyed by calendar id, a
+	// slash and event id.
+	afterRead map[string]func(*gcal.Event)
+	// conferenceAsked is the last conference request id each event was
+	// sent, keyed by calendar and event id: Google ignores a request
+	// that repeats it.
+	conferenceAsked map[string]string
 	// syncSeq is a change counter per calendar, and changed records the
 	// LATEST state of every event that has moved since the calendar was
 	// seeded — a canceled stub for one that was deleted outright.
@@ -121,6 +153,8 @@ func New() *Server {
 		Busy:           map[string][]gcal.TimePeriod{},
 		FreeBusyErrors: map[string]string{},
 		FreeBusyOmit:   map[string]bool{},
+		Groups:         map[string][]string{},
+		GroupErrors:    map[string]string{},
 		Fail:           map[string]int{},
 		FailMessage:    map[string]string{},
 	}
@@ -353,6 +387,29 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	if e.Status == "" {
 		e.Status = gcal.StatusConfirmed
 	}
+	if msg := refusedEventFields(e.Visibility, e.Reminders); msg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
+	if e.Reminders == nil {
+		// An event created without reminders uses the calendar's own.
+		e.Reminders = &gcal.EventReminders{UseDefault: true}
+	}
+	if msg := statusRefusal(s.isPrimary(calID), e); msg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
+	// "In order to modify attachments the supportsAttachments request
+	// parameter should be set to true." That they are dropped without it,
+	// rather than refused, is believed rather than probed (§18 row 88).
+	if r.URL.Query().Get("supportsAttachments") != "true" {
+		e.Attachments = nil
+	}
+	// Version 0 of eventLabelVersion "assumes no event label support",
+	// so a label sent without version 1 is dropped.
+	if r.URL.Query().Get("eventLabelVersion") != "1" {
+		delete(e.Unmodeled, "eventLabelId")
+	}
 	if len(e.ConferenceData) > 0 {
 		// Version 0 — the default — "ignores conference data in the
 		// event's body", so the fake drops it exactly as Google does.
@@ -361,6 +418,9 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 		if r.URL.Query().Get("conferenceDataVersion") != "1" {
 			e.ConferenceData = nil
 		} else {
+			s.mu.Lock()
+			s.askedForConference(calID, e.ID, ConferenceRequestOf(e.ConferenceData))
+			s.mu.Unlock()
 			e.ConferenceData = conferenceAnswer(e.ConferenceData, s.ConferenceFails)
 		}
 	}
@@ -373,6 +433,139 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	s.bumpSync(calID, e)
 	s.mu.Unlock()
 	writeJSON(w, e)
+}
+
+// refusedEventFields is why Google would refuse an event's visibility or
+// reminders, or "". The limits are the discovery document's; the
+// messages are this fake's own.
+func refusedEventFields(visibility string, r *gcal.EventReminders) string {
+	switch visibility {
+	case "", gcal.VisibilityDefault, gcal.VisibilityPublic, gcal.VisibilityPrivate, gcal.VisibilityConfidential:
+	default:
+		return "Invalid visibility value."
+	}
+	if r == nil {
+		return ""
+	}
+	if r.UseDefault && len(r.Overrides) > 0 {
+		return "Cannot specify both default reminders and overrides at the same time."
+	}
+	if len(r.Overrides) > gcal.MaxReminders {
+		return "Too many reminders."
+	}
+	for _, o := range r.Overrides {
+		if o.Minutes < 0 || o.Minutes > gcal.MaxReminderMinutes {
+			return "Invalid reminder minutes."
+		}
+		if o.Method != gcal.ReminderPopup && o.Method != gcal.ReminderEmail {
+			return "Invalid reminder method."
+		}
+	}
+	return ""
+}
+
+// visibilityRank orders visibility from least to most restrictive.
+// Default in the middle is the server's belief, not Google's word (§18
+// row 101), so the fake cannot tell the two apart.
+func visibilityRank(v string) int {
+	switch v {
+	case gcal.VisibilityPublic:
+		return 0
+	case gcal.VisibilityPrivate, gcal.VisibilityConfidential:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// askedForConference records the request id an event was last sent. The
+// caller holds mu.
+func (s *Server) askedForConference(calID, eventID, requestID string) {
+	if s.conferenceAsked == nil {
+		s.conferenceAsked = map[string]string{}
+	}
+	s.conferenceAsked[calID+"/"+eventID] = requestID
+}
+
+// statusRefusal is why Google would refuse a status event as it would
+// stand after a write, or "". The rules are Google's status-events
+// guide's, which says an update "must maintain the required fields" too;
+// the messages are this fake's own.
+//
+// That a create without its details block is refused is believed rather
+// than probed (§18 row 88).
+func statusRefusal(onPrimary bool, e gcal.Event) string {
+	block := statusBlocks[e.EventType]
+	if block == "" {
+		return ""
+	}
+	// "Secondary calendars can't have status events."
+	if !onPrimary {
+		return "A " + e.EventType + " event can only be on a primary calendar."
+	}
+	if len(e.StatusDetails()) == 0 {
+		return "A " + e.EventType + " event needs " + block
+	}
+	allDay := e.Start != nil && e.Start.IsAllDay()
+	switch e.EventType {
+	case gcal.EventTypeOutOfOffice, gcal.EventTypeFocusTime:
+		// "cannot be all-day events", and transparency must be opaque.
+		if allDay {
+			return "A " + e.EventType + " event cannot be all day."
+		}
+		if e.Transparency == gcal.TransparencyTransparent {
+			return "A " + e.EventType + " event must be opaque."
+		}
+	case gcal.EventTypeWorkingLocation:
+		if e.Visibility != gcal.VisibilityPublic || e.Transparency != gcal.TransparencyTransparent {
+			return "A workingLocation event must be public and transparent."
+		}
+		// "An all-day event (with start and end dates specified) which
+		// spans exactly one day."
+		if allDay && e.End != nil {
+			from, ferr := time.Parse("2006-01-02", e.Start.Date)
+			to, terr := time.Parse("2006-01-02", e.End.Date)
+			if ferr != nil || terr != nil || !to.Equal(from.AddDate(0, 0, 1)) {
+				return "An all-day workingLocation event must span exactly one day."
+			}
+		}
+	}
+	return ""
+}
+
+// statusBlocks are the JSON names of each status type's details block.
+var statusBlocks = map[string]string{
+	gcal.EventTypeOutOfOffice:     "outOfOfficeProperties",
+	gcal.EventTypeFocusTime:       "focusTimeProperties",
+	gcal.EventTypeWorkingLocation: "workingLocationProperties",
+}
+
+// ConferenceRequestOf is the request id an event's conference data
+// carries, or "" when it carries no create request.
+func ConferenceRequestOf(raw json.RawMessage) string {
+	var data struct {
+		CreateRequest *struct {
+			RequestID string `json:"requestId"`
+		} `json:"createRequest"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &data) != nil || data.CreateRequest == nil {
+		return ""
+	}
+	return data.CreateRequest.RequestID
+}
+
+// isPrimary reports whether a calendar is the account's primary one.
+func (s *Server) isPrimary(calID string) bool {
+	e, ok := s.Entries[calID]
+	return ok && e.Primary
+}
+
+// onlyReminders reports whether a patch changes nothing but reminders,
+// which Google says does not move the event's updated time.
+func onlyReminders(p gcal.EventPatch) bool {
+	rest := p
+	rest.Reminders = nil
+	return p.Reminders != nil && reflect.DeepEqual(rest, gcal.EventPatch{})
 }
 
 // patchEvent is events.patch, under If-Match.
@@ -398,14 +591,53 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 		writeErr(w, http.StatusBadRequest, "parseError", "bad patch body")
 		return
 	}
+	vis := ""
+	if p.Visibility != nil {
+		vis = *p.Visibility
+	}
+	if msg := refusedEventFields(vis, p.Reminders); msg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
+	trial := *cur
+	p.ApplyTo(&trial)
+	if msg := statusRefusal(s.isPrimary(calID), trial); msg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
 
 	s.mu.Lock()
+	if p.Visibility != nil && cur.RecurringEventID != "" {
+		// "If the new setting is more restrictive (e.g. from public to
+		// private), it is applied to all instances. If the new setting
+		// is less restrictive (e.g. from private to public), the change
+		// is ignored." Google's words, on Event.visibility.
+		switch from, to := visibilityRank(cur.Visibility), visibilityRank(*p.Visibility); {
+		case to < from:
+			p.Visibility = nil
+		case to > from:
+			for _, e := range s.Events[calID] {
+				if e.ID == cur.RecurringEventID || e.RecurringEventID == cur.RecurringEventID {
+					e.Visibility = *p.Visibility
+				}
+			}
+		}
+	}
 	next := *cur
 	// The fold lives on the type, so this fake cannot drift from what
 	// the server sends: a field added to EventPatch and forgotten here
 	// would make the fake quietly not apply it, and a test green over
 	// behavior that never happened.
 	p.ApplyTo(&next)
+	// A conference request is the one field the fold leaves out, because
+	// Google answers it with a conference it makes. Without version 1 it
+	// is ignored, as on an insert; and "If an ID provided is the same as
+	// for the previous request, the request is ignored."
+	if id := ConferenceRequestOf(p.ConferenceData); id != "" &&
+		r.URL.Query().Get("conferenceDataVersion") == "1" && s.conferenceAsked[calID+"/"+eventID] != id {
+		s.askedForConference(calID, eventID, id)
+		next.ConferenceData = conferenceAnswer(p.ConferenceData, s.ConferenceFails)
+	}
 	if s.revs == nil {
 		s.revs = map[string]int{}
 	}
@@ -413,6 +645,13 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 	next.ETag = etag(eventID, s.revs[eventID]+1)
 	s.Events[calID][eventID] = &next
 	s.bumpSync(calID, next)
+	if onlyReminders(p) {
+		// "Changing reminders does not also change the updated property
+		// of the enclosing event", so a read by updatedMin does not see
+		// it. Whether a sync token reports it is not documented, and the
+		// fake keeps reporting it there.
+		next.Updated = cur.Updated
+	}
 	s.mu.Unlock()
 	writeJSON(w, next)
 }
@@ -1060,8 +1299,40 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		return
 	}
 
+	// eventTypes is an enum in the discovery document, repeated for
+	// several, and "If unset, returns all event types."
+	types := q["eventTypes"]
+	for _, t := range types {
+		if !slices.Contains(listTypes, t) {
+			writeErr(w, http.StatusBadRequest, "invalid", "Invalid value for eventTypes: "+t)
+			return
+		}
+	}
+
+	// updatedMin keeps what was written at or after a moment, and
+	// "entries deleted since this time will always be included
+	// regardless of showDeleted". A moment too far back is 410, with the
+	// reason Google's error guide names.
+	var since time.Time
+	if um := q.Get("updatedMin"); um != "" {
+		if s.UpdatedMinTooLongAgo {
+			writeErr(w, http.StatusGone, "updatedMinTooLongAgo",
+				"The requested minimum modification time lies too far in the past.")
+			return
+		}
+		t, err := time.Parse(time.RFC3339, um)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid", "Invalid value for updatedMin: "+um)
+			return
+		}
+		since = t
+	}
+
 	var items []gcal.Event
 	for _, e := range s.Events[calID] {
+		if !since.IsZero() && !changedSince(*e, since) {
+			continue
+		}
 		// §2.9: singleEvents decides which of the two shapes comes back.
 		// Without it, parents; with it, instances.
 		isInstance := e.RecurringEventID != ""
@@ -1081,13 +1352,18 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		switch {
 		case keptCanceledInstance:
 			// Returned regardless of showDeleted, which is the point.
-		case e.Status == gcal.StatusCanceled && !showDeleted:
+		case e.Status == gcal.StatusCanceled && !showDeleted && since.IsZero():
 			continue // §2.13
 		case single && isParent, !single && isInstance:
 			continue // §2.9: one shape or the other, never both
 		}
-		if search != "" && !strings.Contains(strings.ToLower(e.Summary), search) &&
-			!strings.Contains(strings.ToLower(e.Description), search) {
+		if len(types) > 0 && !slices.Contains(types, typeOf(*e)) {
+			continue
+		}
+		if uid := q.Get("iCalUID"); uid != "" && s.uidOf(calID, e) != uid {
+			continue
+		}
+		if search != "" && !matchesQ(e, search) {
 			continue
 		}
 		if tm := q.Get("timeMin"); tm != "" && endsBefore(e, tm) {
@@ -1099,6 +1375,11 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		items = append(items, *e)
 	}
 	sort.Slice(items, func(i, j int) bool { return startKey(items[i]) < startKey(items[j]) })
+	if !since.IsZero() {
+		// Deleted outright, so no longer in Events: only the tombstone
+		// says it went.
+		items = append(items, s.removedSince(calID, since)...)
+	}
 
 	page, next := s.paginate(len(items), q.Get("pageToken"), q.Get("maxResults"))
 	cal := s.Calendars[calID]
@@ -1116,6 +1397,64 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		out.NextSyncToken = syncTokenFor(s.currentSeq(calID))
 	}
 	writeJSON(w, out)
+}
+
+// listTypes is the eventTypes enum of events.list.
+var listTypes = []string{
+	gcal.EventTypeBirthday, gcal.EventTypeDefault, gcal.EventTypeFocusTime,
+	gcal.EventTypeFromGmail, gcal.EventTypeOutOfOffice, gcal.EventTypeWorkingLocation,
+}
+
+// matchesQ is q over the fields the discovery document names: the
+// summary, description and location, each attendee's and the
+// organizer's display name and email, and a working location's
+// building, desk and labels. A lowercase substring is this fake's guess
+// at the matching, which Google does not document, and the built-in
+// words for status events are not modeled.
+func matchesQ(e *gcal.Event, search string) bool {
+	fields := []string{e.Summary, e.Description, e.Location}
+	for _, a := range e.Attendees {
+		fields = append(fields, a.DisplayName, a.Email)
+	}
+	if e.Organizer != nil {
+		fields = append(fields, e.Organizer.DisplayName, e.Organizer.Email)
+	}
+	var where gcal.EventWorkingLocationProperties
+	if len(e.WorkingLocationProperties) > 0 && json.Unmarshal(e.WorkingLocationProperties, &where) == nil {
+		if o := where.OfficeLocation; o != nil {
+			fields = append(fields, o.BuildingID, o.DeskID, o.Label)
+		}
+		if c := where.CustomLocation; c != nil {
+			fields = append(fields, c.Label)
+		}
+	}
+	for _, f := range fields {
+		if f != "" && strings.Contains(strings.ToLower(f), search) {
+			return true
+		}
+	}
+	return false
+}
+
+// uidOf is an event's iCalUID. An occurrence carries its series' UID:
+// "all occurrences of one event have different ids while they all share
+// the same iCalUIDs" (Event.iCalUID).
+func (s *Server) uidOf(calID string, e *gcal.Event) string {
+	if e.ICalUID != "" || e.RecurringEventID == "" {
+		return e.ICalUID
+	}
+	if parent, ok := s.Events[calID][e.RecurringEventID]; ok {
+		return parent.ICalUID
+	}
+	return ""
+}
+
+// typeOf is an event's type, which Google defaults to "default".
+func typeOf(e gcal.Event) string {
+	if e.EventType == "" {
+		return gcal.EventTypeDefault
+	}
+	return e.EventType
 }
 
 // syncPage answers events.list?syncToken=…
@@ -1254,9 +1593,42 @@ func (s *Server) getEvent(w http.ResponseWriter, calID, eventID string) {
 		e.ConferenceData = conferenceReady(e.ConferenceData)
 	}
 	out := *e
+	key := calID + "/" + eventID
+	if edit, ok := s.afterRead[key]; ok {
+		delete(s.afterRead, key)
+		// The lists are copied, so the edit does not reach the answer to
+		// this read, which shares them.
+		next := *e
+		next.Attendees, next.Recurrence = slices.Clone(e.Attendees), slices.Clone(e.Recurrence)
+		if edit != nil {
+			edit(&next)
+		}
+		if s.revs == nil {
+			s.revs = map[string]int{}
+		}
+		s.revs[eventID]++
+		next.ETag = etag(eventID, s.revs[eventID]+1)
+		s.Events[calID][eventID] = &next
+		s.bumpSync(calID, next)
+	}
 	s.mu.Unlock()
 
 	writeJSON(w, out)
+}
+
+// ChangeAfterRead changes an event once, right after the next read of
+// it, as a write between that read and the one that follows would: its
+// etag moves, and edit, when not nil, changes it too. Google did this by
+// itself to an event moments after moving it (§18 row 103), so a write
+// under the read's etag is refused with 412 and the next read sees the
+// change.
+func (s *Server) ChangeAfterRead(calID, eventID string, edit func(*gcal.Event)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.afterRead == nil {
+		s.afterRead = map[string]func(*gcal.Event){}
+	}
+	s.afterRead[calID+"/"+eventID] = edit
 }
 
 func (s *Server) listACL(w http.ResponseWriter, calID string) {
@@ -1283,21 +1655,65 @@ func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid", "too many calendars in one freeBusy query")
 		return
 	}
+	s.mu.Lock()
+	s.FreeBusyAsked = req
+	s.mu.Unlock()
 	out := gcal.FreeBusyResponse{
 		TimeMin: req.TimeMin, TimeMax: req.TimeMax,
 		Calendars: map[string]gcal.FreeBusyCalendar{},
 	}
-	for _, it := range req.Items {
-		if s.FreeBusyOmit[it.ID] {
-			continue
+	// calendarExpansionMax caps the calendars answered, a group's
+	// members included, at 50 at most (discovery). Which calendars Google
+	// leaves unanswered past the cap, and how, is undocumented; the fake
+	// answers in the order asked, and leaves the rest out or answers
+	// them tooManyCalendarsRequested (PastCapAsErrors).
+	answerable := 50
+	if n := req.CalendarExpansionMax; n > 0 && n < answerable {
+		answerable = n
+	}
+	answered := 0
+	calendar := func(id string) {
+		if _, done := out.Calendars[id]; done || s.FreeBusyOmit[id] {
+			return
 		}
-		if reason, bad := s.FreeBusyErrors[it.ID]; bad {
-			out.Calendars[it.ID] = gcal.FreeBusyCalendar{
+		if answered >= answerable {
+			if s.PastCapAsErrors {
+				out.Calendars[id] = gcal.FreeBusyCalendar{
+					Errors: []gcal.FreeBusyError{{Domain: "calendar", Reason: "tooManyCalendarsRequested"}},
+				}
+			}
+			return
+		}
+		answered++
+		if reason, bad := s.FreeBusyErrors[id]; bad {
+			out.Calendars[id] = gcal.FreeBusyCalendar{
 				Errors: []gcal.FreeBusyError{{Domain: "calendar", Reason: reason}},
 			}
+			return
+		}
+		out.Calendars[id] = gcal.FreeBusyCalendar{Busy: s.Busy[id]}
+	}
+	for _, it := range req.Items {
+		members, isGroup := s.Groups[it.ID]
+		if !isGroup {
+			calendar(it.ID)
 			continue
 		}
-		out.Calendars[it.ID] = gcal.FreeBusyCalendar{Busy: s.Busy[it.ID]}
+		if out.Groups == nil {
+			out.Groups = map[string]gcal.FreeBusyGroup{}
+		}
+		reason, bad := s.GroupErrors[it.ID]
+		if !bad && req.GroupExpansionMax > 0 && len(members) > req.GroupExpansionMax {
+			reason, bad = "groupTooBig", true
+		}
+		if bad {
+			out.Groups[it.ID] = gcal.FreeBusyGroup{Errors: []gcal.FreeBusyError{{Domain: "calendar", Reason: reason}}}
+			continue
+		}
+		out.Groups[it.ID] = gcal.FreeBusyGroup{Calendars: members}
+		for _, m := range members {
+			calendar(m)
+		}
 	}
 	writeJSON(w, out)
 }
@@ -1537,7 +1953,9 @@ type syncChange struct {
 	event gcal.Event
 }
 
-// bumpSync records that an event changed. The caller holds mu.
+// bumpSync records that an event changed, and stamps its `updated` with
+// the fake's clock, on the stored event too when there is one. The
+// caller holds mu.
 func (s *Server) bumpSync(calID string, e gcal.Event) {
 	if s.syncSeq == nil {
 		s.syncSeq = map[string]int{}
@@ -1546,8 +1964,42 @@ func (s *Server) bumpSync(calID string, e gcal.Event) {
 	if s.changed[calID] == nil {
 		s.changed[calID] = map[string]syncChange{}
 	}
+	now := time.Now
+	if s.Now != nil {
+		now = s.Now
+	}
+	e.Updated = now().UTC().Format("2006-01-02T15:04:05.000Z")
+	if cur, ok := s.Events[calID][e.ID]; ok {
+		cur.Updated = e.Updated
+	}
 	s.syncSeq[calID]++
 	s.changed[calID][e.ID] = syncChange{seq: s.syncSeq[calID], event: e}
+}
+
+// removedSince returns the tombstones of events deleted outright at or
+// after since, which a read with updatedMin includes "regardless of
+// showDeleted".
+func (s *Server) removedSince(calID string, since time.Time) []gcal.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []gcal.Event
+	for id, c := range s.changed[calID] {
+		if _, alive := s.Events[calID][id]; alive {
+			continue
+		}
+		if changedSince(c.event, since) {
+			out = append(out, c.event)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// changedSince reports whether an event was last written at or after
+// since. An event with no stamp was never written by this fake.
+func changedSince(e gcal.Event, since time.Time) bool {
+	t, err := time.Parse(time.RFC3339, e.Updated)
+	return err == nil && !t.Before(since)
 }
 
 // syncSince returns the events that changed after seq, oldest first.

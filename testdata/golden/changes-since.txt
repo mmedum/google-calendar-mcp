@@ -1,0 +1,12 @@
+Changes on Work since 2026-03-16T00:00:00+01:00
+times are in Europe/Copenhagen, the calendar's own time zone
+Read by updated_since, which Google calls the legacy way: an event whose only change was its reminders is not here. Events deleted since then are.
+
+Changed (1)
+  2026-03-17 Tue  14:00-15:00  Standup  [id ev-standup]
+
+Deleted (1)
+  ev-gone-1
+
+This read did not finish, so there is NO sync token yet — Google issues one with the last page only. Pass page_token, with the same updated_since, to continue; the token arrives at the end.
+page_token: example-page-token-not-a-real-one

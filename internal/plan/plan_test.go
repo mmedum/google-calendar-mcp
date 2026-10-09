@@ -1,10 +1,13 @@
 package plan_test
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
@@ -378,14 +381,36 @@ func TestAMisspelledScopeIsRefusedEvenOnASingleEvent(t *testing.T) {
 	}
 }
 
-// TestAConferenceIsOnlyAttachedAtCreation: adding a Meet link to an
-// event that already exists is a write this server does not make, and
-// the refusal says so rather than the field being dropped in silence.
-func TestAConferenceIsOnlyAttachedAtCreation(t *testing.T) {
-	before := gcal.Event{ID: "abcdef0123456789", Summary: "Standing meeting"}
-	_, _, err := plan.Patch(before, plan.Draft{Conference: true})
-	if !errors.Is(err, plan.ErrUnsupported) {
-		t.Fatalf("Patch with a conference gave %v, want ErrUnsupported", err)
+// A Meet link is asked for on a new event, and on an event that has no
+// conference. The patch's request id is not the event id, which the
+// create used, because Google ignores a repeated one; it follows the
+// etag, so a retry of one patch repeats it.
+func TestAConferenceIsAskedForOnCreateAndOnAnEventWithNone(t *testing.T) {
+	before := gcal.Event{ID: "abcdef0123456789", Summary: "Standing meeting", ETag: `"v3"`}
+	p, changes, err := plan.Patch(before, plan.Draft{Conference: true})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if got := caltest.ConferenceRequestOf(p.ConferenceData); got != gcal.ConferenceRequestID("abcdef0123456789", `"v3"`) ||
+		got == "abcdef0123456789" {
+		t.Fatalf("the request id is %q", got)
+	}
+	if gcal.ConferenceRequestID("abcdef0123456789", `"v4"`) == gcal.ConferenceRequestID("abcdef0123456789", `"v3"`) {
+		t.Fatal("two versions of one event share a request id, so the second request would be ignored")
+	}
+	if len(changes) != 1 || changes[0].Field != "conference" {
+		t.Fatalf("got changes %+v", changes)
+	}
+
+	// One that has a conference is refused: Google would replace it.
+	before.ConferenceData = json.RawMessage(`{"entryPoints":[{"entryPointType":"phone","uri":"tel:+1-555-0100"}]}`)
+	if _, _, err := plan.Patch(before, plan.Draft{Conference: true}); !errors.Is(err, plan.ErrBlocked) {
+		t.Fatalf("got %v, want a conference already there refused", err)
+	}
+	// A request that failed holds no conference, so asking again is allowed.
+	before.ConferenceData = json.RawMessage(`{"createRequest":{"requestId":"x","status":{"statusCode":"failure"}}}`)
+	if _, _, err := plan.Patch(before, plan.Draft{Conference: true}); err != nil {
+		t.Fatalf("asking again after a failed request was refused: %v", err)
 	}
 
 	e, err := plan.Insert("abcdef0123456789", plan.Draft{
@@ -402,5 +427,223 @@ func TestAConferenceIsOnlyAttachedAtCreation(t *testing.T) {
 	// conference: Google ignores a repeated request id.
 	if !strings.Contains(string(e.ConferenceData), `"requestId":"abcdef0123456789"`) {
 		t.Fatalf("the request does not carry the event id: %s", e.ConferenceData)
+	}
+}
+
+// A Gmail server hands an address over as an RFC 5322 mailbox, with a
+// display name. It is taken as its bare address, which is all that goes
+// on. A list in one entry is refused rather than split.
+func TestAMailboxIsTakenAsItsBareAddress(t *testing.T) {
+	for in, want := range map[string]string{
+		`"Sample Person" <person@example.test>`:  "person@example.test",
+		`"Person, Sample" <person@example.test>`: "person@example.test",
+		`Sample Person <person@example.test>`:    "person@example.test",
+		`<person@example.test>`:                  "person@example.test",
+		` person@example.test `:                  "person@example.test",
+	} {
+		got, err := plan.Address(in, "a guest")
+		if err != nil || got != want {
+			t.Errorf("Address(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for in, want := range map[string]string{
+		`"One" <one@example.test>, "Two" <two@example.test>`: "holds 2 addresses in one entry",
+		`one@example.test, two@example.test`:                 "holds 2 addresses in one entry",
+		`Sample Person`:                                      "is not an email address",
+		`person@localhost`:                                   "is not an email address",
+	} {
+		_, err := plan.Address(in, "a guest")
+		if !errors.Is(err, plan.ErrInvalid) || !strings.Contains(err.Error(), want) {
+			t.Errorf("Address(%q): %v, want invalid saying %q", in, err, want)
+		}
+	}
+}
+
+// Reminders: the limits are Google's, refused before a request is made,
+// and the edges of each are accepted.
+func TestNewRemindersHoldsGooglesLimits(t *testing.T) {
+	for _, c := range []struct {
+		name         string
+		defaults     bool
+		popup, email *[]int
+		want         string
+	}{
+		{"default with a list", true, ptr([]int{10}), nil, "one or the other"},
+		{"six in all", false, ptr([]int{1, 2, 3}), ptr([]int{4, 5, 6}), "6 reminders given"},
+		{"past four weeks", false, ptr([]int{40321}), nil, "has 40321"},
+		{"before the start", false, nil, ptr([]int{-1}), "has -1"},
+		{"twice", false, ptr([]int{10, 10}), nil, "10 twice"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := plan.NewReminders(c.defaults, c.popup, c.email)
+			if !errors.Is(err, plan.ErrInvalid) || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("got %v, want [invalid] saying %q", err, c.want)
+			}
+		})
+	}
+
+	r, err := plan.NewReminders(false, ptr([]int{40320, 0, 30}), ptr([]int{1440, 60}))
+	if err != nil {
+		t.Fatalf("five reminders from 0 to 40320 minutes were refused: %v", err)
+	}
+	if fmt.Sprint(r.Popup, r.Email) != "[0 30 40320] [60 1440]" {
+		t.Fatalf("got %v %v, want each list in ascending order", r.Popup, r.Email)
+	}
+	if r, err := plan.NewReminders(false, nil, nil); r != nil || err != nil {
+		t.Fatalf("no reminder input gave %+v, %v; want nil, nil", r, err)
+	}
+}
+
+// Giving one list replaces the whole set: the reminders of the other
+// kind go, and the wire carries the overrides in full.
+func TestRemindersReplaceTheWholeSet(t *testing.T) {
+	before := gcal.Event{ID: "abcde12345", Reminders: &gcal.EventReminders{
+		Overrides: []gcal.EventReminder{{Method: gcal.ReminderEmail, Minutes: 1440}},
+	}}
+	r, err := plan.NewReminders(false, ptr([]int{10}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, changes, err := plan.Patch(before, plan.Draft{Reminders: r})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	body, _ := json.Marshal(p)
+	if string(body) != `{"reminders":{"useDefault":false,"overrides":[{"method":"popup","minutes":10}]}}` {
+		t.Fatalf("got %s", body)
+	}
+	if len(changes) != 1 || changes[0] != (plan.Change{Field: "reminders", From: "email 1440 min", To: "popup 10 min"}) {
+		t.Fatalf("got %+v", changes)
+	}
+
+	// Back to the calendar's own: overrides is sent as null, which is how
+	// a patch deletes a field rather than merging into it.
+	def, _ := plan.NewReminders(true, nil, nil)
+	p, _, err = plan.Patch(before, plan.Draft{Reminders: def})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if body, _ := json.Marshal(p); string(body) != `{"reminders":{"useDefault":true,"overrides":null}}` {
+		t.Fatalf("got %s", body)
+	}
+}
+
+// The same reminders in another order are no change.
+func TestTheSameRemindersAreNoChange(t *testing.T) {
+	before := gcal.Event{ID: "abcde12345", Reminders: &gcal.EventReminders{Overrides: []gcal.EventReminder{
+		{Method: gcal.ReminderEmail, Minutes: 60}, {Method: gcal.ReminderPopup, Minutes: 30},
+		{Method: gcal.ReminderPopup, Minutes: 10},
+	}}}
+	r, _ := plan.NewReminders(false, ptr([]int{30, 10}), ptr([]int{60}))
+	if _, _, err := plan.Patch(before, plan.Draft{Reminders: r}); !errors.Is(err, plan.ErrInvalid) {
+		t.Fatalf("got %v, want nothing to change", err)
+	}
+}
+
+// A draft that touches only reminders is the one that reaches nobody.
+func TestOnlyRemindersIsOnlyReminders(t *testing.T) {
+	r, _ := plan.NewReminders(true, nil, nil)
+	if !(plan.Draft{Reminders: r}).OnlyReminders() {
+		t.Error("a reminders-only draft is not recognized")
+	}
+	if (plan.Draft{Reminders: r, Title: ptr("x")}).OnlyReminders() {
+		t.Error("a draft with a title is not reminders only")
+	}
+	if (plan.Draft{Reminders: r, Visibility: ptr("private")}).OnlyReminders() {
+		t.Error("visibility is the event's, not this account's")
+	}
+	if (plan.Draft{}).OnlyReminders() {
+		t.Error("an empty draft is not reminders only")
+	}
+}
+
+// PersonalNotification sends nothing whatever notify says, and still
+// refuses a value that is not a choice.
+func TestAPersonalWriteAsksForNoNotification(t *testing.T) {
+	d, err := plan.PersonalNotification("all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.SendUpdatesFor() != "" {
+		t.Fatalf("sendUpdates is %q, want none sent", d.SendUpdatesFor())
+	}
+	if _, err := plan.PersonalNotification("sometimes"); !errors.Is(err, plan.ErrInvalid) {
+		t.Fatalf("got %v, want a typo refused", err)
+	}
+}
+
+// Visibility takes three values; confidential is refused with what to
+// pass instead.
+func TestVisibilityTakesThreeValues(t *testing.T) {
+	before := gcal.Event{ID: "abcde12345"}
+	p, changes, err := plan.Patch(before, plan.Draft{Visibility: ptr("Private")})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if p.Visibility == nil || *p.Visibility != "private" ||
+		changes[0] != (plan.Change{Field: "visibility", From: "default", To: "private"}) {
+		t.Fatalf("got %+v %+v", p.Visibility, changes)
+	}
+	for v, want := range map[string]string{"confidential": "Pass private", "secret": "default, public or private"} {
+		if _, _, err := plan.Patch(before, plan.Draft{Visibility: ptr(v)}); !errors.Is(err, plan.ErrInvalid) ||
+			!strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want [invalid] saying %q", v, err, want)
+		}
+	}
+}
+
+// Google ignores a less restrictive visibility on one occurrence and
+// applies a more restrictive one to the whole series.
+func TestVisibilityOnOneOccurrence(t *testing.T) {
+	for _, c := range []struct{ from, to string }{
+		{"private", "public"}, {"private", "default"}, {"", "public"}, {"confidential", "default"},
+	} {
+		if _, err := plan.InstanceVisibility(c.from, c.to); !errors.Is(err, plan.ErrUnsupported) {
+			t.Errorf("%q to %q: got %v, want [unsupported]", c.from, c.to, err)
+		}
+	}
+	note, err := plan.InstanceVisibility("public", "private")
+	if err != nil || !strings.Contains(note, "makes the whole series private") {
+		t.Fatalf("got %q, %v; want a note that the series changes", note, err)
+	}
+	if note, err := plan.InstanceVisibility("private", "private"); note != "" || err != nil {
+		t.Fatalf("an unchanged visibility got %q, %v", note, err)
+	}
+}
+
+// A guest permission is compared with Google's default when the event
+// does not carry it, so setting the default is no change.
+func TestGuestPermissionsAgainstGooglesDefaults(t *testing.T) {
+	before := gcal.Event{ID: "abcde12345"}
+	p, changes, err := plan.Patch(before, plan.Draft{
+		GuestsCanInviteOthers: ptr(false), GuestsCanSeeOtherGuests: ptr(true), GuestsCanModify: ptr(true),
+	})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	body, _ := json.Marshal(p)
+	if string(body) != `{"guestsCanModify":true,"guestsCanInviteOthers":false}` {
+		t.Fatalf("got %s", body)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("got %+v, want two changes", changes)
+	}
+}
+
+// An insert carries all of them.
+func TestInsertCarriesRemindersVisibilityAndPermissions(t *testing.T) {
+	r, _ := plan.NewReminders(false, ptr([]int{}), nil)
+	e, err := plan.Insert("abcde12345", plan.Draft{
+		Title: ptr("Quiet"), Start: "2026-03-20", End: "2026-03-20",
+		Reminders: r, Visibility: ptr("public"), GuestsCanSeeOtherGuests: ptr(false),
+	})
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	if e.Reminders == nil || e.Reminders.UseDefault || len(e.Reminders.Overrides) != 0 {
+		t.Fatalf("an empty list did not mean no reminders: %+v", e.Reminders)
+	}
+	if e.Visibility != "public" || e.GuestsCanSeeOtherGuests == nil || *e.GuestsCanSeeOtherGuests {
+		t.Fatalf("got visibility %q and see-guests %v", e.Visibility, e.GuestsCanSeeOtherGuests)
 	}
 }

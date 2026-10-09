@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 // Incremental sync (§17.1).
@@ -30,7 +33,8 @@ import (
 //  1. deletions are always in the result, and `showDeleted` may not be
 //     false, so this read forces it true;
 //  2. a window, a search, an ordering or `updatedMin` cannot be combined
-//     with a token, so this tool offers none of them;
+//     with a token, so this tool offers no window, search or ordering,
+//     and refuses `updated_since` alongside a token;
 //  3. `nextSyncToken` arrives on the LAST page only — so a truncated
 //     read has no token to give, and saying otherwise would hand the
 //     caller a token that skips everything it did not see.
@@ -38,6 +42,20 @@ import (
 // And the invalidation story §17.1 asked for: an expired token is 410,
 // which reaches the caller as `[stale]` naming the one cure — ask again
 // with no token at all.
+//
+// `updated_since` is the other way in: what changed since a moment, sent
+// as `updatedMin`. Google's sync guide calls it the legacy way and says
+// it misses updates; an event's `updated` does not move when only its
+// reminders change. It is refused alongside a token, as Google refuses
+// `updatedMin` there. Its last page hands back a sync token like any
+// other read's: spike O synced with one and was told of a change made
+// after it (§18 row 91).
+//
+// A page token from any of the three reads — a baseline, a read from a
+// sync token, a read since a moment — carries which it was, and a
+// continuation must ask the same. Without that, a read since a moment
+// continued with only its page token became a baseline, which counts the
+// rows past its budget instead of reporting them.
 
 // baselineRequests caps the pages a baseline will walk for its token.
 //
@@ -53,6 +71,10 @@ type ChangesOptions struct {
 	// SyncToken is empty on the first call, which establishes a
 	// baseline rather than reporting changes.
 	SyncToken string
+	// UpdatedSince asks for what changed at or after a moment instead:
+	// an RFC3339 timestamp, or a date meaning the start of that day in
+	// the resolved zone. Never with SyncToken.
+	UpdatedSince string
 	// PageToken continues a read that did not finish.
 	PageToken string
 	TimeZone  string
@@ -64,11 +86,30 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 	if err := s.ready(); err != nil {
 		return render.Changes{}, err
 	}
+	if strings.TrimSpace(o.UpdatedSince) != "" && o.SyncToken != "" {
+		return render.Changes{}, gapi.Errf(gapi.ClassInvalid,
+			"updated_since and sync_token cannot be used together: Google refuses a modification time "+
+				"alongside a sync token. Pass sync_token alone to continue from your last read, or "+
+				"updated_since alone for what changed since that moment")
+	}
 	c, err := s.ResolveCalendar(ctx, o.Calendar)
 	if err != nil {
 		return render.Changes{}, err
 	}
 	zone, err := s.Zone(ctx, o.TimeZone, c.TimeZone)
+	if err != nil {
+		return render.Changes{}, err
+	}
+	var since when.Zoned
+	if strings.TrimSpace(o.UpdatedSince) != "" {
+		// A bare date is the start of that day in the resolved zone, the
+		// same rule as a window's from, and the result echoes the instant.
+		if since, err = parseBound(o.UpdatedSince, zone, false); err != nil {
+			return render.Changes{}, err
+		}
+	}
+
+	resume, err := decodeChanges(o.PageToken, c.ID, o.SyncToken, since)
 	if err != nil {
 		return render.Changes{}, err
 	}
@@ -82,7 +123,8 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		CalendarID:   c.ID,
 		CalendarName: c.Title,
 		Zone:         zone,
-		Baseline:     o.SyncToken == "",
+		Baseline:     o.SyncToken == "" && since.IsZero(),
+		Since:        since,
 	}
 
 	opts := gapi.EventsListOptions{
@@ -90,8 +132,11 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		// and a sync that hid deletions would be a slower list.
 		ShowDeleted: true,
 		SyncToken:   o.SyncToken,
-		PageToken:   o.PageToken,
+		PageToken:   resume,
 		MaxResults:  budget,
+	}
+	if !since.IsZero() {
+		opts.UpdatedMin = since.T.UTC().Format(time.RFC3339)
 	}
 
 	// A baseline and an incremental read stop for different reasons, and
@@ -116,7 +161,7 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		page, perr := s.API.ListEvents(ctx, c.ID, opts)
 		out.Requests++
 		if perr != nil {
-			return render.Changes{}, changesError(perr, o.SyncToken)
+			return render.Changes{}, changesError(perr, o.SyncToken, since)
 		}
 		atBudget := len(out.Changed)+len(out.Deleted) >= budget
 		for _, raw := range page.Items {
@@ -144,7 +189,7 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		if page.NextSyncToken != "" {
 			out.SyncToken = page.NextSyncToken
 		}
-		out.NextPageToken = page.NextPageToken
+		out.NextPageToken = encodeChanges(page.NextPageToken, c.ID, o.SyncToken, since)
 		done := page.NextPageToken == ""
 		switch {
 		case done:
@@ -171,21 +216,106 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 	return out, nil
 }
 
-// changesError says what to do about a token that no longer works.
+// changesCursor is what list_changes' next_page_token carries: Google's
+// page token, and which read issued it. Cal and Sync are digests of the
+// calendar id and the sync token the read started from, never the
+// values; Since is the moment, as an instant. Sync and Since both empty
+// is a baseline.
+type changesCursor struct {
+	V     int    `json:"v"`
+	Page  string `json:"p"`
+	Cal   string `json:"c"`
+	Sync  string `json:"k,omitempty"`
+	Since string `json:"s,omitempty"`
+}
+
+const changesCursorVersion = 1
+
+// changesRead is the read a call asks for, as a cursor binds it.
+func changesRead(calendarID, syncToken string, since when.Zoned) changesCursor {
+	c := changesCursor{V: changesCursorVersion, Cal: digest(calendarID)}
+	if syncToken != "" {
+		c.Sync = digest(syncToken)
+	}
+	if !since.IsZero() {
+		c.Since = instantKey(since)
+	}
+	return c
+}
+
+func encodeChanges(page, calendarID, syncToken string, since when.Zoned) string {
+	if page == "" {
+		return ""
+	}
+	c := changesRead(calendarID, syncToken, since)
+	c.Page = page
+	return encodeToken(c)
+}
+
+// decodeChanges returns Google's page token, or "" for a first page. It
+// refuses a token issued for another read, naming what to pass instead.
+func decodeChanges(tok, calendarID, syncToken string, since when.Zoned) (string, error) {
+	if strings.TrimSpace(tok) == "" {
+		return "", nil
+	}
+	var was changesCursor
+	if !decodeToken(tok, &was) || was.V != changesCursorVersion || was.Page == "" {
+		return "", errForeignToken
+	}
+	now := changesRead(calendarID, syncToken, since)
+	again := "or omit the token to start again"
+	switch {
+	case was.Cal != now.Cal:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read of another calendar. Pass the calendar it was issued for, %s", again)
+	case was.Since != now.Since && was.Since == "":
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read without updated_since. Pass it without updated_since, %s", again)
+	case was.Since != now.Since && now.Since == "":
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read since %s, and this call has no updated_since. Pass "+
+				"updated_since %s with it, %s", was.Since, was.Since, again)
+	case was.Since != now.Since:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read since %s, not since %s. Pass updated_since %s with it, %s",
+			was.Since, now.Since, was.Since, again)
+	case was.Sync != now.Sync && was.Sync == "":
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a baseline, which has no sync_token. Pass it without sync_token, %s", again)
+	case was.Sync != now.Sync:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read from a sync_token, and this call does not pass the same one. "+
+				"Pass the sync_token it was issued with, %s", again)
+	}
+	return was.Page, nil
+}
+
+// changesError says what to do about a 410.
 //
 // gapi maps 410 to [stale] already; what it cannot know is that the cure
-// here is not "read again and retry" but "ask again with no token", and
-// that everything the caller believes about the calendar is now
-// unreliable rather than merely out of date.
-func changesError(err error, token string) error {
+// here is not "read again and retry". For a token it is "ask again with
+// no token", and everything the caller believes about the calendar is
+// now unreliable rather than merely out of date. For updated_since it is
+// a later moment: Google answers updatedMinTooLongAgo when the moment is
+// further back than it keeps changes for.
+func changesError(err error, token string, since when.Zoned) error {
 	cls, ok := gapi.ClassOf(err)
-	if !ok || cls != gapi.ClassStale || token == "" {
+	if !ok || cls != gapi.ClassStale {
 		return err
 	}
-	return gapi.Wrap(gapi.ClassStale, err,
-		"Google has discarded this sync token, so what changed since it was issued cannot be "+
-			"recovered. Call again with no sync_token to read the calendar afresh and get a new one; "+
-			"treat anything you were holding from before as unreliable rather than merely stale")
+	switch {
+	case !since.IsZero():
+		return gapi.Wrap(gapi.ClassStale, err,
+			"Google no longer keeps changes from as far back as %s, so it cannot say what changed since "+
+				"then. Pass a later updated_since, or call with neither updated_since nor sync_token for a "+
+				"baseline and a sync token, which is the reliable way to follow a calendar", since)
+	case token != "":
+		return gapi.Wrap(gapi.ClassStale, err,
+			"Google has discarded this sync token, so what changed since it was issued cannot be "+
+				"recovered. Call again with no sync_token to read the calendar afresh and get a new one; "+
+				"treat anything you were holding from before as unreliable rather than merely stale")
+	}
+	return err
 }
 
 // ChangeCount is the one-line summary a result leads with.

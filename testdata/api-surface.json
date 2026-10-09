@@ -1,11 +1,11 @@
 {
-  "fetched": "2026-09-30",
+  "fetched": "2026-10-09",
   "note": "Written by `gates api-diff`; nobody edits this. One verdict per method lives in testdata/api-coverage.tsv and one per field in testdata/api-fields.tsv.",
   "apis": [
     {
       "api": "calendar",
       "version": "v3",
-      "revision": "20260925",
+      "revision": "20261005",
       "url": "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"
     }
   ],
@@ -301,6 +301,173 @@
         "kind",
         "role",
         "scope"
+      ]
+    },
+    {
+      "resource": "CalendarNotification",
+      "fields": [
+        "method",
+        "type"
+      ]
+    },
+    {
+      "resource": "ConferenceData",
+      "fields": [
+        "conferenceId",
+        "conferenceSolution",
+        "createRequest",
+        "entryPoints",
+        "notes",
+        "parameters",
+        "signature"
+      ]
+    },
+    {
+      "resource": "ConferenceParameters",
+      "fields": [
+        "addOnParameters"
+      ]
+    },
+    {
+      "resource": "ConferenceParametersAddOnParameters",
+      "fields": [
+        "parameters"
+      ]
+    },
+    {
+      "resource": "ConferenceProperties",
+      "fields": [
+        "allowedConferenceSolutionTypes"
+      ]
+    },
+    {
+      "resource": "ConferenceRequestStatus",
+      "fields": [
+        "statusCode"
+      ]
+    },
+    {
+      "resource": "ConferenceSolution",
+      "fields": [
+        "iconUri",
+        "key",
+        "name"
+      ]
+    },
+    {
+      "resource": "ConferenceSolutionKey",
+      "fields": [
+        "type"
+      ]
+    },
+    {
+      "resource": "CreateConferenceRequest",
+      "fields": [
+        "conferenceSolutionKey",
+        "requestId",
+        "status"
+      ]
+    },
+    {
+      "resource": "EntryPoint",
+      "fields": [
+        "accessCode",
+        "entryPointFeatures",
+        "entryPointType",
+        "label",
+        "meetingCode",
+        "passcode",
+        "password",
+        "pin",
+        "regionCode",
+        "uri"
+      ]
+    },
+    {
+      "resource": "EventAttachment",
+      "fields": [
+        "fileId",
+        "fileUrl",
+        "iconLink",
+        "mimeType",
+        "title"
+      ]
+    },
+    {
+      "resource": "EventAttendee",
+      "fields": [
+        "additionalGuests",
+        "asyncOperation",
+        "comment",
+        "displayName",
+        "email",
+        "id",
+        "optional",
+        "organizer",
+        "resource",
+        "responseStatus",
+        "self"
+      ]
+    },
+    {
+      "resource": "EventBirthdayProperties",
+      "fields": [
+        "contact",
+        "customTypeName",
+        "type"
+      ]
+    },
+    {
+      "resource": "EventDateTime",
+      "fields": [
+        "date",
+        "dateTime",
+        "timeZone"
+      ]
+    },
+    {
+      "resource": "EventFocusTimeProperties",
+      "fields": [
+        "autoDeclineMode",
+        "chatStatus",
+        "declineMessage"
+      ]
+    },
+    {
+      "resource": "EventLabel",
+      "fields": [
+        "backgroundColor",
+        "id",
+        "name"
+      ]
+    },
+    {
+      "resource": "EventOutOfOfficeProperties",
+      "fields": [
+        "autoDeclineMode",
+        "declineMessage"
+      ]
+    },
+    {
+      "resource": "EventReminder",
+      "fields": [
+        "method",
+        "minutes"
+      ]
+    },
+    {
+      "resource": "EventWorkingLocationProperties",
+      "fields": [
+        "customLocation",
+        "homeOffice",
+        "officeLocation",
+        "type"
+      ]
+    },
+    {
+      "resource": "LabelProperties",
+      "fields": [
+        "eventLabels"
       ]
     }
   ]

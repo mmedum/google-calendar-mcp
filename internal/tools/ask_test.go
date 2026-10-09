@@ -93,6 +93,18 @@ func fixtures(t *testing.T) *caltest.Server {
 		"2026-03-24T14:00:00+01:00", "2026-03-24T15:00:00+01:00", tz, "2026-03-24T14:00:00+01:00")
 	withGuests(occurrence)
 	fake.AddEvent("me@example.test", occurrence)
+
+	// An out-of-office series that declines every meeting it overlaps,
+	// and one of its occurrences.
+	away := caltest.Recurring("evaway00001", "Away", "2026-03-17T09:00:00+01:00", "2026-03-17T17:00:00+01:00",
+		tz, "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4")
+	away.EventType, away.Transparency = gcal.EventTypeOutOfOffice, gcal.TransparencyOpaque
+	away.OutOfOfficeProperties = gcal.Raw(gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll})
+	fake.AddEvent("me@example.test", away)
+	awayOn := caltest.Instance("evaway00001_20260331T070000Z", "evaway00001", "Away",
+		"2026-03-31T09:00:00+02:00", "2026-03-31T17:00:00+02:00", tz, "2026-03-31T09:00:00+02:00")
+	awayOn.EventType = gcal.EventTypeOutOfOffice
+	fake.AddEvent("me@example.test", awayOn)
 	return fake
 }
 
@@ -109,13 +121,25 @@ func withGuests(e *gcal.Event) {
 // A nil p declares no elicitation; opts adjust the client further.
 func connect(t *testing.T, cfg config.Config, protocol string, p *person, opts ...func(*mcp.ClientOptions)) (*mcp.ClientSession, *caltest.Server) {
 	t.Helper()
+	srv, fake := newServer(t, cfg)
+	return connectTo(t, srv, protocol, p, opts...), fake
+}
+
+// newServer is a server over a fresh fake.
+func newServer(t *testing.T, cfg config.Config) (*mcp.Server, *caltest.Server) {
+	t.Helper()
 	fake := fixtures(t)
 	base := fake.Start()
 	t.Cleanup(fake.Close)
 	api := gapi.New(nil)
 	api.Base = base
 	api.MaxRetries = 0
-	srv := server.New(server.Deps{Service: service.New(api, cfg), Config: cfg, Version: "test"})
+	return server.New(server.Deps{Service: service.New(api, cfg), Config: cfg, Version: "test"}), fake
+}
+
+// connectTo connects one more client to srv, as connect does.
+func connectTo(t *testing.T, srv *mcp.Server, protocol string, p *person, opts ...func(*mcp.ClientOptions)) *mcp.ClientSession {
+	t.Helper()
 	ct, st := mcp.NewInMemoryTransports()
 	ss, err := srv.Connect(context.Background(), st, nil)
 	if err != nil {
@@ -135,7 +159,7 @@ func connect(t *testing.T, cfg config.Config, protocol string, p *person, opts .
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cs.Close() })
-	return cs, fake
+	return cs
 }
 
 // askCase is a call that clears a tool's own guards and reaches its
@@ -164,6 +188,24 @@ var askCases = map[string]askCase{
 			"notify": "none", "allow_public": true},
 		method: "acl.insert", target: "team@group.calendar.example.test",
 		shows: []string{"publish the calendar `Sample Team` to anyone on the internet, as reader"},
+	},
+	"create_event": {
+		args: map[string]any{"calendar": "primary", "title": "Away", "event_type": "outOfOffice",
+			"start": "2026-03-18T09:00:00+01:00", "end": "2026-03-18T17:00:00+01:00",
+			"auto_decline": "all", "decline_message": "Back on Thursday"},
+		method: "insert", target: "me@example.test",
+		shows: []string{"add the out-of-office event `Away` to your primary calendar `Sample Primary`, and " +
+			"decline every meeting it overlaps?", "starts 2026-03-18 09:00-17:00 Europe/Copenhagen",
+			"That includes meetings you already accepted.", "Each organizer gets your message: `Back on Thursday`"},
+	},
+	"update_event": {
+		args: map[string]any{"calendar": "primary", "event_id": "evaway00001_20260331T070000Z",
+			"scope": "this_and_following", "end": "2026-03-31T19:00:00+02:00"},
+		method: "insert", target: "me@example.test",
+		shows: []string{"update_event: split the out-of-office event `Away` on your primary calendar `Sample " +
+			"Primary`, so this occurrence and every later one become a new series that declines every meeting " +
+			"it overlaps?", "the series starts 2026-03-31 09:00-19:00 Europe/Copenhagen",
+			"That includes meetings you already accepted."},
 	},
 	"cancel_event": {
 		args:   map[string]any{"calendar": "primary", "event_id": "evguests001", "notify": "all"},
@@ -228,11 +270,11 @@ func TestEveryAskingWriteWaitsForThePerson(t *testing.T) {
 	}
 }
 
-// Every tool that takes confirm asks, as do share_calendar and
-// cancel_event; the confirm half of the list is read from the published
-// schemas, not typed out.
+// Every tool that takes confirm asks, as do share_calendar,
+// cancel_event, create_event and update_event; the confirm half of the
+// list is read from the published schemas, not typed out.
 func TestEveryToolThatTakesConfirmAsks(t *testing.T) {
-	want := map[string]bool{"share_calendar": true, "cancel_event": true}
+	want := map[string]bool{"share_calendar": true, "cancel_event": true, "create_event": true, "update_event": true}
 	registered := map[string]bool{}
 	for _, tool := range listTools(t, everything()) {
 		registered[tool.Name] = true
@@ -246,7 +288,7 @@ func TestEveryToolThatTakesConfirmAsks(t *testing.T) {
 			t.Errorf("%s: an asking case %v, and its description says it asks %v", tool.Name, ok, asks)
 		}
 	}
-	if len(want) < 4 {
+	if len(want) < 6 {
 		t.Fatalf("found %d asking tools; the schemas were not read", len(want))
 	}
 	for name := range want {
@@ -258,6 +300,32 @@ func TestEveryToolThatTakesConfirmAsks(t *testing.T) {
 		if !want[name] || !registered[name] {
 			t.Errorf("%s has an asking case and is not an asking tool", name)
 		}
+	}
+}
+
+// A tool that asks before only some of its writes says which, so a model
+// does not expect a question on the rest; a destructive tool asks before
+// every write and says so.
+func TestAnAskingToolSaysWhenItAsks(t *testing.T) {
+	want := map[string]string{
+		"delete_calendar": "asks the person before the write;",
+		"clear_calendar":  "asks the person before the write;",
+		"share_calendar": "asks the person before a share that publishes the calendar, opens it to a whole " +
+			"domain, or makes somebody an owner;",
+		"cancel_event": "asks the person before a cancellation that emails a guest;",
+		"create_event": "asks the person before it makes an out-of-office or focus-time event with " +
+			"auto_decline all;",
+		"update_event": "asks the person before an out-of-office or focus-time event that declines every meeting " +
+			"it overlaps is moved, made longer, repeated more or split with this_and_following;",
+	}
+	for _, tool := range listTools(t, everything()) {
+		if w, ok := want[tool.Name]; ok && !strings.Contains(tool.Description, w) {
+			t.Errorf("%s does not say %q:\n%s", tool.Name, w, tool.Description)
+		}
+		delete(want, tool.Name)
+	}
+	if len(want) != 0 {
+		t.Errorf("not registered: %v", want)
 	}
 }
 
@@ -309,6 +377,58 @@ func TestWhichSharesAsk(t *testing.T) {
 			t.Errorf("%s as %s: asked %d, written %v: %s", tc.who, tc.role, len(qs), written, text(t, res))
 		case tc.want != "" && !strings.Contains(qs[0].Message, tc.want):
 			t.Errorf("%s as %s: %s", tc.who, tc.role, qs[0].Message)
+		}
+	}
+}
+
+// A create asks only for a status event that declines every meeting it
+// overlaps, and a dry run of one shows it without asking or writing. A
+// series says it declines on every occurrence.
+func TestWhichCreatesAsk(t *testing.T) {
+	away := func(extra map[string]any) map[string]any {
+		args := map[string]any{"calendar": "primary", "title": "Away", "event_type": "outOfOffice",
+			"start": "2026-03-18T09:00:00+01:00", "end": "2026-03-18T17:00:00+01:00"}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return args
+	}
+	for _, tc := range []struct {
+		name    string
+		args    map[string]any
+		want    []string
+		written bool
+	}{
+		{"ordinary", map[string]any{"calendar": "primary", "title": "Plain",
+			"start": "2026-03-18T09:00:00+01:00", "end": "2026-03-18T10:00:00+01:00"}, nil, true},
+		{"declines nothing", away(map[string]any{"auto_decline": "none"}), nil, true},
+		{"declines new invitations", away(map[string]any{"auto_decline": "new"}), nil, true},
+		{"dry run", away(map[string]any{"auto_decline": "all", "dry_run": true}), nil, false},
+		{"focus time declining all", away(map[string]any{"event_type": "focusTime", "auto_decline": "all"}),
+			[]string{"add the focus time `Away` to your primary calendar"}, false},
+		{"a series declining all", away(map[string]any{"auto_decline": "all",
+			"recurrence": []string{"RRULE:FREQ=WEEKLY;COUNT=3"}}),
+			[]string{"the series starts 2026-03-18 09:00-17:00", "and declines on every occurrence"}, false},
+	} {
+		p := &person{action: "decline"}
+		cs, fake := connect(t, everything(), "2026-07-28", p)
+		res := callTool(t, cs, &mcp.CallToolParams{Name: "create_event", Arguments: tc.args})
+		qs := p.asked()
+		written := len(fake.Wrote()) > 0
+		if tc.want == nil {
+			if len(qs) != 0 || res.IsError || written != tc.written {
+				t.Errorf("%s: asked %d, written %v: %s", tc.name, len(qs), written, text(t, res))
+			}
+			continue
+		}
+		if len(qs) != 1 || !res.IsError || written {
+			t.Errorf("%s: asked %d, written %v: %s", tc.name, len(qs), written, text(t, res))
+			continue
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(qs[0].Message, w) {
+				t.Errorf("%s: the question does not say %q:\n%s", tc.name, w, qs[0].Message)
+			}
 		}
 	}
 }
@@ -530,6 +650,55 @@ func TestARoleChangeAsks(t *testing.T) {
 		}
 		if !strings.Contains(qs[0].Message, tc.want) {
 			t.Errorf("%v: %s", tc.args, qs[0].Message)
+		}
+	}
+}
+
+// A tool that asks the person before every write carries Claude Code's
+// requiresUserInteraction mark only for a client that cannot ask; with
+// both, the person would answer twice for one call. The two are every
+// tool here that both carries the mark and asks every time: a new name
+// needs a look at whether it really asks every time. Each protocol lists
+// on one server, the client that can ask first, so a mark dropped from
+// the server's own tool rather than from a copy shows for the clients
+// after it.
+func TestTheMarkIsForAClientThatCannotAsk(t *testing.T) {
+	marked := func(cs *mcp.ClientSession) string {
+		t.Helper()
+		res, err := cs.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, tool := range res.Tools {
+			if tool.Meta["anthropic/requiresUserInteraction"] == true {
+				out = append(out, tool.Name)
+			}
+		}
+		slices.Sort(out)
+		return strings.Join(out, " ")
+	}
+	urlAlone := func(o *mcp.ClientOptions) {
+		o.Capabilities = &mcp.ClientCapabilities{
+			Elicitation: &mcp.ElicitationCapabilities{URL: &mcp.URLElicitationCapabilities{}},
+		}
+	}
+	for _, protocol := range protocols {
+		srv, _ := newServer(t, everything())
+		for _, c := range []struct {
+			client string
+			p      *person
+			opts   []func(*mcp.ClientOptions)
+			want   string
+		}{
+			{"a client that can ask", &person{action: "accept"}, nil, ""},
+			{"a client with no elicitation", nil, nil, "clear_calendar delete_calendar"},
+			{"a client with URL elicitation alone", &person{action: "accept"},
+				[]func(*mcp.ClientOptions){urlAlone}, "clear_calendar delete_calendar"},
+		} {
+			if got := marked(connectTo(t, srv, protocol, c.p, c.opts...)); got != c.want {
+				t.Errorf("%s, %s: marked %q, want %q", protocol, c.client, got, c.want)
+			}
 		}
 	}
 }

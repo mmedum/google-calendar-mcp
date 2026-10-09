@@ -71,7 +71,13 @@ type callResult struct {
 }
 
 func startServer(ctx context.Context, bin, profile string, p *person) (*session, error) {
-	cmd := exec.CommandContext(ctx, bin)
+	// Not tied to ctx, and in a process group of its own: an interrupt
+	// stops the driver's steps, and the server must outlive it, so the
+	// call in flight completes and close ends the server after the
+	// cleanup. Bound to ctx, or sent the terminal's Ctrl-C with the
+	// driver, it died mid-call and the step read as a failure.
+	cmd := exec.Command(bin)
+	ownGroup(cmd)
 	// The server must read the same login the driver set up with, or the
 	// two halves of the run would be looking at different accounts.
 	//
@@ -229,6 +235,12 @@ func (s *session) answer(id json.RawMessage, method, message string) error {
 // call invokes one tool and returns the text half plus whether the
 // result was an error.
 func (s *session) call(ctx context.Context, tool string, args map[string]any) (callResult, error) {
+	// §9.1, held here rather than by each step: every tool call passes
+	// this guard, so no step can write on the primary calendar but the
+	// one status event the owner allowed.
+	if err := primaryCal.tool(tool, args); err != nil {
+		return callResult{}, err
+	}
 	params := map[string]any{"name": tool}
 	if args != nil {
 		params["arguments"] = args

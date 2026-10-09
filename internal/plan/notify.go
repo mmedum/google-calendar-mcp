@@ -93,7 +93,9 @@ type Reach struct {
 // what makes notify required (§4.3.2).
 func (r Reach) Any() bool { return r.Guests > 0 }
 
-// ReachOfEvent counts an event's guests against the organizer's domain.
+// ReachOfEvent counts an event's guests against the organizer's domain,
+// with the guests the write adds: they are invited by it, so a write
+// that adds an outside guest to an event with none reaches somebody.
 //
 // Who counts as a guest is model.Event.Guests' to say, not this
 // package's: it is the rule §4.3.2 decides a refusal on, and a second
@@ -102,11 +104,24 @@ func (r Reach) Any() bool { return r.Guests > 0 }
 // account is the signed-in account's own address, which is never a
 // guest — Google's `self` flag alone was not enough to establish that,
 // and the live run proved it (see model.Event.Guests).
-func ReachOfEvent(organizer, account string, e model.Event) Reach {
+func ReachOfEvent(organizer, account string, e model.Event, adding ...string) Reach {
 	guests := e.Guests(account)
 	r := Reach{domain: domainOf(organizer), Guests: len(guests)}
+	seen := map[string]bool{strings.ToLower(account): true, strings.ToLower(organizer): true}
 	for _, a := range guests {
+		seen[strings.ToLower(a.Email)] = true
 		if r.isExternal(a.Email) {
+			r.External++
+		}
+	}
+	for _, a := range adding {
+		a = strings.TrimSpace(a)
+		if a == "" || seen[strings.ToLower(a)] || model.IsRoom(a) {
+			continue
+		}
+		seen[strings.ToLower(a)] = true
+		r.Guests++
+		if r.isExternal(a) {
 			r.External++
 		}
 	}
@@ -118,12 +133,12 @@ func ReachOfEvent(organizer, account string, e model.Event) Reach {
 //
 // The organizer's own address does not count: inviting yourself is not
 // reaching somebody, and a notify requirement over it would be friction
-// with no safety in it (§4.3.2).
+// with no safety in it (§4.3.2). Nor does a room.
 func ReachOfAddresses(organizer string, addresses []string) Reach {
 	r := Reach{domain: domainOf(organizer)}
 	for _, a := range addresses {
 		a = strings.TrimSpace(a)
-		if a == "" || strings.EqualFold(a, organizer) {
+		if a == "" || strings.EqualFold(a, organizer) || model.IsRoom(a) {
 			continue
 		}
 		r.Guests++
@@ -197,6 +212,20 @@ func Notification(v string, r Reach) (Decision, error) {
 			ErrBlocked, r.External, r.Guests, IsAre(r.External))
 	}
 	return Decision{Notify: choice, Asked: true, Reach: r}, nil
+}
+
+// PersonalNotification is the decision for a write that changes only
+// what Google keeps per person, which is an event's reminders. It reaches
+// nobody whatever the guest list, so sendUpdates is left out of the
+// request, as for any write that reaches nobody (§4.3.2). A notify the
+// caller passed is still read, so a typo is refused rather than ignored.
+func PersonalNotification(v string) (Decision, error) {
+	if strings.TrimSpace(v) != "" {
+		if _, err := ParseNotify(v); err != nil {
+			return Decision{}, err
+		}
+	}
+	return Decision{}, nil
 }
 
 // ParseNotify reads a caller's choice.

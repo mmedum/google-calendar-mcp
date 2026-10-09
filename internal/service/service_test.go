@@ -2,6 +2,8 @@ package service_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
 )
 
@@ -283,6 +286,227 @@ func TestSearchEventsFindsByText(t *testing.T) {
 	}
 }
 
+// TestEventTypesKeepOnlyThoseKinds: event_types reaches Google as
+// eventTypes, in Google's spelling, and the result names the filter so a
+// short list is not read as the whole schedule.
+func TestEventTypesKeepOnlyThoseKinds(t *testing.T) {
+	fake := caltest.Seed()
+	away := caltest.Timed("ev-away", "Away", "2026-03-16T08:00:00+01:00", "2026-03-16T17:00:00+01:00",
+		"Europe/Copenhagen")
+	away.EventType = gcal.EventTypeOutOfOffice
+	fake.AddEvent("primary", away)
+	svc := newService(t, fake)
+
+	sched, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-03-16", To: "2026-03-16", Expand: true,
+		EventTypes: []string{"OUTOFOFFICE", "outOfOffice"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, e := range sched.Events {
+		titles = append(titles, e.Title)
+	}
+	if got := strings.Join(titles, ","); got != "Away" {
+		t.Fatalf("got %s, want only the out-of-office event", got)
+	}
+	if got := strings.Join(sched.EventTypes, ","); got != "outOfOffice" {
+		t.Fatalf("the filter reads %q, want outOfOffice once", got)
+	}
+	if !strings.Contains(sched.Text(), "only these event types: outOfOffice") {
+		t.Fatalf("the text does not name the filter:\n%s", sched.Text())
+	}
+}
+
+func TestAnUnknownEventTypeIsRefusedBeforeAnyRequest(t *testing.T) {
+	svc, fake := seeded(t)
+	_, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-03-16", To: "2026-03-16", EventTypes: []string{"meeting"},
+	})
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class = %s, want invalid", cls)
+	}
+	if !strings.Contains(err.Error(), "default, birthday, focusTime, fromGmail, outOfOffice, workingLocation") {
+		t.Fatalf("the refusal does not name the six types: %v", err)
+	}
+	if n := len(fake.Served()); n != 0 {
+		t.Fatalf("spent %d requests on a filter that cannot work", n)
+	}
+}
+
+// A Google page token resumes only the query that issued it, so a
+// continuation under another type filter is refused rather than read.
+// The same filter in another order or spelling is the same filter.
+func TestAPageTokenKeepsItsTypeFilter(t *testing.T) {
+	svc, _ := seeded(t)
+	ctx := context.Background()
+	read := func(token string, types ...string) (string, error) {
+		sched, err := svc.ListEvents(ctx, service.ListOptions{
+			From: "2026-03-16", To: "2026-03-31", Expand: true,
+			EventTypes: types, MaxEvents: 1, PageToken: token,
+		})
+		return sched.NextPageToken, err
+	}
+	token, err := read("", "default", "focusTime")
+	if err != nil || token == "" {
+		t.Fatalf("want a first page and a token, got %q, %v", token, err)
+	}
+	_, err = read(token)
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class = %s, want invalid", cls)
+	}
+	if !strings.Contains(err.Error(), "issued for event_types [default, focusTime], not []") {
+		t.Fatalf("the refusal does not name both filters: %v", err)
+	}
+	if _, err := read(token, "FOCUSTIME", "default"); err != nil {
+		t.Fatalf("the same filter was refused: %v", err)
+	}
+}
+
+// ical_uid reaches Google as iCalUID, so a caller holding the UID an
+// invitation carries finds its event. Every occurrence of a series
+// shares the series' UID, so expanded the filter returns each occurrence
+// in the window, and as a series it returns the series once. The result
+// names the filter.
+func TestICalUIDFindsTheEventAnInvitationIsAbout(t *testing.T) {
+	fake := caltest.Seed()
+	fake.Events["primary"]["ev-weekly"].ICalUID = "AAAAuid-weekly@example.test"
+	fake.Events["primary"]["ev-standup"].ICalUID = "AAAAuid-standup@example.test"
+	svc := newService(t, fake)
+	read := func(expand bool) render.Schedule {
+		t.Helper()
+		sched, err := svc.ListEvents(context.Background(), service.ListOptions{
+			From: "2026-03-16", To: "2026-03-31", Expand: expand, ICalUID: " AAAAuid-weekly@example.test ",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sched
+	}
+	ids := func(sched render.Schedule) string {
+		var out []string
+		for _, e := range sched.Events {
+			out = append(out, e.ID)
+		}
+		return strings.Join(out, ",")
+	}
+
+	occurrences := read(true)
+	if got := ids(occurrences); got != "ev-weekly_20260324T130000Z,ev-weekly_20260331T130000Z" {
+		t.Fatalf("expanded: got %s, want the series' two occurrences in the window", got)
+	}
+	if got := ids(read(false)); got != "ev-weekly" {
+		t.Fatalf("as a series: got %s, want the series once", got)
+	}
+	if got := service.NewScheduleResult(occurrences).ICalUID; got != "AAAAuid-weekly@example.test" {
+		t.Fatalf("ical_uid echoed %q", got)
+	}
+	if !strings.Contains(occurrences.Text(), "only the event with iCalendar UID AAAAuid-weekly@example.test") {
+		t.Fatalf("the text does not name the filter:\n%s", occurrences.Text())
+	}
+}
+
+// A page token carries the UID filter as it carries the type filter,
+// because Google resumes a token only for the query that issued it.
+func TestAPageTokenKeepsItsUIDFilter(t *testing.T) {
+	fake := caltest.Seed()
+	fake.Events["primary"]["ev-weekly"].ICalUID = "AAAAuid-weekly@example.test"
+	svc := newService(t, fake)
+	read := func(token, uid string) (string, error) {
+		sched, err := svc.ListEvents(context.Background(), service.ListOptions{
+			From: "2026-03-16", To: "2026-03-31", Expand: true,
+			ICalUID: uid, MaxEvents: 1, PageToken: token,
+		})
+		return sched.NextPageToken, err
+	}
+	token, err := read("", "AAAAuid-weekly@example.test")
+	if err != nil || token == "" {
+		t.Fatalf("want a first page and a token, got %q, %v", token, err)
+	}
+	_, err = read(token, "")
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class = %s, want invalid", cls)
+	}
+	if !strings.Contains(err.Error(), `issued for ical_uid "AAAAuid-weekly@example.test", not ""`) {
+		t.Fatalf("the refusal does not name both filters: %v", err)
+	}
+	if _, err := read(token, "AAAAuid-weekly@example.test"); err != nil {
+		t.Fatalf("the same filter was refused: %v", err)
+	}
+}
+
+// A page token carries every input that decides which events Google
+// returns: the search text, the window, the time zone a date window is
+// read in, expand and show_canceled, as well as the type and UID filters.
+// A continuation that changes any of them is refused by name, and one
+// that changes none goes on.
+func TestAPageTokenKeepsItsWholeQuery(t *testing.T) {
+	svc, _ := seeded(t)
+	ctx := context.Background()
+	base := service.ListOptions{From: "2026-03-16", To: "2026-03-31", Expand: true, Query: "review", MaxEvents: 1}
+	first, err := svc.ListEvents(ctx, base)
+	if err != nil || first.NextPageToken == "" {
+		t.Fatalf("want a first page and a token, got %q, %v", first.NextPageToken, err)
+	}
+	for _, c := range []struct {
+		name   string
+		change func(*service.ListOptions)
+		says   string
+	}{
+		{"the search text", func(o *service.ListOptions) { o.Query = "sync" },
+			"issued for another search text. Pass the same query"},
+		{"no search text", func(o *service.ListOptions) { o.Query = "" },
+			"issued for another search text"},
+		{"from", func(o *service.ListOptions) { o.From = "2026-03-17" },
+			"issued for the window 2026-03-15T23:00:00Z to 2026-03-31T22:00:00Z, not 2026-03-16T23:00:00Z to " +
+				"2026-03-31T22:00:00Z"},
+		{"to", func(o *service.ListOptions) { o.To = "2026-04-30" },
+			"not 2026-03-15T23:00:00Z to 2026-04-30T22:00:00Z"},
+		{"the zone a date is read in", func(o *service.ListOptions) { o.TimeZone = "UTC" },
+			"not 2026-03-16T00:00:00Z to 2026-04-01T00:00:00Z. Pass the same from, to and time_zone"},
+		{"no_expand", func(o *service.ListOptions) { o.Expand = false },
+			"issued with no_expand false, not true"},
+		{"show_canceled", func(o *service.ListOptions) { o.ShowCanceled = true },
+			"issued with show_canceled false, not true"},
+		{"event_types", func(o *service.ListOptions) { o.EventTypes = []string{"default"} },
+			"issued for event_types [], not [default]"},
+		{"ical_uid", func(o *service.ListOptions) { o.ICalUID = "AAAAuid-weekly@example.test" },
+			`issued for ical_uid "", not "AAAAuid-weekly@example.test"`},
+	} {
+		o := base
+		c.change(&o)
+		o.PageToken = first.NextPageToken
+		_, err := svc.ListEvents(ctx, o)
+		if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: got [%s] %v, want [invalid] saying %q", c.name, got, err, c.says)
+		}
+	}
+	same := base
+	same.PageToken = first.NextPageToken
+	if _, err := svc.ListEvents(ctx, same); err != nil {
+		t.Fatalf("the same query was refused: %v", err)
+	}
+}
+
+// The search text is bound by a digest: a page token goes back to the
+// caller and may be pasted anywhere, and a search term is content.
+func TestAPageTokenDoesNotCarryTheSearchText(t *testing.T) {
+	svc, _ := seeded(t)
+	sched, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-03-16", To: "2026-03-31", Expand: true, Query: "review", MaxEvents: 1})
+	if err != nil || sched.NextPageToken == "" {
+		t.Fatalf("want a token, got %q, %v", sched.NextPageToken, err)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(sched.NextPageToken)
+	if err != nil {
+		t.Fatalf("the token is not base64url: %v", err)
+	}
+	if strings.Contains(string(raw), "review") {
+		t.Fatalf("the page token carries the search text: %s", raw)
+	}
+}
+
 func TestFanOutCountsItsRequests(t *testing.T) {
 	svc, _ := seeded(t)
 	sched, err := svc.ListEvents(context.Background(), service.ListOptions{
@@ -367,6 +591,63 @@ func TestGetEvent(t *testing.T) {
 	}
 }
 
+// TestAReadShowsTheFilesOnAnEvent: Google returns attachments on a read
+// with no parameter. The card lists each with the Drive file id that
+// hands it to a Drive server, and a list row counts them.
+func TestAReadShowsTheFilesOnAnEvent(t *testing.T) {
+	fake := caltest.Seed()
+	planning := caltest.Timed("ev-files", "Planning", "2026-03-16T11:00:00+01:00", "2026-03-16T12:00:00+01:00",
+		"Europe/Copenhagen")
+	planning.Attachments = []gcal.EventAttachment{
+		{FileID: "AAAAfile1", FileURL: "https://drive.example.test/AAAAfile1", Title: "Sample agenda",
+			MimeType: "application/pdf", IconLink: "https://drive.example.test/icon.png"},
+		{FileURL: "https://files.example.test/AAAAfile2"},
+	}
+	fake.AddEvent("primary", planning)
+	svc := newService(t, fake)
+	ctx := context.Background()
+
+	e, z, err := svc.GetEvent(ctx, "primary", "ev-files", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := service.NewEventResult(e, z)
+	got, err := json.Marshal(card.Attachments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"title":"Sample agenda","file_id":"AAAAfile1","url":"https://drive.example.test/AAAAfile1",` +
+		`"mime_type":"application/pdf"},{"url":"https://files.example.test/AAAAfile2"}]`
+	if string(got) != want {
+		t.Fatalf("attachments = %s, want %s", got, want)
+	}
+	for _, line := range []string{
+		"Attachments (2):", "  Sample agenda (application/pdf)", "    file id: AAAAfile1", "  (no title)",
+	} {
+		if !strings.Contains(card.Render(), line+"\n") {
+			t.Fatalf("the card does not carry %q:\n%s", line, card.Render())
+		}
+	}
+
+	sched, err := svc.ListEvents(ctx, service.ListOptions{From: "2026-03-16", To: "2026-03-16", Expand: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := service.NewScheduleResult(sched)
+	for _, ev := range rows.Events {
+		want := 0
+		if ev.ID == "ev-files" {
+			want = 2
+		}
+		if ev.AttachmentCount != want {
+			t.Fatalf("%s has attachment_count %d, want %d", ev.ID, ev.AttachmentCount, want)
+		}
+	}
+	if !strings.Contains(rows.Render(), "Planning  [2 attachments]") {
+		t.Fatalf("the list row does not count the files:\n%s", rows.Render())
+	}
+}
+
 func TestGetEventNotFound(t *testing.T) {
 	svc, _ := seeded(t)
 	_, _, err := svc.GetEvent(context.Background(), "primary", "no-such-event", "")
@@ -398,6 +679,37 @@ func TestCalendarDetailReportsAMissingACLScope(t *testing.T) {
 	}
 	if !strings.Contains(res.Rendered(), "Could not read") {
 		t.Fatalf("the rendered text hides the problem:\n%s", res.Rendered())
+	}
+}
+
+// get_calendar lists the calendar's default reminders, which is what an
+// event that uses them gets, and says when there are none.
+func TestCalendarDetailListsTheDefaultReminders(t *testing.T) {
+	fake := caltest.Seed()
+	fake.Entries["primary"].DefaultReminders = []gcal.EventReminder{
+		{Method: gcal.ReminderEmail, Minutes: 1440}, {Method: gcal.ReminderPopup, Minutes: 10},
+	}
+	svc := newService(t, fake)
+	res, err := svc.CalendarDetail(context.Background(), "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := res.DefaultReminders; d == nil || fmt.Sprint(d.Popup, d.Email) != "[10] [1440]" {
+		t.Fatalf("got %+v", res.DefaultReminders)
+	}
+	if !strings.Contains(res.Rendered(), "default reminders: popup 10 minutes before, email 1 day before") {
+		t.Fatalf("the card does not list them:\n%s", res.Rendered())
+	}
+
+	none, err := svc.CalendarDetail(context.Background(), "team@group.calendar.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := none.DefaultReminders; d == nil || len(d.Popup)+len(d.Email) != 0 {
+		t.Fatalf("got %+v, want two empty lists", none.DefaultReminders)
+	}
+	if !strings.Contains(none.Rendered(), "default reminders: none") {
+		t.Fatalf("the card does not say there are none:\n%s", none.Rendered())
 	}
 }
 

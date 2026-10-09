@@ -429,3 +429,174 @@ func TestHiddenCalendarsAreFilteredNotRefetched(t *testing.T) {
 		}
 	}
 }
+
+// A group is answered from the member calendars Google expands it to:
+// busy when any of them is, and named as a group of so many.
+func TestAvailabilityAnswersForAGroup(t *testing.T) {
+	svc, fake := seeded(t)
+	const group = "team-group@example.test"
+	fake.Groups[group] = []string{"ann@example.test", "bo@example.test"}
+	fake.Busy["ann@example.test"] = []gcal.TimePeriod{{Start: "2026-03-16T09:00:00+01:00", End: "2026-03-16T10:00:00+01:00"}}
+	fake.Busy["bo@example.test"] = []gcal.TimePeriod{{Start: "2026-03-16T09:30:00+01:00", End: "2026-03-16T11:00:00+01:00"}}
+	o := day("2026-03-16", "2026-03-16")
+	o.Calendars = []string{group}
+	got, err := svc.Availability(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Availability: %v", err)
+	}
+	a := got.Answers[0]
+	if a.Unknown || a.Members != 2 || len(a.Busy) != 1 ||
+		a.Busy[0].Start.T.Format("15:04") != "09:00" || a.Busy[0].End.T.Format("15:04") != "11:00" {
+		t.Fatalf("the group's answer is %+v, want busy 09:00-11:00 over 2 calendars", a)
+	}
+	if fake.FreeBusyAsked.GroupExpansionMax != 100 {
+		t.Fatalf("asked groupExpansionMax=%d, want the documented 100", fake.FreeBusyAsked.GroupExpansionMax)
+	}
+	if !strings.Contains(got.Text(), group+" (a group of 2 calendars)") {
+		t.Fatalf("the text does not say it is a group:\n%s", got.Text())
+	}
+}
+
+// A group Google could not expand, expanded to nobody, or with a member
+// it could not read is unknown, never free (§4.6).
+func TestAGroupWithAnUnreadMemberIsUnknown(t *testing.T) {
+	const group = "team-group@example.test"
+	for _, tc := range []struct {
+		name   string
+		setup  func(*caltest.Server)
+		reason string
+	}{
+		{"a member unread", func(f *caltest.Server) {
+			f.Groups[group] = []string{"ann@example.test", "bo@example.test"}
+			f.FreeBusyErrors["bo@example.test"] = "notFound"
+		}, "1 of its 2 calendars could not be read"},
+		{"a member missing", func(f *caltest.Server) {
+			f.Groups[group] = []string{"ann@example.test", "bo@example.test"}
+			f.FreeBusyOmit["bo@example.test"] = true
+		}, "1 of its 2 calendars could not be read"},
+		{"not expanded", func(f *caltest.Server) {
+			f.Groups[group] = []string{"ann@example.test"}
+			f.GroupErrors[group] = "notFound"
+		}, "Google could not expand this group: no such calendar, or this account cannot see it"},
+		{"too big", func(f *caltest.Server) {
+			for i := range 101 {
+				f.Groups[group] = append(f.Groups[group], fmt.Sprintf("member%d@example.test", i))
+			}
+		}, "Google could not expand this group: groupTooBig"},
+		{"empty", func(f *caltest.Server) { f.Groups[group] = []string{} }, "Google expanded this group to no calendars"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, fake := seeded(t)
+			tc.setup(fake)
+			o := day("2026-03-16", "2026-03-16")
+			o.Calendars = []string{group}
+			got, err := svc.Availability(context.Background(), o)
+			if err != nil {
+				t.Fatalf("Availability: %v", err)
+			}
+			if a := got.Answers[0]; !a.Unknown || a.Reason != tc.reason || len(a.Busy) != 0 || !a.Group {
+				t.Fatalf("got %+v, want an unknown group because %q", a, tc.reason)
+			}
+			if got.GapsFrom != 0 || len(got.Gaps) != 0 {
+				t.Fatalf("free time offered from an unknown group: %+v", got.Gaps)
+			}
+			if !strings.Contains(got.Text(), "this group could not be read") {
+				t.Fatalf("the text does not call it a group:\n%s", got.Text())
+			}
+		})
+	}
+}
+
+// One query answers for at most 50 calendars, a group's members
+// included. A group of 60, or a group of 10 beside 45 calendars, is
+// still answered: the members past the cap are asked about again.
+func TestAGroupPastFiftyCalendarsIsAnswered(t *testing.T) {
+	const group = "team-group@example.test"
+	members := func(n int) []string {
+		var out []string
+		for i := range n {
+			out = append(out, fmt.Sprintf("member%02d@example.test", i))
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name      string
+		calendars []string
+		members   int
+		requests  int
+	}{
+		{"a group of 60", []string{group}, 60, 2},
+		{"a group of 10 beside 45 calendars", append([]string{group}, members(55)[10:]...), 10, 2},
+		{"a group of 100", []string{group}, 100, 2},
+	} {
+		// Google does not say whether a calendar past the cap is left out
+		// or answered tooManyCalendarsRequested, so both are held.
+		for _, asErrors := range []bool{false, true} {
+			name := tc.name + ", past the cap left out"
+			if asErrors {
+				name = tc.name + ", past the cap answered tooManyCalendarsRequested"
+			}
+			t.Run(name, func(t *testing.T) {
+				svc, fake := seeded(t)
+				fake.PastCapAsErrors = asErrors
+				fake.Groups[group] = members(tc.members)
+				last := members(tc.members)[tc.members-1]
+				fake.Busy[last] = []gcal.TimePeriod{{Start: "2026-03-16T09:00:00+01:00", End: "2026-03-16T10:00:00+01:00"}}
+				o := day("2026-03-16", "2026-03-16")
+				o.Calendars = tc.calendars
+				got, err := svc.Availability(context.Background(), o)
+				if err != nil {
+					t.Fatalf("Availability: %v", err)
+				}
+				if got.Unknown() != 0 {
+					t.Fatalf("%d answers unknown: %+v", got.Unknown(), got.Answers[0])
+				}
+				if a := got.Answers[0]; len(a.Busy) != 1 || a.Busy[0].Start.T.Format("15:04") != "09:00" {
+					t.Fatalf("the group's answer is %+v, want its last member's 09:00 block", a)
+				}
+				if got.Requests != tc.requests {
+					t.Fatalf("made %d requests, want %d", got.Requests, tc.requests)
+				}
+			})
+		}
+	}
+}
+
+// A calendar Google answers tooManyCalendarsRequested on the second ask
+// too is unknown, with a reason a person can read, never free.
+func TestACalendarStillPastTheCapIsUnknown(t *testing.T) {
+	svc, fake := seeded(t)
+	fake.FreeBusyErrors["team@group.calendar.example.test"] = "tooManyCalendarsRequested"
+	o := day("2026-03-16", "2026-03-16")
+	o.Calendars = []string{"team@group.calendar.example.test"}
+	got, err := svc.Availability(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Availability: %v", err)
+	}
+	a := got.Answers[0]
+	if !a.Unknown || a.Reason != "Google answered for too many calendars at once to include this one" {
+		t.Fatalf("got %+v, want unknown with the reason in words", a)
+	}
+	if got.Requests != 2 {
+		t.Fatalf("made %d requests, want the first and one more ask", got.Requests)
+	}
+}
+
+// A mailbox is asked about by its address, and the answer names the bare
+// one.
+func TestAvailabilityTakesAMailbox(t *testing.T) {
+	fake := caltest.Seed()
+	svc := newService(t, fake)
+	o := day("2026-03-16", "2026-03-16")
+	o.Calendars = []string{`"Sample Team" <team@group.calendar.example.test>`}
+	got, err := svc.Availability(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Availability: %v", err)
+	}
+	if len(got.Answers) != 1 || got.Answers[0].CalendarID != "team@group.calendar.example.test" || got.Answers[0].Unknown {
+		t.Fatalf("answers %+v, want the team calendar by its bare address", got.Answers)
+	}
+	if asked := fake.FreeBusyAsked.Items; len(asked) != 1 || asked[0].ID != "team@group.calendar.example.test" {
+		t.Fatalf("asked Google about %+v, want the bare address", asked)
+	}
+}

@@ -9,7 +9,8 @@ against your own Google account.
 
 It answers **when** — calendars, the events on them, and who is free. What
 a meeting produces (a recording, a notes document, an attachment) belongs
-to servers built on the Meet, Docs and Drive APIs.
+to servers built on the Meet, Docs and Drive APIs. `get_event` names the
+files attached to an event, with the Drive file id those servers take.
 
 ## What makes this one different
 
@@ -98,16 +99,16 @@ Every setting is in `docs/configuration.md`.
 | Tool | What it does |
 |---|---|
 | `list_calendars` | Every calendar this account can see, with ids, time zones and your access level. Start here. |
-| `get_calendar` | One calendar in full, including who it is shared with. |
-| `list_events` | The events on one or more calendars in a window. |
-| `search_events` | Free-text search across a window. |
-| `get_event` | One event, with its guests and their responses. |
+| `get_calendar` | One calendar in full, including who it is shared with and its default reminders. |
+| `list_events` | The events on one or more calendars in a window, or only the kinds you name, such as out of office, or the event an invitation email is about. |
+| `search_events` | Free-text search across a window, over titles, descriptions, locations and guests. |
+| `get_event` | One event, with its guests and their responses, what guests may do, your reminders, and the files attached to it. |
 | `list_instances` | The occurrences of one repeating event, with the dates that were moved or removed. |
-| `list_changes` | What changed since you last looked, including **deletions** — which a list cannot report, because a deleted event simply stops matching. Hands back a sync token to pass in next time. |
+| `list_changes` | What changed since you last looked, including **deletions** — which a list cannot report, because a deleted event simply stops matching. Hands back a sync token to pass in next time, or reads what changed since a moment you name. |
 | `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. Takes an optional working-hours mask. |
 | `get_settings` | The account's time zone, week start and color palette. |
-| `create_event` | Create an event, one-off or repeating, with a Google Meet link if you ask for one. |
-| `update_event` | Change an event. Only the fields you pass are touched. |
+| `create_event` | Create an event, one-off or repeating, with guests, optional guests, rooms, your reminders, its visibility, what guests may do, and a Google Meet link if you ask for one. Or a status event on your primary calendar: out of office, focus time or a working location. |
+| `update_event` | Change an event, including your reminders, its visibility and what guests may do, or add a Google Meet link. Only the fields you pass are touched. |
 | `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
 | `move_event` | Move an event to another calendar, which changes who organizes it. |
 | `respond_to_event` | Answer an invitation: accepted, declined or tentative. |
@@ -119,7 +120,7 @@ Every setting is in `docs/configuration.md`.
 | `delete_calendar` | Delete a calendar and every event on it. Gated. |
 | `clear_calendar` | Delete every event on your primary calendar. Gated. |
 
-`GCAL_READONLY=true` registers the first eight and requests only read
+`GCAL_READONLY=true` registers the first nine and requests only read
 scopes, so the API itself refuses a write.
 
 `manage_calendar` covers what the API splits across two resources and
@@ -182,10 +183,9 @@ local day, so 09:00 is still 09:00 on the Sunday the clocks change.
 link. The link normally comes back with the event; Google documents the
 conference as generated asynchronously, so the result may instead say it
 is still being made, and then you read the event again for it. Either
-way the result says which, and never reports a link it does not have. A
-link can only be attached as the event is created; this server does not
-add one to an event that already exists, and says so rather than failing
-quietly.
+way the result says which, and never reports a link it does not have.
+`update_event` takes `add_conference` to add one to an event that has
+none.
 
 ## Safety
 
@@ -210,8 +210,11 @@ quietly.
 - `GCAL_SHARING=off` removes the three sharing tools entirely.
 - When your client supports MCP elicitation, the server asks you itself
   before it deletes or clears a calendar, publishes one, opens one to a
-  whole domain, makes somebody an owner, or cancels an event in a way
-  that emails its guests. Only your Accept lets the write go ahead;
+  whole domain, makes somebody an owner, cancels an event in a way that
+  emails its guests, or makes an out-of-office or focus-time event that
+  declines every meeting it overlaps, the new series of a split included,
+  or moves one, makes it longer or makes it repeat more.
+  Only your Accept lets the write go ahead;
   anything else is `[blocked]`. A client that cannot ask gets no
   question, unless `GCAL_REQUIRE_PROMPT=true`, which refuses those
   writes instead.

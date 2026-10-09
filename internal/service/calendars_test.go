@@ -938,7 +938,7 @@ func TestADryRunDoesNotPrintTheOldPrivateName(t *testing.T) {
 
 	out, err := svc.ManageCalendar(context.Background(), service.ManageOptions{
 		Calendar: "team@group.calendar.example.test",
-		Title:    strptr("Shared new title"), MyName: strptr("My new private name"),
+		Title:    ptr("Shared new title"), MyName: ptr("My new private name"),
 		DryRun: true,
 	})
 	if err != nil {

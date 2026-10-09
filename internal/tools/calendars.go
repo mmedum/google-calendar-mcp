@@ -109,7 +109,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"`allow_public: true`: removing the rule later stops new readers and takes nothing back from " +
 			"whoever already looked. " + shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
 		Kind: Sharing,
-		Asks: true,
+		Asks: "before a share that publishes the calendar, opens it to a whole domain, or makes somebody an owner",
 		Handle: func(ctx context.Context, in shareCalendarIn) (service.SharingResult, error) {
 			out, err := d.Service.ShareCalendar(ctx, service.ShareOptions{
 				Calendar: in.Calendar, Who: in.Who, ScopeType: in.ScopeType, Role: in.Role,
@@ -153,7 +153,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"that one. To empty a calendar and keep it, use clear_calendar; to remove it from your list " +
 			"without deleting it, use manage_calendar with unsubscribe. " + dryRunHelp,
 		Kind: Destructive,
-		Asks: true,
+		Asks: "before the write",
 		Handle: func(ctx context.Context, in destructiveIn) (service.CalendarWriteResult, error) {
 			out, err := d.Service.DeleteCalendar(ctx, service.DestructiveOptions{
 				Calendar: in.Calendar, Confirm: in.Confirm, DryRun: in.DryRun,
@@ -175,7 +175,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"It works only on the primary calendar, which is what Google documents it for; another calendar " +
 			"is refused, and delete_calendar removes one of those whole. " + dryRunHelp,
 		Kind: Destructive,
-		Asks: true,
+		Asks: "before the write",
 		Handle: func(ctx context.Context, in destructiveIn) (service.CalendarWriteResult, error) {
 			out, err := d.Service.ClearCalendar(ctx, service.DestructiveOptions{
 				Calendar: in.Calendar, Confirm: in.Confirm, DryRun: in.DryRun,
@@ -225,7 +225,7 @@ type listSharingIn struct {
 
 type shareCalendarIn struct {
 	Calendar    string `json:"calendar" jsonschema:"The calendar to share. You must own it."`
-	Who         string `json:"who" jsonschema:"An email address, a group address, a domain, or \"anyone\" for the public internet. Required."`
+	Who         string `json:"who" jsonschema:"An email address, a group address, a domain, or \"anyone\" for the public internet. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
 	ScopeType   string `json:"scope_type,omitempty" jsonschema:"user, group, domain or default. Optional: an address is read as one person unless a rule for it already exists."`
 	Role        string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Required."`
 	Notify      string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
@@ -235,7 +235,7 @@ type shareCalendarIn struct {
 
 type unshareCalendarIn struct {
 	Calendar  string `json:"calendar" jsonschema:"The calendar to stop sharing. You must own it."`
-	Who       string `json:"who" jsonschema:"The address, domain, or \"anyone\", whose access should go. Required."`
+	Who       string `json:"who" jsonschema:"The address, domain, or \"anyone\", whose access should go. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
 	ScopeType string `json:"scope_type,omitempty" jsonschema:"user, group, domain or default, when the address alone is ambiguous."`
 	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"Report whose access would go, without writing."`
 }

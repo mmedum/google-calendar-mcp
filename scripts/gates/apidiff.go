@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"time"
 )
@@ -46,12 +48,10 @@ func apiDiff(out io.Writer) error {
 	}
 
 	var doc struct {
-		Version   string                  `json:"version"`
-		Revision  string                  `json:"revision"`
-		Resources map[string]resourceNode `json:"resources"`
-		Schemas   map[string]struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-		} `json:"schemas"`
+		Version   string                     `json:"version"`
+		Revision  string                     `json:"revision"`
+		Resources map[string]resourceNode    `json:"resources"`
+		Schemas   map[string]json.RawMessage `json:"schemas"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return fmt.Errorf("parse the discovery document: %w (the committed snapshot is unchanged)", err)
@@ -63,11 +63,17 @@ func apiDiff(out io.Writer) error {
 	}
 	sort.Slice(methods, func(i, j int) bool { return methods[i].Name < methods[j].Name })
 
-	schemas := make([]schemaRow, 0, len(fieldResources))
-	for _, name := range fieldResources {
-		schema, ok := doc.Schemas[name]
-		if !ok {
-			return fmt.Errorf("the discovery document has no %s schema; refusing to overwrite the snapshot", name)
+	names, err := reachableSchemas(doc.Schemas)
+	if err != nil {
+		return err
+	}
+	schemas := make([]schemaRow, 0, len(names))
+	for _, name := range names {
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(doc.Schemas[name], &schema); err != nil {
+			return fmt.Errorf("the %s schema: %w (the committed snapshot is unchanged)", name, err)
 		}
 		fields := make([]string, 0, len(schema.Properties))
 		for f := range schema.Properties {
@@ -201,4 +207,63 @@ func reportFieldChanges(out io.Writer, before, after *apiSurface) {
 			_, _ = fmt.Fprintf(out, "  GONE    field %s — remove its verdict\n", name)
 		}
 	}
+}
+
+// reachableSchemas is the four resources and every schema they reach by
+// $ref, the four first. A nested schema is where a field slips by: an
+// attendee is an EventAttendee, and its fields were in nobody's record
+// until one Google added went unnoticed.
+func reachableSchemas(all map[string]json.RawMessage) ([]string, error) {
+	seen := map[string]bool{}
+	var nested []string
+	var visit func(name string) error
+	visit = func(name string) error {
+		if seen[name] {
+			return nil
+		}
+		raw, ok := all[name]
+		if !ok {
+			return fmt.Errorf("the discovery document has no %s schema; refusing to overwrite the snapshot", name)
+		}
+		seen[name] = true
+		if !slices.Contains(fieldResources, name) {
+			nested = append(nested, name)
+		}
+		var body any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			return fmt.Errorf("the %s schema: %w", name, err)
+		}
+		for _, ref := range refsIn(body) {
+			if err := visit(ref); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, name := range fieldResources {
+		if err := visit(name); err != nil {
+			return nil, err
+		}
+	}
+	sort.Strings(nested)
+	return append(slices.Clone(fieldResources), nested...), nil
+}
+
+// refsIn lists the $ref targets anywhere inside a schema.
+func refsIn(v any) []string {
+	var out []string
+	switch x := v.(type) {
+	case map[string]any:
+		if ref, ok := x["$ref"].(string); ok {
+			out = append(out, ref)
+		}
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			out = append(out, refsIn(x[k])...)
+		}
+	case []any:
+		for _, e := range x {
+			out = append(out, refsIn(e)...)
+		}
+	}
+	return out
 }
