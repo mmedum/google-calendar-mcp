@@ -4,8 +4,11 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
 )
 
@@ -216,5 +219,133 @@ func TestAnExpiredTokenSaysToStartOver(t *testing.T) {
 	}
 	if fresh.SyncToken == "" {
 		t.Fatal("starting over produced no new token")
+	}
+}
+
+// clockAt sets the fake's clock, which stamps `updated` on every write.
+func clockAt(t *testing.T, fake *caltest.Server, at string) {
+	t.Helper()
+	ts, err := time.Parse(time.RFC3339, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.Now = func() time.Time { return ts }
+}
+
+func changedTitles(c render.Changes) string {
+	var titles []string
+	for _, e := range c.Changed {
+		titles = append(titles, e.Title)
+	}
+	return strings.Join(titles, ",")
+}
+
+// updated_since asks Google for what was written at or after a moment:
+// an event written before it is not reported, one written after it is,
+// and so is one deleted after it. The read is not a baseline, and it
+// hands back no sync token, because nothing yet shows that a token from
+// such a read chains (§18 row 91).
+func TestUpdatedSinceReportsWhatChangedAfterIt(t *testing.T) {
+	fake := caltest.Seed()
+	svc := newService(t, fake)
+	clockAt(t, fake, "2026-03-10T08:00:00Z")
+	fake.Touch("primary", "ev-holiday")
+	clockAt(t, fake, "2026-03-12T08:00:00Z")
+	fake.Touch("primary", "ev-standup")
+	fake.Remove("primary", "ev-transparent")
+
+	got, err := svc.ListChanges(context.Background(), service.ChangesOptions{
+		Calendar: "primary", UpdatedSince: "2026-03-11T00:00:00Z"})
+	if err != nil {
+		t.Fatalf("ListChanges: %v", err)
+	}
+	if titles := changedTitles(got); titles != "Morning sync" {
+		t.Fatalf("changed = %q, want only the event written after the moment", titles)
+	}
+	if strings.Join(got.Deleted, ",") != "ev-transparent" {
+		t.Fatalf("deleted = %v, want the event deleted after the moment", got.Deleted)
+	}
+	if got.Baseline || got.SyncToken != "" || !got.Complete {
+		t.Fatalf("baseline=%v sync_token=%q complete=%v, want a complete change list with no token",
+			got.Baseline, got.SyncToken, got.Complete)
+	}
+	text := got.Text()
+	for _, want := range []string{
+		"Changes on Sample Primary since 2026-03-11T01:00:00+01:00",
+		"an event whose only change was its reminders is not here",
+		"Deleted (1)",
+		"hands back no sync token",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the text does not say %q:\n%s", want, text)
+		}
+	}
+}
+
+// A bare date is the start of that day in the resolved zone, as a
+// window's from is, and the result echoes the instant it used.
+// Copenhagen is an hour ahead of UTC in March, so 16 March starts at
+// 23:00 UTC on the 15th.
+func TestUpdatedSinceADateIsTheStartOfThatDayInTheZone(t *testing.T) {
+	fake := caltest.Seed()
+	svc := newService(t, fake)
+	clockAt(t, fake, "2026-03-15T22:30:00Z")
+	fake.Touch("primary", "ev-holiday")
+	clockAt(t, fake, "2026-03-15T23:30:00Z")
+	fake.Touch("primary", "ev-standup")
+
+	got, err := svc.ListChanges(context.Background(), service.ChangesOptions{
+		Calendar: "primary", UpdatedSince: "2026-03-16"})
+	if err != nil {
+		t.Fatalf("ListChanges: %v", err)
+	}
+	if titles := changedTitles(got); titles != "Morning sync" {
+		t.Fatalf("changed = %q, want only the event written after local midnight", titles)
+	}
+	if echo := service.NewChangesResult(got).UpdatedSince; echo != "2026-03-16T00:00:00+01:00" {
+		t.Fatalf("updated_since echoed %q, want 2026-03-16T00:00:00+01:00", echo)
+	}
+}
+
+// Google refuses updatedMin alongside a sync token, so the server
+// refuses the pair before it spends a request.
+func TestUpdatedSinceIsRefusedAlongsideASyncToken(t *testing.T) {
+	svc, fake := seeded(t)
+	_, err := svc.ListChanges(context.Background(), service.ChangesOptions{
+		Calendar: "primary", SyncToken: "caltest-sync-0", UpdatedSince: "2026-03-16"})
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class = %s, want invalid", cls)
+	}
+	if !strings.Contains(err.Error(), "updated_since and sync_token cannot be used together") {
+		t.Fatalf("the refusal does not name the pair: %v", err)
+	}
+	if n := len(fake.Served()); n != 0 {
+		t.Fatalf("spent %d requests on a pair Google refuses", n)
+	}
+}
+
+func TestUpdatedSinceThatIsNotATimeIsRefused(t *testing.T) {
+	svc, _ := seeded(t)
+	_, err := svc.ListChanges(context.Background(), service.ChangesOptions{
+		Calendar: "primary", UpdatedSince: "last Monday"})
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class = %s, want invalid", cls)
+	}
+}
+
+// Google answers a moment further back than it keeps changes for with
+// 410 updatedMinTooLongAgo. The cure is a later moment or a baseline,
+// not the sync token's "start over with no token".
+func TestUpdatedSinceTooFarBackSaysToPassALaterOne(t *testing.T) {
+	svc, fake := seeded(t)
+	fake.UpdatedMinTooLongAgo = true
+	_, err := svc.ListChanges(context.Background(), service.ChangesOptions{
+		Calendar: "primary", UpdatedSince: "2000-01-01"})
+	if cls := classOf(t, err); cls != gapi.ClassStale {
+		t.Fatalf("class = %s, want stale", cls)
+	}
+	if !strings.Contains(err.Error(), "as far back as 2000-01-01T00:00:00+01:00") ||
+		!strings.Contains(err.Error(), "Pass a later updated_since") {
+		t.Fatalf("the refusal does not name the moment and the cure: %v", err)
 	}
 }

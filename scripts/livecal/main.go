@@ -264,6 +264,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike L: calendar and acl If-Match", spikeL},
 		{"spike M: conference creation", spikeM},
 		{"spike N: what suppresses nextSyncToken", spikeN},
+		{"spike O: a token from updatedMin", spikeO},
 	} {
 		r.total++
 		v, note := sp.run(ctx, out, api, scratch)
@@ -1097,6 +1098,47 @@ func steps(scratch string, state seedState) []step {
 					return fail, "the incremental read handed back no new token, so the chain stops here"
 				}
 				return pass, "token accepted, a new one issued"
+			},
+		},
+		{
+			// §18 row 91. The seed wrote every event in this run, so an
+			// hour back covers them; Google filters, not the server.
+			name: "list_changes by updated_since",
+			tool: "list_changes",
+			args: map[string]any{
+				"calendar":      scratch,
+				"updated_since": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "since ") || strings.Contains(r.text, "Baseline for") {
+					return fail, "the result does not name the moment it read from"
+				}
+				if !strings.Contains(r.text, timedTitle) {
+					return fail, "an event the seed wrote this run is not among the changes"
+				}
+				if afterLabel(r.text, "Next sync token: ") != "" {
+					return fail, "a read by updated_since handed back a sync token nothing has shown chains"
+				}
+				return pass, "the seeded events came back as changed, with no sync token"
+			},
+		},
+		{
+			// Refused before a request: Google forbids updatedMin with a
+			// token, so the made-up token below is never sent.
+			name: "updated_since refused with a sync token",
+			tool: "list_changes",
+			args: map[string]any{
+				"calendar": scratch, "sync_token": "livecal-not-a-token", "updated_since": "2026-03-16",
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[invalid]") {
+					return fail, "updated_since and sync_token together were not refused as invalid: " +
+						truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid]"
 			},
 		},
 		{

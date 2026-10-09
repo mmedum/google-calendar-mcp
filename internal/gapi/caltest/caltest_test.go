@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
@@ -220,5 +221,45 @@ func TestAnEventTypeOutsideTheEnumIsRefused(t *testing.T) {
 	}
 	if got := status("outOfOffice"); got != http.StatusOK {
 		t.Fatalf("eventTypes=outOfOffice answered %d, want 200", got)
+	}
+}
+
+// updatedMin, from the discovery document: "entries deleted since this
+// time will always be included regardless of showDeleted", and it is one
+// of the parameters "that cannot be specified together with
+// nextSyncToken". The fake holds both, so a server that leaned on
+// showDeleted, or sent the two together, fails here first.
+func TestUpdatedMinIncludesDeletionsAndRefusesASyncToken(t *testing.T) {
+	s := caltest.Seed()
+	s.Now = func() time.Time { return time.Date(2026, 3, 12, 8, 0, 0, 0, time.UTC) }
+	base := s.Start()
+	defer s.Close()
+	s.Remove("primary", "ev-transparent")
+
+	get := func(query string) (int, gcal.EventList) {
+		t.Helper()
+		resp, err := http.Get(base + "/calendars/primary/events?" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out gcal.EventList
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+
+	status, list := get("updatedMin=2026-03-11T00:00:00Z")
+	if status != http.StatusOK {
+		t.Fatalf("updatedMin alone answered %d, want 200", status)
+	}
+	var ids []string
+	for _, e := range list.Items {
+		ids = append(ids, e.ID+":"+e.Status)
+	}
+	if got := strings.Join(ids, ","); got != "ev-transparent:cancelled" {
+		t.Fatalf("got %s, want only the deletion, without showDeleted", got)
+	}
+	if status, _ := get("updatedMin=2026-03-11T00:00:00Z&syncToken=caltest-sync-0"); status != http.StatusBadRequest {
+		t.Fatalf("updatedMin with a sync token answered %d, want 400", status)
 	}
 }

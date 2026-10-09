@@ -740,8 +740,12 @@ type ChangesResult struct {
 
 	// Baseline says no token was supplied, so this is the starting
 	// point rather than a report of changes.
-	Baseline bool       `json:"baseline"`
-	Changed  []EventOut `json:"changed"`
+	Baseline bool `json:"baseline"`
+	// UpdatedSince echoes the moment an updated_since read asked from,
+	// as an absolute instant, so a date the caller passed can be checked
+	// against the zone it was read in.
+	UpdatedSince string     `json:"updated_since,omitempty"`
+	Changed      []EventOut `json:"changed"`
 	// Deleted carries ids only. Google's answer for a deleted event has
 	// no title and no times, and inventing them would be this server
 	// claiming to know what it does not.
@@ -779,6 +783,9 @@ func NewChangesResult(in render.Changes) ChangesResult {
 		Requests: in.Requests, Skipped: in.Skipped,
 		Deleted: in.Deleted,
 		text:    in.Text(),
+	}
+	if !in.Since.IsZero() {
+		out.UpdatedSince = in.Since.String()
 	}
 	for _, e := range in.Changed {
 		out.Changed = append(out.Changed, NewEventOut(e))

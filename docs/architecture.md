@@ -1736,6 +1736,14 @@ states its question and its verdict separately.
   calendars by decision. The flag stays, and stays off: the limit counts
   creations and is not refunded by deleting them, so running it spends a
   quota the driver's own scratch calendar needs (§18 rows 12 and 36).
+- **Spike O — what a read by `updatedMin` gives back.** `list_changes`
+  hands back no sync token from an `updated_since` read, because nothing
+  shows such a token chains. The spike pages an `updatedMin` read to its
+  end and reports whether a token arrived; if one did, it changes the
+  driver's own timed event and syncs with it, to see whether the change
+  is reported. It also prints how Google answers a moment in 2000, and
+  whether the bound includes an event written at exactly that moment.
+  **Not yet run** (§18 row 91).
 
 ## 16. Delivery phases
 
@@ -2652,6 +2660,19 @@ row 80).
    would send the caller round the same loop, so the tool replaces it:
    ask again with **no** token, and treat what you were holding as
    unreliable rather than merely old. **Decided.**
+
+   **`updated_since`, added 2026-10-09, is the one-off look back.** It
+   is `updatedMin`: what was written at or after a moment, given as
+   RFC 3339 or as a date meaning the start of that day in the resolved
+   zone, and echoed as an instant. Deleted events since then are always
+   included. It is refused alongside a token, because Google refuses
+   `updatedMin` there. Google's sync guide calls it the legacy way and
+   says it misses updates, and the reference says why one is missed: an
+   event's `updated` does not move when only its reminders change. So
+   the tool still leads with the token, and a read by `updated_since`
+   hands back no token until a probe shows such a token chains. A
+   moment further back than Google keeps is 410 `updatedMinTooLongAgo`,
+   which gets its own cure: a later moment, or a baseline (§18 row 91).
 2. **Working hours.** There is no working-hours field in the API; the
    `workingLocation` event type is adjacent but not the same thing. Free
    gaps at 03:00 are technically correct and useless. Whether the server
@@ -2848,6 +2869,7 @@ what §15 exists to settle, and they are marked.
 | 88 | The new series of a split can be built from the fields this server models | Calendar discovery revision 20261005, read 2026-10-09: `Event.attachments` "In order to modify attachments the supportsAttachments request parameter should be set to true"; `eventLabelId` "To set or change this property, you need to specify eventLabelVersion=1"; the status-events guide: to create a working location, "Include the workingLocationProperties field" | **Refuted.** The copy was decoded into the modeled fields, so the new series lost the parent's attachments, label, extended properties and status details, and a working-location series went to Google without the details its guide says a create needs. An event now keeps every field it does not model, the split carries them, and the insert sets `supportsAttachments=true` when it carries files and `eventLabelVersion=1` when it carries a label. It leaves `kind`, `locked`, `gadget` and `hangoutLink` behind, which Google sets itself. **Not yet probed live, tier 3:** that Google refuses a status event created without its details; that it drops attachments and a label sent without their parameter rather than refusing them; that it accepts the other carried fields on an insert, such as `privateCopy`, `source` and an attachment's read-only `fileId`; and whether creating an out-of-office series that declines conflicts declines them again. The fake holds the first two. A refusal costs more than before, because it lands after the truncate, as `[ambiguous_outcome]`. The live driver checks that a private extended property survives a split. A split carrying an attachment is owed; one carrying a working location needs a recurring status event on the primary calendar, which §9.1 does not allow the driver |
 | 89 | `events.list` filters by event type, and leaving the filter out returns every type | Calendar discovery revision 20261005, read 2026-10-09: `eventTypes` is repeated, an enum of `birthday`, `default`, `focusTime`, `fromGmail`, `outOfOffice` and `workingLocation`, "If unset, returns all event types." | **Confirmed in the reference; the live steps are written and not yet run.** `list_events` and `search_events` take `event_types` and send each as `eventTypes`. The page token carries the filter, and a continuation under another one is refused, because Google resumes a token only for the query that issued it. The fake refuses a value outside the enum and counts an event with no type as `default`. The live steps filter the scratch calendar, whose events are all ordinary, on `focusTime` and expect none, then on `default` and expect them all |
 | 90 | A read returns an event's attachments without asking, and an attachment's `fileId` is the Drive file id | Calendar discovery revision 20261005, read 2026-10-09: `supportsAttachments` is a parameter of `events.insert`, `import`, `patch` and `update` only, not of `get`, `list` or `instances`; `EventAttachment.fileId` "For Google Drive files, this is the ID of the corresponding Files resource entry in the Drive API" | **Confirmed in the reference; not yet seen live, tier 3.** `get_event` lists the attachments and every event row counts them. The live driver attaches the Drive file `GCAL_LIVE_ATTACHMENT` names to the weekly series, reads it back, and checks a split carries it. Without that variable those steps are skipped and owed: the driver cannot create a Drive file with the scopes this server asks for |
+| 91 | A read by modification time is a supported way to follow a calendar, and its sync token chains | Calendar discovery revision 20261005, read 2026-10-09: `updatedMin` "Lower bound for an event's last modification time (as a RFC3339 timestamp) to filter by. When specified, entries deleted since this time will always be included regardless of showDeleted"; `Event.updated` "Updating event reminders will not cause this to change"; `syncToken` lists `updatedMin` among the parameters that "cannot be specified together with nextSyncToken". The sync guide, read 2026-10-09: the legacy way "is no longer recommended as it is more error-prone with respect to missed updates". The errors guide: 410 `updatedMinTooLongAgo`, "The requested minimum modification time lies too far in the past" | **Refuted as the way to follow a calendar; kept as a one-off look back.** `list_changes` takes `updated_since` and sends it as `updatedMin`, refused alongside `sync_token` before a request is spent. Its description and its result say what it misses. A 410 under it names a later moment or a baseline as the cure. **Not yet probed, tier 3:** whether a read with `updatedMin` issues a sync token and whether that token chains, so the server hands back none; how far back Google allows; and whether the bound includes the moment itself. The fake includes it. The live driver reads the scratch calendar since an hour before the run and expects the seeded events and no token, and spike O asks the two open questions directly |
 
 ### Deviations from the shared Go MCP server standard
 

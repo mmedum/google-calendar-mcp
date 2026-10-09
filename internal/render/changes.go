@@ -25,6 +25,9 @@ type Changes struct {
 	// Baseline is a first call, with no token: everything on the
 	// calendar comes back and nothing has "changed" yet.
 	Baseline bool
+	// Since is the moment an updated_since read asked from, zero on a
+	// read by token. Such a read hands back no token.
+	Since when.Zoned
 	// Complete says the last page was reached, which is the only state
 	// in which SyncToken is set.
 	Complete      bool
@@ -46,12 +49,22 @@ func (c Changes) Text() string {
 	if name == "" {
 		name = c.CalendarID
 	}
-	if c.Baseline {
+	switch {
+	case c.Baseline:
 		fmt.Fprintf(&b, "Baseline for %s\n", name)
-	} else {
+	case !c.Since.IsZero():
+		fmt.Fprintf(&b, "Changes on %s since %s\n", name, c.Since)
+	default:
 		fmt.Fprintf(&b, "Changes on %s\n", name)
 	}
-	fmt.Fprintf(&b, "%s\n\n", c.Zone.Explain())
+	fmt.Fprintf(&b, "%s\n", c.Zone.Explain())
+	if !c.Since.IsZero() {
+		// Google's own caveat on reading by modification time, said
+		// where a reader decides what the list means.
+		b.WriteString("Read by updated_since, which Google calls the legacy way: an event whose only " +
+			"change was its reminders is not here. Events deleted since then are.\n")
+	}
+	b.WriteString("\n")
 
 	switch {
 	case c.Baseline:
@@ -99,6 +112,13 @@ func (c Changes) Text() string {
 
 	// The token, and the honest statement of when there isn't one.
 	switch {
+	case !c.Since.IsZero():
+		if c.NextPageToken != "" {
+			b.WriteString("This read did not finish. Pass page_token, with the same updated_since, to continue.\n")
+			fmt.Fprintf(&b, "page_token: %s\n", c.NextPageToken)
+		}
+		b.WriteString("A read by updated_since hands back no sync token. To follow this calendar from here, " +
+			"call with neither updated_since nor sync_token for a baseline and a token.\n")
 	case c.SyncToken != "":
 		fmt.Fprintf(&b, "Next sync token: %s\n", c.SyncToken)
 		b.WriteString("Pass it as sync_token next time to get only what changed after this point.\n")

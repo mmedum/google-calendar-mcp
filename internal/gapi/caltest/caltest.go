@@ -98,6 +98,16 @@ type Server struct {
 	// the one thing a caller holding a token has to survive: Google
 	// discards tokens and the only cure is a full read with none.
 	SyncTokenExpired bool
+	// UpdatedMinTooLongAgo makes a read with updatedMin answer 410
+	// updatedMinTooLongAgo. How far back Google allows is not
+	// documented, so the fake does not guess a number.
+	UpdatedMinTooLongAgo bool
+
+	// Now is the clock that stamps an event's `updated` on every write,
+	// which is what updatedMin filters on. Nil is the real clock. An
+	// event this fake never wrote has no stamp, and reads as changed
+	// before any updatedMin a test asks about.
+	Now func() time.Time
 
 	mu sync.Mutex
 	// revs counts patches per event, so an etag moves on every write and
@@ -1107,8 +1117,30 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		}
 	}
 
+	// updatedMin keeps what was written at or after a moment, and
+	// "entries deleted since this time will always be included
+	// regardless of showDeleted". A moment too far back is 410, with the
+	// reason Google's error guide names.
+	var since time.Time
+	if um := q.Get("updatedMin"); um != "" {
+		if s.UpdatedMinTooLongAgo {
+			writeErr(w, http.StatusGone, "updatedMinTooLongAgo",
+				"The requested minimum modification time lies too far in the past.")
+			return
+		}
+		t, err := time.Parse(time.RFC3339, um)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid", "Invalid value for updatedMin: "+um)
+			return
+		}
+		since = t
+	}
+
 	var items []gcal.Event
 	for _, e := range s.Events[calID] {
+		if !since.IsZero() && !changedSince(*e, since) {
+			continue
+		}
 		// §2.9: singleEvents decides which of the two shapes comes back.
 		// Without it, parents; with it, instances.
 		isInstance := e.RecurringEventID != ""
@@ -1128,7 +1160,7 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		switch {
 		case keptCanceledInstance:
 			// Returned regardless of showDeleted, which is the point.
-		case e.Status == gcal.StatusCanceled && !showDeleted:
+		case e.Status == gcal.StatusCanceled && !showDeleted && since.IsZero():
 			continue // §2.13
 		case single && isParent, !single && isInstance:
 			continue // §2.9: one shape or the other, never both
@@ -1149,6 +1181,11 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		items = append(items, *e)
 	}
 	sort.Slice(items, func(i, j int) bool { return startKey(items[i]) < startKey(items[j]) })
+	if !since.IsZero() {
+		// Deleted outright, so no longer in Events: only the tombstone
+		// says it went.
+		items = append(items, s.removedSince(calID, since)...)
+	}
 
 	page, next := s.paginate(len(items), q.Get("pageToken"), q.Get("maxResults"))
 	cal := s.Calendars[calID]
@@ -1633,7 +1670,9 @@ type syncChange struct {
 	event gcal.Event
 }
 
-// bumpSync records that an event changed. The caller holds mu.
+// bumpSync records that an event changed, and stamps its `updated` with
+// the fake's clock, on the stored event too when there is one. The
+// caller holds mu.
 func (s *Server) bumpSync(calID string, e gcal.Event) {
 	if s.syncSeq == nil {
 		s.syncSeq = map[string]int{}
@@ -1642,8 +1681,42 @@ func (s *Server) bumpSync(calID string, e gcal.Event) {
 	if s.changed[calID] == nil {
 		s.changed[calID] = map[string]syncChange{}
 	}
+	now := time.Now
+	if s.Now != nil {
+		now = s.Now
+	}
+	e.Updated = now().UTC().Format("2006-01-02T15:04:05.000Z")
+	if cur, ok := s.Events[calID][e.ID]; ok {
+		cur.Updated = e.Updated
+	}
 	s.syncSeq[calID]++
 	s.changed[calID][e.ID] = syncChange{seq: s.syncSeq[calID], event: e}
+}
+
+// removedSince returns the tombstones of events deleted outright at or
+// after since, which a read with updatedMin includes "regardless of
+// showDeleted".
+func (s *Server) removedSince(calID string, since time.Time) []gcal.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []gcal.Event
+	for id, c := range s.changed[calID] {
+		if _, alive := s.Events[calID][id]; alive {
+			continue
+		}
+		if changedSince(c.event, since) {
+			out = append(out, c.event)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// changedSince reports whether an event was last written at or after
+// since. An event with no stamp was never written by this fake.
+func changedSince(e gcal.Event, since time.Time) bool {
+	t, err := time.Parse(time.RFC3339, e.Updated)
+	return err == nil && !t.Before(since)
 }
 
 // syncSince returns the events that changed after seq, oldest first.

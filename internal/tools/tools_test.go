@@ -534,6 +534,9 @@ func TestEveryToolAnswers(t *testing.T) {
 			"calendar": "primary", "event_id": "ev-weekly",
 			"from": "2026-03-20", "to": "2026-03-26",
 		}, "2026-03-24"},
+		{"list_changes", map[string]any{
+			"calendar": "primary", "updated_since": "2026-03-16",
+		}, "since 2026-03-16T00:00:00+01:00"},
 		{"check_availability", map[string]any{"from": "2026-03-16", "to": "2026-03-16"}, "Free"},
 		{"check_availability", map[string]any{
 			"from": "2026-03-16", "to": "2026-03-16", "min_minutes": 30,
