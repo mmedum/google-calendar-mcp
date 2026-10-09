@@ -79,7 +79,10 @@ and Drive APIs.
    `calendarList.update` and `acl.update` replace the whole resource and
    are never called — a client function for any of them fails the
    API-coverage gate. Every write is a patch under `If-Match` from the
-   read that produced it; a 412 is `[stale]`, never a silent retry. §4.4.
+   read that produced it; a 412 is `[stale]`, never a silent retry. The
+   one exception: when the etag came from the server's own read, not the
+   caller, it reads again once and retries only if the write is the same,
+   and the result says so. §4.4.
 8. **Availability comes from `freebusy.query`, never from a list.** A
    list misses events whose details the caller cannot read and ignores
    `transparency`. A calendar that errored is reported **unknown**, never
