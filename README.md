@@ -120,7 +120,7 @@ Every setting is in `docs/configuration.md`.
 | `delete_calendar` | Delete a calendar and every event on it. Gated. |
 | `clear_calendar` | Delete every event on your primary calendar. Gated. |
 
-`GCAL_READONLY=true` registers the first eight and requests only read
+`GCAL_READONLY=true` registers the first nine and requests only read
 scopes, so the API itself refuses a write.
 
 `manage_calendar` covers what the API splits across two resources and

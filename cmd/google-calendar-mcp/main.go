@@ -15,6 +15,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	// Go's own copy of the IANA zone database, used only when the
+	// machine has none. Windows has none Go can read: without this,
+	// every zone is refused on a machine without Go installed, and
+	// nearly every tool here needs one (§4.1).
+	_ "time/tzdata"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"

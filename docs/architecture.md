@@ -503,6 +503,13 @@ A consequence worth stating: **the server has no opinion about "today"**
 until it has resolved a zone. A tool that takes a relative window
 resolves the zone first and prints the absolute window it derived.
 
+**The binary carries the zone database.** A zone name is turned into
+rules by Go's `time.LoadLocation`, which reads the machine's database.
+Windows has none Go can read, so a release binary on a machine without Go
+refused every zone, and nearly every tool needs one. The main package
+imports Go's own copy, `time/tzdata`, which is used only when the machine
+has none. It adds about 400 KB (§18 row 96).
+
 ### 4.2 The recurrence scope is required, never inferred
 
 "Change the 10:00 standup to 10:30" is three different operations and
@@ -1070,8 +1077,8 @@ hazard is identical.
 
 ## 8. Tool surface
 
-Twenty tools. Read-only mode registers the first eight and requests only
-the read scopes (§10).
+Twenty-one tools. Read-only mode registers the first nine and requests
+only the read scopes (§10).
 
 | Tool | API methods | Notes |
 |---|---|---|
@@ -1080,6 +1087,7 @@ the read scopes (§10).
 | `list_events` | `events.list` | `expand` vs `series` required (§7.2) |
 | `get_event` | `events.get` | |
 | `list_instances` | `events.instances` | |
+| `list_changes` | `events.list` (`syncToken`, `updatedMin`) | the caller holds the token; deletions included (§17.1) |
 | `search_events` | `events.list` (`q`) | fanned out; `q` has no field syntax (§2) |
 | `check_availability` | `freebusy.query` | batched at 50; free gaps (§7.3); working-hours mask (§17.2) |
 | `get_settings` | `settings.list`, `colors.get` | the user's zone and week start |
@@ -1277,7 +1285,7 @@ protection `cancel_event` gets instead is §4.2's required `scope`, so
 canceling a series can never be a slip of the wrist, and §4.3's required
 `notify`.
 
-**Read-only mode** (`GCAL_READONLY=true`) registers only the eight read
+**Read-only mode** (`GCAL_READONLY=true`) registers only the nine read
 tools and requests only the read scopes.
 
 ### 9a. A write that cannot be taken back is confirmed by the person
@@ -2914,6 +2922,7 @@ what §15 exists to settle, and they are marked.
 | 93 | An address arrives bare | RFC 5322 §3.4: `mailbox = name-addr / addr-spec`, so `"Sample Person" <person@example.com>` is one address; Calendar discovery revision 20261005, `EventAttendee.email` "must be a valid email address as per RFC5322"; Go `net/mail.ParseAddress` "parses a single RFC 5322 address" | **Refuted: a Gmail server returns the name-addr form, and the old check refused its space**, so a hand-off from mail to calendar failed. Every address input is now parsed as one mailbox and the bare address replaces it before the reach count, the request or the result reads it. A list in one entry is refused. Some strings the old check passed, such as two dots in a row, are now refused before a request rather than by Google. Nothing here depends on Google: it receives the bare address, as before. The live driver passes a mailbox to a dry run and checks the display name is not in the result |
 | 94 | `events.list` finds an event by its iCalendar UID, alongside a window | Calendar discovery revision 20261005, read 2026-10-09: `iCalUID` "Specifies an event ID in the iCalendar format to be provided in the response. Optional. Use this if you want to search for an event by its iCalendar ID"; `syncToken` lists `iCalUID` among the parameters that "cannot be specified together with nextSyncToken"; `Event.iCalUID` "in recurring events, all occurrences of one event have different ids while they all share the same iCalUIDs" | **Confirmed in the reference for the lookup and the sharing; the window is a belief.** `list_events` takes `ical_uid` and sends it as `iCalUID`. The reference forbids it only with a sync token. It says nothing about `timeMin` and `timeMax`, so that Google applies the window alongside it is **not yet seen live, tier 3**; the fake applies both. The live driver reads the UIDs Google gave the seeded timed event and weekly series, filters on each, and filters on the timed event's UID over a window that leaves its day out, expecting nothing |
 | 95 | `q` is undocumented free text, and Google does not say which fields it reads | Calendar discovery revision 20261005, read 2026-10-09: `q` "Free text search terms to find events that match these terms in the following fields: summary, description, location, attendee's displayName, attendee's email, organizer's displayName, organizer's email, workingLocationProperties.officeLocation.buildingId, workingLocationProperties.officeLocation.deskId, workingLocationProperties.officeLocation.label, workingLocationProperties.customLocation.label", and "These search terms also match predefined keywords against all display title translations of working location, out-of-office, and focus-time events" | **Refuted: the fields are documented now.** `search_events`, the server instructions and §7.2 name them. What stays true, and stays in the description: there is no field syntax, how words are matched is not documented, and an event seen only as busy has nothing to match, so an empty result is still not proof. The fake matches the documented fields; the built-in words are not modeled |
+| 96 | A release binary resolves an IANA zone on every platform it is built for | Go 1.27.2 `time.LoadLocation`, read 2026-10-09: it looks in "the directory or uncompressed zip file named by the ZONEINFO environment variable", "on a Unix system, the system standard installation location", "$GOROOT/lib/time/zoneinfo.zip" and "the time/tzdata package, if it was imported"; `time/tzdata`: "if the time package cannot find tzdata files on the system, it will use this embedded information" | **Refuted on Windows.** Windows is not a Unix system and a user without Go has no `$GOROOT`, so the Windows archive and the bundle's Windows binary refused every zone. The main package imports `time/tzdata`: about 400 KB on each platform, used only when the machine has no database. A test asks `go list -deps` whether the binary links it, because on Linux the system database comes first and `ZONEINFO` pointed at an empty directory does not stop that, so a test that loads a zone passes either way. **Not yet seen on a Windows machine without Go, tier 3** |
 
 ### Deviations from the shared Go MCP server standard
 

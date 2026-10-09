@@ -47,7 +47,7 @@ const (
 	// with the other two, because a deployment that has turned sharing
 	// off has turned off the surface, not merely the writes.
 	//
-	// Read-only mode drops it as well. §8 registers the eight read tools
+	// Read-only mode drops it as well. §8 registers the nine read tools
 	// there and this is not one of them: get_calendar already reports a
 	// calendar's exposure, so nothing is unreachable, and the read-only
 	// surface stays the list §8 names rather than the list minus a
