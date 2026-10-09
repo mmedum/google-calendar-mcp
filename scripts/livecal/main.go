@@ -170,6 +170,10 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 2
 	}
 	state.canceledOccurrence = canceled
+	// The UIDs the ical_uid steps filter on. A failed read leaves one
+	// empty, and those steps say they were skipped rather than fail.
+	state.timedUID, _ = api.iCalUID(ctx, scratch, timedID)
+	state.weeklyUID, _ = api.iCalUID(ctx, scratch, weeklyID)
 	out.Printf("filled with %d invented events; the occurrence on %s was canceled\n\n",
 		len(seedEvents()), canceled)
 
@@ -835,6 +839,80 @@ func steps(scratch string, state seedState) []step {
 					return fail, "the default filter dropped an ordinary event"
 				}
 				return pass, "the ordinary events are default events"
+			},
+		},
+		{
+			// §18 row 94. The UID an invitation carries finds its event,
+			// and only it.
+			name: "ical_uid finds one event",
+			tool: "list_events",
+			args: cal(map[string]any{"ical_uid": state.timedUID}),
+			skip: func() string {
+				if state.timedUID == "" {
+					return "the setup could not read the timed event's UID"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "only the event with iCalendar UID") {
+					return fail, "the result does not name the filter"
+				}
+				if !strings.Contains(r.text, timedTitle) || strings.Contains(r.text, weeklyTitle) {
+					return fail, "the filter did not return exactly the event with that UID"
+				}
+				return pass, "the event with that UID and nothing else"
+			},
+		},
+		{
+			// Every occurrence of a series shares the series' UID, so the
+			// filter expanded returns each one in the window.
+			name: "ical_uid gives each occurrence of a series",
+			tool: "list_events",
+			args: cal(map[string]any{"ical_uid": state.weeklyUID}),
+			skip: func() string {
+				if state.weeklyUID == "" {
+					return "the setup could not read the weekly series' UID"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if n := len(linesWith(r.text, weeklyTitle)); n < 2 || strings.Contains(r.text, timedTitle) {
+					return fail, fmt.Sprintf("%d occurrences of the series came back, and the filter should "+
+						"keep only them", n)
+				}
+				return pass, "the series' occurrences in the window, and nothing else"
+			},
+		},
+		{
+			// Unverified belief: Google applies the window alongside
+			// iCalUID. The timed event is on 16 March; a window that
+			// leaves that day out must not return it.
+			name: "ical_uid keeps to the window",
+			tool: "list_events",
+			args: map[string]any{
+				"calendars": []string{scratch}, "from": "2026-03-17", "to": "2026-03-18",
+				"ical_uid": state.timedUID,
+			},
+			skip: func() string {
+				if state.timedUID == "" {
+					return "the setup could not read the timed event's UID"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if strings.Contains(r.text, timedTitle) {
+					return fail, "Google ignored the window alongside iCalUID; the description promises it applies"
+				}
+				return pass, "the event outside the window did not come back"
 			},
 		},
 		{

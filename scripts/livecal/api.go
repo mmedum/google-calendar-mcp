@@ -687,6 +687,19 @@ type seedState struct {
 	// canceledOccurrence is the date of the occurrence removed from the
 	// weekly series, as Google returned it.
 	canceledOccurrence string
+	// timedUID and weeklyUID are the iCalendar UIDs Google gave the
+	// timed event and the weekly series. No tool shows one; a caller
+	// holds one from an invitation email.
+	timedUID, weeklyUID string
+}
+
+// iCalUID reads one event's iCalendar UID.
+func (a *liveAPI) iCalUID(ctx context.Context, cal, id string) (string, error) {
+	var out struct {
+		ICalUID string `json:"iCalUID"`
+	}
+	err := a.do(ctx, http.MethodGet, "/calendars/"+cal+"/events/"+id, nil, &out)
+	return out.ICalUID, err
 }
 
 // removeOneOccurrence cancels the second occurrence of the weekly

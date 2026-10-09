@@ -11,6 +11,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
 )
 
@@ -358,6 +359,78 @@ func TestAPageTokenKeepsItsTypeFilter(t *testing.T) {
 		t.Fatalf("the refusal does not name both filters: %v", err)
 	}
 	if _, err := read(token, "FOCUSTIME", "default"); err != nil {
+		t.Fatalf("the same filter was refused: %v", err)
+	}
+}
+
+// ical_uid reaches Google as iCalUID, so a caller holding the UID an
+// invitation carries finds its event. Every occurrence of a series
+// shares the series' UID, so expanded the filter returns each occurrence
+// in the window, and as a series it returns the series once. The result
+// names the filter.
+func TestICalUIDFindsTheEventAnInvitationIsAbout(t *testing.T) {
+	fake := caltest.Seed()
+	fake.Events["primary"]["ev-weekly"].ICalUID = "AAAAuid-weekly@example.test"
+	fake.Events["primary"]["ev-standup"].ICalUID = "AAAAuid-standup@example.test"
+	svc := newService(t, fake)
+	read := func(expand bool) render.Schedule {
+		t.Helper()
+		sched, err := svc.ListEvents(context.Background(), service.ListOptions{
+			From: "2026-03-16", To: "2026-03-31", Expand: expand, ICalUID: " AAAAuid-weekly@example.test ",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sched
+	}
+	ids := func(sched render.Schedule) string {
+		var out []string
+		for _, e := range sched.Events {
+			out = append(out, e.ID)
+		}
+		return strings.Join(out, ",")
+	}
+
+	occurrences := read(true)
+	if got := ids(occurrences); got != "ev-weekly_20260324T130000Z,ev-weekly_20260331T130000Z" {
+		t.Fatalf("expanded: got %s, want the series' two occurrences in the window", got)
+	}
+	if got := ids(read(false)); got != "ev-weekly" {
+		t.Fatalf("as a series: got %s, want the series once", got)
+	}
+	if got := service.NewScheduleResult(occurrences).ICalUID; got != "AAAAuid-weekly@example.test" {
+		t.Fatalf("ical_uid echoed %q", got)
+	}
+	if !strings.Contains(occurrences.Text(), "only the event with iCalendar UID AAAAuid-weekly@example.test") {
+		t.Fatalf("the text does not name the filter:\n%s", occurrences.Text())
+	}
+}
+
+// A page token carries the UID filter as it carries the type filter,
+// because Google resumes a token only for the query that issued it.
+func TestAPageTokenKeepsItsUIDFilter(t *testing.T) {
+	fake := caltest.Seed()
+	fake.Events["primary"]["ev-weekly"].ICalUID = "AAAAuid-weekly@example.test"
+	svc := newService(t, fake)
+	read := func(token, uid string) (string, error) {
+		sched, err := svc.ListEvents(context.Background(), service.ListOptions{
+			From: "2026-03-16", To: "2026-03-31", Expand: true,
+			ICalUID: uid, MaxEvents: 1, PageToken: token,
+		})
+		return sched.NextPageToken, err
+	}
+	token, err := read("", "AAAAuid-weekly@example.test")
+	if err != nil || token == "" {
+		t.Fatalf("want a first page and a token, got %q, %v", token, err)
+	}
+	_, err = read(token, "")
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class = %s, want invalid", cls)
+	}
+	if !strings.Contains(err.Error(), `issued for ical_uid "AAAAuid-weekly@example.test", not ""`) {
+		t.Fatalf("the refusal does not name both filters: %v", err)
+	}
+	if _, err := read(token, "AAAAuid-weekly@example.test"); err != nil {
 		t.Fatalf("the same filter was refused: %v", err)
 	}
 }

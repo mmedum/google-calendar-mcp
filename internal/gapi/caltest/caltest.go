@@ -1168,6 +1168,9 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		if len(types) > 0 && !slices.Contains(types, typeOf(*e)) {
 			continue
 		}
+		if uid := q.Get("iCalUID"); uid != "" && s.uidOf(calID, e) != uid {
+			continue
+		}
 		if search != "" && !strings.Contains(strings.ToLower(e.Summary), search) &&
 			!strings.Contains(strings.ToLower(e.Description), search) {
 			continue
@@ -1209,6 +1212,19 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 var listTypes = []string{
 	gcal.EventTypeBirthday, gcal.EventTypeDefault, gcal.EventTypeFocusTime,
 	gcal.EventTypeFromGmail, gcal.EventTypeOutOfOffice, gcal.EventTypeWorkingLocation,
+}
+
+// uidOf is an event's iCalUID. An occurrence carries its series' UID:
+// "all occurrences of one event have different ids while they all share
+// the same iCalUIDs" (Event.iCalUID).
+func (s *Server) uidOf(calID string, e *gcal.Event) string {
+	if e.ICalUID != "" || e.RecurringEventID == "" {
+		return e.ICalUID
+	}
+	if parent, ok := s.Events[calID][e.RecurringEventID]; ok {
+		return parent.ICalUID
+	}
+	return ""
 }
 
 // typeOf is an event's type, which Google defaults to "default".

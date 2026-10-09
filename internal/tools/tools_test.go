@@ -516,6 +516,9 @@ func TestEveryToolAnswers(t *testing.T) {
 		{"list_events", map[string]any{
 			"from": "2026-03-16", "to": "2026-03-17", "event_types": []string{"default"},
 		}, "only these event types: default"},
+		{"list_events", map[string]any{
+			"from": "2026-03-16", "to": "2026-03-17", "ical_uid": "AAAAnobody@example.test",
+		}, "No event with that UID was found"},
 		{"search_events", map[string]any{
 			"query": "sync", "from": "2026-03-16", "to": "2026-03-31",
 		}, "Morning sync"},

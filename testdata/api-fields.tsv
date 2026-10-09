@@ -38,7 +38,7 @@ Event	guestsCanModify	modeled	as guestsCanInviteOthers
 Event	guestsCanSeeOtherGuests	modeled	as guestsCanInviteOthers, and this one decides whether the guest list is visible at all
 Event	hangoutLink	out	read-only and superseded by conferenceData, which is modeled
 Event	htmlLink	modeled	the link a person opens to see the event in Calendar
-Event	iCalUID	modeled	accepted on lookup through events.list, never used as an address: one uid covers a whole series (§6.2)
+Event	iCalUID	modeled	accepted on lookup through events.list as list_events' ical_uid, never used as an address: one uid covers a whole series (§6.2, §18 row 94)
 Event	id	modeled	the address, and client-generated on insert so a retry is nearly idempotent (§2.11)
 Event	kind	out	a constant string naming the resource type; the code already knows what it asked for
 Event	location	modeled	content, renderer only (§9)

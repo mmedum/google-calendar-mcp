@@ -46,6 +46,9 @@ type Schedule struct {
 	// EventTypes is the type filter the read was made with, empty when it
 	// had none. A reader must know the list leaves the other types out.
 	EventTypes []string
+	// ICalUID is the UID filter the read was made with, empty when it
+	// had none.
+	ICalUID string
 }
 
 // Text renders a schedule.
@@ -65,12 +68,19 @@ func (s Schedule) Text() string {
 	if len(s.EventTypes) > 0 {
 		fmt.Fprintf(&b, "only these event types: %s\n", strings.Join(s.EventTypes, ", "))
 	}
+	if s.ICalUID != "" {
+		fmt.Fprintf(&b, "only the event with iCalendar UID %s\n", s.ICalUID)
+	}
 	b.WriteString("\n")
 
 	if len(s.Events) == 0 {
-		if len(s.EventTypes) > 0 {
+		switch {
+		case s.ICalUID != "":
+			b.WriteString("No event with that UID was found in that window. It may be on another calendar, " +
+				"or have moved outside the window.\n")
+		case len(s.EventTypes) > 0:
 			b.WriteString("No events of those types were found in that window.\n")
-		} else {
+		default:
 			b.WriteString("No events in that window.\n")
 		}
 		b.WriteString(s.footer())

@@ -792,9 +792,10 @@ the series id plus `original_start` (§4.2). The server accepts both and
 says which it used, because `originalStartTime` is the stable one:
 §2 confirms it identifies the instance even after the instance is moved.
 
-`iCalUID` is accepted on lookup (`events.list` takes it) and is never
-used as the primary address: one `iCalUID` is shared by every occurrence
-of a series, which is exactly the ambiguity §4.2 exists to remove.
+`iCalUID` is accepted on lookup — `list_events` takes it as `ical_uid`,
+sent to `events.list` — and is never used as the primary address: one
+`iCalUID` is shared by every occurrence of a series, which is exactly the
+ambiguity §4.2 exists to remove.
 
 ### 6.3 Referring to a time
 
@@ -884,6 +885,16 @@ before a request is spent. The result names the filter in both halves,
 so a short list is not read as the whole schedule. A page token carries
 the filter, and a continuation under another one is refused (§18 row
 89).
+
+`list_events` also takes `ical_uid`, the UID an invitation email
+carries, which is how a caller holding one from a mail server finds the
+event. Every occurrence of a series shares the series' UID, so the filter
+expanded returns each occurrence in the window, and as a series returns
+the series once. The window still applies, so a meeting moved outside
+it is not found, and the empty result says so. The reference names one
+parameter it cannot go with, `syncToken`, which `list_events` never
+sends. A page token carries the UID as it carries the type filter (§18
+row 94).
 
 `search_events` is `events.list` with `q`, fanned out across the named
 calendars. Its description states plainly that `q` is undocumented
@@ -2894,6 +2905,7 @@ what §15 exists to settle, and they are marked.
 | 91 | A read by modification time is a supported way to follow a calendar, and its sync token chains | Calendar discovery revision 20261005, read 2026-10-09: `updatedMin` "Lower bound for an event's last modification time (as a RFC3339 timestamp) to filter by. When specified, entries deleted since this time will always be included regardless of showDeleted"; `Event.updated` "Updating event reminders will not cause this to change"; `syncToken` lists `updatedMin` among the parameters that "cannot be specified together with nextSyncToken". The sync guide, read 2026-10-09: the legacy way "is no longer recommended as it is more error-prone with respect to missed updates". The errors guide: 410 `updatedMinTooLongAgo`, "The requested minimum modification time lies too far in the past" | **Refuted as the way to follow a calendar; kept as a one-off look back.** `list_changes` takes `updated_since` and sends it as `updatedMin`, refused alongside `sync_token` before a request is spent. Its description and its result say what it misses. A 410 under it names a later moment or a baseline as the cure. **Not yet probed, tier 3:** whether a read with `updatedMin` issues a sync token and whether that token chains, so the server hands back none; how far back Google allows; and whether the bound includes the moment itself. The fake includes it. The live driver reads the scratch calendar since an hour before the run and expects the seeded events and no token, and spike O asks the two open questions directly |
 | 92 | An optional guest is a quieter guest, and adding an address already on an event is a no-op worth no mention | Calendar discovery revision 20261005, read 2026-10-09: `EventAttendee.optional` "Whether this is an optional attendee. Optional. The default is False"; the reference says nothing about optional attendees and notifications | **Refuted for the first: nothing says Google mails an optional guest less, so one counts toward `notify` like any guest.** `create_event` takes `optional_guests` and `update_event` `add_optional_guests`; a room is refused there, and so is one address in two roles. **Refuted for the second:** an address the caller asks to add as optional that is already a required guest is a role change the server does not make, and skipping it in silence reads as done. The result now names every added address the event already had. **Not yet seen live, tier 3:** that Google keeps `optional: true` as sent. The live driver creates an event whose only optional guest is the account itself, which reaches nobody, and reads the role back |
 | 93 | An address arrives bare | RFC 5322 §3.4: `mailbox = name-addr / addr-spec`, so `"Sample Person" <person@example.com>` is one address; Calendar discovery revision 20261005, `EventAttendee.email` "must be a valid email address as per RFC5322"; Go `net/mail.ParseAddress` "parses a single RFC 5322 address" | **Refuted: a Gmail server returns the name-addr form, and the old check refused its space**, so a hand-off from mail to calendar failed. Every address input is now parsed as one mailbox and the bare address replaces it before the reach count, the request or the result reads it. A list in one entry is refused. Some strings the old check passed, such as two dots in a row, are now refused before a request rather than by Google. Nothing here depends on Google: it receives the bare address, as before. The live driver passes a mailbox to a dry run and checks the display name is not in the result |
+| 94 | `events.list` finds an event by its iCalendar UID, alongside a window | Calendar discovery revision 20261005, read 2026-10-09: `iCalUID` "Specifies an event ID in the iCalendar format to be provided in the response. Optional. Use this if you want to search for an event by its iCalendar ID"; `syncToken` lists `iCalUID` among the parameters that "cannot be specified together with nextSyncToken"; `Event.iCalUID` "in recurring events, all occurrences of one event have different ids while they all share the same iCalUIDs" | **Confirmed in the reference for the lookup and the sharing; the window is a belief.** `list_events` takes `ical_uid` and sends it as `iCalUID`. The reference forbids it only with a sync token. It says nothing about `timeMin` and `timeMax`, so that Google applies the window alongside it is **not yet seen live, tier 3**; the fake applies both. The live driver reads the UIDs Google gave the seeded timed event and weekly series, filters on each, and filters on the timed event's UID over a window that leaves its day out, expecting nothing |
 
 ### Deviations from the shared Go MCP server standard
 

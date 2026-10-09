@@ -346,6 +346,10 @@ type ListOptions struct {
 	// EventTypes keeps only events of these types. Empty means every
 	// type, which is what Google does when the filter is left out.
 	EventTypes []string
+	// ICalUID keeps only the event with this iCalendar UID, the one an
+	// invitation carries. Every occurrence of a series shares it. It is
+	// a filter within the window, never an address (§6.2).
+	ICalUID string
 	// MaxEvents overrides the configured budget.
 	MaxEvents int
 	PageToken string
@@ -361,6 +365,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		return render.Schedule{}, err
 	}
 	o.EventTypes = types
+	o.ICalUID = strings.TrimSpace(o.ICalUID)
 	refs := o.Calendars
 	if len(refs) == 0 {
 		refs = []string{"primary"}
@@ -401,7 +406,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		budget = s.Cfg.MaxEvents
 	}
 
-	resume, err := decodeCursor(o.PageToken, o.EventTypes)
+	resume, err := decodeCursor(o.PageToken, o.EventTypes, o.ICalUID)
 	if err != nil {
 		return render.Schedule{}, err
 	}
@@ -436,7 +441,9 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		perCalendar = 1
 	}
 
-	sched := render.Schedule{Window: win, Zone: zone, Expanded: o.Expand, EventTypes: o.EventTypes}
+	sched := render.Schedule{
+		Window: win, Zone: zone, Expanded: o.Expand, EventTypes: o.EventTypes, ICalUID: o.ICalUID,
+	}
 	for _, c := range cals {
 		sched.Calendars = append(sched.Calendars, c.Title)
 	}
@@ -473,7 +480,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 			next[cals[i].ID] = r.token
 		}
 	}
-	sched.NextPageToken = encodeCursor(next, o.EventTypes)
+	sched.NextPageToken = encodeCursor(next, o.EventTypes, o.ICalUID)
 
 	sort.Slice(sched.Events, func(i, j int) bool {
 		return sortKey(sched.Events[i]) < sortKey(sched.Events[j])
@@ -502,6 +509,7 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		ShowDeleted:  o.ShowCanceled,
 		TimeZone:     zone.Name(),
 		EventTypes:   o.EventTypes,
+		ICalUID:      o.ICalUID,
 		MaxResults:   250,
 		PageToken:    pageToken,
 	}
@@ -539,23 +547,24 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 // opaque string, so the tool schema is unchanged and a caller still just
 // passes back what it was given.
 //
-// It also holds the type filter the read was made with. Google resumes a
-// token only for the query that issued it, so a continuation with
-// another filter would skip or repeat rows while its result named the
-// new one.
+// It also holds the type and UID filters the read was made with. Google
+// resumes a token only for the query that issued it, so a continuation
+// with another filter would skip or repeat rows while its result named
+// the new one.
 type pageCursor struct {
 	V     int               `json:"v"`
 	Cals  map[string]string `json:"c"`
 	Types []string          `json:"t,omitempty"`
+	UID   string            `json:"u,omitempty"`
 }
 
 const pageCursorVersion = 1
 
-func encodeCursor(tokens map[string]string, types []string) string {
+func encodeCursor(tokens map[string]string, types []string, uid string) string {
 	if len(tokens) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(pageCursor{V: pageCursorVersion, Cals: tokens, Types: types})
+	b, err := json.Marshal(pageCursor{V: pageCursorVersion, Cals: tokens, Types: types, UID: uid})
 	if err != nil {
 		// Unreachable for a map of strings, and a lost token is better
 		// than a bad one: an empty cursor reads as "nothing more", which
@@ -566,8 +575,8 @@ func encodeCursor(tokens map[string]string, types []string) string {
 }
 
 // decodeCursor returns the per-calendar tokens, or nil for a first read.
-// It refuses a token issued under another type filter than types.
-func decodeCursor(tok string, types []string) (map[string]string, error) {
+// It refuses a token issued under another type or UID filter.
+func decodeCursor(tok string, types []string, uid string) (map[string]string, error) {
 	if strings.TrimSpace(tok) == "" {
 		return nil, nil
 	}
@@ -586,6 +595,11 @@ func decodeCursor(tok string, types []string) (map[string]string, error) {
 		return nil, gapi.Errf(gapi.ClassInvalid,
 			"that page_token was issued for event_types [%s], not [%s]. Pass the same event_types, or "+
 				"omit the token to start again", strings.Join(c.Types, ", "), strings.Join(types, ", "))
+	}
+	if c.UID != uid {
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for ical_uid %q, not %q. Pass the same ical_uid, or omit the "+
+				"token to start again", c.UID, uid)
 	}
 	return c.Cals, nil
 }

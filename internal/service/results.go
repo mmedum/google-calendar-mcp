@@ -175,7 +175,9 @@ type ScheduleResult struct {
 	Expanded   bool      `json:"recurring_expanded"`
 	// EventTypes echoes the type filter, absent when the read had none,
 	// so a caller can tell a short list from a filtered one.
-	EventTypes    []string   `json:"event_types,omitempty"`
+	EventTypes []string `json:"event_types,omitempty"`
+	// ICalUID echoes the UID filter, absent when the read had none.
+	ICalUID       string     `json:"ical_uid,omitempty"`
 	Events        []EventOut `json:"events"`
 	Shown         int        `json:"shown"`
 	Matched       int        `json:"matched"`
@@ -246,6 +248,7 @@ func NewScheduleResult(s render.Schedule) ScheduleResult {
 		Calendars:     s.Calendars,
 		Expanded:      s.Expanded,
 		EventTypes:    s.EventTypes,
+		ICalUID:       s.ICalUID,
 		Shown:         len(s.Events),
 		Matched:       s.Matched,
 		Truncated:     s.Truncated,

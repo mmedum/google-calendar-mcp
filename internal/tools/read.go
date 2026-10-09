@@ -58,6 +58,10 @@ func registerRead(s *mcp.Server, d Deps) {
 			"which is what you want before changing the whole series. " +
 			"Canceled events are hidden unless show_canceled is set. " +
 			"event_types keeps only some kinds of event, such as outOfOffice, and the result names the filter. " +
+			"ical_uid keeps only the event with that iCalendar UID, which is how to find the event an " +
+			"invitation email is about. Every occurrence of a repeating event shares one UID, so with expand you " +
+			"get each occurrence in the window. The window still applies: make it wide enough for a meeting " +
+			"that may have moved. " +
 			"Use search_events to find an event by text; use check_availability to find free time, because a list " +
 			"of events is not the same as being free.",
 		Kind: Read,
@@ -68,6 +72,7 @@ func registerRead(s *mcp.Server, d Deps) {
 				Expand:       !in.NoExpand,
 				ShowCanceled: in.ShowCanceled,
 				EventTypes:   in.EventTypes,
+				ICalUID:      in.ICalUID,
 				MaxEvents:    in.MaxEvents, PageToken: in.PageToken,
 			})
 			if err != nil {
@@ -244,6 +249,7 @@ type listEventsIn struct {
 	NoExpand     bool     `json:"no_expand,omitempty" jsonschema:"Return repeating events once as a series with its rule, instead of as each occurrence."`
 	ShowCanceled bool     `json:"show_canceled,omitempty" jsonschema:"Include canceled events, which are hidden by default."`
 	EventTypes   []string `json:"event_types,omitempty" jsonschema:"Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type."`
+	ICalUID      string   `json:"ical_uid,omitempty" jsonschema:"Only the event with this iCalendar UID, such as the UID an invitation email carries. Every occurrence of a repeating event shares it."`
 	MaxEvents    int      `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
 	PageToken    string   `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
 }
