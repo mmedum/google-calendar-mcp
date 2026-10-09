@@ -309,6 +309,10 @@ type Change struct {
 // request. Whether such a no-op would ALSO move the etag under everybody
 // else holding one is unprobed for events: it was assumed here, and the
 // live run refuted it for calendars (§18 row 58).
+//
+// A status event comes out of the patch in a shape Google takes, or the
+// patch is refused before anything is sent. A split builds its new series
+// with this too, so the series is checked before the truncate.
 func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 	var p gcal.EventPatch
 	var changes []Change
@@ -429,6 +433,9 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 		}
 	}
 
+	if err := statusPatch(before, p); err != nil {
+		return gcal.EventPatch{}, nil, err
+	}
 	if len(changes) == 0 && len(d.AlreadyOn(before.Attendees)) > 0 {
 		return gcal.EventPatch{}, nil, fmt.Errorf(
 			"%w: nothing to change — every address given is already on the event. Adding an address "+

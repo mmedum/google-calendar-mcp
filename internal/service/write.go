@@ -945,13 +945,29 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 				"that way, add one to the new series with update_event, add_conference and scope:series.")
 	}
 
+	shown, err := model.FromEvent(env.cal.ID, newBody, &env.zone)
+	if err != nil {
+		return render.WriteReport{}, err
+	}
+	// The new series is a new status event, so it declines what create's
+	// would, and the result says so.
+	if n := autoDeclineNote(shown.StatusDetails); n != "" {
+		report.Notes = append(report.Notes, n)
+	}
+
 	if o.DryRun {
-		after, cerr := model.FromEvent(env.cal.ID, newBody, &env.zone)
-		if cerr != nil {
-			return render.WriteReport{}, cerr
-		}
-		report.After, report.Requests = &after, gapi.Requests(ctx)
+		report.After, report.Requests = &shown, gapi.Requests(ctx)
 		return report, nil
+	}
+	// Asked before the truncate, as create_event asks before its insert:
+	// whether Google declines again for a series it already declined for
+	// is not probed (§18 row 88), so the new one is treated as new (§9a).
+	if d := shown.StatusDetails; d != nil && d.AutoDecline == autoDeclineAll {
+		if err := ask(ctx, render.AskDecline(render.Decline{
+			CalendarID: env.cal.ID, Calendar: env.cal.Title, Event: shown, Zone: env.zone, Split: true,
+		})); err != nil {
+			return render.WriteReport{}, err
+		}
 	}
 
 	// Truncate first. If the insert then fails, the caller has a series

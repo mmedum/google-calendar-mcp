@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A room's address given as a guest no longer counts as a guest outside your organization, so `notify: none` is allowed on an event whose only guest is a room, when it is created and on every write after. The room is booked as a resource.
 - `check_availability` answers for a group's address: its members' busy time together, with how many calendars it covers, up to Google's 100. It reported every group unknown. A group with a member that cannot be read, or one Google cannot expand, is still unknown, never free. An answer for a group carries `group: true`.
 - `update_event` counts the guests it adds. Adding a guest to an event that had none now asks for `notify`, and `notify: none` is refused for a guest outside your organization; both went through before.
-- `update_event` with `scope: this_and_following` keeps the series' attachments, label, other apps' extended properties and a status event's details on the new series. They were dropped, so a working-location series was sent to Google without the details it needs to create one.
+- `update_event` with `scope: this_and_following` keeps the series' attachments, label, other apps' extended properties and a status event's details on the new series. They were dropped, so a working-location series was sent to Google without the details it needs to create one. A change to a status event, at any scope or through a split, is now held to Google's rules for one before anything is written; a split used to cut the series short and then be refused. A split whose new series declines every overlapping meeting asks you first, as `create_event` does, and a dry run shows it.
 
 ### Security
 

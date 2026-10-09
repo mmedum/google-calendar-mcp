@@ -93,6 +93,18 @@ func fixtures(t *testing.T) *caltest.Server {
 		"2026-03-24T14:00:00+01:00", "2026-03-24T15:00:00+01:00", tz, "2026-03-24T14:00:00+01:00")
 	withGuests(occurrence)
 	fake.AddEvent("me@example.test", occurrence)
+
+	// An out-of-office series that declines every meeting it overlaps,
+	// and one of its occurrences.
+	away := caltest.Recurring("evaway00001", "Away", "2026-03-17T09:00:00+01:00", "2026-03-17T17:00:00+01:00",
+		tz, "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4")
+	away.EventType, away.Transparency = gcal.EventTypeOutOfOffice, gcal.TransparencyOpaque
+	away.OutOfOfficeProperties = gcal.Raw(gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll})
+	fake.AddEvent("me@example.test", away)
+	awayOn := caltest.Instance("evaway00001_20260331T070000Z", "evaway00001", "Away",
+		"2026-03-31T09:00:00+02:00", "2026-03-31T17:00:00+02:00", tz, "2026-03-31T09:00:00+02:00")
+	awayOn.EventType = gcal.EventTypeOutOfOffice
+	fake.AddEvent("me@example.test", awayOn)
 	return fake
 }
 
@@ -186,6 +198,15 @@ var askCases = map[string]askCase{
 			"decline every meeting it overlaps?", "starts 2026-03-18 09:00-17:00 Europe/Copenhagen",
 			"That includes meetings you already accepted.", "Each organizer gets your message: `Back on Thursday`"},
 	},
+	"update_event": {
+		args: map[string]any{"calendar": "primary", "event_id": "evaway00001_20260331T070000Z",
+			"scope": "this_and_following", "end": "2026-03-31T19:00:00+02:00"},
+		method: "insert", target: "me@example.test",
+		shows: []string{"update_event: split the out-of-office event `Away` on your primary calendar `Sample " +
+			"Primary`, so this occurrence and every later one become a new series that declines every meeting " +
+			"it overlaps?", "the series starts 2026-03-31 09:00-19:00 Europe/Copenhagen",
+			"That includes meetings you already accepted."},
+	},
 	"cancel_event": {
 		args:   map[string]any{"calendar": "primary", "event_id": "evguests001", "notify": "all"},
 		method: "delete", target: "evguests001",
@@ -250,10 +271,10 @@ func TestEveryAskingWriteWaitsForThePerson(t *testing.T) {
 }
 
 // Every tool that takes confirm asks, as do share_calendar,
-// cancel_event and create_event; the confirm half of the list is read
-// from the published schemas, not typed out.
+// cancel_event, create_event and update_event; the confirm half of the
+// list is read from the published schemas, not typed out.
 func TestEveryToolThatTakesConfirmAsks(t *testing.T) {
-	want := map[string]bool{"share_calendar": true, "cancel_event": true, "create_event": true}
+	want := map[string]bool{"share_calendar": true, "cancel_event": true, "create_event": true, "update_event": true}
 	registered := map[string]bool{}
 	for _, tool := range listTools(t, everything()) {
 		registered[tool.Name] = true
@@ -267,7 +288,7 @@ func TestEveryToolThatTakesConfirmAsks(t *testing.T) {
 			t.Errorf("%s: an asking case %v, and its description says it asks %v", tool.Name, ok, asks)
 		}
 	}
-	if len(want) < 4 {
+	if len(want) < 6 {
 		t.Fatalf("found %d asking tools; the schemas were not read", len(want))
 	}
 	for name := range want {

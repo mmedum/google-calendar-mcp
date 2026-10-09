@@ -148,13 +148,17 @@ func AskCancel(c Cancel) Question {
 		c.CalendarID, c.Event.ID, c.Scope, string(c.Decision.Notify), strings.Join(slices.Sorted(slices.Values(c.Guests)), "\x00"))
 }
 
-// Decline is a create_event making a status event that declines every
-// meeting it overlaps, the ones already accepted too.
+// Decline is a status event about to be made that declines every meeting
+// it overlaps, the ones already accepted too: by create_event, or as the
+// new series of an update_event split.
 type Decline struct {
 	CalendarID, Calendar string
 	// Event is the event as it would be created.
 	Event model.Event
 	Zone  when.Zone
+	// Split is an update_event this_and_following, whose later
+	// occurrences become this new series.
+	Split bool
 }
 
 // AskDecline asks before a status event that declines every meeting it
@@ -168,11 +172,14 @@ func AskDecline(d Decline) Question {
 	if d.Event.IsSeries() {
 		starts = "the series starts "
 	}
-	lines := []string{
-		fmt.Sprintf("create_event: add %s %s to your primary calendar %s, and decline every meeting it overlaps?",
-			what, quoted(d.Event.Title), quoted(d.Calendar)),
-		starts + startsAt(d.Event, d.Zone),
+	first := fmt.Sprintf("create_event: add %s %s to your primary calendar %s, and decline every meeting it overlaps?",
+		what, quoted(d.Event.Title), quoted(d.Calendar))
+	if d.Split {
+		first = fmt.Sprintf("update_event: split %s %s on your primary calendar %s, so this occurrence and every "+
+			"later one become a new series that declines every meeting it overlaps?",
+			what, quoted(d.Event.Title), quoted(d.Calendar))
 	}
+	lines := []string{first, starts + startsAt(d.Event, d.Zone)}
 	if d.Event.IsSeries() {
 		lines = append(lines, "It repeats "+Recurrence(d.Event.Recurrence)+", and declines on every occurrence.")
 	}

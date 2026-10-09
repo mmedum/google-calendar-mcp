@@ -212,7 +212,8 @@ none.
   before it deletes or clears a calendar, publishes one, opens one to a
   whole domain, makes somebody an owner, cancels an event in a way that
   emails its guests, or makes an out-of-office or focus-time event that
-  declines every meeting it overlaps. Only your Accept lets the write go ahead;
+  declines every meeting it overlaps, the new series of a split included.
+  Only your Accept lets the write go ahead;
   anything else is `[blocked]`. A client that cannot ask gets no
   question, unless `GCAL_REQUIRE_PROMPT=true`, which refuses those
   writes instead.

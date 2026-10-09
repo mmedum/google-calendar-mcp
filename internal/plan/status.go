@@ -12,7 +12,8 @@ import (
 
 // Status asks for a status event (§7.4): out of office, focus time or a
 // working location. Insert only, because Google does not let an event's
-// type change after it is made.
+// type change after it is made; a patch or a split of one is held to the
+// same shapes by statusPatch.
 //
 // The fields are the caller's words. The rules they are held to are
 // Google's, from its status-events guide, and the guards on what Google
@@ -88,39 +89,100 @@ func (s Status) apply(e *gcal.Event, d Draft) error {
 		return fmt.Errorf("%w: %s can only go on your primary calendar; Google does not allow one on any "+
 			"other. Leave calendar out, or pass primary", ErrUnsupported, what)
 	}
-	// Not documented either way, so not sent until a live probe shows
-	// what Google does with them (§18 row 99).
+	if err := d.statusGuests(what); err != nil {
+		return err
+	}
+	// Held as the caller sent it, before the server sets the busy status
+	// and visibility Google requires: a value the caller gave that Google
+	// refuses is refused rather than overridden.
+	e.EventType = kind
+	if err := shape(*e); err != nil {
+		return err
+	}
+	if kind == gcal.EventTypeWorkingLocation {
+		return s.working(e)
+	}
+	return s.away(e, kind, what)
+}
+
+// statusGuests refuses guests, rooms and a Meet link on a status event,
+// new or existing. Google documents nothing about them there, so nothing
+// is sent until a live probe shows what it does (§18 row 99).
+func (d Draft) statusGuests(what string) error {
 	if len(d.Invites()) > 0 || d.Conference {
 		return fmt.Errorf("%w: this server does not put guests, rooms or a Meet link on %s: what Google "+
 			"does with them there is not yet checked. Create an ordinary event for a meeting", ErrBlocked, what)
 	}
-	allDay := e.Start != nil && e.Start.IsAllDay()
-	switch kind {
-	case gcal.EventTypeOutOfOffice, gcal.EventTypeFocusTime:
-		err = s.away(e, d, kind, what, allDay)
-	default:
-		err = s.working(e, d, allDay)
+	return nil
+}
+
+// shape refuses a status event as it would stand after a write, in a
+// shape Google's guide refuses: made by create_event, or changed by a
+// patch or a split. It reads the event, not the call, so a split's new
+// series is held to the same rules as a new event. An event of any other
+// type passes.
+func shape(e gcal.Event) error {
+	what, ok := statusNames[e.EventType]
+	if !ok {
+		return nil
 	}
-	if err != nil {
+	allDay := e.Start != nil && e.Start.IsAllDay()
+	switch e.EventType {
+	case gcal.EventTypeOutOfOffice, gcal.EventTypeFocusTime:
+		// "Out of office events cannot be all-day events", and "Focus
+		// times cannot be all-day events."
+		if allDay {
+			return fmt.Errorf("%w: %s cannot be all day; Google refuses one. Pass start and end as times, "+
+				"such as the whole working day", ErrUnsupported, what)
+		}
+		// Both need transparency opaque.
+		if e.Transparency == gcal.TransparencyTransparent {
+			return fmt.Errorf("%w: %s always shows you as busy; Google requires it. Leave out free_not_busy",
+				ErrInvalid, what)
+		}
+	case gcal.EventTypeWorkingLocation:
+		// "An all-day event (with start and end dates specified) which
+		// spans exactly one day." Google's end is the day after.
+		if allDay && e.End != nil {
+			from, ferr := when.ParseDate(e.Start.Date)
+			to, terr := when.ParseDate(e.End.Date)
+			if ferr == nil && terr == nil && to != from.AddDays(1) {
+				return fmt.Errorf("%w: an all-day working location covers exactly one day; Google refuses more. "+
+					"Pass the same date as start and end, or pass times, which may span days", ErrUnsupported)
+			}
+		}
+		// It needs visibility public and transparency transparent.
+		if e.Visibility != "" && e.Visibility != gcal.VisibilityPublic {
+			return fmt.Errorf("%w: a working location is always public; Google requires it. Leave out "+
+				"visibility", ErrInvalid)
+		}
+		if e.Transparency == gcal.TransparencyOpaque {
+			return fmt.Errorf("%w: a working location always shows you free; Google requires it. Leave out "+
+				"free_not_busy", ErrInvalid)
+		}
+	}
+	return nil
+}
+
+// statusPatch holds a patch of a status event to the shapes a new one is
+// held to, since Google says an update "must maintain the required
+// fields". A rule the event already broke when it was read is left to
+// Google, so a write that does not cause the break is not refused for
+// it.
+func statusPatch(before gcal.Event, p gcal.EventPatch) error {
+	if _, ok := statusNames[before.EventType]; !ok {
+		return nil
+	}
+	after := before
+	p.ApplyTo(&after)
+	if err := shape(after); err != nil && shape(before) == nil {
 		return err
 	}
-	e.EventType = kind
 	return nil
 }
 
 // away fills in an out-of-office or focus-time event.
-func (s Status) away(e *gcal.Event, d Draft, kind, what string, allDay bool) error {
-	// "Out of office events cannot be all-day events", and "Focus
-	// times cannot be all-day events."
-	if allDay {
-		return fmt.Errorf("%w: %s cannot be all day; Google refuses one. Pass start and end as times, "+
-			"such as the whole working day", ErrUnsupported, what)
-	}
-	// Both need transparency opaque.
-	if d.Transparent != nil && *d.Transparent {
-		return fmt.Errorf("%w: %s always shows you as busy; Google requires it. Leave out free_not_busy",
-			ErrInvalid, what)
-	}
+func (s Status) away(e *gcal.Event, kind, what string) error {
 	if s.WorkingLocation != "" || s.Label != "" {
 		return fmt.Errorf("%w: working_location and working_location_label belong to a working location, "+
 			"not to %s", ErrInvalid, what)
@@ -164,28 +226,13 @@ func (s Status) away(e *gcal.Event, d Draft, kind, what string, allDay bool) err
 }
 
 // working fills in a working-location event.
-func (s Status) working(e *gcal.Event, d Draft, allDay bool) error {
+func (s Status) working(e *gcal.Event) error {
 	switch {
 	case s.AutoDecline != "" || s.DeclineMessage != "":
 		return fmt.Errorf("%w: a working location declines nothing, so auto_decline and decline_message "+
 			"do not go with it", ErrInvalid)
 	case s.ChatStatus != "":
 		return fmt.Errorf("%w: chat_status belongs to focus time, not to a working location", ErrInvalid)
-	}
-	// "An all-day event (with start and end dates specified) which spans
-	// exactly one day." Google's end is the day after.
-	if allDay && e.End != nil {
-		from, ferr := when.ParseDate(e.Start.Date)
-		to, terr := when.ParseDate(e.End.Date)
-		if ferr == nil && terr == nil && to != from.AddDays(1) {
-			return fmt.Errorf("%w: an all-day working location covers exactly one day; Google refuses more. "+
-				"Pass the same date as start and end, or pass times, which may span days", ErrUnsupported)
-		}
-	}
-	// It needs visibility public and transparency transparent.
-	if d.Visibility != nil && strings.ToLower(strings.TrimSpace(*d.Visibility)) != gcal.VisibilityPublic {
-		return fmt.Errorf("%w: a working location is always public; Google requires it. Leave out "+
-			"visibility", ErrInvalid)
 	}
 	v := strings.TrimSpace(s.WorkingLocation)
 	if v == "" {

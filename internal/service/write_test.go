@@ -2301,3 +2301,190 @@ func TestDecliningEveryMeetingIsPutToThePerson(t *testing.T) {
 		t.Fatalf("got writes %+v, want one insert", w)
 	}
 }
+
+// counting is a person who confirms every question and keeps them.
+type counting struct{ asked *[]render.Question }
+
+func (c counting) Ask(_ context.Context, q render.Question) error {
+	*c.asked = append(*c.asked, q)
+	return nil
+}
+
+// statusSeries puts a weekly status series of four Tuesdays from 17 March
+// on the primary calendar, with the occurrence of 31 March. A timed one
+// runs 09:00 to 17:00 in Copenhagen; an all-day one is one day.
+func statusSeries(t *testing.T, fake *caltest.Server, id, eventType string, block any, allDay bool) string {
+	t.Helper()
+	const tz = "Europe/Copenhagen"
+	var series, occ *gcal.Event
+	occID := id + "_20260331T070000Z"
+	if allDay {
+		occID = id + "_20260331"
+		series = caltest.AllDay(id, "Status", "2026-03-17", "2026-03-18")
+		occ = caltest.AllDay(occID, "Status", "2026-03-31", "2026-04-01")
+		occ.OriginalStartTime = &gcal.EventDateTime{Date: "2026-03-31"}
+	} else {
+		series = caltest.Timed(id, "Status", "2026-03-17T09:00:00+01:00", "2026-03-17T17:00:00+01:00", tz)
+		occ = caltest.Instance(occID, id, "Status", "2026-03-31T09:00:00+02:00", "2026-03-31T17:00:00+02:00",
+			tz, "2026-03-31T09:00:00+02:00")
+	}
+	series.Recurrence = []string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"}
+	occ.RecurringEventID = id
+	for _, e := range []*gcal.Event{series, occ} {
+		e.EventType = eventType
+		switch eventType {
+		case gcal.EventTypeWorkingLocation:
+			e.Transparency, e.Visibility = gcal.TransparencyTransparent, gcal.VisibilityPublic
+			e.WorkingLocationProperties = gcal.Raw(block)
+		case gcal.EventTypeFocusTime:
+			e.Transparency = gcal.TransparencyOpaque
+			e.FocusTimeProperties = gcal.Raw(block)
+		default:
+			e.Transparency = gcal.TransparencyOpaque
+			e.OutOfOfficeProperties = gcal.Raw(block)
+		}
+		fake.AddEvent("me@example.test", e)
+	}
+	return occID
+}
+
+// A split of an out-of-office series that declines every meeting makes
+// a new series that declines them too, so it is put to the person before
+// the truncate, as create_event's is. A dry run says it and asks nothing.
+func TestASplitThatDeclinesEveryMeetingIsPutToThePerson(t *testing.T) {
+	svc, fake := writeSeed(t)
+	occ := statusSeries(t, fake, "evaway00001", gcal.EventTypeOutOfOffice,
+		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll}, false)
+	o := service.UpdateOptions{
+		Calendar: "primary", EventID: occ, Scope: "this_and_following", End: "2026-03-31T19:00:00+02:00",
+	}
+
+	_, err := svc.UpdateEvent(context.Background(), o)
+	if got := classOf(t, err); got != gapi.ClassBlocked {
+		t.Fatalf("got [%s] %v, want [blocked] with no way to ask", got, err)
+	}
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Fatalf("a decline nobody confirmed was written: %+v", w)
+	}
+
+	var asked []render.Question
+	ctx := service.WithAsker(context.Background(), counting{&asked})
+	dry := o
+	dry.DryRun = true
+	out, err := svc.UpdateEvent(ctx, dry)
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if !strings.Contains(out.Text(), "Google declines every meeting this overlaps, including the ones you already "+
+		"accepted") || len(asked) != 0 || len(fake.Wrote()) != 0 {
+		t.Fatalf("the dry run asked %d times, wrote %d times, or did not say what it declines:\n%s",
+			len(asked), len(fake.Wrote()), out.Text())
+	}
+
+	if _, err := svc.UpdateEvent(ctx, o); err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	if len(asked) != 1 || !strings.HasPrefix(asked[0].Text, "update_event: split the out-of-office event `Status`") {
+		t.Fatalf("asked %d times: %+v", len(asked), asked)
+	}
+	if w := fake.Wrote(); len(w) != 2 || w[0].Method != "patch" || w[1].Method != "insert" {
+		t.Fatalf("got writes %+v, want a truncate and an insert", w)
+	}
+}
+
+// A split that declines less asks nothing: only all is put to the person.
+func TestASplitThatDeclinesOnlyNewInvitationsAsksNothing(t *testing.T) {
+	svc, fake := writeSeed(t)
+	occ := statusSeries(t, fake, "evaway00002", gcal.EventTypeOutOfOffice,
+		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineNew}, false)
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: occ, Scope: "this_and_following", Title: strptr("Away"),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	if !strings.Contains(out.Text(), "Google declines each invitation for this time that arrives while it stands") {
+		t.Errorf("the result does not say what the new series declines:\n%s", out.Text())
+	}
+	if w := fake.Wrote(); len(w) != 2 {
+		t.Fatalf("got writes %+v, want a truncate and an insert", w)
+	}
+}
+
+// A write that would leave a status event in a shape Google refuses is
+// refused before anything is sent: for a split, before the truncate,
+// because a refusal after it leaves the series cut short.
+func TestAStatusEventIsHeldToGooglesRulesOnEveryWrite(t *testing.T) {
+	away := gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineNone}
+	focus := gcal.EventFocusTimeProperties{AutoDeclineMode: gcal.AutoDeclineNone}
+	home := gcal.EventWorkingLocationProperties{Type: gcal.WorkingHome, HomeOffice: json.RawMessage(`{}`)}
+	for _, tc := range []struct {
+		name, eventType string
+		block           any
+		allDay          bool
+		scope           string
+		change          func(*service.UpdateOptions)
+		class           gapi.Class
+		says            string
+	}{
+		{"free out of office, split", gcal.EventTypeOutOfOffice, away, false, "this_and_following",
+			func(o *service.UpdateOptions) { o.Transparent = boolptr(true) },
+			gapi.ClassInvalid, "an out-of-office event always shows you as busy"},
+		{"free out of office, whole series", gcal.EventTypeOutOfOffice, away, false, "series",
+			func(o *service.UpdateOptions) { o.Transparent = boolptr(true) },
+			gapi.ClassInvalid, "an out-of-office event always shows you as busy"},
+		{"free out of office, one occurrence", gcal.EventTypeOutOfOffice, away, false, "instance",
+			func(o *service.UpdateOptions) { o.Transparent = boolptr(true) },
+			gapi.ClassInvalid, "an out-of-office event always shows you as busy"},
+		{"all-day focus time, split", gcal.EventTypeFocusTime, focus, false, "this_and_following",
+			func(o *service.UpdateOptions) { o.Start, o.End = "2026-03-31", "2026-03-31" },
+			gapi.ClassUnsupported, "focus time cannot be all day"},
+		{"a private working location, split", gcal.EventTypeWorkingLocation, home, false, "this_and_following",
+			func(o *service.UpdateOptions) { o.Visibility = strptr("private") },
+			gapi.ClassInvalid, "a working location is always public"},
+		{"a busy working location, whole series", gcal.EventTypeWorkingLocation, home, false, "series",
+			func(o *service.UpdateOptions) { o.Transparent = boolptr(false) },
+			gapi.ClassInvalid, "a working location always shows you free"},
+		{"a two-day working location, split", gcal.EventTypeWorkingLocation, home, true, "this_and_following",
+			func(o *service.UpdateOptions) { o.End = "2026-04-01" },
+			gapi.ClassUnsupported, "covers exactly one day"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, fake := writeSeed(t)
+			occ := statusSeries(t, fake, "evstatus001", tc.eventType, tc.block, tc.allDay)
+			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope, Notify: "none"}
+			tc.change(&o)
+			_, err := svc.UpdateEvent(context.Background(), o)
+			if got := classOf(t, err); got != tc.class || !strings.Contains(err.Error(), tc.says) {
+				t.Fatalf("got [%s] %v, want [%s] saying %q", got, err, tc.class, tc.says)
+			}
+			if w := fake.Wrote(); len(w) != 0 {
+				t.Fatalf("the refusal came after %d writes: %+v", len(w), w)
+			}
+		})
+	}
+}
+
+// A change a status event can take goes through: a later end on one
+// occurrence, and a new title on the whole of a working location.
+func TestAStatusEventTakesTheChangesGoogleAllows(t *testing.T) {
+	svc, fake := writeSeed(t)
+	occ := statusSeries(t, fake, "evstatus002", gcal.EventTypeOutOfOffice,
+		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineNone}, false)
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: occ, Scope: "instance", End: "2026-03-31T18:00:00+02:00",
+	}); err != nil {
+		t.Fatalf("a later end: %v", err)
+	}
+	office := statusSeries(t, fake, "evstatus003", gcal.EventTypeWorkingLocation,
+		gcal.EventWorkingLocationProperties{Type: gcal.WorkingCustom,
+			CustomLocation: &gcal.WorkingLocationCustom{Label: "Library"}}, true)
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: office, Scope: "series", Title: strptr("Library day"),
+	}); err != nil {
+		t.Fatalf("a new title: %v", err)
+	}
+	if w := fake.Wrote(); len(w) != 2 {
+		t.Fatalf("got writes %+v, want two patches", w)
+	}
+}

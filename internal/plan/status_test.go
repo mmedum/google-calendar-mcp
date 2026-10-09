@@ -164,3 +164,26 @@ func TestAStatusEventGoogleWouldRefuseIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A patch is held to the rule it would break. A rule the event already
+// broke when it was read is Google's to enforce, so a change that does
+// not touch it is not refused for it.
+func TestAPatchIsHeldToTheStatusRuleItWouldBreak(t *testing.T) {
+	away := gcal.Event{
+		ID: "abcde12345", EventType: gcal.EventTypeOutOfOffice, Transparency: gcal.TransparencyOpaque,
+		Start:                 &gcal.EventDateTime{DateTime: "2026-04-01T09:00:00+02:00", TimeZone: "Europe/Copenhagen"},
+		End:                   &gcal.EventDateTime{DateTime: "2026-04-01T17:00:00+02:00", TimeZone: "Europe/Copenhagen"},
+		OutOfOfficeProperties: []byte(`{"autoDeclineMode":"declineNone"}`),
+	}
+	_, _, err := plan.Patch(away, plan.Draft{Transparent: ptr(true)})
+	if !errors.Is(err, plan.ErrInvalid) || !strings.Contains(err.Error(), "always shows you as busy") {
+		t.Fatalf("free on out of office: got %v", err)
+	}
+
+	read := away
+	read.Start = &gcal.EventDateTime{Date: "2026-04-01"}
+	read.End = &gcal.EventDateTime{Date: "2026-04-02"}
+	if _, _, err := plan.Patch(read, plan.Draft{Title: ptr("Away")}); err != nil {
+		t.Fatalf("a new title on an all-day out-of-office event as read: %v", err)
+	}
+}
