@@ -31,6 +31,11 @@ type Calendar struct {
 	// Conference is which conference types this calendar accepts, nil
 	// when Google said nothing about it — which is not a refusal (§17.3).
 	Conference *gcal.ConferenceProperties
+	// DefaultReminders are the reminders this account gets for an event
+	// on this calendar that uses the calendar's own. Nil when the
+	// calendar was read as a resource rather than from this account's
+	// list, which is the only place Google keeps them.
+	DefaultReminders *Reminders
 	// No etag, deliberately. A calendar is TWO resources — itself and
 	// this user's subscription to it — with an etag each, and a single
 	// field here carried whichever read had produced the value: the
@@ -49,7 +54,8 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 		ID: e.ID, Title: e.Summary, TimeZone: e.TimeZone, Role: e.AccessRole,
 		Primary: e.Primary, Selected: e.Selected, Hidden: e.Hidden,
 		ColorID: e.ColorID, Description: e.Description,
-		Conference: e.ConferenceProperties,
+		Conference:       e.ConferenceProperties,
+		DefaultReminders: remindersFrom(false, e.DefaultReminders),
 	}
 	// A rename is this user's alone: the same calendar has a different
 	// name for a colleague, so both are carried and the renderer says so.
@@ -162,6 +168,16 @@ type Event struct {
 	OriginalStart When
 
 	Transparent bool
+	// Visibility is Google's value as it came, empty for the default.
+	Visibility string
+	// Reminders are this account's own for this event, nil when Google
+	// sent none.
+	Reminders *Reminders
+	// What a guest may do, with Google's defaults filled in: a guest can
+	// invite others and see the guest list, and cannot change the event.
+	GuestsCanModify         bool
+	GuestsCanInviteOthers   bool
+	GuestsCanSeeOtherGuests bool
 	// Conference is the event's video meeting, if it has one: the link
 	// to join, or the fact that Google is still making it (§17.3).
 	Conference gcal.Conference
@@ -183,6 +199,40 @@ type Attachment struct {
 	FileID   string
 	URL      string
 	MimeType string
+}
+
+// Reminders are when this account is reminded of an event. Google keeps
+// them per person, so a guest has their own.
+type Reminders struct {
+	// Default says the calendar's own reminders apply, and Popup and
+	// Email are then empty.
+	Default bool
+	// Popup and Email are minutes before the start, ascending. Both
+	// empty, and not Default, means no reminders at all.
+	Popup []int
+	Email []int
+}
+
+// remindersFrom reads Google's reminder fields. A method Google no
+// longer publishes, such as the retired sms, is left out.
+func remindersFrom(useDefault bool, overrides []gcal.EventReminder) *Reminders {
+	r := &Reminders{Default: useDefault}
+	for _, o := range overrides {
+		switch o.Method {
+		case gcal.ReminderPopup:
+			r.Popup = append(r.Popup, o.Minutes)
+		case gcal.ReminderEmail:
+			r.Email = append(r.Email, o.Minutes)
+		}
+	}
+	sort.Ints(r.Popup)
+	sort.Ints(r.Email)
+	return r
+}
+
+// Private reports whether only the event's guests see its details.
+func (e Event) Private() bool {
+	return e.Visibility == gcal.VisibilityPrivate || e.Visibility == gcal.VisibilityConfidential
 }
 
 // IsSeries reports whether this is a recurring parent.
@@ -291,8 +341,16 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		Recurrence: e.Recurrence, SeriesID: e.RecurringEventID,
 		EndInvented:        e.EndTimeUnspecified,
 		Transparent:        e.Transparency == gcal.TransparencyTransparent,
+		Visibility:         e.Visibility,
 		Conference:         gcal.ReadConference(e.ConferenceData),
 		AttendeesTruncated: e.AttendeesOmitted,
+		// Google's published defaults: false, true and true.
+		GuestsCanModify:         e.GuestsCanModify,
+		GuestsCanInviteOthers:   e.GuestsCanInviteOthers == nil || *e.GuestsCanInviteOthers,
+		GuestsCanSeeOtherGuests: e.GuestsCanSeeOtherGuests == nil || *e.GuestsCanSeeOtherGuests,
+	}
+	if e.Reminders != nil {
+		out.Reminders = remindersFrom(e.Reminders.UseDefault, e.Reminders.Overrides)
 	}
 	var err error
 	if out.Start, err = ParseWhen(e.Start, zone); err != nil {

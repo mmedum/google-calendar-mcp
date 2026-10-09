@@ -808,8 +808,9 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 		return CalendarResult{}, err
 	}
 	out := CalendarResult{
-		Calendar:    NewCalendarsResult([]model.Calendar{c}).Calendars[0],
-		Description: c.Description,
+		Calendar:         NewCalendarsResult([]model.Calendar{c}).Calendars[0],
+		Description:      c.Description,
+		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders),
 	}
 	if !s.Cfg.Sharing {
 		out.Note = "Sharing tools are off in this server (GCAL_SHARING=off), so the sharing list was not read."

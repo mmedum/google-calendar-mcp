@@ -870,7 +870,8 @@ The zone is on this result specifically so the zone-resolution order of
 §4.1 can be followed without a second call.
 
 `get_calendar` adds the description, the sharing exposure (§7.6) and the
-default reminders.
+default reminders, which only the caller's own calendar list carries: a
+calendar read by id without a subscription shows none.
 
 ### 7.2 Reading events
 
@@ -994,6 +995,32 @@ reach count sees the domain the address has, not the bracket after it.
 The display name goes nowhere: not to Google, not to a result, not to a
 log. One entry holds one address; a list in one string is refused rather
 than split (§18 row 93).
+
+**Reminders are the caller's own, so changing them reaches nobody.**
+Google documents `reminders` as "the event's reminders for the
+authenticated user", and a change to them does not move the event's
+`updated`. `create_event` and `update_event` take `popup_reminders` and
+`email_reminders`, in minutes before the start, and `default_reminders`
+to go back to the calendar's own. Either list replaces the whole set, and
+an empty one given alone means none. The limits are Google's: 0 to 40320
+minutes, five in all. A patch merges an object into the one there, so
+`overrides` is always sent, null when there are none, and the old ones
+cannot survive under a new `useDefault`. An update that changes only
+reminders needs no `notify` and sends no `sendUpdates`, whatever the
+guest list; the result says why. Every event read carries the
+caller's reminders, and `get_calendar` lists the calendar's defaults.
+
+**Visibility and the guests' permissions are the event's.** `visibility`
+is `default`, `public` or `private`. `confidential` is refused with what
+to pass instead, because Google documents it as "The event is private"
+and keeps it for compatibility; a read shows it as it came. On one
+occurrence Google ignores a less restrictive visibility and applies a
+more restrictive one to every occurrence, so the first is refused before
+a request and the second is made and the result says the whole series
+changed. `guests_can_modify`, `guests_can_invite_others` and
+`guests_can_see_other_guests` are set as given; `get_event` shows all
+three with Google's defaults filled in. These reach the guests like any
+other change to the event (§18 row 97).
 
 `respond_to_event` sets the caller's own `responseStatus` and comment. It
 is separate from `update_event` because RSVPing is not editing, the
@@ -2923,6 +2950,7 @@ what §15 exists to settle, and they are marked.
 | 94 | `events.list` finds an event by its iCalendar UID, alongside a window | Calendar discovery revision 20261005, read 2026-10-09: `iCalUID` "Specifies an event ID in the iCalendar format to be provided in the response. Optional. Use this if you want to search for an event by its iCalendar ID"; `syncToken` lists `iCalUID` among the parameters that "cannot be specified together with nextSyncToken"; `Event.iCalUID` "in recurring events, all occurrences of one event have different ids while they all share the same iCalUIDs" | **Confirmed in the reference for the lookup and the sharing; the window is a belief.** `list_events` takes `ical_uid` and sends it as `iCalUID`. The reference forbids it only with a sync token. It says nothing about `timeMin` and `timeMax`, so that Google applies the window alongside it is **not yet seen live, tier 3**; the fake applies both. The live driver reads the UIDs Google gave the seeded timed event and weekly series, filters on each, and filters on the timed event's UID over a window that leaves its day out, expecting nothing |
 | 95 | `q` is undocumented free text, and Google does not say which fields it reads | Calendar discovery revision 20261005, read 2026-10-09: `q` "Free text search terms to find events that match these terms in the following fields: summary, description, location, attendee's displayName, attendee's email, organizer's displayName, organizer's email, workingLocationProperties.officeLocation.buildingId, workingLocationProperties.officeLocation.deskId, workingLocationProperties.officeLocation.label, workingLocationProperties.customLocation.label", and "These search terms also match predefined keywords against all display title translations of working location, out-of-office, and focus-time events" | **Refuted: the fields are documented now.** `search_events`, the server instructions and §7.2 name them. What stays true, and stays in the description: there is no field syntax, how words are matched is not documented, and an event seen only as busy has nothing to match, so an empty result is still not proof. The fake matches the documented fields; the built-in words are not modeled |
 | 96 | A release binary resolves an IANA zone on every platform it is built for | Go 1.27.2 `time.LoadLocation`, read 2026-10-09: it looks in "the directory or uncompressed zip file named by the ZONEINFO environment variable", "on a Unix system, the system standard installation location", "$GOROOT/lib/time/zoneinfo.zip" and "the time/tzdata package, if it was imported"; `time/tzdata`: "if the time package cannot find tzdata files on the system, it will use this embedded information" | **Refuted on Windows.** Windows is not a Unix system and a user without Go has no `$GOROOT`, so the Windows archive and the bundle's Windows binary refused every zone. The main package imports `time/tzdata`: about 400 KB on each platform, used only when the machine has no database. A test asks `go list -deps` whether the binary links it, because on Linux the system database comes first and `ZONEINFO` pointed at an empty directory does not stop that, so a test that loads a zone passes either way. **Not yet seen on a Windows machine without Go, tier 3** |
+| 97 | Reminders, visibility and the guests' permissions are the event's, set like any other field | Calendar discovery revision 20261002, read 2026-10-09: `reminders` "Information about the event's reminders for the authenticated user. Note that changing reminders does not also change the updated property of the enclosing event"; `overrides` "The maximum number of override reminders is 5"; `EventReminder.minutes` "between 0 and 40320 (4 weeks in minutes)"; `visibility` "confidential - The event is private. This value is provided for compatibility reasons", and "If the new setting is more restrictive (e.g. from public to private), it is applied to all instances. If the new setting is less restrictive (e.g. from private to public), the change is ignored"; `guestsCanInviteOthers` and `guestsCanSeeOtherGuests` "The default is True". The performance guide on patch: "The modified data you send is merged into the data for the parent object", "Patch requests that contain arrays replace the existing array", "To delete a field, specify the field and set it to null" | **Refuted for reminders: they are the caller's alone**, so an update that changes only them needs no `notify` and sends no `sendUpdates`. Visibility and the permissions are the event's and reach the guests as before. A less restrictive visibility on one occurrence is refused, and a more restrictive one is made with a note that the series changed. The fake holds the limits and both visibility rules. **Not yet seen live, tier 3:** that a patch with `overrides: null` clears the old reminders under `useDefault` true or false, and that Google accepts it at all; and that a more restrictive visibility on an occurrence reaches the series. The live driver sets, replaces, empties and restores reminders on its own event and reads each back, and makes one occurrence of its series private and reads the series |
 
 ### Deviations from the shared Go MCP server standard
 

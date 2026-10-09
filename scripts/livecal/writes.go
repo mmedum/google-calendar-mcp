@@ -104,6 +104,62 @@ func (a *liveAPI) seedRSVP(ctx context.Context, cal, self string) error {
 	})
 }
 
+// setReminders changes only this account's reminders on the probe
+// event. It needs no notify, which is part of what it checks.
+func setReminders(on func(map[string]any) map[string]any, w *writeState, name string,
+	args map[string]any,
+) step {
+	return step{
+		name: name,
+		tool: "update_event",
+		argsFn: func() map[string]any {
+			args["event_id"] = w.created
+			return on(args)
+		},
+		skip: func() string {
+			if w.created == "" {
+				return "no probe event was created"
+			}
+			return ""
+		},
+		check: func(r callResult) (verdict, string) {
+			if r.isError {
+				return fail, "returned an error: " + truncate(r.text, 300)
+			}
+			if !strings.Contains(r.text, "Reminders are yours alone") {
+				return fail, "a reminders-only update did not say it reaches nobody"
+			}
+			return pass, "patched without notify"
+		},
+	}
+}
+
+// readReminders reads the probe event's reminders back.
+func readReminders(scratch string, w *writeState, name, want string) step {
+	return step{
+		name: name,
+		tool: "get_event",
+		argsFn: func() map[string]any {
+			return map[string]any{"calendar": scratch, "event_id": w.created}
+		},
+		skip: func() string {
+			if w.created == "" {
+				return "no probe event was created"
+			}
+			return ""
+		},
+		check: func(r callResult) (verdict, string) {
+			if r.isError {
+				return fail, "returned an error: " + truncate(r.text, 200)
+			}
+			if !strings.Contains(r.text, want+"\n") {
+				return fail, "Google kept something else: " + truncate(r.text, 400)
+			}
+			return pass, "read back as " + strings.TrimPrefix(want, "your reminders: ")
+		},
+	}
+}
+
 // field reads one value out of a write result, which is how a step hands
 // an id or an etag to the next one.
 func field(text, prefix string) string {
@@ -526,6 +582,19 @@ func writeSteps(scratch string, w *writeState) []step {
 				return pass, "refused with [invalid]"
 			},
 		},
+		// §18 row 97: a reminders patch replaces the whole set, by an
+		// overrides list sent in full or as null, and each is read back.
+		setReminders(on, w, "reminders set", map[string]any{
+			"popup_reminders": []int{30, 10}, "email_reminders": []int{1440},
+		}),
+		readReminders(scratch, w, "reminders read back",
+			"your reminders: popup 10 minutes before, popup 30 minutes before, email 1 day before"),
+		setReminders(on, w, "one list replaces both", map[string]any{"email_reminders": []int{60}}),
+		readReminders(scratch, w, "the popups are gone", "your reminders: email 1 hour before"),
+		setReminders(on, w, "an empty list removes them", map[string]any{"popup_reminders": []int{}}),
+		readReminders(scratch, w, "no reminders read back", "your reminders: none"),
+		setReminders(on, w, "back to the calendar's", map[string]any{"default_reminders": true}),
+		readReminders(scratch, w, "the calendar's read back", "your reminders: the calendar's default ones"),
 		{
 			// §4.4: the etag the caller decided on is held to. The one
 			// captured above is now the previous version.
@@ -688,6 +757,55 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the 17 March exception did not survive a split made after it"
 				}
 				return pass, "the earlier exception survived the split, and nothing after it remains"
+			},
+		},
+		{
+			// §18 row 97: Google applies a more restrictive visibility on
+			// one occurrence to the whole series. The result says so;
+			// the step after reads the series to see it is true.
+			name: "a private occurrence",
+			tool: "update_event",
+			args: on(map[string]any{
+				"event_id": weeklyID, "original_start": "2026-03-17T14:00:00+01:00",
+				"scope": "instance", "visibility": "private",
+			}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "makes the whole series private") {
+					return fail, "the result does not say the series changed: " + truncate(r.text, 300)
+				}
+				return pass, "made, with a note that the series changed"
+			},
+		},
+		{
+			name: "the series is private",
+			tool: "get_event",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "[private") {
+					return fail, "the series is not private, so the note the step before printed is false"
+				}
+				return pass, "one private occurrence made the series private, as the reference says"
+			},
+		},
+		{
+			// Refused before a request: Google ignores it.
+			name: "a less restrictive occurrence refused",
+			tool: "update_event",
+			args: on(map[string]any{
+				"event_id": weeklyID, "original_start": "2026-03-17T14:00:00+01:00",
+				"scope": "instance", "visibility": "public",
+			}),
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[unsupported]") {
+					return fail, "a public occurrence of a private series was not refused: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [unsupported]"
 			},
 		},
 		{

@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -844,5 +845,42 @@ func TestAWriteRefusalArrivesAsAClassifiedToolResult(t *testing.T) {
 	}
 	if got := text(t, res); !strings.Contains(got, "[invalid]") {
 		t.Fatalf("the refusal carries no class:\n%s", got)
+	}
+}
+
+// An empty reminder list survives the protocol as given, so on
+// create_event it means no reminders rather than the calendar's own.
+func TestAnEmptyReminderListMeansNoneThroughTheProtocol(t *testing.T) {
+	fake := caltest.Seed()
+	cs, cleanup := sessionWith(t, baseConfig(), fake)
+	defer cleanup()
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "create_event",
+		Arguments: map[string]any{
+			"title": "No reminders", "start": "2026-04-01T09:00:00+02:00",
+			"end": "2026-04-01T10:00:00+02:00", "popup_reminders": []int{},
+		},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("CallTool: %v %v", err, res)
+	}
+	var out struct {
+		Event struct {
+			ID        string `json:"id"`
+			Reminders *struct {
+				Default bool `json:"default"`
+			} `json:"reminders"`
+		} `json:"event"`
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Event.Reminders == nil || out.Event.Reminders.Default {
+		t.Fatalf("got reminders %+v, want none rather than the calendar's: %s", out.Event.Reminders, raw)
+	}
+	if got := fake.Events["primary"][out.Event.ID].Reminders; got == nil || got.UseDefault || len(got.Overrides) != 0 {
+		t.Fatalf("Google was sent %+v", got)
 	}
 }

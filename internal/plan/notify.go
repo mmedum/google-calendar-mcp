@@ -214,6 +214,20 @@ func Notification(v string, r Reach) (Decision, error) {
 	return Decision{Notify: choice, Asked: true, Reach: r}, nil
 }
 
+// PersonalNotification is the decision for a write that changes only
+// what Google keeps per person, which is an event's reminders. It reaches
+// nobody whatever the guest list, so sendUpdates is left out of the
+// request, as for any write that reaches nobody (§4.3.2). A notify the
+// caller passed is still read, so a typo is refused rather than ignored.
+func PersonalNotification(v string) (Decision, error) {
+	if strings.TrimSpace(v) != "" {
+		if _, err := ParseNotify(v); err != nil {
+			return Decision{}, err
+		}
+	}
+	return Decision{}, nil
+}
+
 // ParseNotify reads a caller's choice.
 //
 // Google's own spelling, `externalOnly`, is accepted alongside this

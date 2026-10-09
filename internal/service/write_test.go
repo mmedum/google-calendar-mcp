@@ -1902,3 +1902,152 @@ func TestAMoveGoogleRefusedIsNotAmbiguous(t *testing.T) {
 		t.Fatalf("got [%s], want [invalid]: %v", got, err)
 	}
 }
+
+func intsptr(v ...int) *[]int { return &v }
+
+func boolptr(v bool) *bool { return &v }
+
+// Reminders are kept per person, so a write that changes only them
+// reaches nobody: on an event with a guest outside the organization it
+// needs no notify, and sends no sendUpdates.
+func TestARemindersOnlyUpdateReachesNobody(t *testing.T) {
+	svc, fake := writeSeed(t)
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evguests001", PopupReminders: intsptr(10), EmailReminders: intsptr(1440),
+	})
+	if err != nil {
+		t.Fatalf("a reminders-only update asked for notify: %v", err)
+	}
+	writes := fake.Wrote()
+	if len(writes) != 1 || writes[0].SendUpdates != "" {
+		t.Fatalf("got writes %+v, want one patch with no sendUpdates", writes)
+	}
+	got := fake.Events["me@example.test"]["evguests001"].Reminders
+	if got == nil || got.UseDefault || len(got.Overrides) != 2 {
+		t.Fatalf("the event's reminders are %+v", got)
+	}
+	if !strings.Contains(out.Text(), "Reminders are yours alone") {
+		t.Fatalf("the result does not say why nobody was notified:\n%s", out.Text())
+	}
+	r := service.NewWriteResult(out).Event.Reminders
+	if r == nil || r.Default || fmt.Sprint(r.Popup, r.Email) != "[10] [1440]" {
+		t.Fatalf("the result's reminders are %+v", r)
+	}
+}
+
+// Anything else alongside the reminders is the event's, and reaches its
+// guests as before.
+func TestRemindersWithAnotherChangeStillNeedNotify(t *testing.T) {
+	svc, _ := writeSeed(t)
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evguests001", PopupReminders: intsptr(10), Visibility: strptr("private"),
+	})
+	if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), "pass notify") {
+		t.Fatalf("got [%s] %v, want notify required", got, err)
+	}
+}
+
+// Google ignores a less restrictive visibility on one occurrence, so it
+// is refused before anything is written.
+func TestALessRestrictiveVisibilityOnAnOccurrenceIsRefused(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.Events["me@example.test"]["evseries001_20260324T130000Z"].Visibility = gcal.VisibilityPrivate
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evseries001_20260324T130000Z", Scope: "instance",
+		Visibility: strptr("public"),
+	})
+	if got := classOf(t, err); got != gapi.ClassUnsupported || !strings.Contains(err.Error(), "scope:series") {
+		t.Fatalf("got [%s] %v, want [unsupported] naming scope:series", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("the refusal must come before any write")
+	}
+}
+
+// A more restrictive one is applied to every occurrence, and the result
+// says so rather than reporting one occurrence changed.
+func TestAMoreRestrictiveVisibilityOnAnOccurrenceSaysItReachesTheSeries(t *testing.T) {
+	svc, fake := writeSeed(t)
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evseries001_20260324T130000Z", Scope: "instance",
+		Visibility: strptr("private"),
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	if !strings.Contains(out.Text(), "makes the whole series private") {
+		t.Fatalf("the result does not say the series changed:\n%s", out.Text())
+	}
+	if got := fake.Events["me@example.test"]["evseries001"].Visibility; got != gcal.VisibilityPrivate {
+		t.Fatalf("the fake's series is %q; it does not hold Google's rule", got)
+	}
+}
+
+// create_event sends reminders, visibility and the guest permissions,
+// and get_event reads them back.
+func TestCreateEventSetsRemindersVisibilityAndPermissions(t *testing.T) {
+	svc, _ := writeSeed(t)
+	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "primary", Title: "Quiet planning",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+		PopupReminders: []int{30}, Visibility: "private",
+		GuestsCanInviteOthers: boolptr(false), GuestsCanModify: boolptr(true),
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	got, zone, err := svc.GetEvent(context.Background(), "primary", out.After.ID, "")
+	if err != nil {
+		t.Fatalf("GetEvent: %v", err)
+	}
+	res := service.NewEventResult(got, zone)
+	if res.Event.Visibility != "private" || res.Event.Reminders == nil ||
+		fmt.Sprint(res.Event.Reminders.Popup) != "[30]" || res.Event.Reminders.Default {
+		t.Fatalf("got visibility %q and reminders %+v", res.Event.Visibility, res.Event.Reminders)
+	}
+	if !res.GuestsCanModify || res.GuestsCanInviteOthers || !res.GuestsCanSeeOtherGuests {
+		t.Fatalf("got modify %v, invite %v, see %v; want true, false, true",
+			res.GuestsCanModify, res.GuestsCanInviteOthers, res.GuestsCanSeeOtherGuests)
+	}
+	text := res.Render()
+	for _, want := range []string{"[private", "your reminders: popup 30 minutes before",
+		"guests can change the event, see the guest list; cannot invite others"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the card does not say %q:\n%s", want, text)
+		}
+	}
+}
+
+// An event created with no reminder input uses the calendar's own, and
+// the card says so.
+func TestANewEventUsesTheCalendarsReminders(t *testing.T) {
+	svc, _ := writeSeed(t)
+	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "primary", Title: "Plain",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	r := service.NewWriteResult(out).Event.Reminders
+	if r == nil || !r.Default {
+		t.Fatalf("got %+v, want the calendar's default reminders", r)
+	}
+}
+
+// A dry run shows the reminders it would set.
+func TestADryRunProjectsReminders(t *testing.T) {
+	svc, fake := writeSeed(t)
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evsolo00001", EmailReminders: intsptr(), DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	if out.After.Reminders == nil || out.After.Reminders.Default || len(out.After.Reminders.Email) != 0 {
+		t.Fatalf("the dry run shows reminders %+v, want none", out.After.Reminders)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("a dry run wrote something")
+	}
+}

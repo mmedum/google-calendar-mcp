@@ -99,16 +99,16 @@ Every setting is in `docs/configuration.md`.
 | Tool | What it does |
 |---|---|
 | `list_calendars` | Every calendar this account can see, with ids, time zones and your access level. Start here. |
-| `get_calendar` | One calendar in full, including who it is shared with. |
+| `get_calendar` | One calendar in full, including who it is shared with and its default reminders. |
 | `list_events` | The events on one or more calendars in a window, or only the kinds you name, such as out of office, or the event an invitation email is about. |
 | `search_events` | Free-text search across a window, over titles, descriptions, locations and guests. |
-| `get_event` | One event, with its guests and their responses, and the files attached to it. |
+| `get_event` | One event, with its guests and their responses, what guests may do, your reminders, and the files attached to it. |
 | `list_instances` | The occurrences of one repeating event, with the dates that were moved or removed. |
 | `list_changes` | What changed since you last looked, including **deletions** — which a list cannot report, because a deleted event simply stops matching. Hands back a sync token to pass in next time, or reads what changed since a moment you name. |
 | `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. Takes an optional working-hours mask. |
 | `get_settings` | The account's time zone, week start and color palette. |
-| `create_event` | Create an event, one-off or repeating, with guests, optional guests, rooms, and a Google Meet link if you ask for one. |
-| `update_event` | Change an event. Only the fields you pass are touched. |
+| `create_event` | Create an event, one-off or repeating, with guests, optional guests, rooms, your reminders, its visibility, what guests may do, and a Google Meet link if you ask for one. |
+| `update_event` | Change an event, including your reminders, its visibility and what guests may do. Only the fields you pass are touched. |
 | `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
 | `move_event` | Move an event to another calendar, which changes who organizes it. |
 | `respond_to_event` | Answer an invitation: accepted, declined or tentative. |

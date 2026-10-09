@@ -103,6 +103,10 @@ func sharingOut(rules []model.Sharing) []SharingOut {
 type CalendarResult struct {
 	Calendar    CalendarOut `json:"calendar"`
 	Description string      `json:"description,omitempty"`
+	// DefaultReminders are what this account gets for an event here that
+	// uses the calendar's own. Absent when the calendar is not on this
+	// account's list, the only place Google keeps them.
+	DefaultReminders *DefaultRemindersOut `json:"default_reminders,omitempty"`
 	// Sharing is empty when the ACL scope was not granted, and Note says
 	// so rather than letting an empty list read as "shared with nobody"
 	// (§2.15).
@@ -140,6 +144,9 @@ func (r CalendarResult) Render() string {
 	}))
 	if r.Description != "" {
 		fmt.Fprintf(&b, "  %s\n", r.Description)
+	}
+	if d := r.DefaultReminders; d != nil {
+		fmt.Fprintf(&b, "  default reminders: %s\n", render.Reminders(model.Reminders{Popup: d.Popup, Email: d.Email}))
 	}
 	b.WriteString("\n")
 	if r.Note != "" {
@@ -232,8 +239,46 @@ type EventOut struct {
 	ConferenceStatus string `json:"conference_status,omitempty"`
 	// AttachmentCount is how many files are on the event. get_event
 	// lists them.
-	AttachmentCount int    `json:"attachment_count,omitempty"`
-	ETag            string `json:"etag,omitempty"`
+	AttachmentCount int `json:"attachment_count,omitempty"`
+	// Visibility is Google's value: public, private, or confidential,
+	// which Google keeps for compatibility and means private. Absent
+	// means the calendar's default.
+	Visibility string `json:"visibility,omitempty"`
+	// Reminders are this account's own, absent when Google sent none.
+	Reminders *RemindersOut `json:"reminders,omitempty"`
+	ETag      string        `json:"etag,omitempty"`
+}
+
+// RemindersOut is when this account is reminded of an event, in minutes
+// before it starts. Google keeps reminders per person.
+type RemindersOut struct {
+	// Default says the calendar's own reminders apply, which
+	// get_calendar lists. When it is false, Popup and Email are the whole
+	// set, and both empty means no reminders at all.
+	Default bool  `json:"default"`
+	Popup   []int `json:"popup,omitempty"`
+	Email   []int `json:"email,omitempty"`
+}
+
+// DefaultRemindersOut is a calendar's own reminders, in minutes before an
+// event starts. Both lists empty means none.
+type DefaultRemindersOut struct {
+	Popup []int `json:"popup"`
+	Email []int `json:"email"`
+}
+
+func newDefaultRemindersOut(r *model.Reminders) *DefaultRemindersOut {
+	if r == nil {
+		return nil
+	}
+	out := &DefaultRemindersOut{Popup: r.Popup, Email: r.Email}
+	if out.Popup == nil {
+		out.Popup = []int{}
+	}
+	if out.Email == nil {
+		out.Email = []int{}
+	}
+	return out
 }
 
 // Render implements Rendered.
@@ -274,6 +319,10 @@ func NewEventOut(e model.Event) EventOut {
 		AllDay:          e.Start.AllDay,
 		ConferenceURI:   e.Conference.URI,
 		AttachmentCount: len(e.Attachments),
+		Visibility:      e.Visibility,
+	}
+	if r := e.Reminders; r != nil {
+		o.Reminders = &RemindersOut{Default: r.Default, Popup: r.Popup, Email: r.Email}
 	}
 	// The same four states the text renders, so a client reading only
 	// this block reaches the same conclusion. "other" is a state rather
@@ -316,6 +365,11 @@ type EventResult struct {
 	// Attachments are the files on the event. This server never opens
 	// one; file_id is what a Drive server takes.
 	Attachments []AttachmentOut `json:"attachments,omitempty"`
+	// What a guest may do, with Google's defaults filled in: a guest can
+	// invite others and see the guest list, and cannot change the event.
+	GuestsCanModify         bool `json:"guests_can_modify"`
+	GuestsCanInviteOthers   bool `json:"guests_can_invite_others"`
+	GuestsCanSeeOtherGuests bool `json:"guests_can_see_other_guests"`
 
 	text string
 }
@@ -347,6 +401,8 @@ func (r EventResult) Render() string { return r.text }
 func NewEventResult(e model.Event, z when.Zone) EventResult {
 	out := EventResult{
 		Event: NewEventOut(e), TimeZone: z.Name(), ZoneSource: string(z.Source),
+		GuestsCanModify: e.GuestsCanModify, GuestsCanInviteOthers: e.GuestsCanInviteOthers,
+		GuestsCanSeeOtherGuests: e.GuestsCanSeeOtherGuests,
 	}
 	for _, a := range e.Attendees {
 		out.Attendees = append(out.Attendees, AttendeeOut{
@@ -366,6 +422,9 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 	fmt.Fprintf(&b, "id: %s on calendar %s\n", e.ID, e.CalendarID)
 	if line := render.ConferenceLine(e.Conference); line != "" {
 		fmt.Fprintf(&b, "%s\n", line)
+	}
+	if e.Reminders != nil {
+		fmt.Fprintf(&b, "your reminders: %s\n", render.Reminders(*e.Reminders))
 	}
 	if e.Description != "" {
 		fmt.Fprintf(&b, "\n%s\n", e.Description)
@@ -397,6 +456,9 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 		if e.AttendeesTruncated {
 			b.WriteString("  (Google truncated this guest list)\n")
 		}
+	}
+	if line := render.GuestPermissions(e); line != "" {
+		fmt.Fprintf(&b, "%s\n", line)
 	}
 	if len(e.Attachments) > 0 {
 		b.WriteString(render.Attachments(e.Attachments))

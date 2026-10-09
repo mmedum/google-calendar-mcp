@@ -311,3 +311,54 @@ func TestQMatchesTheFieldsGoogleDocuments(t *testing.T) {
 		t.Error("q matched text that is in none of the documented fields")
 	}
 }
+
+// Google's reminder limits and its two visibility rules on one
+// occurrence, held by the fake for whatever calls it: the service
+// refuses the first before sending, and never sends the ignored one.
+func TestRemindersAndVisibilityFollowGooglesRules(t *testing.T) {
+	s := caltest.Seed()
+	base := s.Start()
+	defer s.Close()
+
+	send := func(method, path, body string) int {
+		t.Helper()
+		req, err := http.NewRequest(method, base+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("If-Match", "*")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	for name, body := range map[string]string{
+		"default with overrides": `{"reminders":{"useDefault":true,"overrides":[{"method":"popup","minutes":10}]}}`,
+		"six reminders": `{"reminders":{"useDefault":false,"overrides":[{"method":"popup","minutes":1},` +
+			`{"method":"popup","minutes":2},{"method":"popup","minutes":3},{"method":"popup","minutes":4},` +
+			`{"method":"popup","minutes":5},{"method":"popup","minutes":6}]}}`,
+		"past four weeks": `{"reminders":{"useDefault":false,"overrides":[{"method":"email","minutes":40321}]}}`,
+		"sms":             `{"reminders":{"useDefault":false,"overrides":[{"method":"sms","minutes":10}]}}`,
+		"visibility":      `{"visibility":"secret"}`,
+	} {
+		if got := send(http.MethodPatch, "/calendars/primary/events/ev-standup", body); got != http.StatusBadRequest {
+			t.Errorf("%s: answered %d, want 400", name, got)
+		}
+	}
+
+	occurrence := "/calendars/primary/events/ev-weekly_20260324T130000Z"
+	if got := send(http.MethodPatch, occurrence, `{"visibility":"private"}`); got != http.StatusOK {
+		t.Fatalf("a private occurrence answered %d", got)
+	}
+	if v := s.Events["primary"]["ev-weekly"].Visibility; v != gcal.VisibilityPrivate {
+		t.Fatalf("a more restrictive occurrence left the series %q", v)
+	}
+	if got := send(http.MethodPatch, occurrence, `{"visibility":"public"}`); got != http.StatusOK {
+		t.Fatalf("a public occurrence answered %d", got)
+	}
+	if v := s.Events["primary"]["ev-weekly_20260324T130000Z"].Visibility; v != gcal.VisibilityPrivate {
+		t.Fatalf("a less restrictive occurrence was applied: %q", v)
+	}
+}

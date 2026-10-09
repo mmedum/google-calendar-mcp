@@ -306,6 +306,20 @@ type CreateOptions struct {
 	Rooms       []string
 	Recurrence  []string
 	Transparent bool
+	// PopupReminders and EmailReminders are this account's reminders, in
+	// minutes before the start. Either one given replaces the calendar's
+	// default ones, and an empty list given alone means none.
+	PopupReminders []int
+	EmailReminders []int
+	// DefaultReminders keeps the calendar's own, which is also what an
+	// event gets when no list is given.
+	DefaultReminders bool
+	// Visibility is default, public or private.
+	Visibility string
+	// What a guest may do. Nil keeps Google's default.
+	GuestsCanModify         *bool
+	GuestsCanInviteOthers   *bool
+	GuestsCanSeeOtherGuests *bool
 	// Conference asks for a Google Meet link on the new event (§17.3).
 	Conference bool
 	Notify     string
@@ -353,6 +367,19 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	if o.Recurrence != nil {
 		lines := o.Recurrence
 		draft.Recurrence = &lines
+	}
+	if o.Visibility != "" {
+		draft.Visibility = &o.Visibility
+	}
+	draft.GuestsCanModify = o.GuestsCanModify
+	draft.GuestsCanInviteOthers = o.GuestsCanInviteOthers
+	draft.GuestsCanSeeOtherGuests = o.GuestsCanSeeOtherGuests
+	// A list is given when it is not nil, so an empty one given alone
+	// means no reminders at all.
+	draft.Reminders, err = plan.NewReminders(o.DefaultReminders, listGiven(o.PopupReminders),
+		listGiven(o.EmailReminders))
+	if err != nil {
+		return render.WriteReport{}, classifyPlan(err)
 	}
 	if err := draft.BareAddresses(); err != nil {
 		return render.WriteReport{}, classifyPlan(err)
@@ -408,6 +435,14 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	}
 	report.After, report.Requests = &after, gapi.Requests(ctx)
 	return report, nil
+}
+
+// listGiven is a list input as given, nil when it was left out.
+func listGiven(v []int) *[]int {
+	if v == nil {
+		return nil
+	}
+	return &v
 }
 
 // conferenceNote says what actually happened to a requested Meet link.
@@ -514,6 +549,17 @@ type UpdateOptions struct {
 	// already on the event keeps its role, and the result names it.
 	AddOptionalGuests []string
 	Transparent       *bool
+	// PopupReminders and EmailReminders replace this account's reminders
+	// whole, and an empty list given alone means none. DefaultReminders
+	// goes back to the calendar's own.
+	PopupReminders   *[]int
+	EmailReminders   *[]int
+	DefaultReminders bool
+	Visibility       *string
+	// What a guest may do. Nil leaves each as it is.
+	GuestsCanModify         *bool
+	GuestsCanInviteOthers   *bool
+	GuestsCanSeeOtherGuests *bool
 
 	Notify string
 	ETag   string
@@ -531,15 +577,23 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 		Start: o.Start, End: o.End,
 		Recurrence: o.Recurrence, AddGuests: o.AddGuests, RemoveGuests: o.RemoveGuests,
 		AddRooms: o.AddRooms, AddOptional: o.AddOptionalGuests, Transparent: o.Transparent,
+		Visibility: o.Visibility, GuestsCanModify: o.GuestsCanModify,
+		GuestsCanInviteOthers: o.GuestsCanInviteOthers, GuestsCanSeeOtherGuests: o.GuestsCanSeeOtherGuests,
 	}
+	reminders, err := plan.NewReminders(o.DefaultReminders, o.PopupReminders, o.EmailReminders)
+	if err != nil {
+		return render.WriteReport{}, classifyPlan(err)
+	}
+	draft.Reminders = reminders
 	if err := draft.BareAddresses(); err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
 	if draft.Empty() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
 			"update_event was given nothing to change. Pass at least one of title, description, location, "+
-				"start, end, recurrence, add_guests, add_optional_guests, remove_guests, add_rooms or "+
-				"free_not_busy")
+				"start, end, recurrence, add_guests, add_optional_guests, remove_guests, add_rooms, "+
+				"free_not_busy, popup_reminders, email_reminders, default_reminders, visibility, "+
+				"guests_can_modify, guests_can_invite_others or guests_can_see_other_guests")
 	}
 	ctx, env, err := s.prepare(ctx, o.Calendar, o.TimeZone)
 	if err != nil {
@@ -574,7 +628,18 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel, draft.Invites()...))
+	var visibilityNote string
+	if scope == recur.ScopeInstance && draft.Visibility != nil {
+		if visibilityNote, err = plan.InstanceVisibility(target.Visibility, *draft.Visibility); err != nil {
+			return render.WriteReport{}, classifyPlan(err)
+		}
+	}
+	var decision plan.Decision
+	if draft.OnlyReminders() {
+		decision, err = plan.PersonalNotification(o.Notify)
+	} else {
+		decision, err = plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel, draft.Invites()...))
+	}
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -590,6 +655,12 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	}
 	if note != "" {
 		report.Notes = append(report.Notes, note)
+	}
+	if draft.OnlyReminders() {
+		report.Notes = append(report.Notes, remindersOnlyNote)
+	}
+	if visibilityNote != "" {
+		report.Notes = append(report.Notes, visibilityNote)
 	}
 	if n := alreadyOnNote(draft, target.Attendees); n != "" {
 		report.Notes = append(report.Notes, n)
@@ -643,6 +714,11 @@ func alreadyOnNote(d plan.Draft, attendees []gcal.EventAttendee) string {
 	return "Already on the event, so left as they were: " + strings.Join(on, ", ") + ". Adding an " +
 		"address does not change how it is invited: this server does not make a guest optional or required."
 }
+
+// remindersOnlyNote says why a write that changed only reminders asked
+// nobody to be notified.
+const remindersOnlyNote = "Reminders are yours alone: Google keeps them per person, so this reaches no " +
+	"guest and no notification was asked for."
 
 // forcedNote says a write went through with If-Match: *, which is §4.4's
 // explicit override and never a default.

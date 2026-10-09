@@ -610,6 +610,37 @@ func TestCalendarDetailReportsAMissingACLScope(t *testing.T) {
 	}
 }
 
+// get_calendar lists the calendar's default reminders, which is what an
+// event that uses them gets, and says when there are none.
+func TestCalendarDetailListsTheDefaultReminders(t *testing.T) {
+	fake := caltest.Seed()
+	fake.Entries["primary"].DefaultReminders = []gcal.EventReminder{
+		{Method: gcal.ReminderEmail, Minutes: 1440}, {Method: gcal.ReminderPopup, Minutes: 10},
+	}
+	svc := newService(t, fake)
+	res, err := svc.CalendarDetail(context.Background(), "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := res.DefaultReminders; d == nil || fmt.Sprint(d.Popup, d.Email) != "[10] [1440]" {
+		t.Fatalf("got %+v", res.DefaultReminders)
+	}
+	if !strings.Contains(res.Rendered(), "default reminders: popup 10 minutes before, email 1 day before") {
+		t.Fatalf("the card does not list them:\n%s", res.Rendered())
+	}
+
+	none, err := svc.CalendarDetail(context.Background(), "team@group.calendar.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := none.DefaultReminders; d == nil || len(d.Popup)+len(d.Email) != 0 {
+		t.Fatalf("got %+v, want two empty lists", none.DefaultReminders)
+	}
+	if !strings.Contains(none.Rendered(), "default reminders: none") {
+		t.Fatalf("the card does not say there are none:\n%s", none.Rendered())
+	}
+}
+
 func TestCalendarDetailListsSharing(t *testing.T) {
 	svc, _ := seeded(t)
 	res, err := svc.CalendarDetail(context.Background(), "primary")

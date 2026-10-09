@@ -272,9 +272,17 @@ const (
 )
 
 // EventReminders is the per-event override of the calendar's defaults.
+//
+// Reminders are per person: Google documents the field as "the event's
+// reminders for the authenticated user", so another guest has their own
+// and changing them reaches nobody.
 type EventReminders struct {
-	UseDefault bool            `json:"useDefault"`
-	Overrides  []EventReminder `json:"overrides,omitempty"`
+	UseDefault bool `json:"useDefault"`
+	// Overrides is always sent, null when there are none. A patch merges
+	// an object into the one there and replaces an array, so leaving it
+	// out would keep the old reminders under a new useDefault, and null
+	// is how a patch deletes a field.
+	Overrides []EventReminder `json:"overrides"`
 }
 
 // EventReminder is one reminder.
@@ -282,6 +290,30 @@ type EventReminder struct {
 	Method  string `json:"method,omitempty"`
 	Minutes int    `json:"minutes"`
 }
+
+// The two reminder methods Google publishes.
+const (
+	ReminderPopup = "popup"
+	ReminderEmail = "email"
+)
+
+// Reminder limits, from the discovery document: minutes "between 0 and
+// 40320 (4 weeks in minutes)", and "The maximum number of override
+// reminders is 5."
+const (
+	MaxReminderMinutes = 40320
+	MaxReminders       = 5
+)
+
+// Visibility values. Confidential is Google's: "The event is private.
+// This value is provided for compatibility reasons." A read shows it as
+// it came; a write sends private instead.
+const (
+	VisibilityDefault      = "default"
+	VisibilityPublic       = "public"
+	VisibilityPrivate      = "private"
+	VisibilityConfidential = "confidential"
+)
 
 // EventList is the events.list response.
 type EventList struct {
@@ -676,6 +708,15 @@ type EventPatch struct {
 	Status       *string          `json:"status,omitempty"`
 	Transparency *string          `json:"transparency,omitempty"`
 	ColorID      *string          `json:"colorId,omitempty"`
+	Visibility   *string          `json:"visibility,omitempty"`
+	// Reminders replaces this account's reminders whole, Overrides
+	// included (see EventReminders).
+	Reminders *EventReminders `json:"reminders,omitempty"`
+	// What a guest may do. Pointers, because two of the three default
+	// to true and false has to survive the trip.
+	GuestsCanModify         *bool `json:"guestsCanModify,omitempty"`
+	GuestsCanInviteOthers   *bool `json:"guestsCanInviteOthers,omitempty"`
+	GuestsCanSeeOtherGuests *bool `json:"guestsCanSeeOtherGuests,omitempty"`
 }
 
 // ApplyTo folds a patch into an event: what the resource looks like once
@@ -717,6 +758,24 @@ func (p EventPatch) ApplyTo(e *Event) {
 	}
 	if p.ColorID != nil {
 		e.ColorID = *p.ColorID
+	}
+	if p.Visibility != nil {
+		e.Visibility = *p.Visibility
+	}
+	if p.Reminders != nil {
+		r := *p.Reminders
+		e.Reminders = &r
+	}
+	if p.GuestsCanModify != nil {
+		e.GuestsCanModify = *p.GuestsCanModify
+	}
+	if p.GuestsCanInviteOthers != nil {
+		v := *p.GuestsCanInviteOthers
+		e.GuestsCanInviteOthers = &v
+	}
+	if p.GuestsCanSeeOtherGuests != nil {
+		v := *p.GuestsCanSeeOtherGuests
+		e.GuestsCanSeeOtherGuests = &v
 	}
 }
 

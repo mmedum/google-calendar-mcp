@@ -374,6 +374,14 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	if e.Status == "" {
 		e.Status = gcal.StatusConfirmed
 	}
+	if msg := refusedEventFields(e.Visibility, e.Reminders); msg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
+	if e.Reminders == nil {
+		// An event created without reminders uses the calendar's own.
+		e.Reminders = &gcal.EventReminders{UseDefault: true}
+	}
 	// Google's status-events guide creates each status type with its own
 	// details block. That a create without it is refused is believed
 	// rather than probed, and the message is this fake's own (§18 row 88).
@@ -414,6 +422,47 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	writeJSON(w, e)
 }
 
+// refusedEventFields is why Google would refuse an event's visibility or
+// reminders, or "". The limits are the discovery document's; the
+// messages are this fake's own.
+func refusedEventFields(visibility string, r *gcal.EventReminders) string {
+	switch visibility {
+	case "", gcal.VisibilityDefault, gcal.VisibilityPublic, gcal.VisibilityPrivate, gcal.VisibilityConfidential:
+	default:
+		return "Invalid visibility value."
+	}
+	if r == nil {
+		return ""
+	}
+	if r.UseDefault && len(r.Overrides) > 0 {
+		return "Cannot specify both default reminders and overrides at the same time."
+	}
+	if len(r.Overrides) > gcal.MaxReminders {
+		return "Too many reminders."
+	}
+	for _, o := range r.Overrides {
+		if o.Minutes < 0 || o.Minutes > gcal.MaxReminderMinutes {
+			return "Invalid reminder minutes."
+		}
+		if o.Method != gcal.ReminderPopup && o.Method != gcal.ReminderEmail {
+			return "Invalid reminder method."
+		}
+	}
+	return ""
+}
+
+// visibilityRank orders visibility from least to most restrictive.
+func visibilityRank(v string) int {
+	switch v {
+	case gcal.VisibilityPublic:
+		return 0
+	case gcal.VisibilityPrivate, gcal.VisibilityConfidential:
+		return 2
+	default:
+		return 1
+	}
+}
+
 // statusDetails names the details block each status event type is
 // created with.
 var statusDetails = map[string]string{
@@ -445,8 +494,32 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 		writeErr(w, http.StatusBadRequest, "parseError", "bad patch body")
 		return
 	}
+	vis := ""
+	if p.Visibility != nil {
+		vis = *p.Visibility
+	}
+	if msg := refusedEventFields(vis, p.Reminders); msg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
 
 	s.mu.Lock()
+	if p.Visibility != nil && cur.RecurringEventID != "" {
+		// "If the new setting is more restrictive (e.g. from public to
+		// private), it is applied to all instances. If the new setting
+		// is less restrictive (e.g. from private to public), the change
+		// is ignored." Google's words, on Event.visibility.
+		switch from, to := visibilityRank(cur.Visibility), visibilityRank(*p.Visibility); {
+		case to < from:
+			p.Visibility = nil
+		case to > from:
+			for _, e := range s.Events[calID] {
+				if e.ID == cur.RecurringEventID || e.RecurringEventID == cur.RecurringEventID {
+					e.Visibility = *p.Visibility
+				}
+			}
+		}
+	}
 	next := *cur
 	// The fold lives on the type, so this fake cannot drift from what
 	// the server sends: a field added to EventPatch and forgotten here

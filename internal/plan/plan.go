@@ -86,6 +86,17 @@ type Draft struct {
 	// Transparent marks the event as not making the person busy.
 	Transparent *bool
 
+	// Reminders replaces this account's reminders for the event. Nil
+	// leaves them. Google keeps them per person, so a write that changes
+	// only them reaches nobody (OnlyReminders).
+	Reminders *Reminders
+	// Visibility is default, public or private. Nil leaves it.
+	Visibility *string
+	// What a guest may do. Nil leaves each as it is.
+	GuestsCanModify         *bool
+	GuestsCanInviteOthers   *bool
+	GuestsCanSeeOtherGuests *bool
+
 	// Conference asks Google to attach a Google Meet link. It is only
 	// meaningful on an insert: Patch refuses it rather than dropping it
 	// silently, because adding a conference to an event that exists is
@@ -97,7 +108,178 @@ type Draft struct {
 func (d Draft) Empty() bool {
 	return d.Title == nil && d.Description == nil && d.Location == nil &&
 		d.Start == "" && d.End == "" && d.Recurrence == nil &&
-		!d.touchesGuests() && d.Transparent == nil
+		!d.touchesGuests() && d.Transparent == nil &&
+		d.Reminders == nil && d.Visibility == nil && d.GuestsCanModify == nil &&
+		d.GuestsCanInviteOthers == nil && d.GuestsCanSeeOtherGuests == nil
+}
+
+// OnlyReminders reports whether the draft changes nothing but this
+// account's reminders. Google documents them as "the event's reminders
+// for the authenticated user", so such a write reaches nobody.
+func (d Draft) OnlyReminders() bool {
+	rest := d
+	rest.Reminders = nil
+	return d.Reminders != nil && rest.Empty()
+}
+
+// Reminders is a reminder set a caller asks for: back to the calendar's
+// own, or exactly the popups and emails given, in minutes before the
+// start. Both lists empty, and not Default, means no reminders.
+type Reminders struct {
+	Default bool
+	Popup   []int
+	Email   []int
+}
+
+// NewReminders reads the three reminder inputs, and is nil when none was
+// given. Giving either list replaces the whole set, so a list left out
+// is empty rather than kept. defaults puts the event back on the
+// calendar's own reminders and cannot go with a list.
+func NewReminders(defaults bool, popup, email *[]int) (*Reminders, error) {
+	if popup == nil && email == nil {
+		if !defaults {
+			return nil, nil
+		}
+		return &Reminders{Default: true}, nil
+	}
+	if defaults {
+		return nil, fmt.Errorf("%w: default_reminders puts the event back on the calendar's own reminders, "+
+			"and popup_reminders or email_reminders replaces them. Pass one or the other", ErrInvalid)
+	}
+	r := &Reminders{}
+	if popup != nil {
+		r.Popup = slices.Clone(*popup)
+	}
+	if email != nil {
+		r.Email = slices.Clone(*email)
+	}
+	if n := len(r.Popup) + len(r.Email); n > gcal.MaxReminders {
+		return nil, fmt.Errorf("%w: %d reminders given; Google allows at most %d on one event, popups and "+
+			"emails together", ErrInvalid, n, gcal.MaxReminders)
+	}
+	for _, list := range []struct {
+		name    string
+		minutes []int
+	}{{"popup_reminders", r.Popup}, {"email_reminders", r.Email}} {
+		seen := map[int]bool{}
+		for _, m := range list.minutes {
+			if m < 0 || m > gcal.MaxReminderMinutes {
+				return nil, fmt.Errorf("%w: %s has %d; a reminder is 0 to %d minutes before the start, "+
+					"which is four weeks", ErrInvalid, list.name, m, gcal.MaxReminderMinutes)
+			}
+			if seen[m] {
+				return nil, fmt.Errorf("%w: %s has %d twice. Give each reminder once", ErrInvalid, list.name, m)
+			}
+			seen[m] = true
+		}
+	}
+	slices.Sort(r.Popup)
+	slices.Sort(r.Email)
+	return r, nil
+}
+
+// wire is the reminder set as Google takes it.
+func (r Reminders) wire() *gcal.EventReminders {
+	if r.Default {
+		return &gcal.EventReminders{UseDefault: true}
+	}
+	out := &gcal.EventReminders{}
+	for _, m := range r.Popup {
+		out.Overrides = append(out.Overrides, gcal.EventReminder{Method: gcal.ReminderPopup, Minutes: m})
+	}
+	for _, m := range r.Email {
+		out.Overrides = append(out.Overrides, gcal.EventReminder{Method: gcal.ReminderEmail, Minutes: m})
+	}
+	return out
+}
+
+// remindersText is a reminder set in the values sent, for a change line.
+// The order is fixed, so the same set read back in another order is no
+// change.
+func remindersText(r *gcal.EventReminders) string {
+	switch {
+	case r == nil:
+		return ""
+	case r.UseDefault:
+		return "calendar default"
+	case len(r.Overrides) == 0:
+		return "none"
+	}
+	sorted := slices.Clone(r.Overrides)
+	slices.SortFunc(sorted, func(a, b gcal.EventReminder) int {
+		if a.Method != b.Method {
+			// Popups first, as the inputs list them.
+			return strings.Compare(b.Method, a.Method)
+		}
+		return a.Minutes - b.Minutes
+	})
+	parts := make([]string, 0, len(sorted))
+	for _, o := range sorted {
+		parts = append(parts, fmt.Sprintf("%s %d min", o.Method, o.Minutes))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// visibilities are the values a write may send, in order of how many
+// people see the details: public to all readers of the calendar, default
+// as the calendar decides, private to the guests alone.
+var visibilities = []string{gcal.VisibilityPublic, gcal.VisibilityDefault, gcal.VisibilityPrivate}
+
+// visibilityRank orders a visibility from least to most restrictive. An
+// empty one is the default. One Google adds later ranks above private,
+// so a change away from it on one occurrence is refused rather than
+// guessed at.
+func visibilityRank(v string) int {
+	switch v {
+	case gcal.VisibilityConfidential:
+		return slices.Index(visibilities, gcal.VisibilityPrivate)
+	case "":
+		return slices.Index(visibilities, gcal.VisibilityDefault)
+	}
+	if i := slices.Index(visibilities, v); i >= 0 {
+		return i
+	}
+	return len(visibilities)
+}
+
+// parseVisibility reads a caller's visibility.
+func parseVisibility(v string) (string, error) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	switch {
+	case slices.Contains(visibilities, v):
+		return v, nil
+	case v == gcal.VisibilityConfidential:
+		return "", fmt.Errorf("%w: Google keeps confidential only for compatibility and documents it as "+
+			"\"The event is private\". Pass private", ErrInvalid)
+	default:
+		return "", fmt.Errorf("%w: %q is not a visibility. Pass default, public or private", ErrInvalid, v)
+	}
+}
+
+// InstanceVisibility applies Google's rule for a visibility set on one
+// occurrence of a series. A less restrictive one, such as private to
+// public, is ignored, so it is refused here rather than reported as done.
+// A more restrictive one is applied to every occurrence, so the note
+// says that.
+func InstanceVisibility(before, to string) (note string, err error) {
+	to, err = parseVisibility(to)
+	if err != nil {
+		return "", err
+	}
+	from := before
+	if from == "" {
+		from = gcal.VisibilityDefault
+	}
+	switch {
+	case visibilityRank(to) < visibilityRank(from):
+		return "", fmt.Errorf("%w: Google ignores a less restrictive visibility on one occurrence, so "+
+			"%s to %s here would change nothing. Set it on the whole series with scope:series", ErrUnsupported,
+			from, to)
+	case visibilityRank(to) > visibilityRank(from):
+		return fmt.Sprintf("Google applies a more restrictive visibility on one occurrence to every "+
+			"occurrence, so this makes the whole series %s, not only this one.", to), nil
+	}
+	return "", nil
 }
 
 // touchesGuests reports whether the draft changes who is on the event.
@@ -160,6 +342,38 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 			from = gcal.TransparencyOpaque
 		}
 		set("free_not_busy", from, to, &p.Transparency)
+	}
+	if d.Visibility != nil {
+		to, verr := parseVisibility(*d.Visibility)
+		if verr != nil {
+			return gcal.EventPatch{}, nil, verr
+		}
+		from := before.Visibility
+		if from == "" {
+			from = gcal.VisibilityDefault
+		}
+		set("visibility", from, to, &p.Visibility)
+	}
+	setBool := func(field string, from bool, to *bool, dst **bool) {
+		if to == nil || from == *to {
+			return
+		}
+		v := *to
+		*dst = &v
+		changes = append(changes, Change{Field: field, From: fmt.Sprint(from), To: fmt.Sprint(v)})
+	}
+	setBool("guests_can_modify", before.GuestsCanModify, d.GuestsCanModify, &p.GuestsCanModify)
+	setBool("guests_can_invite_others", orTrue(before.GuestsCanInviteOthers), d.GuestsCanInviteOthers,
+		&p.GuestsCanInviteOthers)
+	setBool("guests_can_see_other_guests", orTrue(before.GuestsCanSeeOtherGuests), d.GuestsCanSeeOtherGuests,
+		&p.GuestsCanSeeOtherGuests)
+	if d.Reminders != nil {
+		to := d.Reminders.wire()
+		from, next := remindersText(before.Reminders), remindersText(to)
+		if from != next {
+			p.Reminders = to
+			changes = append(changes, Change{Field: "reminders", From: from, To: next})
+		}
 	}
 
 	start, end, err := d.times(&before)
@@ -247,6 +461,27 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 	}
 	if d.Transparent != nil && *d.Transparent {
 		e.Transparency = gcal.TransparencyTransparent
+	}
+	if d.Visibility != nil {
+		v, verr := parseVisibility(*d.Visibility)
+		if verr != nil {
+			return gcal.Event{}, verr
+		}
+		e.Visibility = v
+	}
+	if d.Reminders != nil {
+		e.Reminders = d.Reminders.wire()
+	}
+	if d.GuestsCanModify != nil {
+		e.GuestsCanModify = *d.GuestsCanModify
+	}
+	if d.GuestsCanInviteOthers != nil {
+		v := *d.GuestsCanInviteOthers
+		e.GuestsCanInviteOthers = &v
+	}
+	if d.GuestsCanSeeOtherGuests != nil {
+		v := *d.GuestsCanSeeOtherGuests
+		e.GuestsCanSeeOtherGuests = &v
 	}
 	if d.Recurrence != nil {
 		lines, rerr := cleanRecurrence(*d.Recurrence)
@@ -501,6 +736,9 @@ func sideGiven(hasStart bool) string {
 	}
 	return "end"
 }
+
+// orTrue reads a guest permission whose published default is true.
+func orTrue(v *bool) bool { return v == nil || *v }
 
 // moment renders one end of an event for a change line.
 func moment(e *gcal.EventDateTime) string {

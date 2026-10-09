@@ -33,8 +33,8 @@ Event	eventType	modeled	a birthday or an out-of-office is not a meeting, and the
 Event	extendedProperties	out	an application's private key-value store on an event. This server has no state to keep there, and reading another application's keys is not something to do by default. A split carries them whole (§4.2)
 Event	focusTimeProperties	out	only on eventType=focusTime, which this server reads and marks but does not create (§2.12). A split carries it whole (§4.2)
 Event	gadget	out	deprecated by Google, and per its own description now only carries birthday calendar metadata
-Event	guestsCanInviteOthers	modeled	what a guest may do; a write that drops it widens or narrows access silently
-Event	guestsCanModify	modeled	as guestsCanInviteOthers
+Event	guestsCanInviteOthers	modeled	as guestsCanModify; Google's default is true, so false is carried as a pointer
+Event	guestsCanModify	modeled	what a guest may do: get_event shows it with Google's default filled in, and create_event and update_event set it; a write that drops it widens or narrows access silently
 Event	guestsCanSeeOtherGuests	modeled	as guestsCanInviteOthers, and this one decides whether the guest list is visible at all
 Event	hangoutLink	out	read-only and superseded by conferenceData, which is modeled
 Event	htmlLink	modeled	the link a person opens to see the event in Calendar
@@ -49,7 +49,7 @@ Event	outOfOfficeProperties	out	only on eventType=outOfOffice, read and marked b
 Event	privateCopy	out	immutable, and set when an event is created; this server never sets it, and a split carries the parent's whole (§4.2)
 Event	recurrence	modeled	the RRULE, EXDATE and RDATE lines, parsed by internal/recur and sent as the caller's own strings (§6.4)
 Event	recurringEventId	modeled	names the series an instance belongs to, and is what makes a scope required on a write (§4.2)
-Event	reminders	modeled	the per-event override of the calendar's defaults
+Event	reminders	modeled	this account's reminders, which Google keeps per person: shown on every event, set by create_event and update_event, and a write that changes only them reaches nobody (§7.4)
 Event	sequence	modeled	the iCalendar revision; carried through a patch so a write does not reset it
 Event	source	out	the page or message an event was created from, visible only to its creator; no tool here shows provenance. A split carries it whole (§4.2)
 Event	start	modeled	half of the time model: date XOR dateTime, never converted (§4.1)
@@ -57,7 +57,7 @@ Event	status	modeled	canceled events are hidden by default and a canceled instan
 Event	summary	modeled	the title; content, so it reaches a renderer and never a log (§9)
 Event	transparency	modeled	an event marked free does not make somebody busy: the reason availability cannot come from a list (§4.6)
 Event	updated	modeled	shown on an event card, and the answer to "has this changed since I looked"
-Event	visibility	modeled	a private event reads differently depending on the caller's role, and the renderer must not imply it read the details
+Event	visibility	modeled	shown as a private or public tag, and a private event with no title reads as one whose title may be hidden; set by create_event and update_event, with Google's rule for one occurrence held (§7.4)
 Event	workingLocationProperties	out	only on eventType=workingLocation. It is the API's nearest thing to working hours and is not one: §17.2 ships a working-hours mask the CALLER states, and reading somebody's office days off this field would be a different claim. A split carries it whole (§4.2)
 Calendar	autoAcceptInvitations	out	only meaningful on a Workspace resource calendar, which this server does not administer (§1)
 Calendar	conferenceProperties	modeled	which conference types a calendar allows. create_event refuses a Meet link on a calendar whose published list does not name hangoutsMeet, rather than letting Google answer 200 with a failed request and an event that exists (§17.3)
@@ -76,7 +76,7 @@ CalendarListEntry	backgroundColor	modeled	the color actually shown, which colorI
 CalendarListEntry	colorId	modeled	a per-user override, set by manage_calendar (§7.5); the ids come from the calendar palette in colors.get, which get_settings reports
 CalendarListEntry	conferenceProperties	modeled	as Calendar.conferenceProperties. Carried here too, so the calendar list this server already holds answers the question without a second request
 CalendarListEntry	dataOwner	out	read-only, and an email address nothing here needs (§9)
-CalendarListEntry	defaultReminders	modeled	the calendar's default reminders, which an event inherits
+CalendarListEntry	defaultReminders	modeled	the calendar's default reminders, which an event that uses them gets; get_calendar lists them
 CalendarListEntry	deleted	modeled	a deleted entry is skipped when the list is read
 CalendarListEntry	description	modeled	shown by get_calendar
 CalendarListEntry	etag	modeled	If-Match on a calendarList patch (§4.4)
@@ -160,7 +160,7 @@ EventLabel	id	out	as Calendar.labelProperties: a label vocabulary is not a sched
 EventLabel	name	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
 EventOutOfOfficeProperties	autoDeclineMode	out	as Event.outOfOfficeProperties: read and marked, not created (§2.12)
 EventOutOfOfficeProperties	declineMessage	out	as Event.outOfOfficeProperties: read and marked, not created (§2.12)
-EventReminder	method	modeled	a reminder's channel, carried as Event.reminders and CalendarListEntry.defaultReminders are
+EventReminder	method	modeled	a reminder's channel, popup or email, carried as Event.reminders and CalendarListEntry.defaultReminders are
 EventReminder	minutes	modeled	how long before a reminder fires, carried with its method
 EventWorkingLocationProperties	customLocation	out	as Event.workingLocationProperties: not working hours, which the caller states (§17.2)
 EventWorkingLocationProperties	homeOffice	out	as Event.workingLocationProperties: not working hours, which the caller states (§17.2)
