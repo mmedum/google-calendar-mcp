@@ -76,6 +76,11 @@ type Draft struct {
 	// added to the event for the first time" (EventAttendee.resource).
 	// RemoveGuests takes a room's address as well.
 	AddRooms []string
+	// AddOptional are guests invited as optional. They are reached like
+	// any other guest, so they count toward notify. A room cannot be
+	// optional. Add only: an address already on the event keeps the role
+	// it has, and AlreadyOn names it so a result can say so.
+	AddOptional []string
 
 	// Transparent marks the event as not making the person busy.
 	Transparent *bool
@@ -91,7 +96,12 @@ type Draft struct {
 func (d Draft) Empty() bool {
 	return d.Title == nil && d.Description == nil && d.Location == nil &&
 		d.Start == "" && d.End == "" && d.Recurrence == nil &&
-		len(d.AddGuests) == 0 && len(d.RemoveGuests) == 0 && len(d.AddRooms) == 0 && d.Transparent == nil
+		!d.touchesGuests() && d.Transparent == nil
+}
+
+// touchesGuests reports whether the draft changes who is on the event.
+func (d Draft) touchesGuests() bool {
+	return len(d.AddGuests) > 0 || len(d.AddOptional) > 0 || len(d.RemoveGuests) > 0 || len(d.AddRooms) > 0
 }
 
 // Change is one field a write alters, in the exact values that went over
@@ -179,7 +189,7 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 		}
 	}
 
-	if len(d.AddGuests) > 0 || len(d.RemoveGuests) > 0 || len(d.AddRooms) > 0 {
+	if d.touchesGuests() {
 		add, aerr := d.adding()
 		if aerr != nil {
 			return gcal.EventPatch{}, nil, aerr
@@ -194,6 +204,12 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 		}
 	}
 
+	if len(changes) == 0 && len(d.AlreadyOn(before.Attendees)) > 0 {
+		return gcal.EventPatch{}, nil, fmt.Errorf(
+			"%w: nothing to change — every address given is already on the event. Adding an address "+
+				"does not change how it is invited: this server does not make a guest optional or required",
+			ErrInvalid)
+	}
 	if len(changes) == 0 {
 		return gcal.EventPatch{}, nil, fmt.Errorf(
 			"%w: nothing to change — every field given already holds that value, so there is no write to "+
@@ -258,23 +274,57 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 	return e, nil
 }
 
-// Invites is every address the draft adds, rooms included. The reach
-// count decides what a room is by its address (model.IsRoom), so a
-// person passed as a room is still counted as somebody the write
-// reaches.
+// Invites is every address the draft adds, optional guests and rooms
+// included. The reach count decides what a room is by its address
+// (model.IsRoom), so a person passed as a room is still counted as
+// somebody the write reaches, and an optional guest is reached like any
+// other.
 func (d Draft) Invites() []string {
-	return append(slices.Clone(d.AddGuests), d.AddRooms...)
+	out := slices.Clone(d.AddGuests)
+	out = append(out, d.AddOptional...)
+	return append(out, d.AddRooms...)
 }
 
-// adding is the attendees the draft adds: its guests, then its rooms,
-// with every room marked as a resource whichever list carried it.
+// AlreadyOn names the addresses the draft adds that are on the event
+// already. They are left as they are — adding one does not make a guest
+// optional or required — and a result says so rather than skipping them
+// in silence. An address the draft also removes is not among them: it
+// goes and comes back.
+func (d Draft) AlreadyOn(attendees []gcal.EventAttendee) []string {
+	on := map[string]bool{}
+	for _, a := range attendees {
+		on[strings.ToLower(a.Email)] = true
+	}
+	for _, r := range d.RemoveGuests {
+		delete(on, strings.ToLower(strings.TrimSpace(r)))
+	}
+	var out []string
+	for _, a := range d.Invites() {
+		a = strings.TrimSpace(a)
+		if on[strings.ToLower(a)] {
+			delete(on, strings.ToLower(a))
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// adding is the attendees the draft adds: its guests, its optional
+// guests, then its rooms, with every room marked as a resource whichever
+// list carried it.
 func (d Draft) adding() ([]gcal.EventAttendee, error) {
 	var out []gcal.EventAttendee
+	listed := map[string]string{}
 	for _, list := range []struct {
-		addrs []string
-		room  bool
-		what  string
-	}{{d.AddGuests, false, "a guest"}, {d.AddRooms, true, "a room"}} {
+		addrs    []string
+		room     bool
+		optional bool
+		what     string
+	}{
+		{d.AddGuests, false, false, "a guest"},
+		{d.AddOptional, false, true, "an optional guest"},
+		{d.AddRooms, true, false, "a room"},
+	} {
 		for _, a := range list.addrs {
 			a = strings.TrimSpace(a)
 			if a == "" {
@@ -283,7 +333,20 @@ func (d Draft) adding() ([]gcal.EventAttendee, error) {
 			if err := validAddress(a, list.what); err != nil {
 				return nil, err
 			}
-			out = append(out, gcal.EventAttendee{Email: a, Resource: list.room || model.IsRoom(a)})
+			if list.optional && model.IsRoom(a) {
+				return nil, fmt.Errorf("%w: %q is a room's address, and a room cannot be an optional guest. "+
+					"Book it as a room", ErrInvalid, a)
+			}
+			// The same address as an optional guest and as anything else
+			// asks for two roles at once, and which one Google keeps is
+			// not this server's to guess.
+			key := strings.ToLower(a)
+			if prev, ok := listed[key]; ok && prev != list.what &&
+				(list.optional || prev == "an optional guest") {
+				return nil, fmt.Errorf("%w: %q is given as both %s and %s. Give it once", ErrInvalid, a, prev, list.what)
+			}
+			listed[key] = list.what
+			out = append(out, gcal.EventAttendee{Email: a, Resource: list.room || model.IsRoom(a), Optional: list.optional})
 		}
 	}
 	return out, nil

@@ -27,13 +27,14 @@ import (
 //     about the transcript holds for the write path too.
 
 const (
-	writeTitle   = "Livecal write probe"
-	writtenTitle = "Livecal written probe"
-	allDayWrite  = "Livecal all-day write probe"
-	dryRunTitle  = "Livecal dry run that must not exist"
-	rsvpTitle    = "Livecal rsvp probe"
-	meetTitle    = "Livecal conference probe"
-	cancelTitle  = "Livecal cancel probe"
+	writeTitle    = "Livecal write probe"
+	writtenTitle  = "Livecal written probe"
+	allDayWrite   = "Livecal all-day write probe"
+	dryRunTitle   = "Livecal dry run that must not exist"
+	rsvpTitle     = "Livecal rsvp probe"
+	meetTitle     = "Livecal conference probe"
+	cancelTitle   = "Livecal cancel probe"
+	optionalTitle = "Livecal optional guest probe"
 	// The two that reach a real person. Armed by -spike-notify, like
 	// spikes A and B, because every other step in this file is written
 	// so that it CANNOT mail anybody and these two are written so that
@@ -66,6 +67,9 @@ type writeState struct {
 	// meeting is the event created with conference: true, so the step
 	// that reads the link back knows which event to ask for.
 	meeting string
+	// optional is the event whose only guest is this account, invited
+	// as optional, so the step after it can read the role back.
+	optional string
 	// guest is a REAL person's address, from GCAL_LIVE_GUEST_INTERNAL,
 	// and it is empty unless -spike-notify armed the run. The steps that
 	// use it are the only ones here that put an event in somebody else's
@@ -292,6 +296,73 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the refusal is not classified blocked: " + truncate(r.text, 200)
 				}
 				return pass, "refused with [blocked]"
+			},
+		},
+		{
+			// §18 row 92: an optional guest is mailed like any guest, so
+			// notify is required. Refused before a request is built, so
+			// the address below is never sent anywhere.
+			name: "notify required with an optional guest",
+			tool: "create_event",
+			args: on(map[string]any{
+				"title": "Livecal must not be created, optional",
+				"start": "2026-04-02T09:00:00+02:00", "end": "2026-04-02T10:00:00+02:00",
+				"optional_guests": []string{outsideGuest},
+			}),
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "an event with an optional guest was created without a notify decision"
+				}
+				if !strings.Contains(r.text, "[invalid]") || !strings.Contains(r.text, "1 guest") {
+					return fail, "the refusal is not [invalid] counting one guest: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid], counting the optional guest"
+			},
+		},
+		{
+			// §18 row 92: does Google keep optional: true? The only guest
+			// is this account, which reaches nobody, so none is allowed
+			// and nobody is mailed.
+			name: "create_event with an optional guest",
+			tool: "create_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"title": optionalTitle,
+					"start": "2026-04-02T11:00:00+02:00", "end": "2026-04-02T12:00:00+02:00",
+					"optional_guests": []string{w.self}, "notify": "none",
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				w.optional = field(r.text, "id: ")
+				if w.optional == "" {
+					return fail, "the result does not report the id it created"
+				}
+				return pass, "created with this account as its optional guest"
+			},
+		},
+		{
+			name: "get_event shows the optional guest",
+			tool: "get_event",
+			argsFn: func() map[string]any {
+				return map[string]any{"calendar": scratch, "event_id": w.optional}
+			},
+			skip: func() string {
+				if w.optional == "" {
+					return "the step before created nothing"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, ", optional") {
+					return fail, "the guest does not read back as optional, so Google dropped the role"
+				}
+				return pass, "Google kept the guest optional"
 			},
 		},
 		{

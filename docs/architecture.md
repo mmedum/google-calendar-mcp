@@ -569,7 +569,8 @@ Five supporting rules:
    address (§18 rows 84, 85). The address decides that, not the
    attendee's `resource` flag, so a person passed as a room is still
    somebody the write reaches. A guest the write itself adds is
-   reached too (row 86).
+   reached too (row 86), and an optional guest is a guest: Google mails
+   one like any other (row 92).
 3. **A result says what the server asked for, never what a guest
    received.** `none` is never reported as silence, because Google says
    some mail may go out anyway (§2.6). `all` is never reported as
@@ -947,6 +948,16 @@ API shapes behind one honest verb, with the result naming which happened.
 It is **not** behind the destructive flag: canceling a meeting is an
 ordinary calendar action, it notifies by the same `notify` rule, and
 Google keeps the record. §9 has the line.
+
+**Optional guests are added, never re-roled.** `create_event` takes
+`optional_guests` and `update_event` `add_optional_guests`, sent with
+`optional: true`. They count toward `notify` exactly as guests do, through
+the one list of addresses a write adds. A room cannot be optional, and one
+address asked for in two roles is refused. An address the write adds that
+is already on the event keeps the role it has, and the result names it
+rather than skipping it in silence, whichever list it came in. Changing a
+guest from required to optional is a different write, and this server
+does not make it (§18 row 92).
 
 `respond_to_event` sets the caller's own `responseStatus` and comment. It
 is separate from `update_event` because RSVPing is not editing, the
@@ -2870,6 +2881,7 @@ what §15 exists to settle, and they are marked.
 | 89 | `events.list` filters by event type, and leaving the filter out returns every type | Calendar discovery revision 20261005, read 2026-10-09: `eventTypes` is repeated, an enum of `birthday`, `default`, `focusTime`, `fromGmail`, `outOfOffice` and `workingLocation`, "If unset, returns all event types." | **Confirmed in the reference; the live steps are written and not yet run.** `list_events` and `search_events` take `event_types` and send each as `eventTypes`. The page token carries the filter, and a continuation under another one is refused, because Google resumes a token only for the query that issued it. The fake refuses a value outside the enum and counts an event with no type as `default`. The live steps filter the scratch calendar, whose events are all ordinary, on `focusTime` and expect none, then on `default` and expect them all |
 | 90 | A read returns an event's attachments without asking, and an attachment's `fileId` is the Drive file id | Calendar discovery revision 20261005, read 2026-10-09: `supportsAttachments` is a parameter of `events.insert`, `import`, `patch` and `update` only, not of `get`, `list` or `instances`; `EventAttachment.fileId` "For Google Drive files, this is the ID of the corresponding Files resource entry in the Drive API" | **Confirmed in the reference; not yet seen live, tier 3.** `get_event` lists the attachments and every event row counts them. The live driver attaches the Drive file `GCAL_LIVE_ATTACHMENT` names to the weekly series, reads it back, and checks a split carries it. Without that variable those steps are skipped and owed: the driver cannot create a Drive file with the scopes this server asks for |
 | 91 | A read by modification time is a supported way to follow a calendar, and its sync token chains | Calendar discovery revision 20261005, read 2026-10-09: `updatedMin` "Lower bound for an event's last modification time (as a RFC3339 timestamp) to filter by. When specified, entries deleted since this time will always be included regardless of showDeleted"; `Event.updated` "Updating event reminders will not cause this to change"; `syncToken` lists `updatedMin` among the parameters that "cannot be specified together with nextSyncToken". The sync guide, read 2026-10-09: the legacy way "is no longer recommended as it is more error-prone with respect to missed updates". The errors guide: 410 `updatedMinTooLongAgo`, "The requested minimum modification time lies too far in the past" | **Refuted as the way to follow a calendar; kept as a one-off look back.** `list_changes` takes `updated_since` and sends it as `updatedMin`, refused alongside `sync_token` before a request is spent. Its description and its result say what it misses. A 410 under it names a later moment or a baseline as the cure. **Not yet probed, tier 3:** whether a read with `updatedMin` issues a sync token and whether that token chains, so the server hands back none; how far back Google allows; and whether the bound includes the moment itself. The fake includes it. The live driver reads the scratch calendar since an hour before the run and expects the seeded events and no token, and spike O asks the two open questions directly |
+| 92 | An optional guest is a quieter guest, and adding an address already on an event is a no-op worth no mention | Calendar discovery revision 20261005, read 2026-10-09: `EventAttendee.optional` "Whether this is an optional attendee. Optional. The default is False"; the reference says nothing about optional attendees and notifications | **Refuted for the first: nothing says Google mails an optional guest less, so one counts toward `notify` like any guest.** `create_event` takes `optional_guests` and `update_event` `add_optional_guests`; a room is refused there, and so is one address in two roles. **Refuted for the second:** an address the caller asks to add as optional that is already a required guest is a role change the server does not make, and skipping it in silence reads as done. The result now names every added address the event already had. **Not yet seen live, tier 3:** that Google keeps `optional: true` as sent. The live driver creates an event whose only optional guest is the account itself, which reaches nobody, and reads the role back |
 
 ### Deviations from the shared Go MCP server standard
 

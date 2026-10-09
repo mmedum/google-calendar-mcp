@@ -299,6 +299,9 @@ type CreateOptions struct {
 	Description string
 	Location    string
 	Guests      []string
+	// OptionalGuests are invited as optional. They count toward notify
+	// like any guest.
+	OptionalGuests []string
 	// Rooms are rooms and other resources to book, sent as resources.
 	Rooms       []string
 	Recurrence  []string
@@ -336,7 +339,7 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	title := o.Title
 	draft := plan.Draft{
 		Title: &title, Start: o.Start, End: o.End, Zone: env.zone,
-		AddGuests: o.Guests, AddRooms: o.Rooms, Conference: o.Conference,
+		AddGuests: o.Guests, AddOptional: o.OptionalGuests, AddRooms: o.Rooms, Conference: o.Conference,
 	}
 	if o.Description != "" {
 		draft.Description = &o.Description
@@ -504,7 +507,10 @@ type UpdateOptions struct {
 	AddGuests    []string
 	RemoveGuests []string
 	AddRooms     []string
-	Transparent  *bool
+	// AddOptionalGuests are invited as optional. Add only: an address
+	// already on the event keeps its role, and the result names it.
+	AddOptionalGuests []string
+	Transparent       *bool
 
 	Notify string
 	ETag   string
@@ -521,12 +527,13 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 		Title: o.Title, Description: o.Description, Location: o.Location,
 		Start: o.Start, End: o.End,
 		Recurrence: o.Recurrence, AddGuests: o.AddGuests, RemoveGuests: o.RemoveGuests,
-		AddRooms: o.AddRooms, Transparent: o.Transparent,
+		AddRooms: o.AddRooms, AddOptional: o.AddOptionalGuests, Transparent: o.Transparent,
 	}
 	if draft.Empty() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
 			"update_event was given nothing to change. Pass at least one of title, description, location, "+
-				"start, end, recurrence, add_guests, remove_guests, add_rooms or free_not_busy")
+				"start, end, recurrence, add_guests, add_optional_guests, remove_guests, add_rooms or "+
+				"free_not_busy")
 	}
 	ctx, env, err := s.prepare(ctx, o.Calendar, o.TimeZone)
 	if err != nil {
@@ -578,6 +585,9 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if note != "" {
 		report.Notes = append(report.Notes, note)
 	}
+	if n := alreadyOnNote(draft, target.Attendees); n != "" {
+		report.Notes = append(report.Notes, n)
+	}
 	if o.Force {
 		report.Notes = append(report.Notes, forcedNote)
 	}
@@ -614,6 +624,18 @@ func project(before gcal.Event, patch gcal.EventPatch, env *writeEnv) (model.Eve
 	after := before
 	patch.ApplyTo(&after)
 	return model.FromEvent(env.cal.ID, after, &env.zone)
+}
+
+// alreadyOnNote names the addresses a write was asked to add that the
+// event already had. They are left as they were, and saying so is the
+// difference between "added" and "asked to add".
+func alreadyOnNote(d plan.Draft, attendees []gcal.EventAttendee) string {
+	on := d.AlreadyOn(attendees)
+	if len(on) == 0 {
+		return ""
+	}
+	return "Already on the event, so left as they were: " + strings.Join(on, ", ") + ". Adding an " +
+		"address does not change how it is invited: this server does not make a guest optional or required."
 }
 
 // forcedNote says a write went through with If-Match: *, which is §4.4's
@@ -727,6 +749,9 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	}
 	if note != "" {
 		report.Notes = append(report.Notes, note)
+	}
+	if n := alreadyOnNote(draft, parentRaw.Attendees); n != "" {
+		report.Notes = append(report.Notes, n)
 	}
 	report.Notes = append(report.Notes,
 		fmt.Sprintf("\"This and following\" is two calls, because Google has no such operation (§2.8). "+

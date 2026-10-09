@@ -141,7 +141,7 @@ EventAttendee	comment	modeled	an RSVP note, kept when respond_to_event changes t
 EventAttendee	displayName	modeled	shown beside the address
 EventAttendee	email	modeled	who the guest is; counted in a refusal, never logged (§9)
 EventAttendee	id	modeled	carried whole through a guest-list patch
-EventAttendee	optional	modeled	carried whole through a guest-list patch
+EventAttendee	optional	modeled	carried whole through a guest-list patch, shown on get_event, and set by create_event's optional_guests and update_event's add_optional_guests (§18 row 92)
 EventAttendee	organizer	modeled	marks the organizer's own row
 EventAttendee	resource	modeled	a room or other resource: not a guest, never counted toward notify, and set by create_event's rooms (§4.3, §18 rows 84, 85)
 EventAttendee	responseStatus	modeled	the RSVP, shown and set by respond_to_event

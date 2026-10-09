@@ -107,7 +107,7 @@ Every setting is in `docs/configuration.md`.
 | `list_changes` | What changed since you last looked, including **deletions** — which a list cannot report, because a deleted event simply stops matching. Hands back a sync token to pass in next time, or reads what changed since a moment you name. |
 | `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. Takes an optional working-hours mask. |
 | `get_settings` | The account's time zone, week start and color palette. |
-| `create_event` | Create an event, one-off or repeating, with guests, rooms, and a Google Meet link if you ask for one. |
+| `create_event` | Create an event, one-off or repeating, with guests, optional guests, rooms, and a Google Meet link if you ask for one. |
 | `update_event` | Change an event. Only the fields you pass are touched. |
 | `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
 | `move_event` | Move an event to another calendar, which changes who organizes it. |

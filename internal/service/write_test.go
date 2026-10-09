@@ -263,6 +263,140 @@ func TestUpdateEventCountsTheGuestsItAdds(t *testing.T) {
 	}
 }
 
+// An optional guest is a guest who may skip the meeting, and Google
+// mails them like any other: notify is required, none is refused for
+// somebody outside the domain, and the attendee goes to Google marked
+// optional, on a create and on an update.
+func TestOptionalGuestsAreReachedLikeGuests(t *testing.T) {
+	svc, fake := writeSeed(t)
+	outside := []string{"partner@elsewhere.test"}
+	create := func(notify string) (render.WriteReport, error) {
+		return svc.CreateEvent(context.Background(), service.CreateOptions{
+			Calendar: "primary", Title: "Optional", Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+			OptionalGuests: outside, Notify: notify,
+		})
+	}
+	update := func(notify string) error {
+		_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+			Calendar: "primary", EventID: "evsolo00001", AddOptionalGuests: outside, Notify: notify,
+		})
+		return err
+	}
+	for notify, want := range map[string]gapi.Class{"": gapi.ClassInvalid, "none": gapi.ClassBlocked} {
+		if _, err := create(notify); classOf(t, err) != want {
+			t.Fatalf("create with notify %q: %v, want [%s]", notify, err, want)
+		}
+		if err := update(notify); classOf(t, err) != want {
+			t.Fatalf("update with notify %q: %v, want [%s]", notify, err, want)
+		}
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Fatalf("refusals wrote %+v", fake.Wrote())
+	}
+
+	out, err := create("external_only")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := update("external_only"); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	for _, id := range []string{out.After.ID, "evsolo00001"} {
+		got := fake.Events["me@example.test"][id].Attendees
+		if len(got) != 1 || got[0].Email != "partner@elsewhere.test" || !got[0].Optional {
+			t.Fatalf("%s: attendees %+v, want the one guest, optional", id, got)
+		}
+	}
+	for _, w := range fake.Wrote() {
+		if w.SendUpdates != gcal.SendUpdatesExternalOnly {
+			t.Fatalf("%s sent sendUpdates=%q, want %q", w.Method, w.SendUpdates, gcal.SendUpdatesExternalOnly)
+		}
+	}
+}
+
+// Adding is add only. An address already on the event keeps the role it
+// has, and the result names it rather than skipping it in silence; when
+// every address is already there, there is nothing to write.
+func TestAnAddressAlreadyOnTheEventIsReportedNotSkipped(t *testing.T) {
+	svc, fake := writeSeed(t)
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evguests001", Notify: "all",
+		AddOptionalGuests: []string{"Colleague@example.test", "newcomer@example.test"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	optional := map[string]bool{}
+	for _, a := range fake.Events["me@example.test"]["evguests001"].Attendees {
+		optional[a.Email] = a.Optional
+	}
+	if got, ok := optional["colleague@example.test"]; !ok || got {
+		t.Fatalf("the guest already there was changed or dropped: %+v", optional)
+	}
+	if !optional["newcomer@example.test"] {
+		t.Fatalf("the new guest was not added as optional: %+v", optional)
+	}
+	want := "Already on the event, so left as they were: Colleague@example.test."
+	if !strings.Contains(strings.Join(out.Notes, "\n"), want) {
+		t.Fatalf("the result does not name the address already there: %v", out.Notes)
+	}
+
+	_, err = svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evguests001", Notify: "all",
+		AddOptionalGuests: []string{"partner@elsewhere.test"},
+	})
+	if classOf(t, err) != gapi.ClassInvalid || !strings.Contains(err.Error(), "already on the event") {
+		t.Fatalf("adding only addresses already there: %v, want [invalid] naming why", err)
+	}
+}
+
+// A split carries the series' guests to the new series, so an address it
+// is asked to add that the series already has is named there too.
+func TestASplitNamesAnAddressTheSeriesAlreadyHas(t *testing.T) {
+	svc, _ := writeSeed(t)
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evseries001", Scope: "series", Notify: "all",
+		AddGuests: []string{"colleague@example.test"},
+	}); err != nil {
+		t.Fatalf("adding a guest to the series: %v", err)
+	}
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evseries001_20260331T120000Z", Scope: "this_and_following",
+		Notify: "all", Title: strptr("Later review"), AddOptionalGuests: []string{"colleague@example.test"},
+	})
+	if err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	if !strings.Contains(strings.Join(out.Notes, "\n"), "left as they were: colleague@example.test") {
+		t.Fatalf("the split does not name the address already there: %v", out.Notes)
+	}
+}
+
+// A room cannot be optional, and one address cannot be asked for in two
+// roles at once. Both are refused before anything is written.
+func TestOptionalGuestsRefuseRoomsAndDoubleRoles(t *testing.T) {
+	svc, fake := writeSeed(t)
+	for _, c := range []struct {
+		o    service.CreateOptions
+		want string
+	}{
+		{service.CreateOptions{OptionalGuests: []string{"room-sample@resource.calendar.google.com"}},
+			"a room cannot be an optional guest"},
+		{service.CreateOptions{Guests: []string{"colleague@example.test"}, OptionalGuests: []string{"COLLEAGUE@example.test"}},
+			"given as both a guest and an optional guest"},
+	} {
+		o := c.o
+		o.Calendar, o.Title, o.Start, o.End, o.Notify = "primary", "Refused", "2026-04-01T09:00:00+02:00", "2026-04-01T10:00:00+02:00", "all"
+		_, err := svc.CreateEvent(context.Background(), o)
+		if classOf(t, err) != gapi.ClassInvalid || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("%+v: %v, want [invalid] saying %q", c.o, err, c.want)
+		}
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Fatalf("refusals wrote %+v", fake.Wrote())
+	}
+}
+
 // §4.3.5: dry_run shows the blast radius and writes nothing.
 func TestDryRunWritesNothing(t *testing.T) {
 	svc, fake := writeSeed(t)
