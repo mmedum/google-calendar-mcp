@@ -1,5 +1,5 @@
 # One verdict per published field of the four resources whose fields
-# decide what this server can do. `gates api-fields` holds this,
+# decide what this server can do, and of every schema they reach by $ref. `gates api-fields` holds this,
 # testdata/api-surface.json and internal/gcal to each other, and runs in
 # make check with no network.
 #
@@ -96,3 +96,74 @@ AclRule	id	modeled	the rule's address, which unshare_calendar deletes by
 AclRule	kind	out	a constant string naming the resource type
 AclRule	role	modeled	what the rule grants, explained rather than echoed because writerWithoutPrivateAccess is not self-explanatory (§7.6)
 AclRule	scope	modeled	who the rule applies to, including the default scope that means the public internet (§7.6)
+
+# The schemas the four reach by $ref. A field Google adds to an attendee
+# or a reminder is as much a capability as one on the event, and one did
+# go by unnoticed before these rows existed (EventAttendee.asyncOperation).
+CalendarNotification	method	modeled	how a notification is delivered; manage_calendar always writes email (§7.5)
+CalendarNotification	type	modeled	which change this user is emailed about, as manage_calendar sets it (§7.5)
+ConferenceData	conferenceId	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
+ConferenceData	conferenceSolution	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
+ConferenceData	createRequest	modeled	the Meet link request create_event sends, read back for its status (§17.3)
+ConferenceData	entryPoints	modeled	where a conference is joined; the video entry point is the link a result shows
+ConferenceData	notes	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
+ConferenceData	parameters	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
+ConferenceData	signature	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
+ConferenceParameters	addOnParameters	out	parameters for a third-party conferencing add-on, which this server does not create (§17.3)
+ConferenceParametersAddOnParameters	parameters	out	as ConferenceParameters.addOnParameters
+ConferenceProperties	allowedConferenceSolutionTypes	modeled	the conference types a calendar allows; create_event refuses a Meet link where hangoutsMeet is not one
+ConferenceRequestStatus	statusCode	modeled	pending, success or failure of the Meet link request, which a result reports as such (§17.3)
+ConferenceSolution	iconUri	out	the conferencing product's own name and icon, kept raw and not shown
+ConferenceSolution	key	out	the conferencing product's own name and icon, kept raw and not shown
+ConferenceSolution	name	out	the conferencing product's own name and icon, kept raw and not shown
+ConferenceSolutionKey	type	modeled	hangoutsMeet, the one solution create_event asks for
+CreateConferenceRequest	conferenceSolutionKey	modeled	names the solution asked for
+CreateConferenceRequest	requestId	modeled	the event's own id, so a retried insert cannot make a second conference (§2.11)
+CreateConferenceRequest	status	modeled	read to say whether the link is ready, coming or failed
+EntryPoint	accessCode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	entryPointFeatures	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	entryPointType	modeled	picks the video entry point out of the phone and SIP ones
+EntryPoint	label	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	meetingCode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	passcode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	password	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	pin	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	regionCode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
+EntryPoint	uri	modeled	the link a person clicks
+EventAttachment	fileId	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
+EventAttachment	fileUrl	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
+EventAttachment	iconLink	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
+EventAttachment	mimeType	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
+EventAttachment	title	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
+EventAttendee	additionalGuests	modeled	carried whole through a guest-list patch, so a guest's +1 is kept (§4.4)
+EventAttendee	asyncOperation	out	read-only, added by Google after this record began: a group guest whose members Google is still listing. Not read; the guest count takes the group as one guest either way
+EventAttendee	comment	modeled	an RSVP note, kept when respond_to_event changes the answer
+EventAttendee	displayName	modeled	shown beside the address
+EventAttendee	email	modeled	who the guest is; counted in a refusal, never logged (§9)
+EventAttendee	id	modeled	carried whole through a guest-list patch
+EventAttendee	optional	modeled	carried whole through a guest-list patch
+EventAttendee	organizer	modeled	marks the organizer's own row
+EventAttendee	resource	modeled	a room or other resource: not a guest, never counted toward notify, and set by create_event's rooms (§4.3, §18 rows 84, 85)
+EventAttendee	responseStatus	modeled	the RSVP, shown and set by respond_to_event
+EventAttendee	self	modeled	the account's own row, which is not trusted alone (§18 row 50)
+EventBirthdayProperties	contact	out	as Event.birthdayProperties: immutable, and only on a birthday event (§2.12)
+EventBirthdayProperties	customTypeName	out	as Event.birthdayProperties: immutable, and only on a birthday event (§2.12)
+EventBirthdayProperties	type	out	as Event.birthdayProperties: immutable, and only on a birthday event (§2.12)
+EventDateTime	date	modeled	an all-day event's date, which never becomes an instant (§4.1)
+EventDateTime	dateTime	modeled	a timed event's instant
+EventDateTime	timeZone	modeled	the zone a recurring event needs (§2.2), sent on every timed write
+EventFocusTimeProperties	autoDeclineMode	out	as Event.focusTimeProperties: read and marked, not created (§2.12)
+EventFocusTimeProperties	chatStatus	out	as Event.focusTimeProperties: read and marked, not created (§2.12)
+EventFocusTimeProperties	declineMessage	out	as Event.focusTimeProperties: read and marked, not created (§2.12)
+EventLabel	backgroundColor	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
+EventLabel	id	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
+EventLabel	name	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
+EventOutOfOfficeProperties	autoDeclineMode	out	as Event.outOfOfficeProperties: read and marked, not created (§2.12)
+EventOutOfOfficeProperties	declineMessage	out	as Event.outOfOfficeProperties: read and marked, not created (§2.12)
+EventReminder	method	modeled	a reminder's channel, carried as Event.reminders and CalendarListEntry.defaultReminders are
+EventReminder	minutes	modeled	how long before a reminder fires, carried with its method
+EventWorkingLocationProperties	customLocation	out	as Event.workingLocationProperties: not working hours, which the caller states (§17.2)
+EventWorkingLocationProperties	homeOffice	out	as Event.workingLocationProperties: not working hours, which the caller states (§17.2)
+EventWorkingLocationProperties	officeLocation	out	as Event.workingLocationProperties: not working hours, which the caller states (§17.2)
+EventWorkingLocationProperties	type	out	as Event.workingLocationProperties: not working hours, which the caller states (§17.2)
+LabelProperties	eventLabels	out	as Calendar.labelProperties

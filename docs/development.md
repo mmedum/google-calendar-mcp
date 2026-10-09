@@ -24,7 +24,7 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make licenses` | the dependency license allow-list |
 | `make secrets` | gitleaks |
 | `make api-coverage` | every published API method is used or written off, with a reason |
-| `make api-fields` | every published field of the four main resources is modeled or written off, with a reason |
+| `make api-fields` | every published field of the four main resources, and of every schema they reach, is modeled or written off, with a reason |
 | `make classes` | the error vocabulary is closed **from both sides** |
 | `make leaks` | no deployer-specific data in the tree |
 | `make pins` | actions pinned to SHAs, tools pinned to versions, and a tool run locally pinned to the version the release runs |
@@ -113,7 +113,7 @@ implements it, or `out` with why not.
 ## Adding a wire field
 
 `make api-fields` fails on a field of `Event`, `Calendar`,
-`CalendarListEntry` or `AclRule` that `internal/gcal` carries with no row
+`CalendarListEntry`, `AclRule` or a schema they reach that `internal/gcal` carries with no row
 in `testdata/api-fields.tsv`, and on a row saying `out` for a field the
 code actually reads. Fields come from the discovery document through
 `make api-diff`, so a field Google adds arrives as a gate failure naming

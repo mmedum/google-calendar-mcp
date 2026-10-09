@@ -1111,8 +1111,8 @@ written off.
 Methods are the coarse axis; this API keeps its capability in the `Event`
 resource, which has 44 properties. A second gate, `gates api-fields`,
 holds one verdict per published field of `Event`, `Calendar`,
-`CalendarListEntry` and `AclRule`: modeled in `internal/gcal`, or
-written off with a reason. Without it, "we support events" hides the fact
+`CalendarListEntry` and `AclRule`, and of every schema they reach by
+`$ref`: modeled in `internal/gcal`, or written off with a reason. Without it, "we support events" hides the fact
 that `attachments`, `extendedProperties`, `gadget` and the four
 event-type property blocks were never considered.
 
@@ -1126,6 +1126,14 @@ Phase 0 was supposed to write this record and did not, while
 `internal/gcal`'s own doc comment said a gate held the list. Nothing
 noticed, because `parity` compares `make check` with CI and both were
 equally short.
+
+The four alone were not enough. An attendee is an `EventAttendee`, a
+reminder an `EventReminder`, a Meet link a `ConferenceData`, and none of
+their fields had a row, so `EventAttendee.asyncOperation` arrived
+unnoticed. Since 2026-10-09 `api-diff` records every schema the four
+reach by `$ref`, twenty of them, and the record holds 148 fields. A wire
+type is matched to its schema by name, and the five unexported types
+that read the raw conference data by a list in the gate.
 
 ## 9. Confidentiality, security, safety
 
