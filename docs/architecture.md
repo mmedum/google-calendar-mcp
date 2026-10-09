@@ -280,7 +280,7 @@ preamble says to expect.
 document** (`www.googleapis.com/discovery/v1/apis/calendar/v3/rest`,
 revision 20260826, fetched 2026-09-15 and refetched unchanged
 2026-09-16), the Calendar guides, and the public MCP calendar servers
-named in §1. §18 is the evidence log, 101 rows. More than a third of them
+named in §1. §18 is the evidence log, 103 rows. More than a third of them
 refute an assumption this design started out holding; phase 3 added four
 before it wrote any code, one of which removed a parameter rather than
 adding one; and one reversed the single most consequential decision in
