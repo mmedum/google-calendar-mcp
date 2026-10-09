@@ -488,17 +488,23 @@ func (r AvailabilityReport) Text() string {
 	fmt.Fprintf(&b, "%s\n%s\n\n", r.Window, r.Zone.Explain())
 
 	for _, a := range r.Answers {
-		if a.Members > 0 {
-			fmt.Fprintf(&b, "%s (a group of %d calendars)\n", a.CalendarID, a.Members)
-		} else {
+		what := "calendar"
+		switch {
+		case a.Group && a.Members > 0:
+			what = "group"
+			fmt.Fprintf(&b, "%s (a group of %d calendar%s)\n", a.CalendarID, a.Members, plural(a.Members))
+		case a.Group:
+			what = "group"
+			fmt.Fprintf(&b, "%s (a group)\n", a.CalendarID)
+		default:
 			fmt.Fprintf(&b, "%s\n", a.CalendarID)
 		}
 		switch {
 		case a.Unknown:
 			// Never "free". §4.6: a model that cannot tell these apart
 			// will book over somebody.
-			fmt.Fprintf(&b, "  UNKNOWN — this calendar could not be read (%s). "+
-				"Do not treat this as free.\n", a.Reason)
+			fmt.Fprintf(&b, "  UNKNOWN — this %s could not be read (%s). "+
+				"Do not treat this as free.\n", what, a.Reason)
 		case len(a.Busy) == 0:
 			b.WriteString("  free for the whole window\n")
 		default:

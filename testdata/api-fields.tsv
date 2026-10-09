@@ -21,7 +21,7 @@ Event	attendees	modeled	the guest list, and the reason notify is required on any
 Event	attendeesOmitted	modeled	Google truncated the list; a renderer that ignores it shows a meeting as smaller than it is
 Event	birthdayProperties	out	immutable, and only on eventType=birthday. The renderer marks such events so a model does not try to reschedule one (§2.12)
 Event	colorId	modeled	resolved to a color name through colors.get, because "colorId 5" tells a person nothing
-Event	conferenceData	modeled	read as raw JSON and round-tripped, so a shape this server does not model survives a write; create_event asks for a Meet link through it (§17.3)
+Event	conferenceData	modeled	read as raw JSON and never sent back: a patch leaves it alone, so a shape this server does not model survives a write, and a series split drops it and says so; create_event asks for a Meet link through it (§17.3)
 Event	created	modeled	shown on an event card
 Event	creator	modeled	who made it; with organizer it decides whether an edit or an RSVP is the right call
 Event	description	modeled	content, renderer only (§9)
@@ -102,13 +102,13 @@ AclRule	scope	modeled	who the rule applies to, including the default scope that 
 # go by unnoticed before these rows existed (EventAttendee.asyncOperation).
 CalendarNotification	method	modeled	how a notification is delivered; manage_calendar always writes email (§7.5)
 CalendarNotification	type	modeled	which change this user is emailed about, as manage_calendar sets it (§7.5)
-ConferenceData	conferenceId	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
-ConferenceData	conferenceSolution	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
+ConferenceData	conferenceId	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
+ConferenceData	conferenceSolution	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
 ConferenceData	createRequest	modeled	the Meet link request create_event sends, read back for its status (§17.3)
 ConferenceData	entryPoints	modeled	where a conference is joined; the video entry point is the link a result shows
-ConferenceData	notes	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
-ConferenceData	parameters	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
-ConferenceData	signature	out	kept raw on the event and round-tripped, never read: a result says only whether there is a video link and where (§17.3)
+ConferenceData	notes	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
+ConferenceData	parameters	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
+ConferenceData	signature	out	kept raw on the event, never read and never sent back: a result says only whether there is a video link and where (§17.3)
 ConferenceParameters	addOnParameters	out	parameters for a third-party conferencing add-on, which this server does not create (§17.3)
 ConferenceParametersAddOnParameters	parameters	out	as ConferenceParameters.addOnParameters
 ConferenceProperties	allowedConferenceSolutionTypes	modeled	the conference types a calendar allows; create_event refuses a Meet link where hangoutsMeet is not one

@@ -496,8 +496,10 @@ type AvailabilityOut struct {
 	Busy       []IntervalOut `json:"busy"`
 	Unknown    bool          `json:"unknown,omitempty"`
 	Reason     string        `json:"unknown_reason,omitempty"`
-	// GroupMembers is how many calendars a group stands for.
-	GroupMembers int `json:"group_members,omitempty"`
+	// Group is set for a group's address, and GroupMembers is how many
+	// calendars Google expanded it to: none when it could not.
+	Group        bool `json:"group,omitempty"`
+	GroupMembers int  `json:"group_members,omitempty"`
 }
 
 // IntervalOut is a span, absolute at both ends and with its length said
@@ -523,7 +525,10 @@ func NewAvailabilityResult(rep render.AvailabilityReport) AvailabilityResult {
 		text: rep.Text(),
 	}
 	for _, a := range rep.Answers {
-		ans := AvailabilityOut{CalendarID: a.CalendarID, Unknown: a.Unknown, Reason: a.Reason, GroupMembers: a.Members}
+		ans := AvailabilityOut{
+			CalendarID: a.CalendarID, Unknown: a.Unknown, Reason: a.Reason,
+			Group: a.Group, GroupMembers: a.Members,
+		}
 		for _, b := range a.Busy {
 			ans.Busy = append(ans.Busy, interval(b.Start, b.End))
 		}

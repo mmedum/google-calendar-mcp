@@ -1300,8 +1300,15 @@ func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
 		TimeMin: req.TimeMin, TimeMax: req.TimeMax,
 		Calendars: map[string]gcal.FreeBusyCalendar{},
 	}
+	// calendarExpansionMax caps the calendars answered, a group's
+	// members included, at 50 at most (discovery). What Google drops
+	// past the cap is undocumented; the fake answers in the order asked.
+	answerable := 50
+	if n := req.CalendarExpansionMax; n > 0 && n < answerable {
+		answerable = n
+	}
 	calendar := func(id string) {
-		if s.FreeBusyOmit[id] {
+		if s.FreeBusyOmit[id] || len(out.Calendars) >= answerable {
 			return
 		}
 		if reason, bad := s.FreeBusyErrors[id]; bad {

@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -1061,23 +1062,41 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 
 	// §2.10 caps one query at 50 calendars, so more than that is more
 	// than one request — and §4.7 says the result reports how many.
-	for batch := range slices.Chunk(ids, FreeBusyBatch) {
-		req := &gcal.FreeBusyRequest{
-			TimeMin: win.Start.String(), TimeMax: win.End.String(),
-			TimeZone: zone.Name(), CalendarExpansionMax: FreeBusyBatch,
-			GroupExpansionMax: maxGroupMembers,
+	resp := &gcal.FreeBusyResponse{Calendars: map[string]gcal.FreeBusyCalendar{}, Groups: map[string]gcal.FreeBusyGroup{}}
+	query := func(ids []string) error {
+		for batch := range slices.Chunk(ids, FreeBusyBatch) {
+			req := &gcal.FreeBusyRequest{
+				TimeMin: win.Start.String(), TimeMax: win.End.String(),
+				TimeZone: zone.Name(), CalendarExpansionMax: FreeBusyBatch,
+				GroupExpansionMax: maxGroupMembers,
+			}
+			for _, id := range batch {
+				req.Items = append(req.Items, gcal.FreeBusyRequestItem{ID: id})
+			}
+			got, err := s.API.QueryFreeBusy(ctx, req)
+			report.Requests++
+			if err != nil {
+				return err
+			}
+			maps.Copy(resp.Calendars, got.Calendars)
+			maps.Copy(resp.Groups, got.Groups)
 		}
-		for _, id := range batch {
-			req.Items = append(req.Items, gcal.FreeBusyRequestItem{ID: id})
-		}
-		resp, err := s.API.QueryFreeBusy(ctx, req)
-		report.Requests++
-		if err != nil {
+		return nil
+	}
+	if err := query(ids); err != nil {
+		return render.AvailabilityReport{}, err
+	}
+	// The cap counts a group's members too, so a group of 60, or a group
+	// of 10 beside 45 calendars, leaves calendars unanswered. They are
+	// asked again on their own, up to a bound; one still unanswered is
+	// unknown, and so is its group, never free.
+	if again := unanswered(ids, resp); len(again) > 0 {
+		if err := query(again[:min(len(again), maxAskedAgain)]); err != nil {
 			return render.AvailabilityReport{}, err
 		}
-		for _, id := range batch {
-			report.Answers = append(report.Answers, answerFor(id, resp, zone))
-		}
+	}
+	for _, id := range ids {
+		report.Answers = append(report.Answers, answerFor(id, resp, zone))
 	}
 
 	var busy []model.Busy
@@ -1104,6 +1123,34 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 // FreeBusyRequest.groupExpansionMax).
 const maxGroupMembers = 100
 
+// maxAskedAgain bounds the members asked about again, at four requests:
+// enough for two groups of the most Google expands.
+const maxAskedAgain = 2 * maxGroupMembers
+
+// unanswered is every calendar the response has no slot for, a
+// group's members included, in the order asked and each once.
+func unanswered(ids []string, resp *gcal.FreeBusyResponse) []string {
+	var out []string
+	seen := map[string]bool{}
+	ask := func(id string) {
+		if _, answered := resp.Calendars[id]; !answered && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, id := range ids {
+		g, isGroup := resp.Groups[id]
+		if _, isCalendar := resp.Calendars[id]; !isGroup || isCalendar {
+			ask(id)
+			continue
+		}
+		for _, m := range g.Calendars {
+			ask(m)
+		}
+	}
+	return out
+}
+
 // answerFor turns one calendar's or group's slot in the response into an
 // answer.
 func answerFor(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
@@ -1120,7 +1167,7 @@ func answerFor(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Ava
 // could not read a member: one member unread is somebody who may be
 // busy, and a group answered as free on that is §4.6's defect.
 func groupAnswer(id string, g gcal.FreeBusyGroup, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
-	out := model.Availability{CalendarID: id, Members: len(g.Calendars)}
+	out := model.Availability{CalendarID: id, Group: true, Members: len(g.Calendars)}
 	switch {
 	case len(g.Errors) > 0:
 		out.Unknown, out.Reason = true, "Google could not expand this group: "+freeBusyReason(g.Errors[0])

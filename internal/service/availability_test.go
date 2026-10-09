@@ -494,11 +494,60 @@ func TestAGroupWithAnUnreadMemberIsUnknown(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Availability: %v", err)
 			}
-			if a := got.Answers[0]; !a.Unknown || a.Reason != tc.reason || len(a.Busy) != 0 {
-				t.Fatalf("got %+v, want unknown because %q", a, tc.reason)
+			if a := got.Answers[0]; !a.Unknown || a.Reason != tc.reason || len(a.Busy) != 0 || !a.Group {
+				t.Fatalf("got %+v, want an unknown group because %q", a, tc.reason)
 			}
 			if got.GapsFrom != 0 || len(got.Gaps) != 0 {
 				t.Fatalf("free time offered from an unknown group: %+v", got.Gaps)
+			}
+			if !strings.Contains(got.Text(), "this group could not be read") {
+				t.Fatalf("the text does not call it a group:\n%s", got.Text())
+			}
+		})
+	}
+}
+
+// One query answers for at most 50 calendars, a group's members
+// included. A group of 60, or a group of 10 beside 45 calendars, is
+// still answered: the members past the cap are asked about again.
+func TestAGroupPastFiftyCalendarsIsAnswered(t *testing.T) {
+	const group = "team-group@example.test"
+	members := func(n int) []string {
+		var out []string
+		for i := range n {
+			out = append(out, fmt.Sprintf("member%02d@example.test", i))
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name      string
+		calendars []string
+		members   int
+		requests  int
+	}{
+		{"a group of 60", []string{group}, 60, 2},
+		{"a group of 10 beside 45 calendars", append([]string{group}, members(55)[10:]...), 10, 2},
+		{"a group of 100", []string{group}, 100, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, fake := seeded(t)
+			fake.Groups[group] = members(tc.members)
+			last := members(tc.members)[tc.members-1]
+			fake.Busy[last] = []gcal.TimePeriod{{Start: "2026-03-16T09:00:00+01:00", End: "2026-03-16T10:00:00+01:00"}}
+			o := day("2026-03-16", "2026-03-16")
+			o.Calendars = tc.calendars
+			got, err := svc.Availability(context.Background(), o)
+			if err != nil {
+				t.Fatalf("Availability: %v", err)
+			}
+			if got.Unknown() != 0 {
+				t.Fatalf("%d answers unknown: %+v", got.Unknown(), got.Answers[0])
+			}
+			if a := got.Answers[0]; len(a.Busy) != 1 || a.Busy[0].Start.T.Format("15:04") != "09:00" {
+				t.Fatalf("the group's answer is %+v, want its last member's 09:00 block", a)
+			}
+			if got.Requests != tc.requests {
+				t.Fatalf("made %d requests, want %d", got.Requests, tc.requests)
 			}
 		})
 	}

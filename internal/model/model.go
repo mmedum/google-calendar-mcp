@@ -385,8 +385,9 @@ type Availability struct {
 	Busy       []Busy
 	Unknown    bool
 	Reason     string
-	// Members is how many calendars a group stands for, zero for a
-	// calendar.
+	// Group is set for a group's address. Members is how many
+	// calendars Google expanded it to, which is zero when it could not.
+	Group   bool
 	Members int
 }
 

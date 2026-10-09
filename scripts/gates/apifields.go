@@ -54,9 +54,12 @@ func apiFieldsGate() error {
 	if err != nil {
 		return err
 	}
-	if len(surface.Schemas) < len(fieldResources) {
-		return fmt.Errorf("the API snapshot carries %d resources, want %d (run `make api-diff`)",
-			len(surface.Schemas), len(fieldResources))
+	// By name, not by count: the snapshot also carries every schema the
+	// four reach, so a count would still pass with one of them gone.
+	for _, r := range fieldResources {
+		if !slices.ContainsFunc(surface.Schemas, func(s schemaRow) bool { return s.Resource == r }) {
+			return fmt.Errorf("the API snapshot does not carry %s (run `make api-diff`)", r)
+		}
 	}
 
 	published := map[string]bool{}
