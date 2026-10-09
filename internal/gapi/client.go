@@ -539,6 +539,12 @@ func (c *Client) PatchEvent(ctx context.Context, calendarID, eventID string,
 	if sendUpdates != "" {
 		q.Set("sendUpdates", sendUpdates)
 	}
+	if len(p.ConferenceData) > 0 {
+		// As on an insert: version 0 "ignores conference data in the
+		// event's body", so a create request without this is a 200
+		// that adds nothing.
+		q.Set("conferenceDataVersion", "1")
+	}
 	var out gcal.Event
 	if err := c.do(ctx, request{
 		method: http.MethodPatch,

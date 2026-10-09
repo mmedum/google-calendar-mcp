@@ -97,10 +97,10 @@ type Draft struct {
 	GuestsCanInviteOthers   *bool
 	GuestsCanSeeOtherGuests *bool
 
-	// Conference asks Google to attach a Google Meet link. It is only
-	// meaningful on an insert: Patch refuses it rather than dropping it
-	// silently, because adding a conference to an event that exists is
-	// a write this server does not make (§17.3).
+	// Conference asks Google to attach a Google Meet link: to a new event
+	// on an insert, and to an event that has none on a patch, which
+	// refuses one that has a conference because Google would replace it
+	// (§17.3).
 	Conference bool
 }
 
@@ -110,7 +110,7 @@ func (d Draft) Empty() bool {
 		d.Start == "" && d.End == "" && d.Recurrence == nil &&
 		!d.touchesGuests() && d.Transparent == nil &&
 		d.Reminders == nil && d.Visibility == nil && d.GuestsCanModify == nil &&
-		d.GuestsCanInviteOthers == nil && d.GuestsCanSeeOtherGuests == nil
+		d.GuestsCanInviteOthers == nil && d.GuestsCanSeeOtherGuests == nil && !d.Conference
 }
 
 // OnlyReminders reports whether the draft changes nothing but this
@@ -310,9 +310,15 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 	var changes []Change
 
 	if d.Conference {
-		return gcal.EventPatch{}, nil, fmt.Errorf("%w: a Google Meet link can only be attached when the "+
-			"event is created. This server does not add one to an event that already exists — create the "+
-			"event with conference: true, or add the link in Google Calendar", ErrUnsupported)
+		// A create request that failed holds no conference, so asking
+		// again replaces nothing anybody could join.
+		if c := gcal.ReadConference(before.ConferenceData); c.Present && !c.Failed() {
+			return gcal.EventPatch{}, nil, fmt.Errorf("%w: this event already has a conference. Google "+
+				"replaces conference data whole, so adding a Google Meet link would replace the one there. "+
+				"Read it with get_event, or change it in Google Calendar", ErrBlocked)
+		}
+		p.ConferenceData = gcal.NewConferenceRequest(gcal.ConferenceRequestID(before.ID, before.ETag))
+		changes = append(changes, Change{Field: "conference", From: "none", To: "Google Meet link requested"})
 	}
 
 	set := func(field, from, to string, dst **string) {

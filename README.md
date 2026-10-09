@@ -108,7 +108,7 @@ Every setting is in `docs/configuration.md`.
 | `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. Takes an optional working-hours mask. |
 | `get_settings` | The account's time zone, week start and color palette. |
 | `create_event` | Create an event, one-off or repeating, with guests, optional guests, rooms, your reminders, its visibility, what guests may do, and a Google Meet link if you ask for one. |
-| `update_event` | Change an event, including your reminders, its visibility and what guests may do. Only the fields you pass are touched. |
+| `update_event` | Change an event, including your reminders, its visibility and what guests may do, or add a Google Meet link. Only the fields you pass are touched. |
 | `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
 | `move_event` | Move an event to another calendar, which changes who organizes it. |
 | `respond_to_event` | Answer an invitation: accepted, declined or tentative. |

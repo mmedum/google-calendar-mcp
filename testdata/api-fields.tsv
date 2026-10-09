@@ -21,7 +21,7 @@ Event	attendees	modeled	the guest list, and the reason notify is required on any
 Event	attendeesOmitted	modeled	Google truncated the list; a renderer that ignores it shows a meeting as smaller than it is
 Event	birthdayProperties	out	immutable, and only on eventType=birthday. The renderer marks such events so a model does not try to reschedule one (§2.12). A split carries it whole (§4.2)
 Event	colorId	modeled	resolved to a color name through colors.get, because "colorId 5" tells a person nothing
-Event	conferenceData	modeled	read as raw JSON and never sent back: a patch leaves it alone, so a shape this server does not model survives a write, and a series split drops it and says so; create_event asks for a Meet link through it (§17.3)
+Event	conferenceData	modeled	read as raw JSON and never sent back: a patch leaves it alone, so a shape this server does not model survives a write, and a series split drops it and says so; create_event and update_event's add_conference send a create request through it, and the second refuses an event that has one (§17.3)
 Event	created	modeled	shown on an event card
 Event	creator	modeled	who made it; with organizer it decides whether an edit or an RSVP is the right call
 Event	description	modeled	content, renderer only (§9)

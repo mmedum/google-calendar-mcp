@@ -408,13 +408,15 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 			"This is a series: "+render.Recurrence(body.Recurrence)+".")
 	}
 	if o.Conference && o.DryRun {
-		report.Notes = append(report.Notes,
-			"A Google Meet link would be requested. Nothing is written by a dry run, so there is "+
-				"no link to report here.")
+		report.Notes = append(report.Notes, dryRunConferenceNote)
 	}
 
 	if o.DryRun {
-		after, cerr := model.FromEvent(env.cal.ID, body, &env.zone)
+		// Without the create request: read back, it is conference data
+		// with no link in it, a state Google never answered with.
+		projected := body
+		projected.ConferenceData = nil
+		after, cerr := model.FromEvent(env.cal.ID, projected, &env.zone)
 		if cerr != nil {
 			return render.WriteReport{}, cerr
 		}
@@ -436,6 +438,11 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	report.After, report.Requests = &after, gapi.Requests(ctx)
 	return report, nil
 }
+
+// dryRunConferenceNote is what a dry run says about a Meet link it would
+// ask for: there is no link to report, because nothing was asked.
+const dryRunConferenceNote = "A Google Meet link would be requested. Nothing is written by a dry run, so " +
+	"there is no link to report here."
 
 // listGiven is a list input as given, nil when it was left out.
 func listGiven(v []int) *[]int {
@@ -560,6 +567,9 @@ type UpdateOptions struct {
 	GuestsCanModify         *bool
 	GuestsCanInviteOthers   *bool
 	GuestsCanSeeOtherGuests *bool
+	// AddConference asks Google for a Meet link on an event that has no
+	// conference (§17.3).
+	AddConference bool
 
 	Notify string
 	ETag   string
@@ -579,6 +589,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 		AddRooms: o.AddRooms, AddOptional: o.AddOptionalGuests, Transparent: o.Transparent,
 		Visibility: o.Visibility, GuestsCanModify: o.GuestsCanModify,
 		GuestsCanInviteOthers: o.GuestsCanInviteOthers, GuestsCanSeeOtherGuests: o.GuestsCanSeeOtherGuests,
+		Conference: o.AddConference,
 	}
 	reminders, err := plan.NewReminders(o.DefaultReminders, o.PopupReminders, o.EmailReminders)
 	if err != nil {
@@ -593,11 +604,18 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 			"update_event was given nothing to change. Pass at least one of title, description, location, "+
 				"start, end, recurrence, add_guests, add_optional_guests, remove_guests, add_rooms, "+
 				"free_not_busy, popup_reminders, email_reminders, default_reminders, visibility, "+
-				"guests_can_modify, guests_can_invite_others or guests_can_see_other_guests")
+				"guests_can_modify, guests_can_invite_others, guests_can_see_other_guests or add_conference")
 	}
 	ctx, env, err := s.prepare(ctx, o.Calendar, o.TimeZone)
 	if err != nil {
 		return render.WriteReport{}, err
+	}
+	if o.AddConference && !env.cal.Conference.AllowsMeet() {
+		// As on create: Google's own answer is a 200 and a failed
+		// request.
+		return render.WriteReport{}, gapi.Errf(gapi.ClassUnsupported,
+			"this calendar does not allow Google Meet conferences, so nothing was changed. "+
+				"Leave out add_conference, or use a calendar that allows them")
 	}
 	id, note, err := address(o.EventID, o.OriginalStart)
 	if err != nil {
@@ -662,6 +680,9 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if visibilityNote != "" {
 		report.Notes = append(report.Notes, visibilityNote)
 	}
+	if o.AddConference && o.DryRun {
+		report.Notes = append(report.Notes, dryRunConferenceNote)
+	}
 	if n := alreadyOnNote(draft, target.Attendees); n != "" {
 		report.Notes = append(report.Notes, n)
 	}
@@ -684,6 +705,9 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	after, err := model.FromEvent(env.cal.ID, *updated, &env.zone)
 	if err != nil {
 		return render.WriteReport{}, err
+	}
+	if note := conferenceNote(o.AddConference, after); note != "" {
+		report.Notes = append(report.Notes, note)
 	}
 	report.After, report.Requests = &after, gapi.Requests(ctx)
 	return report, nil
@@ -775,6 +799,13 @@ func notFoundHint(err error, id, originalStart string) error {
 func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target model.Event,
 	draft plan.Draft, o UpdateOptions, note string,
 ) (render.WriteReport, error) {
+	if draft.Conference {
+		// The new series is a new event, and a split mints no
+		// conference for it (§17.3).
+		return render.WriteReport{}, gapi.Errf(gapi.ClassUnsupported,
+			"add_conference cannot go with this_and_following: a split starts a new series and does not "+
+				"make a conference for it. Split first, then add the link to the new series with scope:series")
+	}
 	if target.IsSeries() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
 			"%s is the series itself, so \"this and following\" does not say where to split it. Pass "+
@@ -850,8 +881,8 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if droppedConference {
 		report.Notes = append(report.Notes,
 			"The original series had a conference attached and the NEW series does not. A split does not "+
-				"copy a conference, so the later occurrences have no meeting link — add one in Calendar if "+
-				"people were joining that way.")
+				"copy a conference, so the later occurrences have no meeting link. If people were joining "+
+				"that way, add one to the new series with update_event, add_conference and scope:series.")
 	}
 
 	if o.DryRun {
@@ -966,14 +997,14 @@ func splitBody(parent gcal.Event, target model.Event, draft plan.Draft, rule str
 	// The conference is NOT carried, and the result says so rather than
 	// letting it vanish.
 	//
-	// The reason is no longer "this server cannot write one" — since
-	// §17.3 it can, and the client would send the version parameter for
-	// this body as readily as for a create. It is that copying the value
-	// points TWO series at one conference, which is a decision about
-	// somebody's meeting rather than about this write, and minting a
-	// second conference for a split is a write nobody asked for. So the
-	// split leaves the new series without a link and says so, which is
-	// the honest half of a limitation.
+	// The reason is not that this server cannot write one: create_event
+	// and add_conference both do. It is that copying the value points
+	// TWO series at one conference, which is a decision about somebody's
+	// meeting rather than about this write, and Google warns that reusing
+	// conference data across events can expose a meeting to people it
+	// was not meant for. Minting a second conference for a split is a
+	// write nobody asked for. So the split leaves the new series without
+	// a link, says so, and names add_conference as the way to add one.
 	droppedConference := len(body.ConferenceData) > 0
 	body.ConferenceData = nil
 

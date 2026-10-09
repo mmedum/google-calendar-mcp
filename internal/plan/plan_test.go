@@ -380,14 +380,36 @@ func TestAMisspelledScopeIsRefusedEvenOnASingleEvent(t *testing.T) {
 	}
 }
 
-// TestAConferenceIsOnlyAttachedAtCreation: adding a Meet link to an
-// event that already exists is a write this server does not make, and
-// the refusal says so rather than the field being dropped in silence.
-func TestAConferenceIsOnlyAttachedAtCreation(t *testing.T) {
-	before := gcal.Event{ID: "abcdef0123456789", Summary: "Standing meeting"}
-	_, _, err := plan.Patch(before, plan.Draft{Conference: true})
-	if !errors.Is(err, plan.ErrUnsupported) {
-		t.Fatalf("Patch with a conference gave %v, want ErrUnsupported", err)
+// A Meet link is asked for on a new event, and on an event that has no
+// conference. The patch's request id is not the event id, which the
+// create used, because Google ignores a repeated one; it follows the
+// etag, so a retry of one patch repeats it.
+func TestAConferenceIsAskedForOnCreateAndOnAnEventWithNone(t *testing.T) {
+	before := gcal.Event{ID: "abcdef0123456789", Summary: "Standing meeting", ETag: `"v3"`}
+	p, changes, err := plan.Patch(before, plan.Draft{Conference: true})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if got := gcal.ConferenceRequestOf(p.ConferenceData); got != gcal.ConferenceRequestID("abcdef0123456789", `"v3"`) ||
+		got == "abcdef0123456789" {
+		t.Fatalf("the request id is %q", got)
+	}
+	if gcal.ConferenceRequestID("abcdef0123456789", `"v4"`) == gcal.ConferenceRequestID("abcdef0123456789", `"v3"`) {
+		t.Fatal("two versions of one event share a request id, so the second request would be ignored")
+	}
+	if len(changes) != 1 || changes[0].Field != "conference" {
+		t.Fatalf("got changes %+v", changes)
+	}
+
+	// One that has a conference is refused: Google would replace it.
+	before.ConferenceData = json.RawMessage(`{"entryPoints":[{"entryPointType":"phone","uri":"tel:+1-555-0100"}]}`)
+	if _, _, err := plan.Patch(before, plan.Draft{Conference: true}); !errors.Is(err, plan.ErrBlocked) {
+		t.Fatalf("got %v, want a conference already there refused", err)
+	}
+	// A request that failed holds no conference, so asking again is allowed.
+	before.ConferenceData = json.RawMessage(`{"createRequest":{"requestId":"x","status":{"statusCode":"failure"}}}`)
+	if _, _, err := plan.Patch(before, plan.Draft{Conference: true}); err != nil {
+		t.Fatalf("asking again after a failed request was refused: %v", err)
 	}
 
 	e, err := plan.Insert("abcdef0123456789", plan.Draft{

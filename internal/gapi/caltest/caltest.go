@@ -113,6 +113,10 @@ type Server struct {
 	// revs counts patches per event, so an etag moves on every write and
 	// a stale If-Match is refused the way Google refuses it.
 	revs map[string]int
+	// conferenceAsked is the last conference request id each event was
+	// sent, keyed by calendar and event id: Google ignores a request
+	// that repeats it.
+	conferenceAsked map[string]string
 	// syncSeq is a change counter per calendar, and changed records the
 	// LATEST state of every event that has moved since the calendar was
 	// seeded — a canceled stub for one that was deleted outright.
@@ -408,6 +412,9 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 		if r.URL.Query().Get("conferenceDataVersion") != "1" {
 			e.ConferenceData = nil
 		} else {
+			s.mu.Lock()
+			s.askedForConference(calID, e.ID, gcal.ConferenceRequestOf(e.ConferenceData))
+			s.mu.Unlock()
 			e.ConferenceData = conferenceAnswer(e.ConferenceData, s.ConferenceFails)
 		}
 	}
@@ -461,6 +468,15 @@ func visibilityRank(v string) int {
 	default:
 		return 1
 	}
+}
+
+// askedForConference records the request id an event was last sent. The
+// caller holds mu.
+func (s *Server) askedForConference(calID, eventID, requestID string) {
+	if s.conferenceAsked == nil {
+		s.conferenceAsked = map[string]string{}
+	}
+	s.conferenceAsked[calID+"/"+eventID] = requestID
 }
 
 // statusDetails names the details block each status event type is
@@ -526,6 +542,15 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 	// would make the fake quietly not apply it, and a test green over
 	// behavior that never happened.
 	p.ApplyTo(&next)
+	// A conference request is the one field the fold leaves out, because
+	// Google answers it with a conference it makes. Without version 1 it
+	// is ignored, as on an insert; and "If an ID provided is the same as
+	// for the previous request, the request is ignored."
+	if id := gcal.ConferenceRequestOf(p.ConferenceData); id != "" &&
+		r.URL.Query().Get("conferenceDataVersion") == "1" && s.conferenceAsked[calID+"/"+eventID] != id {
+		s.askedForConference(calID, eventID, id)
+		next.ConferenceData = conferenceAnswer(p.ConferenceData, s.ConferenceFails)
+	}
 	if s.revs == nil {
 		s.revs = map[string]int{}
 	}

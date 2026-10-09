@@ -1022,6 +1022,10 @@ changed. `guests_can_modify`, `guests_can_invite_others` and
 three with Google's defaults filled in. These reach the guests like any
 other change to the event (§18 row 97).
 
+**A Meet link can be added after the event is made.** `update_event`
+takes `add_conference`, refused on an event that has a conference and
+with `this_and_following`; §17.3 has the rules and the request id.
+
 `respond_to_event` sets the caller's own `responseStatus` and comment. It
 is separate from `update_event` because RSVPing is not editing, the
 permissions differ, and a model that conflates them will try to RSVP by
@@ -1119,7 +1123,7 @@ only the read scopes (§10).
 | `check_availability` | `freebusy.query` | batched at 50; free gaps (§7.3); working-hours mask (§17.2) |
 | `get_settings` | `settings.list`, `colors.get` | the user's zone and week start |
 | `create_event` | `events.insert` | client-side id (§2.11); optional Meet link (§17.3) |
-| `update_event` | `events.patch` | `scope` + `notify` + `If-Match` |
+| `update_event` | `events.patch` | `scope` + `notify` + `If-Match`; `add_conference` (§17.3) |
 | `cancel_event` | `events.delete`, `events.patch` | not gated (§7.4) |
 | `move_event` | `events.move` | between calendars |
 | `respond_to_event` | `events.patch` | RSVP only (§7.4) |
@@ -2811,6 +2815,26 @@ row 80).
    instead, rather than silently dropped: `events.patch` can carry
    conference data and this server does not write it, so saying so is the
    honest half. **Decided, with the boundary named.**
+
+   **Reversed 2026-10-09: `update_event` takes `add_conference`.** A
+   meeting often gets its link after it is made, and the refusal sent the
+   caller to Google Calendar for a write the API supports. The boundary
+   that mattered is kept by the rule rather than by the refusal. A patch
+   carries the create request, and the client sets the version parameter
+   from the body, as on an insert. An event that already has a
+   conference is refused, because Google replaces the field whole, so the
+   request would replace the link people are using; one whose earlier
+   request failed holds no conference and may ask again. The calendar's
+   published types are checked first, as on create. The request id is
+   **not** the event id: a create with a conference used that, and Google
+   ignores a repeated one, so asking again after somebody removed the
+   first link would be ignored in silence. It is a hash of the event id
+   and the etag the write is made under, so a retry of the same patch
+   repeats it and a later version gets a new one. A dry run names the
+   request and shows no conference. A split still mints none: the new
+   series is a new event, so `add_conference` with `this_and_following`
+   is refused, and the split's own note names `add_conference` with
+   `scope:series` as the way to add one afterward (§18 row 98).
 4. **quickAdd, argued against.** §1 writes it off and the counter-argument
    is recorded rather than lost: it is one call where the structured path
    is several, and users type strings like that. It stays out because it
@@ -2951,6 +2975,7 @@ what §15 exists to settle, and they are marked.
 | 95 | `q` is undocumented free text, and Google does not say which fields it reads | Calendar discovery revision 20261005, read 2026-10-09: `q` "Free text search terms to find events that match these terms in the following fields: summary, description, location, attendee's displayName, attendee's email, organizer's displayName, organizer's email, workingLocationProperties.officeLocation.buildingId, workingLocationProperties.officeLocation.deskId, workingLocationProperties.officeLocation.label, workingLocationProperties.customLocation.label", and "These search terms also match predefined keywords against all display title translations of working location, out-of-office, and focus-time events" | **Refuted: the fields are documented now.** `search_events`, the server instructions and §7.2 name them. What stays true, and stays in the description: there is no field syntax, how words are matched is not documented, and an event seen only as busy has nothing to match, so an empty result is still not proof. The fake matches the documented fields; the built-in words are not modeled |
 | 96 | A release binary resolves an IANA zone on every platform it is built for | Go 1.27.2 `time.LoadLocation`, read 2026-10-09: it looks in "the directory or uncompressed zip file named by the ZONEINFO environment variable", "on a Unix system, the system standard installation location", "$GOROOT/lib/time/zoneinfo.zip" and "the time/tzdata package, if it was imported"; `time/tzdata`: "if the time package cannot find tzdata files on the system, it will use this embedded information" | **Refuted on Windows.** Windows is not a Unix system and a user without Go has no `$GOROOT`, so the Windows archive and the bundle's Windows binary refused every zone. The main package imports `time/tzdata`: about 400 KB on each platform, used only when the machine has no database. A test asks `go list -deps` whether the binary links it, because on Linux the system database comes first and `ZONEINFO` pointed at an empty directory does not stop that, so a test that loads a zone passes either way. **Not yet seen on a Windows machine without Go, tier 3** |
 | 97 | Reminders, visibility and the guests' permissions are the event's, set like any other field | Calendar discovery revision 20261002, read 2026-10-09: `reminders` "Information about the event's reminders for the authenticated user. Note that changing reminders does not also change the updated property of the enclosing event"; `overrides` "The maximum number of override reminders is 5"; `EventReminder.minutes` "between 0 and 40320 (4 weeks in minutes)"; `visibility` "confidential - The event is private. This value is provided for compatibility reasons", and "If the new setting is more restrictive (e.g. from public to private), it is applied to all instances. If the new setting is less restrictive (e.g. from private to public), the change is ignored"; `guestsCanInviteOthers` and `guestsCanSeeOtherGuests` "The default is True". The performance guide on patch: "The modified data you send is merged into the data for the parent object", "Patch requests that contain arrays replace the existing array", "To delete a field, specify the field and set it to null" | **Refuted for reminders: they are the caller's alone**, so an update that changes only them needs no `notify` and sends no `sendUpdates`. Visibility and the permissions are the event's and reach the guests as before. A less restrictive visibility on one occurrence is refused, and a more restrictive one is made with a note that the series changed. The fake holds the limits and both visibility rules. **Not yet seen live, tier 3:** that a patch with `overrides: null` clears the old reminders under `useDefault` true or false, and that Google accepts it at all; and that a more restrictive visibility on an occurrence reaches the series. The live driver sets, replaces, empties and restores reminders on its own event and reads each back, and makes one occurrence of its series private and reads the series |
+| 98 | A conference can only be attached when an event is created | Calendar discovery revision 20261002, read 2026-10-09: `events.patch.conferenceDataVersion` "Version 1 enables support for copying of ConferenceData as well as for creating new conferences using the createRequest field of conferenceData"; `Event.conferenceData` "To persist your changes, remember to set the conferenceDataVersion request parameter to 1 for all event modification requests", and "Reusing Google Meet conference data across different events can cause access issues and expose meeting details to unintended users"; `CreateConferenceRequest.requestId` "Clients should regenerate this ID for every new request. If an ID provided is the same as for the previous request, the request is ignored" | **Refuted: a patch can create one.** `update_event` takes `add_conference`, reversing §17.3's refusal. The request id is a hash of the event id and the etag, because the event id may already have been used by the create and a repeat is ignored. An event with a conference is refused, since the field is replaced whole. A split still copies none, for the reuse warning above. The fake ignores a repeated id per event and drops the request without the version. **Not yet seen live, tier 3:** that a patch with a create request answers with the link or pending as an insert does; and whether Google remembers request ids per event or across events, which decides whether the create's id would really be ignored. The live driver adds a link to its probe event, reads it back, and checks a second request is refused |
 
 ### Deviations from the shared Go MCP server standard
 

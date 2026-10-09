@@ -16,6 +16,8 @@ package gcal
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -104,7 +106,8 @@ type Event struct {
 	// and fromGmail cannot be created at all (§2.12).
 	EventType string `json:"eventType,omitempty"`
 
-	// ConferenceData is read here and written by create_event (§17.3).
+	// ConferenceData is read here, and a create request is written by
+	// create_event and by update_event's add_conference (§17.3).
 	// It stays raw JSON: the union has a third-party arm this package
 	// does not model, and a read that round-trips the value whole cannot
 	// lose what it did not understand. ReadConference takes out the
@@ -717,6 +720,13 @@ type EventPatch struct {
 	GuestsCanModify         *bool `json:"guestsCanModify,omitempty"`
 	GuestsCanInviteOthers   *bool `json:"guestsCanInviteOthers,omitempty"`
 	GuestsCanSeeOtherGuests *bool `json:"guestsCanSeeOtherGuests,omitempty"`
+	// ConferenceData carries only a create request, from
+	// NewConferenceRequest. Google replaces the field whole, so a patch
+	// carrying it on an event that has a conference would replace that
+	// conference; the service refuses that before building one. ApplyTo
+	// does not fold it: Google answers a request with a conference it
+	// makes, which no fold can produce.
+	ConferenceData json.RawMessage `json:"conferenceData,omitempty"`
 }
 
 // ApplyTo folds a patch into an event: what the resource looks like once
@@ -1129,10 +1139,11 @@ func (c Conference) Ready() bool { return c.State() == ConferenceReady }
 // NewConferenceRequest is the body that asks Google to attach a Meet
 // conference to an event.
 //
-// requestId is the caller's, and this server passes the event id: the
+// requestId is the caller's. create_event passes the event id: the
 // discovery document says a request repeating an id is IGNORED, so a
 // retry of a create that may have landed (§2.11) cannot produce a second
-// conference. An id regenerated per attempt would.
+// conference. An id regenerated per attempt would. update_event passes
+// ConferenceRequestID, for the reason given there.
 //
 // The request only asks, and Conference carries the status rather than a
 // promise: the answer may be "success" with the link in it, which is
@@ -1150,6 +1161,31 @@ func NewConferenceRequest(requestID string) json.RawMessage {
 		return nil
 	}
 	return raw
+}
+
+// ConferenceRequestID is the request id for adding a conference to an
+// event that exists: a hash of the event id and the etag of the version
+// the write is made under.
+//
+// Not the event id. A create with a conference already used that one,
+// and Google ignores a request that repeats an id, so adding a link
+// again after somebody removed the first would be ignored in silence.
+// The etag moves with every write, so each version gets its own id,
+// while a retry of the same patch, made under the same etag, repeats it
+// and cannot make a second conference.
+func ConferenceRequestID(eventID, etag string) string {
+	sum := sha256.Sum256([]byte(eventID + "\x00" + etag))
+	return hex.EncodeToString(sum[:16])
+}
+
+// ConferenceRequestOf is the request id an event's conference data
+// carries, or "" when it carries no create request.
+func ConferenceRequestOf(raw json.RawMessage) string {
+	var data conferenceData
+	if len(raw) == 0 || json.Unmarshal(raw, &data) != nil || data.CreateRequest == nil {
+		return ""
+	}
+	return data.CreateRequest.RequestID
 }
 
 // ReadConference reads what a result needs out of an event's raw

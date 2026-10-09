@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `get_event` lists the files attached to an event under `attachments`: `title`, `file_id`, `url` and `mime_type`. An event row carries `attachment_count` when the event has files. A Drive server opens a file by its `file_id`; this server never opens or changes one.
 
 - `create_event` and `update_event` set your reminders, the event's visibility and what guests may do. `popup_reminders` and `email_reminders` take minutes before the start, 0 to 40320, at most five in all; either one replaces the whole set, and an empty list given alone means none. `default_reminders: true` goes back to the calendar's own. `visibility` is `default`, `public` or `private`. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` take true or false. Reminders are yours alone, so an update that changes only them needs no `notify` and emails nobody. On one occurrence of a repeating event, a less restrictive visibility is refused, because Google ignores it, and a more restrictive one changes the whole series, which the result says.
+- `update_event` takes `add_conference`: a Google Meet link on an event that has no conference. The result says whether the link came back or Google is still making it. An event that already has a conference is refused, because Google would replace it, and so is a calendar that does not allow Meet. It cannot go with `scope: this_and_following`.
 - Every event read carries `visibility` and your `reminders`, and the text marks a private or public event. `get_event` adds `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests`, with Google's defaults filled in. `get_calendar` lists the calendar's `default_reminders`.
 
 ### Changed
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A `create_event` dry run with `conference: true` no longer reports `conference_status: no_video_entry_point`. It was reading its own request back as a conference.
 - On Windows, time zones work on a machine without Go installed. The binary now carries Go's copy of the time zone database, used only when the machine has none. Before, every time zone was refused there, so most tools failed. The binary is about 400 KB larger.
 - A room's address given as a guest no longer counts as a guest outside your organization, so `notify: none` is allowed on an event whose only guest is a room, when it is created and on every write after. The room is booked as a resource.
 - `check_availability` answers for a group's address: its members' busy time together, with how many calendars it covers, up to Google's 100. It reported every group unknown. A group with a member that cannot be read, or one Google cannot expand, is still unknown, never free. An answer for a group carries `group: true`.

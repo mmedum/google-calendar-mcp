@@ -1692,6 +1692,11 @@ func TestCreateEventDryRunDoesNotPromiseALink(t *testing.T) {
 	if !strings.Contains(out.Text(), "would be requested") {
 		t.Fatalf("the dry run does not mention the conference:\n%s", out.Text())
 	}
+	// The structured half read the request back as a conference with no
+	// video link, a state Google never answered with.
+	if got := service.NewWriteResult(out).Event.ConferenceStatus; got != "" {
+		t.Fatalf("the dry run reports conference_status %q", got)
+	}
 	if len(fake.Wrote()) != 0 {
 		t.Error("a dry run wrote something")
 	}
@@ -2046,6 +2051,126 @@ func TestADryRunProjectsReminders(t *testing.T) {
 	}
 	if out.After.Reminders == nil || out.After.Reminders.Default || len(out.After.Reminders.Email) != 0 {
 		t.Fatalf("the dry run shows reminders %+v, want none", out.After.Reminders)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("a dry run wrote something")
+	}
+}
+
+// add_conference asks for a Meet link on an event that has none, under
+// conferenceDataVersion=1, which the fake requires as Google does.
+func TestAddConferenceAsksForAMeetLink(t *testing.T) {
+	svc, _ := writeSeed(t)
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evsolo00001", AddConference: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	if !out.After.Conference.Pending() {
+		t.Fatalf("the conference is %+v, want pending", out.After.Conference)
+	}
+	if !strings.Contains(out.Text(), "still making it") || !strings.Contains(out.Text(), "conference: none → Google Meet link requested") {
+		t.Fatalf("the result does not report the request:\n%s", out.Text())
+	}
+	got, zone, err := svc.GetEvent(context.Background(), "primary", "evsolo00001", "")
+	if err != nil {
+		t.Fatalf("GetEvent: %v", err)
+	}
+	if text := service.NewEventResult(got, zone).Render(); !strings.Contains(text, "join: https://meet.google.com/") {
+		t.Fatalf("the event does not show the link:\n%s", text)
+	}
+}
+
+// The request id is not the event id. A create with a conference used
+// that, and Google ignores a repeated one, so after somebody removed the
+// first link, asking again under the event id would be ignored.
+func TestAddConferenceAfterTheFirstLinkWasRemoved(t *testing.T) {
+	svc, fake := writeSeed(t)
+	created, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "primary", Title: "Linked",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00", Conference: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	// Somebody removes the link in Google Calendar.
+	fake.Events["me@example.test"][created.After.ID].ConferenceData = nil
+
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: created.After.ID, AddConference: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	if !out.After.Conference.Pending() {
+		t.Fatalf("the second request was ignored: %+v", out.After.Conference)
+	}
+}
+
+// An event that has a conference is refused, because Google replaces the
+// field whole.
+func TestAddConferenceRefusesAnEventThatHasOne(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.Events["me@example.test"]["evsolo00001"].ConferenceData =
+		json.RawMessage(`{"entryPoints":[{"entryPointType":"video","uri":"https://meet.google.com/aaa-bbbb-ccc"}]}`)
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evsolo00001", AddConference: true,
+	})
+	if got := classOf(t, err); got != gapi.ClassBlocked || !strings.Contains(err.Error(), "already has a conference") {
+		t.Fatalf("got [%s] %v, want [blocked]", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("the refusal must come before any write")
+	}
+}
+
+// The calendar check create_event makes holds here too.
+func TestAddConferenceRefusesACalendarThatForbidsMeet(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.Entries["me@example.test"].ConferenceProperties =
+		&gcal.ConferenceProperties{AllowedConferenceSolutionTypes: []string{"eventHangout"}}
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evsolo00001", AddConference: true,
+	})
+	if got := classOf(t, err); got != gapi.ClassUnsupported {
+		t.Fatalf("got [%s] %v, want [unsupported]", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("the refusal must come before any write")
+	}
+}
+
+// A split starts a new series and mints no conference for it.
+func TestAddConferenceDoesNotGoWithASplit(t *testing.T) {
+	svc, fake := writeSeed(t)
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evseries001_20260331T120000Z", Scope: "this_and_following",
+		AddConference: true,
+	})
+	if got := classOf(t, err); got != gapi.ClassUnsupported || !strings.Contains(err.Error(), "scope:series") {
+		t.Fatalf("got [%s] %v, want [unsupported] naming scope:series", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("the refusal must come before any write")
+	}
+}
+
+// A dry run names the request and reports no conference state it did
+// not see.
+func TestAddConferenceDryRun(t *testing.T) {
+	svc, fake := writeSeed(t)
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evsolo00001", AddConference: true, DryRun: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	if !strings.Contains(out.Text(), "would be requested") {
+		t.Fatalf("the dry run does not mention the conference:\n%s", out.Text())
+	}
+	if out.After.Conference.Present {
+		t.Fatalf("the dry run invented a conference state: %+v", out.After.Conference)
 	}
 	if len(fake.Wrote()) != 0 {
 		t.Error("a dry run wrote something")

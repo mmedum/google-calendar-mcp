@@ -596,6 +596,82 @@ func writeSteps(scratch string, w *writeState) []step {
 		setReminders(on, w, "back to the calendar's", map[string]any{"default_reminders": true}),
 		readReminders(scratch, w, "the calendar's read back", "your reminders: the calendar's default ones"),
 		{
+			// §18 row 98: a patch can create a conference, under a
+			// request id that is not the event id. The probe event has
+			// no guest but this account, so nobody is reached.
+			name: "add_conference",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "add_conference": true, "notify": "none"})
+			},
+			skip: func() string {
+				if w.created == "" {
+					return "no probe event was created"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				switch {
+				case strings.Contains(r.text, "Google Meet: https://meet.google.com/"):
+					return pass, "the link came back with the patch"
+				case strings.Contains(r.text, "still making it"):
+					return pass, "reported pending rather than promising a link"
+				default:
+					return fail, "a conference was asked for and the result does not report one: " +
+						truncate(r.text, 300)
+				}
+			},
+		},
+		{
+			name: "the added link arrives",
+			tool: "get_event",
+			argsFn: func() map[string]any {
+				return map[string]any{"calendar": scratch, "event_id": w.created}
+			},
+			skip: func() string {
+				if w.created == "" {
+					return "no probe event was created"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				switch {
+				case strings.Contains(r.text, "join: https://meet.google.com/"):
+					return pass, "the event carries the link the patch asked for"
+				case strings.Contains(r.text, "still creating"):
+					return undetermined, "Google has not finished making the link"
+				default:
+					return fail, "the event has no link after add_conference: " + truncate(r.text, 300)
+				}
+			},
+		},
+		{
+			// Refused before a request: Google would replace the link.
+			name: "add_conference refused when there is one",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "add_conference": true, "notify": "none"})
+			},
+			skip: func() string {
+				if w.created == "" {
+					return "no probe event was created"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[blocked]") {
+					return fail, "a second conference request was not refused: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked]"
+			},
+		},
+		{
 			// §4.4: the etag the caller decided on is held to. The one
 			// captured above is now the previous version.
 			name: "stale etag refused",

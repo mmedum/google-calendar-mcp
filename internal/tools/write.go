@@ -56,8 +56,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"`recurrence` takes RFC 5545 lines such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10. " +
 			"`conference: true` asks Google for a Meet link. The link normally comes back with the event, " +
 			"but Google may still be making it — the result says which, and when it says the link is " +
-			"still being made, read the event again to get it rather than promising anybody a link. A " +
-			"link can only be attached as the event is created; this server cannot add one afterward. " +
+			"still being made, read the event again to get it rather than promising anybody a link. " +
+			"update_event's `add_conference` adds one to an event later. " +
 			"`optional_guests` invites people as optional; they are emailed like any guest, so they make " +
 			"notify required too. A room cannot be optional. " + addressHelp + " " +
 			remindersHelp + " " + visibilityHelp + " " + notifyHelp + " " + dryRunHelp,
@@ -97,8 +97,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 			visibilityHelp + " On one occurrence, Google ignores a less restrictive visibility, so it is " +
 			"refused, and applies a more restrictive one to the whole series, which the result says. " +
 			notifyHelp + " " + etagHelp + " " + dryRunHelp + " " +
-			"A Google Meet link cannot be added here: `conference: true` on create_event attaches one when " +
-			"the event is made, and this server does not add one to an event that already exists. " +
+			"`add_conference: true` asks Google for a Meet link on an event that has no conference; one " +
+			"that has a conference is refused, because Google would replace it, and the result says " +
+			"whether the link came back or is still being made. It cannot go with `this_and_following`. " +
 			"Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
 		Kind: IdempotentWrite,
 		Handle: func(ctx context.Context, in updateEventIn) (service.WriteResult, error) {
@@ -112,8 +113,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 				PopupReminders: in.PopupReminders, EmailReminders: in.EmailReminders,
 				DefaultReminders: in.DefaultReminders, Visibility: in.Visibility,
 				GuestsCanModify: in.GuestsCanModify, GuestsCanInviteOthers: in.GuestsCanInviteOthers,
-				GuestsCanSeeOtherGuests: in.GuestsCanSeeOtherGuests, Notify: in.Notify,
-				ETag: in.ETag, Force: in.Force, DryRun: in.DryRun,
+				GuestsCanSeeOtherGuests: in.GuestsCanSeeOtherGuests, AddConference: in.AddConference,
+				Notify: in.Notify, ETag: in.ETag, Force: in.Force, DryRun: in.DryRun,
 			})
 			if err != nil {
 				return service.WriteResult{}, err
@@ -252,6 +253,7 @@ type updateEventIn struct {
 	GuestsCanModify         *bool   `json:"guests_can_modify,omitempty" jsonschema:"Whether guests may change the event."`
 	GuestsCanInviteOthers   *bool   `json:"guests_can_invite_others,omitempty" jsonschema:"Whether guests may invite others."`
 	GuestsCanSeeOtherGuests *bool   `json:"guests_can_see_other_guests,omitempty" jsonschema:"Whether guests see the guest list."`
+	AddConference           bool    `json:"add_conference,omitempty" jsonschema:"Ask Google for a Google Meet link. Refused when the event already has a conference."`
 
 	Notify string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests or the call adds one."`
 	ETag   string `json:"etag,omitempty" jsonschema:"The etag from the get_event you decided on. The write is refused as stale if it moved since."`
