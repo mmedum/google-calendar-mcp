@@ -1,11 +1,11 @@
 {
   "server": "google-calendar-mcp",
-  "version": "v3.0.1",
+  "version": "v3.1.0",
   "sdk_version": "v1.8.0",
   "tools": [
     {
       "name": "cancel_event",
-      "description": "Cancel an event, or one occurrence of a repeating one. A whole event is deleted; one occurrence is marked canceled, which is how a single date leaves a series — the result says which of the two happened. Google keeps the record either way, and list_events with show_canceled still shows it. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. With `this_and_following` the series simply ends before this occurrence, which is one call rather than the two an update takes. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Read that rule twice here: canceling with no notification removes the meeting from YOUR calendar and leaves it on your guests'. They will still turn up. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before the write; a call they do not confirm is [blocked], and is not made again unless they ask.",
+      "description": "Cancel an event, or one occurrence of a repeating one. A whole event is deleted; one occurrence is marked canceled, which is how a single date leaves a series — the result says which of the two happened. Google keeps the record either way, and list_events with show_canceled still shows it. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. With `this_and_following` the series simply ends before this occurrence, which is one call rather than the two an update takes. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Read that rule twice here: canceling with no notification removes the meeting from YOUR calendar and leaves it on your guests'. They will still turn up. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before a cancellation that emails a guest; a call they do not confirm is [blocked], and is not made again unless they ask.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -67,13 +67,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -124,6 +136,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -137,6 +182,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -192,13 +246,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -249,6 +315,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -262,6 +361,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -317,12 +425,12 @@
     },
     {
       "name": "check_availability",
-      "description": "When people are busy, and when they are free, in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. This asks Google's free/busy service rather than listing events, which matters: it sees busy time on calendars whose events you cannot read, and it respects events marked \"free\", so a list of events is not the same answer. A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to use. working_from, working_to and working_days mask the gaps to a working week: a window is one interval, so \"next week, 09:00 to 17:00\" cannot be asked for as a window and would otherwise come back with a fifteen-hour gap every night. There is no default — without them every hour of the window counts, and the result always says which was used. Calendars are asked in batches of 50, and the result says how many requests that took.",
+      "description": "When people are busy, and when they are free, in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. This asks Google's free/busy service rather than listing events, which matters: it sees busy time on calendars whose events you cannot read, and it respects events marked \"free\", so a list of events is not the same answer. A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. A group's address is answered for its members together, and is unknown if any of them is. The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to use. working_from, working_to and working_days mask the gaps to a working week: a window is one interval, so \"next week, 09:00 to 17:00\" cannot be asked for as a window and would otherwise come back with a fifteen-hour gap every night. There is no default — without them every hour of the window counts, and the result always says which was used. Calendars are asked in batches of 50, and the result says how many requests that took.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
           "calendars": {
-            "description": "Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read.",
+            "description": "Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read, and may be a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e; only the address is used.",
             "items": {
               "type": "string"
             },
@@ -410,6 +518,12 @@
                 },
                 "calendar_id": {
                   "type": "string"
+                },
+                "group": {
+                  "type": "boolean"
+                },
+                "group_members": {
+                  "type": "integer"
                 },
                 "unknown": {
                   "type": "boolean"
@@ -888,16 +1002,32 @@
     },
     {
       "name": "create_event",
-      "description": "Create an event. `start` and `end` are either two yyyy-mm-dd dates for an all-day event, where `end` is the LAST day and is included, or two RFC3339 timestamps for a timed one — never one of each, because a date is not a time. Times are written in `time_zone` if you pass one, otherwise the calendar's own zone; the result says which it used, and the zone is always sent alongside the timestamp so a repeating event keeps its wall-clock time across a daylight-saving change. `recurrence` takes RFC 5545 lines such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10. `conference: true` asks Google for a Meet link. The link normally comes back with the event, but Google may still be making it — the result says which, and when it says the link is still being made, read the event again to get it rather than promising anybody a link. A link can only be attached as the event is created; this server cannot add one afterward. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "description": "Create an event. `start` and `end` are either two yyyy-mm-dd dates for an all-day event, where `end` is the LAST day and is included, or two RFC3339 timestamps for a timed one — never one of each, because a date is not a time. Times are written in `time_zone` if you pass one, otherwise the calendar's own zone; the result says which it used, and the zone is always sent alongside the timestamp so a repeating event keeps its wall-clock time across a daylight-saving change. `recurrence` takes RFC 5545 lines such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10. `conference: true` asks Google for a Meet link. The link normally comes back with the event, but Google may still be making it — the result says which, and when it says the link is still being made, read the event again to get it rather than promising anybody a link. update_event's `add_conference` adds one to an event later. `optional_guests` invites people as optional; they are emailed like any guest, so they make notify required too. A room cannot be optional. An address may be bare or a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e, the way a mail server hands one over; only the address is used, and one entry holds one address. `popup_reminders` and `email_reminders` are minutes before the start, 0 to 40320, at most five in all. Either one replaces the whole set, so pass both to keep both kinds, and an empty list given alone means no reminders. `default_reminders: true` goes back to the calendar's own. Reminders are yours alone: Google keeps them per person, so they never notify a guest. `visibility` is default, public or private: private shows the details only to the guests, and public to everybody who can see the calendar. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do. `event_type` makes a status event, which only your primary calendar can hold: outOfOffice, focusTime or workingLocation. Out of office and focus time are timed, never all day, and always show you busy. `auto_decline` is REQUIRED for them, with no default: none declines nothing, new declines invitations that arrive for that time, and all also declines the meetings you already accepted. Google shows each organizer the decline, with `decline_message` if you give one. Focus time takes `chat_status`: available or do_not_disturb. A working location takes `working_location` (home, office or custom) and `working_location_label` for the office or place; it is timed or exactly one whole day, always public, and shows you free. A status event takes no guests, rooms or Meet link. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before it makes an out-of-office or focus-time event with auto_decline all; a call they do not confirm is [blocked], and is not made again unless they ask.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
+          "auto_decline": {
+            "description": "Required for outOfOffice and focusTime, with no default: none, new (invitations that arrive for that time) or all (also the meetings you already accepted, which asks the person first).",
+            "type": "string"
+          },
           "calendar": {
             "description": "The calendar id or title to create it on. Defaults to the account's primary calendar.",
             "type": "string"
           },
+          "chat_status": {
+            "description": "focusTime only: available or do_not_disturb, what Google Chat shows during it.",
+            "type": "string"
+          },
           "conference": {
             "description": "Ask Google for a Google Meet link. Usually in the answer; if it says the link is still being made, read the event again for it.",
+            "type": "boolean"
+          },
+          "decline_message": {
+            "description": "The message each organizer gets with a decline. outOfOffice and focusTime only, and not with auto_decline none.",
+            "type": "string"
+          },
+          "default_reminders": {
+            "description": "Use the calendar's own reminders, which is also what happens when no list is given.",
             "type": "boolean"
           },
           "description": {
@@ -908,8 +1038,22 @@
             "description": "Report what would be created and who would be emailed, without writing.",
             "type": "boolean"
           },
+          "email_reminders": {
+            "description": "Email reminders for you, in minutes before the start, 0 to 40320. At most five reminders in all.",
+            "items": {
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "end": {
             "description": "End: for an all-day event the LAST day, included; for a timed one an RFC3339 timestamp. Must be the same kind as start. Required.",
+            "type": "string"
+          },
+          "event_type": {
+            "description": "Make a status event on your primary calendar: outOfOffice, focusTime or workingLocation. Leave it out for an ordinary event.",
             "type": "string"
           },
           "free_not_busy": {
@@ -926,6 +1070,27 @@
               "array"
             ]
           },
+          "guests_can_invite_others": {
+            "description": "Whether guests may invite others. Google's default is true.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "guests_can_modify": {
+            "description": "Whether guests may change the event. Google's default is false.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "guests_can_see_other_guests": {
+            "description": "Whether guests see the guest list. Google's default is true.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "location": {
             "description": "Where it is.",
             "type": "string"
@@ -934,8 +1099,38 @@
             "description": "Who Google is asked to email: none, external_only or all. Required when the event has guests.",
             "type": "string"
           },
+          "optional_guests": {
+            "description": "Email addresses to invite as optional guests. They are emailed like any guest, so passing any makes notify required. A room cannot be optional.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "popup_reminders": {
+            "description": "Popup reminders for you, in minutes before the start, 0 to 40320. Replaces the calendar's default reminders; an empty list given alone means none.",
+            "items": {
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "recurrence": {
             "description": "RFC 5545 lines, such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "rooms": {
+            "description": "Addresses of rooms or other resources to book. A room is not a guest, so it does not make notify required; an address here that is not a room's still counts as one.",
             "items": {
               "type": "string"
             },
@@ -954,6 +1149,18 @@
           },
           "title": {
             "description": "What the event is called. Required.",
+            "type": "string"
+          },
+          "visibility": {
+            "description": "default, public or private. Private shows the details only to the guests.",
+            "type": "string"
+          },
+          "working_location": {
+            "description": "Required for workingLocation: home, office or custom.",
+            "type": "string"
+          },
+          "working_location_label": {
+            "description": "The office's name, or the place for custom, as Calendar shows it. Not with home.",
             "type": "string"
           }
         },
@@ -979,13 +1186,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -1036,6 +1255,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -1049,6 +1301,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -1104,13 +1365,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -1161,6 +1434,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -1174,6 +1480,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -1479,6 +1794,37 @@
             ],
             "type": "object"
           },
+          "default_reminders": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "popup": {
+                "items": {
+                  "type": "integer"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "popup",
+              "email"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -1538,7 +1884,7 @@
     },
     {
       "name": "get_event",
-      "description": "One event in full, including its guests and their responses, its recurrence rule if it has one, and its etag. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. An event id is unique per calendar and not globally, so `calendar` is required alongside it. Ids come from list_events or search_events.",
+      "description": "One event in full, including its guests and their responses, its recurrence rule if it has one, and its etag. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. It lists the files attached to the event with each one's Drive file id; this server never opens a file, so pass the id to a Drive server to read one. An event id is unique per calendar and not globally, so `calendar` is required alongside it. Ids come from list_events or search_events.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -1564,6 +1910,30 @@
       "output_schema": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "file_id": {
+                  "type": "string"
+                },
+                "mime_type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "attendees": {
             "items": {
               "additionalProperties": false,
@@ -1607,13 +1977,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -1664,6 +2046,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -1678,6 +2093,15 @@
               },
               "title": {
                 "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
+                "type": "string"
               }
             },
             "required": [
@@ -1687,6 +2111,15 @@
               "all_day"
             ],
             "type": "object"
+          },
+          "guests_can_invite_others": {
+            "type": "boolean"
+          },
+          "guests_can_modify": {
+            "type": "boolean"
+          },
+          "guests_can_see_other_guests": {
+            "type": "boolean"
           },
           "time_zone": {
             "type": "string"
@@ -1698,7 +2131,10 @@
         "required": [
           "event",
           "time_zone",
-          "time_zone_source"
+          "time_zone_source",
+          "guests_can_modify",
+          "guests_can_invite_others",
+          "guests_can_see_other_guests"
         ],
         "type": "object"
       },
@@ -1842,7 +2278,7 @@
     },
     {
       "name": "list_changes",
-      "description": "What changed on a calendar since you last looked. This is the only read that reports DELETIONS: a deleted event stops matching a window, so list_events cannot tell you it is gone, and this returns its id under deleted. Call it once with no sync_token to get a baseline and a token; pass that token next time and you get only what has changed since. The token comes back with the LAST page only. A baseline therefore pages all the way to the end to fetch one, and says how many rows it passed over on the way — they are covered by the token, not lost. An INCREMENTAL read stops at its budget instead and hands back no token, because every row there is a change you have not seen yet; continue with page_token until the token arrives, and never store one you did not get. It takes no window, no search and no ordering: Google forbids all of them alongside a sync token, and deleted events are always included. If the token has expired the call fails [stale]; ask again with no sync_token and start over.",
+      "description": "What changed on a calendar since you last looked. This is the only read that reports DELETIONS: a deleted event stops matching a window, so list_events cannot tell you it is gone, and this returns its id under deleted. Call it once with no sync_token to get a baseline and a token; pass that token next time and you get only what has changed since. The token comes back with the LAST page only. A baseline therefore pages all the way to the end to fetch one, and says how many rows it passed over on the way — they are covered by the token, not lost. An INCREMENTAL read stops at its budget instead and hands back no token, because every row there is a change you have not seen yet; continue with page_token and the same sync_token until the token arrives, and never store one you did not get. It takes no window, no search and no ordering: Google forbids all of them alongside a sync token, and deleted events are always included. If the token has expired the call fails [stale]; ask again with no sync_token and start over. updated_since asks instead for what changed since a moment, such as \"since Monday\": an RFC3339 time, or a yyyy-mm-dd date meaning the start of that day in time_zone, else the calendar's zone; the result echoes the instant it used. It cannot be combined with sync_token. Events deleted since then are always included. Google calls this the legacy way and says it can miss updates: an event whose only change was its reminders is not reported. Its last page hands back a sync token too, to follow the calendar from there; continue a read that stopped early with page_token and the same updated_since. A moment too far back fails [stale]; pass a later one.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -1855,7 +2291,7 @@
             "type": "integer"
           },
           "page_token": {
-            "description": "Continue a read that did not finish, from next_page_token. The sync token arrives with the last page.",
+            "description": "Continue a read that did not finish, from next_page_token, with the same calendar and the same sync_token or updated_since. The sync token arrives with the last page.",
             "type": "string"
           },
           "sync_token": {
@@ -1863,7 +2299,11 @@
             "type": "string"
           },
           "time_zone": {
-            "description": "IANA zone to show the changed events in.",
+            "description": "IANA zone to show the changed events in, and to read an updated_since date in.",
+            "type": "string"
+          },
+          "updated_since": {
+            "description": "Only what changed at or after this moment: RFC3339, or yyyy-mm-dd for the start of that day in time_zone, else the calendar's zone. Not with sync_token. The last page hands back a sync token to follow the calendar from there.",
             "type": "string"
           }
         },
@@ -1894,13 +2334,25 @@
                 "all_day": {
                   "type": "boolean"
                 },
+                "attachment_count": {
+                  "type": "integer"
+                },
+                "auto_decline": {
+                  "type": "string"
+                },
                 "calendar_id": {
+                  "type": "string"
+                },
+                "chat_status": {
                   "type": "string"
                 },
                 "conference_status": {
                   "type": "string"
                 },
                 "conference_uri": {
+                  "type": "string"
+                },
+                "decline_message": {
                   "type": "string"
                 },
                 "description": {
@@ -1951,6 +2403,39 @@
                 "recurrence_means": {
                   "type": "string"
                 },
+                "reminders": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "default": {
+                      "type": "boolean"
+                    },
+                    "email": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "popup": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "default"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
                 "series_id": {
                   "type": "string"
                 },
@@ -1964,6 +2449,15 @@
                   "type": "string"
                 },
                 "title": {
+                  "type": "string"
+                },
+                "visibility": {
+                  "type": "string"
+                },
+                "working_location": {
+                  "type": "string"
+                },
+                "working_location_label": {
                   "type": "string"
                 }
               },
@@ -2006,6 +2500,9 @@
           },
           "time_zone_source": {
             "type": "string"
+          },
+          "updated_since": {
+            "type": "string"
           }
         },
         "required": [
@@ -2028,7 +2525,7 @@
     },
     {
       "name": "list_events",
-      "description": "Read a schedule: the events on one or more calendars in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. `expand` decides which shape you get, and the two are genuinely different: with expand=true (the default) a repeating event appears as each of its occurrences, which is what you want to answer \"what is on this week\". With expand=false it appears once, as a series with its recurrence rule, which is what you want before changing the whole series. Canceled events are hidden unless show_canceled is set. Use search_events to find an event by text; use check_availability to find free time, because a list of events is not the same as being free.",
+      "description": "Read a schedule: the events on one or more calendars in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Times are shown in `time_zone` if you pass one, otherwise the calendar's own zone, otherwise the zone in the account's Calendar settings. The result names which of the three it used. This server never falls back to the machine's own clock zone. `expand` decides which shape you get, and the two are genuinely different: with expand=true (the default) a repeating event appears as each of its occurrences, which is what you want to answer \"what is on this week\". With expand=false it appears once, as a series with its recurrence rule, which is what you want before changing the whole series. Canceled events are hidden unless show_canceled is set. event_types keeps only some kinds of event, such as outOfOffice, and the result names the filter. ical_uid keeps only the event with that iCalendar UID, which is how to find the event an invitation email is about. Every occurrence of a repeating event shares one UID, so with expand you get each occurrence in the window. The window still applies: make it wide enough for a meeting that may have moved. Use search_events to find an event by text; use check_availability to find free time, because a list of events is not the same as being free.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -2042,8 +2539,22 @@
               "array"
             ]
           },
+          "event_types": {
+            "description": "Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "from": {
             "description": "Start of the window: yyyy-mm-dd or RFC3339. Required.",
+            "type": "string"
+          },
+          "ical_uid": {
+            "description": "Only the event with this iCalendar UID, such as the UID an invitation email carries. Every occurrence of a repeating event shares it.",
             "type": "string"
           },
           "max_events": {
@@ -2055,7 +2566,7 @@
             "type": "boolean"
           },
           "page_token": {
-            "description": "Continue a truncated read, from next_page_token.",
+            "description": "Continue a truncated read, from next_page_token, with the same arguments; a token is refused under another query.",
             "type": "string"
           },
           "show_canceled": {
@@ -2092,6 +2603,15 @@
               "array"
             ]
           },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "events": {
             "items": {
               "additionalProperties": false,
@@ -2099,13 +2619,25 @@
                 "all_day": {
                   "type": "boolean"
                 },
+                "attachment_count": {
+                  "type": "integer"
+                },
+                "auto_decline": {
+                  "type": "string"
+                },
                 "calendar_id": {
+                  "type": "string"
+                },
+                "chat_status": {
                   "type": "string"
                 },
                 "conference_status": {
                   "type": "string"
                 },
                 "conference_uri": {
+                  "type": "string"
+                },
+                "decline_message": {
                   "type": "string"
                 },
                 "description": {
@@ -2156,6 +2688,39 @@
                 "recurrence_means": {
                   "type": "string"
                 },
+                "reminders": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "default": {
+                      "type": "boolean"
+                    },
+                    "email": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "popup": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "default"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
                 "series_id": {
                   "type": "string"
                 },
@@ -2169,6 +2734,15 @@
                   "type": "string"
                 },
                 "title": {
+                  "type": "string"
+                },
+                "visibility": {
+                  "type": "string"
+                },
+                "working_location": {
+                  "type": "string"
+                },
+                "working_location_label": {
                   "type": "string"
                 }
               },
@@ -2184,6 +2758,9 @@
               "null",
               "array"
             ]
+          },
+          "ical_uid": {
+            "type": "string"
           },
           "matched": {
             "type": "integer"
@@ -2266,7 +2843,7 @@
             "type": "integer"
           },
           "page_token": {
-            "description": "Continue a truncated read, from next_page_token.",
+            "description": "Continue a truncated read, from next_page_token, with the same arguments; a token is refused under another read.",
             "type": "string"
           },
           "show_canceled": {
@@ -2307,16 +2884,28 @@
                 "all_day": {
                   "type": "boolean"
                 },
+                "attachment_count": {
+                  "type": "integer"
+                },
+                "auto_decline": {
+                  "type": "string"
+                },
                 "calendar_id": {
                   "type": "string"
                 },
                 "canceled": {
                   "type": "boolean"
                 },
+                "chat_status": {
+                  "type": "string"
+                },
                 "conference_status": {
                   "type": "string"
                 },
                 "conference_uri": {
+                  "type": "string"
+                },
+                "decline_message": {
                   "type": "string"
                 },
                 "description": {
@@ -2373,6 +2962,39 @@
                 "recurrence_means": {
                   "type": "string"
                 },
+                "reminders": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "default": {
+                      "type": "boolean"
+                    },
+                    "email": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "popup": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "default"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
                 "series_id": {
                   "type": "string"
                 },
@@ -2386,6 +3008,15 @@
                   "type": "string"
                 },
                 "title": {
+                  "type": "string"
+                },
+                "visibility": {
+                  "type": "string"
+                },
+                "working_location": {
+                  "type": "string"
+                },
+                "working_location_label": {
                   "type": "string"
                 }
               },
@@ -2894,7 +3525,7 @@
     },
     {
       "name": "move_event",
-      "description": "Move an event to another calendar, which changes who organizes it. The event keeps its id but is addressed on the new calendar from then on. This does NOT change the time — use update_event for that. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is not available here: there is nothing to split when the event is simply changing calendars. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "description": "Move an event to another calendar, which changes who organizes it. The event keeps its id but is addressed on the new calendar from then on. This does NOT change the time — use update_event for that. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is not available here: there is nothing to split when the event is simply changing calendars. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -2961,13 +3592,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -3018,6 +3661,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -3031,6 +3707,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -3086,13 +3771,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -3143,6 +3840,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -3156,6 +3886,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -3282,13 +4021,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -3339,6 +4090,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -3352,6 +4136,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -3407,13 +4200,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -3464,6 +4269,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -3477,6 +4315,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -3532,12 +4379,22 @@
     },
     {
       "name": "search_events",
-      "description": "Find events matching free text in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Important: Google's event search is undocumented free text with no field scoping — you cannot search \"attendee:someone\" or restrict it to titles, and Google does not say which fields it reads. Treat an empty result as \"this search found nothing\", not as \"there is no such event\", and fall back to list_events over the window when you need certainty. Searching several calendars costs one request each.",
+      "description": "Find events matching free text in a window. `from` and `to` are required and take either a yyyy-mm-dd date or an RFC3339 timestamp. A bare date means that whole day in the resolved zone, so from and to on the same date is that one day. Resolve relative expressions like \"next Tuesday\" yourself before calling: this server does not guess, and the result always echoes the absolute window and the zone it used so you can check the resolution. Google documents the fields the text is matched against: the title, description and location, the guests' and organizer's names and addresses, and a working location's labels; words such as \"Out of office\" also match those kinds of event, in any language. There is no field syntax: you cannot search \"attendee:someone\" or restrict it to titles. How words are matched is not documented, and an event you can see only as busy has nothing to match, so treat an empty result as \"this search found nothing\", not as \"there is no such event\", and fall back to list_events over the window when you need certainty. event_types narrows the search to some kinds of event, as on list_events. Searching several calendars costs one request each.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
           "calendars": {
             "description": "Calendar ids or titles. Defaults to the primary calendar.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "event_types": {
+            "description": "Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type.",
             "items": {
               "type": "string"
             },
@@ -3555,11 +4412,11 @@
             "type": "integer"
           },
           "page_token": {
-            "description": "Continue a truncated search, from next_page_token.",
+            "description": "Continue a truncated search, from next_page_token, with the same arguments; a token is refused under another query.",
             "type": "string"
           },
           "query": {
-            "description": "Free text. Google decides which fields this matches; there is no field syntax.",
+            "description": "Free text, matched against the title, description, location, and the guests' and organizer's names and addresses. There is no field syntax.",
             "type": "string"
           },
           "time_zone": {
@@ -3593,6 +4450,15 @@
               "array"
             ]
           },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
           "events": {
             "items": {
               "additionalProperties": false,
@@ -3600,13 +4466,25 @@
                 "all_day": {
                   "type": "boolean"
                 },
+                "attachment_count": {
+                  "type": "integer"
+                },
+                "auto_decline": {
+                  "type": "string"
+                },
                 "calendar_id": {
+                  "type": "string"
+                },
+                "chat_status": {
                   "type": "string"
                 },
                 "conference_status": {
                   "type": "string"
                 },
                 "conference_uri": {
+                  "type": "string"
+                },
+                "decline_message": {
                   "type": "string"
                 },
                 "description": {
@@ -3657,6 +4535,39 @@
                 "recurrence_means": {
                   "type": "string"
                 },
+                "reminders": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "default": {
+                      "type": "boolean"
+                    },
+                    "email": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    },
+                    "popup": {
+                      "items": {
+                        "type": "integer"
+                      },
+                      "type": [
+                        "null",
+                        "array"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "default"
+                  ],
+                  "type": [
+                    "null",
+                    "object"
+                  ]
+                },
                 "series_id": {
                   "type": "string"
                 },
@@ -3670,6 +4581,15 @@
                   "type": "string"
                 },
                 "title": {
+                  "type": "string"
+                },
+                "visibility": {
+                  "type": "string"
+                },
+                "working_location": {
+                  "type": "string"
+                },
+                "working_location_label": {
                   "type": "string"
                 }
               },
@@ -3685,6 +4605,9 @@
               "null",
               "array"
             ]
+          },
+          "ical_uid": {
+            "type": "string"
           },
           "matched": {
             "type": "integer"
@@ -3746,7 +4669,7 @@
     },
     {
       "name": "share_calendar",
-      "description": "Give somebody access to a calendar, or change the access they already have. `who` is an email address, a group address, a domain, or \"anyone\" for the public internet. An address is read as one person unless this calendar already has a rule for it — pass `scope_type` to be sure, because a group address and a person's look identical. `role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. The result explains the one it set. Sharing with \"anyone\" publishes the calendar to the whole internet and needs `allow_public: true`: removing the rule later stops new readers and takes nothing back from whoever already looked. `notify` is REQUIRED and has no default: `all` asks Google to email about the change, `none` asks it not to. Google's own default here is to EMAIL — the opposite of its default on an event — which is why this server asks rather than inheriting either. `external_only` has no meaning on a sharing change and is refused: Google's switch is on or off, with no internal/external split. Whatever you pass, the result says what was ASKED FOR; the API reports nothing about what arrived. The result lists who could see the calendar before and who can see it now, because \"shared with somebody\" is not an answer to \"who can see this\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before the write; a call they do not confirm is [blocked], and is not made again unless they ask.",
+      "description": "Give somebody access to a calendar, or change the access they already have. `who` is an email address, a group address, a domain, or \"anyone\" for the public internet. An address is read as one person unless this calendar already has a rule for it — pass `scope_type` to be sure, because a group address and a person's look identical. `role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. The result explains the one it set. Sharing with \"anyone\" publishes the calendar to the whole internet and needs `allow_public: true`: removing the rule later stops new readers and takes nothing back from whoever already looked. `notify` is REQUIRED and has no default: `all` asks Google to email about the change, `none` asks it not to. Google's own default here is to EMAIL — the opposite of its default on an event — which is why this server asks rather than inheriting either. `external_only` has no meaning on a sharing change and is refused: Google's switch is on or off, with no internal/external split. Whatever you pass, the result says what was ASKED FOR; the API reports nothing about what arrived. The result lists who could see the calendar before and who can see it now, because \"shared with somebody\" is not an answer to \"who can see this\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before a share that publishes the calendar, opens it to a whole domain, or makes somebody an owner; a call they do not confirm is [blocked], and is not made again unless they ask.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -3775,7 +4698,7 @@
             "type": "string"
           },
           "who": {
-            "description": "An email address, a group address, a domain, or \"anyone\" for the public internet. Required.",
+            "description": "An email address, a group address, a domain, or \"anyone\" for the public internet. An address may be a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e; only the address is used. Required.",
             "type": "string"
           }
         },
@@ -3965,7 +4888,7 @@
             "type": "string"
           },
           "who": {
-            "description": "The address, domain, or \"anyone\", whose access should go. Required.",
+            "description": "The address, domain, or \"anyone\", whose access should go. An address may be a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e; only the address is used. Required.",
             "type": "string"
           }
         },
@@ -4137,12 +5060,36 @@
     },
     {
       "name": "update_event",
-      "description": "Change an event. Only the fields you pass are touched; everything else is left exactly as it is, so this can never drop a guest list or flatten a series the way a whole-resource write does. Guests are added and removed one at a time with `add_guests` and `remove_guests`, applied to the list as it is read, so somebody else's RSVP arriving in between is reported rather than overwritten. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is two calls: the original series is ended before this occurrence and a NEW series starts at it with a new id, and any exception after this occurrence is reset. The result says so. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. A Google Meet link cannot be added here: `conference: true` on create_event attaches one when the event is made, and this server does not add one to an event that already exists. Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
+      "description": "Change an event. Only the fields you pass are touched; everything else is left exactly as it is, so this can never drop a guest list or flatten a series the way a whole-resource write does. Guests are added and removed one at a time with `add_guests` and `remove_guests`, optional guests added with `add_optional_guests`, and rooms booked with `add_rooms`, applied to the list as it is read, so somebody else's RSVP arriving in between is reported rather than overwritten. An address already on the event keeps the role it has, and the result names it: this server does not make a guest optional or required, and a call that would add nothing else is refused as having nothing to change. An address may be bare or a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e, the way a mail server hands one over; only the address is used, and one entry holds one address. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is two calls: the original series is ended before this occurrence and a NEW series starts at it with a new id, and any exception after this occurrence is reset. The result says so. `popup_reminders` and `email_reminders` are minutes before the start, 0 to 40320, at most five in all. Either one replaces the whole set, so pass both to keep both kinds, and an empty list given alone means no reminders. `default_reminders: true` goes back to the calendar's own. Reminders are yours alone: Google keeps them per person, so they never notify a guest. A write that changes only reminders needs no `notify`, except with `this_and_following`, whose new series reaches the guests. `visibility` is default, public or private: private shows the details only to the guests, and public to everybody who can see the calendar. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do. On one occurrence, Google ignores a less restrictive visibility, so it is refused, and applies a more restrictive one to the whole series, which the result says. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. `add_conference: true` asks Google for a Meet link on an event that has no conference; one that has a conference is refused, because Google would replace it, and the result says whether the link came back or is still being made. It cannot go with `this_and_following`. A status event takes no guests, rooms or Meet link, and a change to one that Google's rules for it refuse is refused before anything is written. An out-of-office or focus-time event that declines every overlapping meeting declines in the time a change adds to it: moved, made longer or repeated more. A change that only shortens it adds no time. With `this_and_following`, such a series starts a new series that declines them too. Use respond_to_event to answer an invitation and move_event to change which calendar it is on. When the client can, the server also asks the person before an out-of-office or focus-time event that declines every meeting it overlaps is moved, made longer, repeated more or split with this_and_following; a call they do not confirm is [blocked], and is not made again unless they ask.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
+          "add_conference": {
+            "description": "Ask Google for a Google Meet link. Refused when the event already has a conference.",
+            "type": "boolean"
+          },
           "add_guests": {
             "description": "Email addresses to invite, added to the guests already there.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "add_optional_guests": {
+            "description": "Email addresses to invite as optional guests, added to the guests already there. An address already on the event keeps the role it has, and the result says so. A room cannot be optional.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "add_rooms": {
+            "description": "Addresses of rooms or other resources to book. A room is not a guest; an address here that is not a room's still counts as one.",
             "items": {
               "type": "string"
             },
@@ -4155,6 +5102,10 @@
             "description": "The calendar the event is on. An event id is unique per calendar, not globally.",
             "type": "string"
           },
+          "default_reminders": {
+            "description": "Go back to the calendar's own reminders.",
+            "type": "boolean"
+          },
           "description": {
             "description": "New description. Omit to leave it; pass an empty string to clear it.",
             "type": [
@@ -4165,6 +5116,16 @@
           "dry_run": {
             "description": "Report what would change and who would be emailed, without writing.",
             "type": "boolean"
+          },
+          "email_reminders": {
+            "description": "Your email reminders, in minutes before the start, 0 to 40320. At most five reminders in all.",
+            "items": {
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "end": {
             "description": "New end. For an all-day event this is the last day, included.",
@@ -4189,6 +5150,27 @@
               "boolean"
             ]
           },
+          "guests_can_invite_others": {
+            "description": "Whether guests may invite others.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "guests_can_modify": {
+            "description": "Whether guests may change the event.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "guests_can_see_other_guests": {
+            "description": "Whether guests see the guest list.",
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
           "location": {
             "description": "New location. Omit to leave it; pass an empty string to clear it.",
             "type": [
@@ -4197,12 +5179,22 @@
             ]
           },
           "notify": {
-            "description": "Who Google is asked to email: none, external_only or all. Required when the event has guests.",
+            "description": "Who Google is asked to email: none, external_only or all. Required when the event has guests or the call adds one.",
             "type": "string"
           },
           "original_start": {
             "description": "The occurrence's SCHEDULED start, from list_instances. Use it with the series id to name one occurrence.",
             "type": "string"
+          },
+          "popup_reminders": {
+            "description": "Your popup reminders, in minutes before the start, 0 to 40320. Replaces all your reminders on the event; an empty list given alone removes them.",
+            "items": {
+              "type": "integer"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           },
           "recurrence": {
             "description": "New RFC 5545 lines. An empty list stops the event repeating.",
@@ -4215,7 +5207,7 @@
             ]
           },
           "remove_guests": {
-            "description": "Email addresses to uninvite.",
+            "description": "Email addresses to uninvite, rooms included.",
             "items": {
               "type": "string"
             },
@@ -4238,6 +5230,13 @@
           },
           "title": {
             "description": "New title. Omit to leave it; pass an empty string to clear it.",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "visibility": {
+            "description": "default, public or private. On one occurrence a less restrictive value is refused, because Google ignores it.",
             "type": [
               "null",
               "string"
@@ -4265,13 +5264,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -4322,6 +5333,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -4335,6 +5379,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },
@@ -4390,13 +5443,25 @@
               "all_day": {
                 "type": "boolean"
               },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
               "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
                 "type": "string"
               },
               "conference_status": {
                 "type": "string"
               },
               "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
                 "type": "string"
               },
               "description": {
@@ -4447,6 +5512,39 @@
               "recurrence_means": {
                 "type": "string"
               },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
               "series_id": {
                 "type": "string"
               },
@@ -4460,6 +5558,15 @@
                 "type": "string"
               },
               "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
                 "type": "string"
               }
             },

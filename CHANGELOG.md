@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-09
+
 ### Added
 
 - `create_event` takes `rooms` and `update_event` takes `add_rooms`: rooms and other resources to book, sent to Google as resources. A room is not a guest, so it does not make `notify` required. An address there that is not a room's still counts as a guest. One address given as both a guest and a room is refused.
@@ -989,7 +991,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v1.0.2...v2.0.0
