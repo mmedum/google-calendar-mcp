@@ -8,4 +8,5 @@ Changed (1)
 Deleted (1)
   ev-gone-1
 
-A read by updated_since hands back no sync token. To follow this calendar from here, call with neither updated_since nor sync_token for a baseline and a token.
+This read did not finish, so there is NO sync token yet — Google issues one with the last page only. Pass page_token, with the same updated_since, to continue; the token arrives at the end.
+page_token: example-page-token-not-a-real-one

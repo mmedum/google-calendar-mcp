@@ -243,9 +243,7 @@ func changedTitles(c render.Changes) string {
 
 // updated_since asks Google for what was written at or after a moment:
 // an event written before it is not reported, one written after it is,
-// and so is one deleted after it. The read is not a baseline, and it
-// hands back no sync token, because nothing yet shows that a token from
-// such a read chains (§18 row 91).
+// and so is one deleted after it. The read is not a baseline.
 func TestUpdatedSinceReportsWhatChangedAfterIt(t *testing.T) {
 	fake := caltest.Seed()
 	svc := newService(t, fake)
@@ -266,20 +264,47 @@ func TestUpdatedSinceReportsWhatChangedAfterIt(t *testing.T) {
 	if strings.Join(got.Deleted, ",") != "ev-transparent" {
 		t.Fatalf("deleted = %v, want the event deleted after the moment", got.Deleted)
 	}
-	if got.Baseline || got.SyncToken != "" || !got.Complete {
-		t.Fatalf("baseline=%v sync_token=%q complete=%v, want a complete change list with no token",
-			got.Baseline, got.SyncToken, got.Complete)
+	if got.Baseline || !got.Complete {
+		t.Fatalf("baseline=%v complete=%v, want a complete change list", got.Baseline, got.Complete)
 	}
 	text := got.Text()
 	for _, want := range []string{
 		"Changes on Sample Primary since 2026-03-11T01:00:00+01:00",
 		"an event whose only change was its reminders is not here",
 		"Deleted (1)",
-		"hands back no sync token",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the text does not say %q:\n%s", want, text)
 		}
+	}
+}
+
+// The sync token a read since a moment hands back follows the calendar
+// from there: a sync with it reports what changed after the read and
+// nothing before. Spike O found Google's token chains (§18 row 91).
+func TestATokenFromAReadSinceAMomentChains(t *testing.T) {
+	fake := caltest.Seed()
+	svc := newService(t, fake)
+	ctx := context.Background()
+	clockAt(t, fake, "2026-03-12T08:00:00Z")
+	fake.Touch("primary", "ev-standup")
+
+	since, err := svc.ListChanges(ctx, service.ChangesOptions{Calendar: "primary", UpdatedSince: "2026-03-11T00:00:00Z"})
+	if err != nil {
+		t.Fatalf("ListChanges: %v", err)
+	}
+	if since.SyncToken == "" || !strings.Contains(since.Text(), "Next sync token: "+since.SyncToken) {
+		t.Fatalf("sync_token=%q, want one handed back and named in the text:\n%s", since.SyncToken, since.Text())
+	}
+
+	fake.Touch("primary", "ev-holiday")
+	next, err := svc.ListChanges(ctx, service.ChangesOptions{Calendar: "primary", SyncToken: since.SyncToken})
+	if err != nil {
+		t.Fatalf("ListChanges with the token: %v", err)
+	}
+	if titles := changedTitles(next); titles != "Public holiday" || next.Baseline || next.SyncToken == "" {
+		t.Fatalf("changed=%q baseline=%v sync_token=%q, want only the event changed after the read, "+
+			"and a new token", titles, next.Baseline, next.SyncToken)
 	}
 }
 
@@ -388,9 +413,9 @@ func TestUpdatedSinceTooFarBackSaysToPassALaterOne(t *testing.T) {
 }
 
 // A read since a moment that stops early continues only with that same
-// moment. Without it the page token was taken for a baseline's, and the
-// chain's last page handed back the sync token a read since a moment
-// withholds. No page of the chain carries one.
+// moment. Without it the page token was taken for a baseline's, which
+// counts the rows past its budget instead of reporting them. Every page
+// reports its change, and only the last carries the sync token.
 func TestAReadSinceAMomentContinuesOnlyWithThatMoment(t *testing.T) {
 	fake := caltest.Seed()
 	svc := newService(t, fake)
@@ -429,8 +454,10 @@ func TestAReadSinceAMomentContinuesOnlyWithThatMoment(t *testing.T) {
 		if next, err = svc.ListChanges(ctx, o); err != nil {
 			t.Fatalf("page %d: %v", pages, err)
 		}
-		if next.Baseline || next.SyncToken != "" {
-			t.Fatalf("page %d: baseline=%v sync_token=%q, want neither", pages, next.Baseline, next.SyncToken)
+		last := next.NextPageToken == ""
+		if next.Baseline || len(next.Changed)+len(next.Deleted) != 1 || (next.SyncToken != "") != last {
+			t.Fatalf("page %d: baseline=%v rows=%d sync_token=%q, want one change reported and a token on "+
+				"the last page only", pages, next.Baseline, len(next.Changed)+len(next.Deleted), next.SyncToken)
 		}
 	}
 	if !next.Complete || pages != 3 {

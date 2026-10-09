@@ -169,11 +169,11 @@ func registerRead(s *mcp.Server, d Deps) {
 			"If the token has expired the call fails [stale]; ask again with no sync_token and start over. " +
 			"updated_since asks instead for what changed since a moment, such as \"since Monday\": an RFC3339 " +
 			"time, or a yyyy-mm-dd date meaning the start of that day in time_zone, else the calendar's zone; the result " +
-			"echoes the instant it used. It cannot be combined with sync_token and returns no token. Events " +
+			"echoes the instant it used. It cannot be combined with sync_token. Events " +
 			"deleted since then are always included. Google calls this the legacy way and says it can miss " +
-			"updates: an event whose only change was its reminders is not reported. Use the token to follow a " +
-			"calendar; use updated_since for a one-off look back. A moment too far back fails [stale]; pass " +
-			"a later one.",
+			"updates: an event whose only change was its reminders is not reported. Its last page hands back a " +
+			"sync token too, to follow the calendar from there; continue a read that stopped early with " +
+			"page_token and the same updated_since. A moment too far back fails [stale]; pass a later one.",
 		Kind: Read,
 		Handle: func(ctx context.Context, in listChangesIn) (service.ChangesResult, error) {
 			out, err := d.Service.ListChanges(ctx, service.ChangesOptions{
@@ -289,8 +289,8 @@ type listChangesIn struct {
 	Calendar  string `json:"calendar" jsonschema:"The calendar to check for changes."`
 	SyncToken string `json:"sync_token,omitempty" jsonschema:"A token from a previous call's sync_token. Leave it out the first time to get a baseline and a token. Opaque: never build or edit one."`
 	// UpdatedSince is the legacy way in, kept apart from the token: it
-	// is refused alongside one and hands none back.
-	UpdatedSince string `json:"updated_since,omitempty" jsonschema:"Only what changed at or after this moment: RFC3339, or yyyy-mm-dd for the start of that day in time_zone, else the calendar's zone. Not with sync_token, and no sync token comes back."`
+	// is refused alongside one. Its last page hands one back.
+	UpdatedSince string `json:"updated_since,omitempty" jsonschema:"Only what changed at or after this moment: RFC3339, or yyyy-mm-dd for the start of that day in time_zone, else the calendar's zone. Not with sync_token. The last page hands back a sync token to follow the calendar from there."`
 	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a read that did not finish, from next_page_token, with the same calendar and the same sync_token or updated_since. The sync token arrives with the last page."`
 	TimeZone     string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the changed events in, and to read an updated_since date in."`
 	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`

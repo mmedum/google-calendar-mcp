@@ -484,6 +484,37 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
+			// §18 row 91: the token a read by updated_since handed back,
+			// before any write, follows the calendar. The update above is
+			// a change made after it.
+			name: "list_changes from the updated_since token",
+			tool: "list_changes",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"sync_token": sinceToken})
+			},
+			skip: func() string {
+				if sinceToken == "" {
+					return "the read by updated_since handed back no token"
+				}
+				return ""
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if strings.Contains(r.text, "Baseline for") || !strings.Contains(r.text, "Changes on") {
+					return fail, "the result does not report itself as a change list"
+				}
+				if !strings.Contains(r.text, writtenTitle) {
+					return fail, "the event updated after the token was issued is not among the changes"
+				}
+				if afterLabel(r.text, "Next sync token: ") == "" {
+					return fail, "the read handed back no new token, so the chain stops here"
+				}
+				return pass, "the token chains: the update made after it was reported, and a new token issued"
+			},
+		},
+		{
 			// §18 row 95: q reads the location, among the fields Google
 			// documents. The update above set this one.
 			name: "search_events matches a location",

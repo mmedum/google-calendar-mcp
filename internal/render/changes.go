@@ -26,7 +26,7 @@ type Changes struct {
 	// calendar comes back and nothing has "changed" yet.
 	Baseline bool
 	// Since is the moment an updated_since read asked from, zero on a
-	// read by token. Such a read hands back no token.
+	// read by token.
 	Since when.Zoned
 	// Complete says the last page was reached, which is the only state
 	// in which SyncToken is set.
@@ -112,19 +112,16 @@ func (c Changes) Text() string {
 
 	// The token, and the honest statement of when there isn't one.
 	switch {
-	case !c.Since.IsZero():
-		if c.NextPageToken != "" {
-			b.WriteString("This read did not finish. Pass page_token, with the same updated_since, to continue.\n")
-			fmt.Fprintf(&b, "page_token: %s\n", c.NextPageToken)
-		}
-		b.WriteString("A read by updated_since hands back no sync token. To follow this calendar from here, " +
-			"call with neither updated_since nor sync_token for a baseline and a token.\n")
 	case c.SyncToken != "":
 		fmt.Fprintf(&b, "Next sync token: %s\n", c.SyncToken)
 		b.WriteString("Pass it as sync_token next time to get only what changed after this point.\n")
 	case c.NextPageToken != "":
+		again := "Pass page_token to continue"
+		if !c.Since.IsZero() {
+			again = "Pass page_token, with the same updated_since, to continue"
+		}
 		b.WriteString("This read did not finish, so there is NO sync token yet — Google issues one " +
-			"with the last page only. Pass page_token to continue; the token arrives at the end.\n")
+			"with the last page only. " + again + "; the token arrives at the end.\n")
 		fmt.Fprintf(&b, "page_token: %s\n", c.NextPageToken)
 	default:
 		b.WriteString("No sync token came back, so this read cannot be continued incrementally; " +

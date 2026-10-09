@@ -482,8 +482,9 @@ func TestGoldenChangesUnfinished(t *testing.T) {
 	golden(t, "changes-unfinished", c.Text())
 }
 
-// A read by updated_since names the moment, carries Google's caveat and
-// says it hands back no token.
+// A read by updated_since names the moment and carries Google's caveat.
+// One that stopped early says to continue with the same moment, and that
+// its token comes with the last page.
 func TestGoldenChangesSince(t *testing.T) {
 	z := goldenZone(t)
 	moved := goldenEvent(t, "ev-standup", "Standup",
@@ -497,7 +498,7 @@ func TestGoldenChangesSince(t *testing.T) {
 		CalendarID: "primary", CalendarName: "Work", Zone: z, Since: since,
 		Changed:  []model.Event{moved},
 		Deleted:  []string{"ev-gone-1"},
-		Complete: true, Requests: 1,
+		Complete: false, NextPageToken: syntheticPageToken, Requests: 1,
 	}
 	golden(t, "changes-since", c.Text())
 }

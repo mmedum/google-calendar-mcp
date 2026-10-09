@@ -363,6 +363,11 @@ var spikeNotify bool
 // preserves, canceling them to their guests on the way out.
 var clearSpikeEvents bool
 
+// sinceToken is the sync token the read by updated_since handed back. A
+// write step syncs with it after the writes have changed an event, so it
+// is shared across the two step lists.
+var sinceToken string
+
 // results tallies and prints, through the redactor only.
 type results struct {
 	out *redact.Printer
@@ -1244,10 +1249,13 @@ func steps(scratch string, state seedState) []step {
 				if !strings.Contains(r.text, timedTitle) {
 					return fail, "an event the seed wrote this run is not among the changes"
 				}
-				if afterLabel(r.text, "Next sync token: ") != "" {
-					return fail, "a read by updated_since handed back a sync token nothing has shown chains"
+				// Spike O found Google's token from such a read chains; the
+				// write steps sync with this one after they change an event.
+				sinceToken = afterLabel(r.text, "Next sync token: ")
+				if sinceToken == "" {
+					return fail, "a read by updated_since that finished handed back no sync token"
 				}
-				return pass, "the seeded events came back as changed, with no sync token"
+				return pass, "the seeded events came back as changed, with a sync token"
 			},
 		},
 		{

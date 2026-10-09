@@ -47,14 +47,15 @@ import (
 // as `updatedMin`. Google's sync guide calls it the legacy way and says
 // it misses updates; an event's `updated` does not move when only its
 // reminders change. It is refused alongside a token, as Google refuses
-// `updatedMin` there, and it hands back no token, because nothing yet
-// shows that a token from such a read chains (§18 row 91).
+// `updatedMin` there. Its last page hands back a sync token like any
+// other read's: spike O synced with one and was told of a change made
+// after it (§18 row 91).
 //
 // A page token from any of the three reads — a baseline, a read from a
 // sync token, a read since a moment — carries which it was, and a
 // continuation must ask the same. Without that, a read since a moment
-// continued with only its page token became a baseline, and its last
-// page handed back the sync token the moment withholds.
+// continued with only its page token became a baseline, which counts the
+// rows past its budget instead of reporting them.
 
 // baselineRequests caps the pages a baseline will walk for its token.
 //
@@ -209,11 +210,7 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 	// Said rather than implied: an incomplete read carries no token, so
 	// a caller that stored one anyway would skip everything still
 	// unread. Belt and braces — Google withholds it too.
-	//
-	// A read by updated_since hands back none either: whether a token
-	// from it chains is unprobed (§18 row 91), and a token that skipped
-	// changes would be worse than none.
-	if !out.Complete || !since.IsZero() {
+	if !out.Complete {
 		out.SyncToken = ""
 	}
 	return out, nil
