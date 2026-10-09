@@ -732,13 +732,30 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if o.Force {
 		report.Notes = append(report.Notes, forcedNote)
 	}
-	if o.DryRun {
-		after, perr := project(target, patch, env)
-		if perr != nil {
-			return render.WriteReport{}, perr
+	afterRaw := target
+	patch.ApplyTo(&afterRaw)
+	// A status event that declines every meeting it overlaps, moved or
+	// made to cover more, declines in its new time too. Whether Google
+	// declines the meetings already there is not probed (§18 row 102),
+	// so the person is asked, as before a create (§9a).
+	declines := plan.DeclinesMore(target, afterRaw)
+	if declines {
+		report.Notes = append(report.Notes, declinesMoreNote)
+	}
+	if o.DryRun || declines {
+		shown, err := model.FromEvent(env.cal.ID, afterRaw, &env.zone)
+		if err != nil {
+			return render.WriteReport{}, err
 		}
-		report.After, report.Requests = &after, gapi.Requests(ctx)
-		return report, nil
+		if o.DryRun {
+			report.After, report.Requests = &shown, gapi.Requests(ctx)
+			return report, nil
+		}
+		if err := ask(ctx, render.AskDecline(render.Decline{
+			CalendarID: env.cal.ID, Calendar: env.cal.Title, Event: shown, Zone: env.zone, Was: &targetModel,
+		})); err != nil {
+			return render.WriteReport{}, err
+		}
 	}
 
 	updated, err := s.API.PatchEvent(ctx, env.cal.ID, target.ID, &patch, decision.SendUpdatesFor(), etag)
@@ -781,6 +798,13 @@ func alreadyOnNote(d plan.Draft, attendees []gcal.EventAttendee) string {
 	return "Already on the event, so left as they were: " + strings.Join(on, ", ") + ". Adding an " +
 		"address does not change how it is invited: this server does not make a guest optional or required."
 }
+
+// declinesMoreNote says what a change to a status event that declines
+// every meeting it overlaps does when it covers more time. Tense-neutral,
+// because a dry run prints it too.
+const declinesMoreNote = "This change covers time the event did not, and the event declines every meeting it " +
+	"overlaps. Google may decline the meetings in that time, including the ones you already accepted, and each " +
+	"organizer sees a decline."
 
 // remindersOnlyNote says why a write that changed only reminders asked
 // nobody to be notified.

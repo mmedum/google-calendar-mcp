@@ -315,8 +315,8 @@ func TestAnAskingToolSaysWhenItAsks(t *testing.T) {
 		"cancel_event": "asks the person before a cancellation that emails a guest;",
 		"create_event": "asks the person before it makes an out-of-office or focus-time event with " +
 			"auto_decline all;",
-		"update_event": "asks the person before a this_and_following split whose new series declines every " +
-			"meeting it overlaps;",
+		"update_event": "asks the person before an out-of-office or focus-time event that declines every meeting " +
+			"it overlaps is moved, made longer, repeated more or split with this_and_following;",
 	}
 	for _, tool := range listTools(t, everything()) {
 		if w, ok := want[tool.Name]; ok && !strings.Contains(tool.Description, w) {

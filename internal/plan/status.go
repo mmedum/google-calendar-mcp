@@ -3,10 +3,13 @@ package plan
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
@@ -185,6 +188,129 @@ func statusPatch(before gcal.Event, p gcal.EventPatch) error {
 		return err
 	}
 	return nil
+}
+
+// DeclinesMore reports whether a write leaves an out-of-office or
+// focus-time event declining every meeting it overlaps over time it did
+// not before: moved, made longer, repeated more, or newly set to decline
+// all. Google may decline the meetings in that time, the accepted ones
+// too, so the person is asked (§9a). A write that only shrinks the time
+// asks nothing. A change this cannot show to shrink counts as more.
+func DeclinesMore(before, after gcal.Event) bool {
+	switch {
+	case !declinesAll(after):
+		return false
+	case !declinesAll(before):
+		return true
+	case sameWhen(before.Start, after.Start) && sameWhen(before.End, after.End) &&
+		slices.Equal(before.Recurrence, after.Recurrence):
+		return false
+	}
+	return !within(before, after)
+}
+
+// declinesAll reports whether an event, as it stands, declines every
+// meeting it overlaps.
+func declinesAll(e gcal.Event) bool {
+	if e.Status == gcal.StatusCanceled ||
+		(e.EventType != gcal.EventTypeOutOfOffice && e.EventType != gcal.EventTypeFocusTime) {
+		return false
+	}
+	var p struct {
+		AutoDeclineMode string `json:"autoDeclineMode"`
+	}
+	return json.Unmarshal(e.StatusDetails(), &p) == nil && p.AutoDeclineMode == gcal.AutoDeclineAll
+}
+
+// sameWhen reports whether two ends of an event are the same, zone
+// included.
+func sameWhen(a, b *gcal.EventDateTime) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// within reports whether every occurrence of after lies inside one of
+// before's.
+func within(before, after gcal.Event) bool {
+	a, complete, ok := spans(after, time.Time{})
+	if !ok {
+		return false
+	}
+	// A series longer than this server expands has no last occurrence
+	// to compare. With the rule it had, it repeats as it did, so its
+	// first occurrences show the rest.
+	if !complete && !slices.Equal(before.Recurrence, after.Recurrence) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	b, _, ok := spans(before, a[len(a)-1].to)
+	if !ok || len(b) == 0 {
+		return false
+	}
+	// Both run in order of start, and before's occurrences last equally
+	// long, so the latest one to start by an occurrence of after ends
+	// latest.
+	i := 0
+	for _, s := range a {
+		for i+1 < len(b) && !b[i+1].from.After(s.from) {
+			i++
+		}
+		if b[i].from.After(s.from) || b[i].to.Before(s.to) {
+			return false
+		}
+	}
+	return true
+}
+
+// span is the time one occurrence covers.
+type span struct{ from, to time.Time }
+
+// spans is the time a timed event covers, one span per occurrence that
+// starts before end, or every one when end is zero. complete is false
+// when there are more than this server expands. ok is false for an
+// all-day event, and for one this server cannot read or expand.
+func spans(e gcal.Event, end time.Time) (out []span, complete, ok bool) {
+	if e.Start == nil || e.End == nil || e.Start.DateTime == "" || e.End.DateTime == "" {
+		return nil, false, false
+	}
+	var loc *time.Location
+	if len(e.Recurrence) > 0 {
+		// A series repeats its wall clock in its zone, so it has to
+		// have one.
+		var err error
+		if loc, err = when.LoadLocation(e.Start.TimeZone); err != nil {
+			return nil, false, false
+		}
+	}
+	from, ferr := when.ParseZoned(e.Start.DateTime, loc)
+	to, terr := when.ParseZoned(e.End.DateTime, loc)
+	if ferr != nil || terr != nil {
+		return nil, false, false
+	}
+	if len(e.Recurrence) == 0 {
+		return []span{{from.T, to.T}}, true, true
+	}
+	set, err := recur.Parse(e.Recurrence)
+	if err != nil {
+		return nil, false, false
+	}
+	var stop when.Zoned
+	if !end.IsZero() {
+		stop = when.NewZoned(end, loc)
+	}
+	occ, err := set.ExpandTimes(from, when.Zoned{}, stop, recur.MaxOccurrences)
+	if err != nil {
+		return nil, false, false
+	}
+	length := to.T.Sub(from.T)
+	for _, t := range occ.Times {
+		out = append(out, span{t.T, t.T.Add(length)})
+	}
+	return out, !occ.Truncated, true
 }
 
 // away fills in an out-of-office or focus-time event.

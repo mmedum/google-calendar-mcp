@@ -1088,6 +1088,17 @@ server holds each before a request (§18 row 99):
   person first, as `create_event` does (§9a). Whether Google declines
   again for a series it already declined for is not probed, so the new
   series is treated as new.
+- A change that makes an out-of-office or focus-time event that declines
+  all cover time it did not asks the person first too, at any scope:
+  moved, made longer, repeated more or made to repeat. Whether Google
+  declines the meetings already in the new time is not probed, so they
+  are treated as declined (§18 row 102). A change that only shrinks the
+  time asks nothing, and neither does one that leaves the time alone.
+  The server expands the occurrences before and after from the rule and
+  asks unless each one after lies inside one before. A series longer
+  than it expands is compared on its first occurrences only when its rule
+  is unchanged. A change it cannot show to shrink, such as one to a rule
+  it does not expand, asks.
 
 The three details blocks stay raw JSON on the event, as `conferenceData`
 does, so a read and a split copy carry a detail Google adds later. Every
@@ -1432,9 +1443,13 @@ writes:
   accepted ones too, and each organizer sees the decline, which cannot be
   recalled. `none` and `new` ask nothing: one declines nothing, and the
   other only invitations that arrive while the event stands (§7.4).
-- `update_event` with `this_and_following` on such a series that declines
-  all: the new series is a new event that declines all, so it is asked
-  about exactly as a create is, before the truncate.
+- `update_event` when it makes such an event that declines all cover
+  time it did not: moved, made longer or repeated more, at any scope.
+  Google may decline the meetings in the new time, the accepted ones too.
+  A change that only shrinks the time asks nothing (§7.4). A
+  `this_and_following` split of such a series always asks: the new series
+  is a new event that declines all, so it is asked about exactly as a
+  create is, before the truncate.
 
 1. **A second gate, not a replacement.** The arguments stay and are
    checked first. A call a guard refuses asks nothing. The question comes
@@ -1466,7 +1481,8 @@ writes:
    calendar, when it starts with its zone, the scope, and how many guests
    are emailed and how many of them are outside the organization; a
    status event by its kind, title and calendar, when it starts, whether
-   it repeats, and the decline message the organizers get. Text
+   it repeats, and the decline message the organizers get, and a change
+   to one also by when it was and how it repeated. Text
    from Calendar or from the call stands in a code span, on one line,
    made inert as in the sibling servers: invisible characters
    removed, every quote and backtick lookalike made a plain single quote,
@@ -1933,10 +1949,11 @@ states its question and its verdict separately.
   event on the primary calendar, read it back and delete it by id, with
   `-status-type` choosing out of office, focus time or a working location
   per run. What Google does with guests, rooms or a Meet link on a
-  status event, and whether a split of a status series declining all
-  declines again, stay unprobed: each needs a second status event or a
-  guest, which the exception does not allow. **Not yet run** (§18 row
-  99).
+  status event, whether a split of a status series declining all
+  declines again, and whether moving or lengthening one declines the
+  meetings in its new time, stay unprobed: each needs a second status
+  event, a guest or another organizer's meeting, which the exception does
+  not allow. **Not yet run** (§18 rows 99 and 102).
 
 ## 16. Delivery phases
 
@@ -2721,15 +2738,17 @@ events on `create_event`, a group's free/busy answer, page tokens bound to
 their query, and the time zone database in the binary. Its review found a
 split of a status series that skipped the status rules and the question,
 guests sent to an existing status event, page tokens reusable under
-another query, `tooManyCalendarsRequested` read as an answer, and gaps in
-the live driver's primary-calendar guard; all are fixed.
+another query, `tooManyCalendarsRequested` read as an answer, gaps in
+the live driver's primary-calendar guard, and a status event declining all
+moved or made longer without asking; all are fixed.
 
 **Next: the live run, with the transcript read, before any release.**
 `make live` once per `-status-type`, which makes and deletes the one
 status event §9.1 allows; spikes O and P; the attachment steps, with
 `GCAL_LIVE_ATTACHMENT` set; and the group probe of §18 rows 87 and 100,
-outside the driver. Each settles tier-3 rows of §18 from 85 on. Rooms and
-a split of a status series stay unproven: the driver can make neither.
+outside the driver. Each settles tier-3 rows of §18 from 85 on. Rooms, a
+split of a status series and a move of one that declines all stay
+unproven: the driver can make none of them.
 
 ### 16a. Found by review, and fixed
 
@@ -3121,6 +3140,7 @@ what §15 exists to settle, and they are marked.
 | 99 | Status events are read-only here: create_event makes ordinary events, and the details blocks are written off | Google's status-events guide, read 2026-10-09: "Secondary calendars can't have status events"; focus time and out of office need their properties and `transparency` `opaque`, and "cannot be all-day events"; a working location needs its properties, `visibility` `public` and `transparency` `transparent`, and an all-day one "spans exactly one day"; an update "must maintain the required fields". Calendar discovery revision 20261002, fetched 2026-10-09: `autoDeclineMode` `declineNone`, `declineAllConflictingInvitations` or `declineOnlyNewConflictingInvitations`, the second declining "all conflicting meeting invitations that conflict with the event"; `chatStatus` "available or doNotDisturb"; `declineMessage` on both; `workingLocationProperties.type` `homeOffice`, `officeLocation` or `customLocation`, "Any details are specified in a sub-field of the specified name, but this field may be missing if empty", and `homeOffice` typed `any` | **Reversed: `create_event` makes all three.** `event_type` with `auto_decline` (required, no default, `all` asks the person), `decline_message`, `chat_status`, `working_location` and `working_location_label`, refused on a calendar other than the primary and in every shape the guide refuses; the server sets the transparency and visibility. The blocks are kept raw so a split still carries them whole, and every read shows them in the input words. The fake refuses what the guide refuses, on insert and on a patch. **Not yet probed live, tier 3:** that Google refuses a status event on a secondary calendar (spike P asks); the body Google takes for `home`, sent as `homeOffice: {}`; what it does with guests, rooms, optional guests and a Meet link on a status event, all refused with `[blocked]` on create and on every update until a probe; whether an organizer is emailed about an automatic decline, where the question says only that they see it; and whether a split of a series declining all declines again (row 88). The driver makes one status event per run on the primary calendar under §9.1's exception, declining nothing |
 | 100 | A calendar past `calendarExpansionMax` is left out of the free/busy answer | Calendar discovery revision 20261005, read 2026-10-09: `calendarExpansionMax` "Maximal number of calendars for which FreeBusy information is to be provided. Optional. Maximum value is 50"; `Error.reason` "tooManyCalendarsRequested - The number of calendars requested is too large for a single query" | **Not settled, tier 3.** Google names the reason and not where it lands: a calendar past the cap may be left out, or answered with that error. Nor does it say whether a group's members count toward the cap (row 87), and row 12's live run, with no cap set, saw 51 entries come back. The server treats both shapes as no answer and asks those calendars again on their own, up to 200; one still past the cap is unknown, never free, with the reason in words. The fake answers either way, and the tests hold both. A live check needs a group of more than fifty readable members, which the driver cannot make, so it waits on the group probe row 87 names; the probe should count both shapes |
 | 101 | `default` visibility ranks between `public` and `private` when Google compares one occurrence's visibility with the series' | Calendar discovery revision 20261002, read 2026-10-09: `visibility` "If the new setting is more restrictive (e.g. from public to private), it is applied to all instances. If the new setting is less restrictive (e.g. from private to public), the change is ignored"; `default` "Uses the default visibility for events on the calendar" | **A belief, tier 3.** The reference ranks public below private and says nothing of `default`, which takes the calendar's own setting. The server and the fake both put it in the middle: private to default, and default to public, on one occurrence are refused as ignored, and public to default is made with a note that the whole series changed. Ranked otherwise by Google, the server would refuse a change Google makes, or report as made one Google ignores, the worse of the two. The live driver makes its series public, one occurrence default, and reads the series |
+| 102 | A change to an out-of-office or focus-time event that declines all declines nothing new, so only a create asks | Calendar discovery revision 20261005, read 2026-10-09: `autoDeclineMode` `declineAllConflictingInvitations`, "meaning that all conflicting meeting invitations that conflict with the event are declined", with nothing on when; `Event.start` "For a recurring event, this is the start time of the first instance". The status-events and recurring-events guides, read 2026-10-09, say nothing about an update to either | **Not settled; treated as refuted until a probe.** A move, a later end or more occurrences put meetings inside the event that were outside it, and the reference does not say they are spared. `update_event` asks the person before a change that makes such an event cover time it did not, at any scope, and a dry run says so; a change that only shrinks the time asks nothing (§7.4, §9a). The time is read from the rule, so a canceled occurrence of a series counts as covered: whether a change to the whole series brings one back is not probed either. One occurrence is judged by the details it carries when read on its own, which Google is believed to copy from its series; one read without them asks nothing. No tool changes `auto_decline` on an existing event, so a switch to `all` has no path yet; the check counts one as more. **Not yet probed live, tier 3**, and the driver cannot: its one status event declines nothing, and the probe needs another organizer's meeting on the primary calendar |
 
 ### Deviations from the shared Go MCP server standard
 

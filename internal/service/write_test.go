@@ -2575,3 +2575,189 @@ func TestAStatusEventTakesNoGuestsOnAnyWrite(t *testing.T) {
 		t.Fatalf("removing a guest: %v", err)
 	}
 }
+
+// declining puts statusSeries' weekly series on the primary calendar,
+// declining every meeting it overlaps and repeating by rule, and returns
+// the id of its occurrence of 31 March.
+func declining(t *testing.T, fake *caltest.Server, id, eventType, rule string) string {
+	t.Helper()
+	var block any = gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll}
+	if eventType == gcal.EventTypeFocusTime {
+		block = gcal.EventFocusTimeProperties{AutoDeclineMode: gcal.AutoDeclineAll}
+	}
+	occ := statusSeries(t, fake, id, eventType, block, false)
+	fake.Events["me@example.test"][id].Recurrence = []string{rule}
+	return occ
+}
+
+const weeklyFour = "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"
+
+// A change that leaves an out-of-office event declining every meeting
+// over time it did not cover is put to the person before the patch, as a
+// create is. A dry run says it and asks nothing.
+func TestACoverThatGrowsIsPutToThePerson(t *testing.T) {
+	svc, fake := writeSeed(t)
+	occ := declining(t, fake, "evaway00005", gcal.EventTypeOutOfOffice, weeklyFour)
+	o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: "instance", End: "2026-03-31T19:00:00+02:00"}
+
+	_, err := svc.UpdateEvent(context.Background(), o)
+	if got := classOf(t, err); got != gapi.ClassBlocked {
+		t.Fatalf("got [%s] %v, want [blocked] with no way to ask", got, err)
+	}
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Fatalf("a decline nobody confirmed was written: %+v", w)
+	}
+
+	var asked []render.Question
+	ctx := service.WithAsker(context.Background(), counting{&asked})
+	dry := o
+	dry.DryRun = true
+	out, err := svc.UpdateEvent(ctx, dry)
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if !strings.Contains(out.Text(), "This change covers time the event did not, and the event declines every "+
+		"meeting it overlaps.") || len(asked) != 0 || len(fake.Wrote()) != 0 {
+		t.Fatalf("the dry run asked %d times, wrote %d times, or did not say what it declines:\n%s",
+			len(asked), len(fake.Wrote()), out.Text())
+	}
+
+	if _, err := svc.UpdateEvent(ctx, o); err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	want := "update_event: change the out-of-office event `Status` on your primary calendar `Sample Primary`, so " +
+		"it covers time it did not and declines every meeting it overlaps?\n\n" +
+		"It was 2026-03-31 09:00-17:00 Europe/Copenhagen.\n\n" +
+		"It would be 2026-03-31 09:00-19:00 Europe/Copenhagen.\n\n" +
+		"That includes meetings you already accepted.\n\n"
+	if len(asked) != 1 || !strings.HasPrefix(asked[0].Text, want) {
+		t.Fatalf("asked %d times, want once:\n%+v", len(asked), asked)
+	}
+	if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" || w[0].EventID != occ {
+		t.Fatalf("got writes %+v, want one patch of the occurrence", w)
+	}
+}
+
+// Every way a change can make such an event cover more asks: moved, made
+// longer, repeated more, or made to repeat at all.
+func TestEveryCoverThatGrowsAsks(t *testing.T) {
+	for _, tc := range []struct {
+		name, eventType, rule, scope string
+		change                       func(*service.UpdateOptions)
+		// shows is what the question says, where it says more than
+		// that it changes the event.
+		shows string
+	}{
+		{"an earlier start on the series", gcal.EventTypeOutOfOffice, weeklyFour, "series",
+			func(o *service.UpdateOptions) { o.Start = "2026-03-17T08:00:00+01:00" }, ""},
+		{"an earlier start on one occurrence", gcal.EventTypeOutOfOffice, weeklyFour, "instance",
+			func(o *service.UpdateOptions) { o.Start = "2026-03-31T08:00:00+02:00" }, ""},
+		{"one occurrence, a week before the series began", gcal.EventTypeOutOfOffice, weeklyFour, "series",
+			func(o *service.UpdateOptions) {
+				o.Start, o.End = "2026-03-10T09:00:00+01:00", "2026-03-10T17:00:00+01:00"
+				o.Recurrence = &[]string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=1"}
+			}, ""},
+		{"the same length later in the day", gcal.EventTypeOutOfOffice, weeklyFour, "instance",
+			func(o *service.UpdateOptions) {
+				o.Start, o.End = "2026-03-31T10:00:00+02:00", "2026-03-31T18:00:00+02:00"
+			}, ""},
+		{"more occurrences", gcal.EventTypeOutOfOffice, weeklyFour, "series",
+			func(o *service.UpdateOptions) { o.Recurrence = &[]string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=8"} },
+			"\n\nThe series started 2026-03-17 09:00-17:00 Europe/Copenhagen, repeating every week on Tuesday, 4 " +
+				"times.\n\nThe series would start 2026-03-17 09:00-17:00 Europe/Copenhagen.\n\nIt repeats every week " +
+				"on Tuesday, 8 times, and declines on every occurrence.\n\n"},
+		{"a series twenty years long made endless", gcal.EventTypeOutOfOffice,
+			"RRULE:FREQ=DAILY;UNTIL=20460317T235959Z", "series",
+			func(o *service.UpdateOptions) { o.Recurrence = &[]string{"RRULE:FREQ=DAILY"} }, ""},
+		{"focus time made longer", gcal.EventTypeFocusTime, weeklyFour, "instance",
+			func(o *service.UpdateOptions) { o.End = "2026-03-31T18:00:00+02:00" },
+			"update_event: change the focus time `Status`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, fake := writeSeed(t)
+			occ := declining(t, fake, "evaway00006", tc.eventType, tc.rule)
+			var asked []render.Question
+			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
+			tc.change(&o)
+			if _, err := svc.UpdateEvent(service.WithAsker(context.Background(), counting{&asked}), o); err != nil {
+				t.Fatalf("UpdateEvent: %v", err)
+			}
+			if len(asked) != 1 || !strings.HasPrefix(asked[0].Text, "update_event: change ") ||
+				!strings.Contains(asked[0].Text, tc.shows) {
+				t.Fatalf("asked %d times, want once, showing %q: %+v", len(asked), tc.shows, asked)
+			}
+		})
+	}
+
+	svc, fake := writeSeed(t)
+	one := caltest.Timed("evaway00007", "Status", "2026-03-31T09:00:00+02:00", "2026-03-31T17:00:00+02:00",
+		"Europe/Copenhagen")
+	one.EventType, one.Transparency = gcal.EventTypeOutOfOffice, gcal.TransparencyOpaque
+	one.OutOfOfficeProperties = gcal.Raw(gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll})
+	fake.AddEvent("me@example.test", one)
+	var asked []render.Question
+	if _, err := svc.UpdateEvent(service.WithAsker(context.Background(), counting{&asked}), service.UpdateOptions{
+		Calendar: "primary", EventID: one.ID, Recurrence: &[]string{"RRULE:FREQ=WEEKLY;COUNT=2"},
+	}); err != nil {
+		t.Fatalf("made to repeat: %v", err)
+	}
+	if len(asked) != 1 || !strings.Contains(asked[0].Text, "\n\nIt was 2026-03-31 09:00-17:00 Europe/Copenhagen."+
+		"\n\nThe series would start 2026-03-31 09:00-17:00 Europe/Copenhagen.\n\nIt repeats ") {
+		t.Fatalf("made to repeat: asked %d times, want once: %+v", len(asked), asked)
+	}
+}
+
+// A change that only shrinks the time such an event covers asks nothing,
+// and neither does one to an event that declines less, or to a canceled
+// occurrence, or one that leaves the time alone.
+func TestACoverThatOnlyShrinksAsksNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name, rule, scope string
+		change            func(*service.UpdateOptions)
+		setup             func(fake *caltest.Server, occ string)
+	}{
+		{"an earlier end on one occurrence", weeklyFour, "instance",
+			func(o *service.UpdateOptions) { o.End = "2026-03-31T16:00:00+02:00" }, nil},
+		{"a later start on the series", weeklyFour, "series",
+			func(o *service.UpdateOptions) { o.Start = "2026-03-17T10:00:00+01:00" }, nil},
+		{"fewer occurrences", weeklyFour, "series",
+			func(o *service.UpdateOptions) { o.Recurrence = &[]string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=2"} }, nil},
+		{"the repetition ended", weeklyFour, "series",
+			func(o *service.UpdateOptions) { o.Recurrence = &[]string{} }, nil},
+		{"an endless series made shorter each day", "RRULE:FREQ=WEEKLY;BYDAY=TU", "series",
+			func(o *service.UpdateOptions) { o.End = "2026-03-17T16:00:00+01:00" }, nil},
+		{"a new title on a series this server cannot expand", "RRULE:FREQ=HOURLY;COUNT=4", "series",
+			func(o *service.UpdateOptions) { o.Title = ptr("Away") }, nil},
+		{"a later end on an occurrence that declines only new invitations", weeklyFour, "instance",
+			func(o *service.UpdateOptions) { o.End = "2026-03-31T19:00:00+02:00" },
+			func(fake *caltest.Server, occ string) {
+				fake.Events["me@example.test"][occ].OutOfOfficeProperties = gcal.Raw(
+					gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineNew})
+			}},
+		{"a later end on a canceled occurrence", weeklyFour, "instance",
+			func(o *service.UpdateOptions) { o.End = "2026-03-31T19:00:00+02:00" },
+			func(fake *caltest.Server, occ string) {
+				fake.Events["me@example.test"][occ].Status = gcal.StatusCanceled
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, fake := writeSeed(t)
+			occ := declining(t, fake, "evaway00008", gcal.EventTypeOutOfOffice, tc.rule)
+			if tc.setup != nil {
+				tc.setup(fake, occ)
+			}
+			var asked []render.Question
+			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
+			tc.change(&o)
+			if _, err := svc.UpdateEvent(service.WithAsker(context.Background(), counting{&asked}), o); err != nil {
+				t.Fatalf("UpdateEvent: %v", err)
+			}
+			if len(asked) != 0 {
+				t.Fatalf("asked %d times, want none: %+v", len(asked), asked)
+			}
+			if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" {
+				t.Fatalf("got writes %+v, want one patch", w)
+			}
+		})
+	}
+}

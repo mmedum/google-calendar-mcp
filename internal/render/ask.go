@@ -148,17 +148,20 @@ func AskCancel(c Cancel) Question {
 		c.CalendarID, c.Event.ID, c.Scope, string(c.Decision.Notify), strings.Join(slices.Sorted(slices.Values(c.Guests)), "\x00"))
 }
 
-// Decline is a status event about to be made that declines every meeting
-// it overlaps, the ones already accepted too: by create_event, or as the
-// new series of an update_event split.
+// Decline is a status event that declines every meeting it overlaps, the
+// ones already accepted too, about to be made by create_event or as the
+// new series of an update_event split, or changed by update_event to
+// cover time it did not.
 type Decline struct {
 	CalendarID, Calendar string
-	// Event is the event as it would be created.
+	// Event is the event as the write would leave it.
 	Event model.Event
 	Zone  when.Zone
 	// Split is an update_event this_and_following, whose later
 	// occurrences become this new series.
 	Split bool
+	// Was is the event as it is, for an update_event that changes it.
+	Was *model.Event
 }
 
 // AskDecline asks before a status event that declines every meeting it
@@ -172,14 +175,31 @@ func AskDecline(d Decline) Question {
 	if d.Event.IsSeries() {
 		starts = "the series starts "
 	}
-	first := fmt.Sprintf("create_event: add %s %s to your primary calendar %s, and decline every meeting it overlaps?",
-		what, quoted(d.Event.Title), quoted(d.Calendar))
-	if d.Split {
-		first = fmt.Sprintf("update_event: split %s %s on your primary calendar %s, so this occurrence and every "+
-			"later one become a new series that declines every meeting it overlaps?",
-			what, quoted(d.Event.Title), quoted(d.Calendar))
+	var lines, was []string
+	switch {
+	case d.Split:
+		lines = []string{fmt.Sprintf("update_event: split %s %s on your primary calendar %s, so this occurrence "+
+			"and every later one become a new series that declines every meeting it overlaps?",
+			what, quoted(d.Event.Title), quoted(d.Calendar)), starts + startsAt(d.Event, d.Zone)}
+	case d.Was != nil:
+		lines = []string{fmt.Sprintf("update_event: change %s %s on your primary calendar %s, so it covers time "+
+			"it did not and declines every meeting it overlaps?", what, quoted(d.Was.Title), quoted(d.Calendar))}
+		if d.Was.IsSeries() {
+			lines = append(lines, "The series started "+startsAt(*d.Was, d.Zone)+", repeating "+
+				Recurrence(d.Was.Recurrence)+".")
+		} else {
+			lines = append(lines, "It was "+startsAt(*d.Was, d.Zone)+".")
+		}
+		if d.Event.IsSeries() {
+			lines = append(lines, "The series would start "+startsAt(d.Event, d.Zone)+".")
+		} else {
+			lines = append(lines, "It would be "+startsAt(d.Event, d.Zone)+".")
+		}
+		was = []string{d.Was.ID, whenKey(d.Was.Start), whenKey(d.Was.End), strings.Join(d.Was.Recurrence, "\n")}
+	default:
+		lines = []string{fmt.Sprintf("create_event: add %s %s to your primary calendar %s, and decline every "+
+			"meeting it overlaps?", what, quoted(d.Event.Title), quoted(d.Calendar)), starts + startsAt(d.Event, d.Zone)}
 	}
-	lines := []string{first, starts + startsAt(d.Event, d.Zone)}
 	if d.Event.IsSeries() {
 		lines = append(lines, "It repeats "+Recurrence(d.Event.Recurrence)+", and declines on every occurrence.")
 	}
@@ -190,8 +210,8 @@ func AskDecline(d Decline) Question {
 		lines = append(lines, "Each organizer gets your message: "+quoted(message))
 	}
 	lines = append(lines, "Each organizer sees the decline, and that cannot be taken back.")
-	return ask(lines, d.CalendarID, d.Event.Type, whenKey(d.Event.Start), whenKey(d.Event.End),
-		strings.Join(d.Event.Recurrence, "\n"), message)
+	return ask(lines, append([]string{d.CalendarID, d.Event.Type, whenKey(d.Event.Start), whenKey(d.Event.End),
+		strings.Join(d.Event.Recurrence, "\n"), message}, was...)...)
 }
 
 // whenKey is one end of an event as a value a question binds.

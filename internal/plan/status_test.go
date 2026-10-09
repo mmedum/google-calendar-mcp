@@ -187,3 +187,23 @@ func TestAPatchIsHeldToTheStatusRuleItWouldBreak(t *testing.T) {
 		t.Fatalf("a new title on an all-day out-of-office event as read: %v", err)
 	}
 }
+
+// An event newly set to decline every meeting it overlaps declines more
+// over the time it always covered. No tool changes the setting on an
+// existing event today, so this holds the rule for the one that will.
+func TestAnEventNewlySetToDeclineAllDeclinesMore(t *testing.T) {
+	before := gcal.Event{
+		ID: "abcde12345", EventType: gcal.EventTypeFocusTime, Transparency: gcal.TransparencyOpaque,
+		Start:               &gcal.EventDateTime{DateTime: "2026-04-01T09:00:00+02:00", TimeZone: "Europe/Copenhagen"},
+		End:                 &gcal.EventDateTime{DateTime: "2026-04-01T17:00:00+02:00", TimeZone: "Europe/Copenhagen"},
+		FocusTimeProperties: []byte(`{"autoDeclineMode":"declineOnlyNewConflictingInvitations"}`),
+	}
+	after := before
+	after.FocusTimeProperties = []byte(`{"autoDeclineMode":"declineAllConflictingInvitations"}`)
+	if !plan.DeclinesMore(before, after) {
+		t.Fatal("new to all over the same time: got false, want true")
+	}
+	if plan.DeclinesMore(after, before) {
+		t.Fatal("all to new over the same time: got true, want false")
+	}
+}

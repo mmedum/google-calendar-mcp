@@ -115,12 +115,14 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"that has a conference is refused, because Google would replace it, and the result says " +
 			"whether the link came back or is still being made. It cannot go with `this_and_following`. " +
 			"A status event takes no guests, rooms or Meet link, and a change to one that Google's rules " +
-			"for it refuse is refused before anything is written. With `this_and_following`, an out-of-office or " +
-			"focus-time series that declines every overlapping meeting starts a new series that declines them " +
-			"too. " +
+			"for it refuse is refused before anything is written. An out-of-office or focus-time event that " +
+			"declines every overlapping meeting declines in the time a change adds to it: moved, made longer or " +
+			"repeated more. A change that only shortens it adds no time. With `this_and_following`, such a " +
+			"series starts a new series that declines them too. " +
 			"Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
 		Kind: IdempotentWrite,
-		Asks: "before a this_and_following split whose new series declines every meeting it overlaps",
+		Asks: "before an out-of-office or focus-time event that declines every meeting it overlaps is moved, made " +
+			"longer, repeated more or split with this_and_following",
 		Handle: func(ctx context.Context, in updateEventIn) (service.WriteResult, error) {
 			out, err := d.Service.UpdateEvent(ctx, service.UpdateOptions{
 				Calendar: in.Calendar, EventID: in.EventID, OriginalStart: in.OriginalStart,
