@@ -21,7 +21,7 @@ GATES     ?= ./.gates$(EXE)
 # fetches them — not whatever is on the PATH. A distribution's
 # golangci-lint built with an older Go refuses this module outright, and
 # says so as "can't load config", which names the wrong thing.
-GOLANGCI_LINT ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+GOLANGCI_LINT ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 GOVULNCHECK   ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
 GOLICENSES    ?= github.com/google/go-licenses@v1.6.0
 # The module path is zricethezav, not gitleaks: the project moved
