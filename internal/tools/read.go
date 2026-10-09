@@ -162,8 +162,8 @@ func registerRead(s *mcp.Server, d Deps) {
 			"The token comes back with the LAST page only. A baseline therefore pages all the way to the " +
 			"end to fetch one, and says how many rows it passed over on the way — they are covered by the " +
 			"token, not lost. An INCREMENTAL read stops at its budget instead and hands back no token, " +
-			"because every row there is a change you have not seen yet; continue with page_token until " +
-			"the token arrives, and never store one you did not get. " +
+			"because every row there is a change you have not seen yet; continue with page_token and the same " +
+			"sync_token until the token arrives, and never store one you did not get. " +
 			"It takes no window, no search and no ordering: Google forbids all of them alongside a sync " +
 			"token, and deleted events are always included. " +
 			"If the token has expired the call fails [stale]; ask again with no sync_token and start over. " +
@@ -254,7 +254,7 @@ type listEventsIn struct {
 	EventTypes   []string `json:"event_types,omitempty" jsonschema:"Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type."`
 	ICalUID      string   `json:"ical_uid,omitempty" jsonschema:"Only the event with this iCalendar UID, such as the UID an invitation email carries. Every occurrence of a repeating event shares it."`
 	MaxEvents    int      `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
-	PageToken    string   `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+	PageToken    string   `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token, with the same arguments; a token is refused under another query."`
 }
 
 type searchEventsIn struct {
@@ -265,7 +265,7 @@ type searchEventsIn struct {
 	TimeZone   string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
 	EventTypes []string `json:"event_types,omitempty" jsonschema:"Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type."`
 	MaxEvents  int      `json:"max_events,omitempty" jsonschema:"Cap on events returned."`
-	PageToken  string   `json:"page_token,omitempty" jsonschema:"Continue a truncated search, from next_page_token."`
+	PageToken  string   `json:"page_token,omitempty" jsonschema:"Continue a truncated search, from next_page_token, with the same arguments; a token is refused under another query."`
 }
 
 type getEventIn struct {
@@ -282,7 +282,7 @@ type listInstancesIn struct {
 	TimeZone     string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the occurrences in."`
 	ShowCanceled bool   `json:"show_canceled,omitempty" jsonschema:"Include occurrences that were canceled, which is how single dates are removed from a series."`
 	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on occurrences returned. The server has its own budget and says when it truncated."`
-	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token, with the same arguments; a token is refused under another read."`
 }
 
 type listChangesIn struct {
@@ -291,7 +291,7 @@ type listChangesIn struct {
 	// UpdatedSince is the legacy way in, kept apart from the token: it
 	// is refused alongside one and hands none back.
 	UpdatedSince string `json:"updated_since,omitempty" jsonschema:"Only what changed at or after this moment: RFC3339, or yyyy-mm-dd for the start of that day in time_zone, else the calendar's zone. Not with sync_token, and no sync token comes back."`
-	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a read that did not finish, from next_page_token. The sync token arrives with the last page. With updated_since, pass the same one again."`
+	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a read that did not finish, from next_page_token, with the same calendar and the same sync_token or updated_since. The sync token arrives with the last page."`
 	TimeZone     string `json:"time_zone,omitempty" jsonschema:"IANA zone to show the changed events in, and to read an updated_since date in."`
 	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
 }

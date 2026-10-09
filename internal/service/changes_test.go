@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -383,5 +384,146 @@ func TestUpdatedSinceTooFarBackSaysToPassALaterOne(t *testing.T) {
 	if !strings.Contains(err.Error(), "as far back as 2000-01-01T00:00:00+01:00") ||
 		!strings.Contains(err.Error(), "Pass a later updated_since") {
 		t.Fatalf("the refusal does not name the moment and the cure: %v", err)
+	}
+}
+
+// A read since a moment that stops early continues only with that same
+// moment. Without it the page token was taken for a baseline's, and the
+// chain's last page handed back the sync token a read since a moment
+// withholds. No page of the chain carries one.
+func TestAReadSinceAMomentContinuesOnlyWithThatMoment(t *testing.T) {
+	fake := caltest.Seed()
+	svc := newService(t, fake)
+	ctx := context.Background()
+	clockAt(t, fake, "2026-03-12T08:00:00Z")
+	for _, id := range []string{"ev-holiday", "ev-standup", "ev-transparent"} {
+		fake.Touch("primary", id)
+	}
+	o := service.ChangesOptions{Calendar: "primary", UpdatedSince: "2026-03-11T00:00:00Z", MaxEvents: 1}
+	first, err := svc.ListChanges(ctx, o)
+	if err != nil {
+		t.Fatalf("ListChanges: %v", err)
+	}
+	if first.Complete || first.NextPageToken == "" {
+		t.Fatalf("complete=%v next=%q, want a read that stopped at its budget", first.Complete, first.NextPageToken)
+	}
+
+	for _, c := range []struct{ since, says string }{
+		{"", "continues a read since 2026-03-11T00:00:00Z, and this call has no updated_since"},
+		{"2026-03-10T00:00:00Z", "continues a read since 2026-03-11T00:00:00Z, not since 2026-03-10T00:00:00Z"},
+		{"2026-03-11", "not since 2026-03-10T23:00:00Z"},
+	} {
+		_, err := svc.ListChanges(ctx, service.ChangesOptions{
+			Calendar: "primary", UpdatedSince: c.since, PageToken: first.NextPageToken, MaxEvents: 1})
+		if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), c.says) {
+			t.Fatalf("updated_since %q: got [%s] %v, want [invalid] saying %q", c.since, got, err, c.says)
+		}
+	}
+
+	next, pages := first, 1
+	for next.NextPageToken != "" {
+		if pages++; pages > 10 {
+			t.Fatal("the chain did not end")
+		}
+		o.PageToken = next.NextPageToken
+		if next, err = svc.ListChanges(ctx, o); err != nil {
+			t.Fatalf("page %d: %v", pages, err)
+		}
+		if next.Baseline || next.SyncToken != "" {
+			t.Fatalf("page %d: baseline=%v sync_token=%q, want neither", pages, next.Baseline, next.SyncToken)
+		}
+	}
+	if !next.Complete || pages != 3 {
+		t.Fatalf("complete=%v after %d pages, want the three changes over three pages", next.Complete, pages)
+	}
+}
+
+// An incremental read continues only with the sync token it started
+// from, on its own calendar. Without the token its page token was taken
+// for a baseline's, which pages past its budget and counts changes
+// rather than reporting them.
+func TestAnIncrementalReadContinuesOnlyFromItsSyncToken(t *testing.T) {
+	svc, fake := seeded(t)
+	ctx := context.Background()
+	base, err := svc.ListChanges(ctx, service.ChangesOptions{Calendar: "primary"})
+	if err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	for _, id := range fake.EventIDs("primary") {
+		fake.Touch("primary", id)
+	}
+	fake.PageSize = 1
+	o := service.ChangesOptions{Calendar: "primary", SyncToken: base.SyncToken, MaxEvents: 1}
+	first, err := svc.ListChanges(ctx, o)
+	if err != nil || first.NextPageToken == "" {
+		t.Fatalf("got %v and next %q, want a read that stopped at its budget", err, first.NextPageToken)
+	}
+
+	for _, c := range []struct {
+		name string
+		o    service.ChangesOptions
+		says string
+	}{
+		{"no sync token", service.ChangesOptions{Calendar: "primary"},
+			"continues a read from a sync_token, and this call does not pass the same one"},
+		{"another sync token", service.ChangesOptions{Calendar: "primary", SyncToken: "caltest-sync-1"},
+			"continues a read from a sync_token, and this call does not pass the same one"},
+		{"a moment instead", service.ChangesOptions{Calendar: "primary", UpdatedSince: "2026-03-11"},
+			"continues a read without updated_since"},
+		{"another calendar", service.ChangesOptions{Calendar: "team@group.calendar.example.test",
+			SyncToken: base.SyncToken}, "continues a read of another calendar"},
+	} {
+		c.o.PageToken, c.o.MaxEvents = first.NextPageToken, 1
+		_, err := svc.ListChanges(ctx, c.o)
+		if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), c.says) {
+			t.Fatalf("%s: got [%s] %v, want [invalid] saying %q", c.name, got, err, c.says)
+		}
+	}
+
+	o.PageToken = first.NextPageToken
+	next, err := svc.ListChanges(ctx, o)
+	if err != nil {
+		t.Fatalf("continuing: %v", err)
+	}
+	if next.Baseline || len(next.Changed)+len(next.Deleted) != 1 || next.Skipped != 0 {
+		t.Fatalf("baseline=%v rows=%d skipped=%d, want one more change reported",
+			next.Baseline, len(next.Changed)+len(next.Deleted), next.Skipped)
+	}
+}
+
+// A baseline too long for one call continues as a baseline: with a sync
+// token its page token is refused, and alone it goes on.
+func TestABaselineContinuesAsABaseline(t *testing.T) {
+	svc, fake := seeded(t)
+	for i := range 30 {
+		fake.AddEvent("primary", caltest.Timed(fmt.Sprintf("ev-extra-%02d", i), "Extra",
+			"2026-03-16T09:00:00+01:00", "2026-03-16T09:15:00+01:00", "Europe/Copenhagen"))
+	}
+	fake.PageSize = 1
+	ctx := context.Background()
+	first, err := svc.ListChanges(ctx, service.ChangesOptions{Calendar: "primary"})
+	if err != nil || first.NextPageToken == "" || !first.Baseline {
+		t.Fatalf("got %v, next %q, baseline %v: want a baseline cut short", err, first.NextPageToken, first.Baseline)
+	}
+	_, err = svc.ListChanges(ctx, service.ChangesOptions{
+		Calendar: "primary", SyncToken: "caltest-sync-1", PageToken: first.NextPageToken})
+	if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(),
+		"continues a baseline, which has no sync_token. Pass it without sync_token") {
+		t.Fatalf("got [%s] %v, want [invalid] naming the baseline", got, err)
+	}
+	next, err := svc.ListChanges(ctx, service.ChangesOptions{Calendar: "primary", PageToken: first.NextPageToken})
+	if err != nil || !next.Baseline || next.SyncToken == "" {
+		t.Fatalf("got %v, baseline %v, sync token %q: want the baseline finished with its token",
+			err, next.Baseline, next.SyncToken)
+	}
+}
+
+// A page token list_changes did not issue is refused rather than handed
+// to Google.
+func TestAForeignPageTokenIsRefusedByListChanges(t *testing.T) {
+	svc, _ := seeded(t)
+	_, err := svc.ListChanges(context.Background(), service.ChangesOptions{Calendar: "primary", PageToken: "2"})
+	if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), "not one this server issued") {
+		t.Fatalf("got [%s] %v, want [invalid]", got, err)
 	}
 }

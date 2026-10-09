@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
@@ -321,5 +322,52 @@ func TestInstancesComeBackInDateOrder(t *testing.T) {
 		if cur.T.Before(prev.T) {
 			t.Fatalf("occurrence %d (%s) comes before %d (%s)", i, cur, i-1, prev)
 		}
+	}
+}
+
+// list_instances' page token carries its read as list_events' does: the
+// series, the window and show_canceled. A continuation that changes any
+// of them is refused by name, and one that changes none goes on.
+func TestAnInstancesPageTokenKeepsItsRead(t *testing.T) {
+	svc, _ := seeded(t)
+	ctx := context.Background()
+	base := service.InstanceOptions{Calendar: "primary", EventID: "ev-weekly", MaxEvents: 1,
+		From: "2026-03-16", To: "2026-04-30"}
+	first, err := svc.Instances(ctx, base)
+	if err != nil || first.NextPageToken == "" {
+		t.Fatalf("want a first page and a token, got %q, %v", first.NextPageToken, err)
+	}
+	for _, c := range []struct {
+		name   string
+		change func(*service.InstanceOptions)
+		says   string
+	}{
+		{"another series", func(o *service.InstanceOptions) { o.EventID = "ev-other" },
+			"issued for another series"},
+		{"another calendar", func(o *service.InstanceOptions) { o.Calendar = "team@group.calendar.example.test" },
+			"issued for another series"},
+		{"the whole series", func(o *service.InstanceOptions) { o.From, o.To = "", "" },
+			"issued for the window 2026-03-15T23:00:00Z to 2026-04-30T22:00:00Z, not the whole series"},
+		{"another window", func(o *service.InstanceOptions) { o.To = "2026-04-07" },
+			"not the window 2026-03-15T23:00:00Z to 2026-04-07T22:00:00Z"},
+		{"show_canceled", func(o *service.InstanceOptions) { o.ShowCanceled = true },
+			"issued with show_canceled false, not true"},
+	} {
+		o := base
+		c.change(&o)
+		o.PageToken = first.NextPageToken
+		_, err := svc.Instances(ctx, o)
+		if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: got [%s] %v, want [invalid] saying %q", c.name, got, err, c.says)
+		}
+	}
+	same := base
+	same.PageToken = first.NextPageToken
+	if _, err := svc.Instances(ctx, same); err != nil {
+		t.Fatalf("the same read was refused: %v", err)
+	}
+	if _, err := svc.Instances(ctx, service.InstanceOptions{Calendar: "primary", EventID: "ev-weekly",
+		PageToken: "2"}); classOf(t, err) != gapi.ClassInvalid {
+		t.Fatalf("a token this server did not issue: %v", err)
 	}
 }

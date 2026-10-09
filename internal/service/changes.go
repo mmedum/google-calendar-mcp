@@ -49,6 +49,12 @@ import (
 // reminders change. It is refused alongside a token, as Google refuses
 // `updatedMin` there, and it hands back no token, because nothing yet
 // shows that a token from such a read chains (§18 row 91).
+//
+// A page token from any of the three reads — a baseline, a read from a
+// sync token, a read since a moment — carries which it was, and a
+// continuation must ask the same. Without that, a read since a moment
+// continued with only its page token became a baseline, and its last
+// page handed back the sync token the moment withholds.
 
 // baselineRequests caps the pages a baseline will walk for its token.
 //
@@ -102,6 +108,11 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		}
 	}
 
+	resume, err := decodeChanges(o.PageToken, c.ID, o.SyncToken, since)
+	if err != nil {
+		return render.Changes{}, err
+	}
+
 	budget := o.MaxEvents
 	if budget <= 0 {
 		budget = s.Cfg.MaxEvents
@@ -120,7 +131,7 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		// and a sync that hid deletions would be a slower list.
 		ShowDeleted: true,
 		SyncToken:   o.SyncToken,
-		PageToken:   o.PageToken,
+		PageToken:   resume,
 		MaxResults:  budget,
 	}
 	if !since.IsZero() {
@@ -177,7 +188,7 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		if page.NextSyncToken != "" {
 			out.SyncToken = page.NextSyncToken
 		}
-		out.NextPageToken = page.NextPageToken
+		out.NextPageToken = encodeChanges(page.NextPageToken, c.ID, o.SyncToken, since)
 		done := page.NextPageToken == ""
 		switch {
 		case done:
@@ -206,6 +217,80 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		out.SyncToken = ""
 	}
 	return out, nil
+}
+
+// changesCursor is what list_changes' next_page_token carries: Google's
+// page token, and which read issued it. Cal and Sync are digests of the
+// calendar id and the sync token the read started from, never the
+// values; Since is the moment, as an instant. Sync and Since both empty
+// is a baseline.
+type changesCursor struct {
+	V     int    `json:"v"`
+	Page  string `json:"p"`
+	Cal   string `json:"c"`
+	Sync  string `json:"k,omitempty"`
+	Since string `json:"s,omitempty"`
+}
+
+const changesCursorVersion = 1
+
+// changesRead is the read a call asks for, as a cursor binds it.
+func changesRead(calendarID, syncToken string, since when.Zoned) changesCursor {
+	c := changesCursor{V: changesCursorVersion, Cal: digest(calendarID)}
+	if syncToken != "" {
+		c.Sync = digest(syncToken)
+	}
+	if !since.IsZero() {
+		c.Since = instantKey(since)
+	}
+	return c
+}
+
+func encodeChanges(page, calendarID, syncToken string, since when.Zoned) string {
+	if page == "" {
+		return ""
+	}
+	c := changesRead(calendarID, syncToken, since)
+	c.Page = page
+	return encodeToken(c)
+}
+
+// decodeChanges returns Google's page token, or "" for a first page. It
+// refuses a token issued for another read, naming what to pass instead.
+func decodeChanges(tok, calendarID, syncToken string, since when.Zoned) (string, error) {
+	if strings.TrimSpace(tok) == "" {
+		return "", nil
+	}
+	var was changesCursor
+	if !decodeToken(tok, &was) || was.V != changesCursorVersion || was.Page == "" {
+		return "", errForeignToken
+	}
+	now := changesRead(calendarID, syncToken, since)
+	again := "or omit the token to start again"
+	switch {
+	case was.Cal != now.Cal:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read of another calendar. Pass the calendar it was issued for, %s", again)
+	case was.Since != now.Since && was.Since == "":
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read without updated_since. Pass it without updated_since, %s", again)
+	case was.Since != now.Since && now.Since == "":
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read since %s, and this call has no updated_since. Pass "+
+				"updated_since %s with it, %s", was.Since, was.Since, again)
+	case was.Since != now.Since:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read since %s, not since %s. Pass updated_since %s with it, %s",
+			was.Since, now.Since, was.Since, again)
+	case was.Sync != now.Sync && was.Sync == "":
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a baseline, which has no sync_token. Pass it without sync_token, %s", again)
+	case was.Sync != now.Sync:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token continues a read from a sync_token, and this call does not pass the same one. "+
+				"Pass the sync_token it was issued with, %s", again)
+	}
+	return was.Page, nil
 }
 
 // changesError says what to do about a 410.

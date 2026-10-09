@@ -9,7 +9,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -407,7 +409,8 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		budget = s.Cfg.MaxEvents
 	}
 
-	resume, err := decodeCursor(o.PageToken, o.EventTypes, o.ICalUID)
+	query := queryOf(o, win)
+	resume, err := decodeCursor(o.PageToken, query)
 	if err != nil {
 		return render.Schedule{}, err
 	}
@@ -481,7 +484,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 			next[cals[i].ID] = r.token
 		}
 	}
-	sched.NextPageToken = encodeCursor(next, o.EventTypes, o.ICalUID)
+	sched.NextPageToken = encodeCursor(next, query)
 
 	sort.Slice(sched.Events, func(i, j int) bool {
 		return sortKey(sched.Events[i]) < sortKey(sched.Events[j])
@@ -526,13 +529,6 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 	return events, requests, token, err
 }
 
-// drain reads pages until the budget is reached or the pages run out.
-//
-// It is §4.5's completeness policy in one place: stop at the budget
-// rather than draining a year of events to throw them away, and hand
-// back the token so the caller can say how to continue. The two read
-// paths had a copy each and had already drifted on what "truncated"
-// means.
 // pageCursor is what `next_page_token` actually carries.
 //
 // One call can read several calendars, and a Google page token is scoped
@@ -548,61 +544,126 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 // opaque string, so the tool schema is unchanged and a caller still just
 // passes back what it was given.
 //
-// It also holds the type and UID filters the read was made with. Google
-// resumes a token only for the query that issued it, so a continuation
-// with another filter would skip or repeat rows while its result named
-// the new one.
+// It also holds the query the read was made with: every input that
+// decides which events Google returns. Google resumes a token only for
+// the query that issued it, so a continuation with another one would
+// skip or repeat rows while its result named the new one. Each is
+// refused by name.
 type pageCursor struct {
 	V     int               `json:"v"`
 	Cals  map[string]string `json:"c"`
-	Types []string          `json:"t,omitempty"`
-	UID   string            `json:"u,omitempty"`
+	Query listQuery         `json:"q"`
 }
 
-const pageCursorVersion = 1
+// listQuery is what a schedule read asked Google for, as a cursor binds
+// it. The search text is kept as a hash: a page token is handed to the
+// caller and may land in a transcript, and a search term is content.
+type listQuery struct {
+	Types    []string `json:"t,omitempty"`
+	UID      string   `json:"u,omitempty"`
+	Text     string   `json:"s,omitempty"`
+	From     string   `json:"f"`
+	To       string   `json:"e"`
+	Series   bool     `json:"x,omitempty"`
+	Canceled bool     `json:"d,omitempty"`
+}
 
-func encodeCursor(tokens map[string]string, types []string, uid string) string {
+// queryOf is the query o makes over win.
+func queryOf(o ListOptions, win when.Window) listQuery {
+	q := listQuery{
+		Types: o.EventTypes, UID: o.ICalUID, Series: !o.Expand, Canceled: o.ShowCanceled,
+		From: instantKey(win.Start), To: instantKey(win.End),
+	}
+	if o.Query != "" {
+		q.Text = digest(o.Query)
+	}
+	return q
+}
+
+// instantKey is a moment as a cursor binds it: the instant, whatever zone
+// it was read in.
+func instantKey(z when.Zoned) string { return z.T.UTC().Format(time.RFC3339) }
+
+// digest is a short SHA-256 of s, for binding a value a cursor must not
+// carry.
+func digest(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:8])
+}
+
+// pageCursorVersion is 2 from the cursor that binds the whole query. A
+// token from before is refused as one this server did not issue, and
+// the read starts again.
+const pageCursorVersion = 2
+
+func encodeCursor(tokens map[string]string, q listQuery) string {
 	if len(tokens) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(pageCursor{V: pageCursorVersion, Cals: tokens, Types: types, UID: uid})
+	return encodeToken(pageCursor{V: pageCursorVersion, Cals: tokens, Query: q})
+}
+
+// decodeCursor returns the per-calendar tokens, or nil for a first read.
+// It refuses a token issued for another query, naming what differs.
+func decodeCursor(tok string, q listQuery) (map[string]string, error) {
+	if strings.TrimSpace(tok) == "" {
+		return nil, nil
+	}
+	var c pageCursor
+	if !decodeToken(tok, &c) || c.V != pageCursorVersion || len(c.Cals) == 0 {
+		return nil, errForeignToken
+	}
+	was := c.Query
+	again := "or omit the token to start again"
+	switch {
+	case !sameTypes(was.Types, q.Types):
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for event_types [%s], not [%s]. Pass the same event_types, %s",
+			strings.Join(was.Types, ", "), strings.Join(q.Types, ", "), again)
+	case was.UID != q.UID:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for ical_uid %q, not %q. Pass the same ical_uid, %s", was.UID, q.UID, again)
+	case was.Text != q.Text:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for another search text. Pass the same query, %s", again)
+	case was.From != q.From || was.To != q.To:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for the window %s to %s, not %s to %s. Pass the same from, to and "+
+				"time_zone, %s", was.From, was.To, q.From, q.To, again)
+	case was.Series != q.Series:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued with no_expand %t, not %t. Pass the same no_expand, %s",
+			was.Series, q.Series, again)
+	case was.Canceled != q.Canceled:
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued with show_canceled %t, not %t. Pass the same show_canceled, %s",
+			was.Canceled, q.Canceled, again)
+	}
+	return c.Cals, nil
+}
+
+// errForeignToken refuses a page token this server did not issue, or
+// issued in another shape.
+var errForeignToken = gapi.Errf(gapi.ClassInvalid,
+	"page_token is not one this server issued. Pass back the next_page_token from a previous read with "+
+		"the same arguments, unchanged, or omit it to start again")
+
+// encodeToken is v as an opaque page token: JSON, base64url.
+func encodeToken(v any) string {
+	b, err := json.Marshal(v)
 	if err != nil {
-		// Unreachable for a map of strings, and a lost token is better
-		// than a bad one: an empty cursor reads as "nothing more", which
-		// Truncated still contradicts.
+		// Unreachable for this package's cursors, and a lost token is
+		// better than a bad one: an empty cursor reads as "nothing
+		// more", which the result's truncation still contradicts.
 		return ""
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// decodeCursor returns the per-calendar tokens, or nil for a first read.
-// It refuses a token issued under another type or UID filter.
-func decodeCursor(tok string, types []string, uid string) (map[string]string, error) {
-	if strings.TrimSpace(tok) == "" {
-		return nil, nil
-	}
-	bad := gapi.Errf(gapi.ClassInvalid,
-		"page_token is not one this server issued. Pass back the next_page_token from a previous "+
-			"read of the same calendars, unchanged, or omit it to start again")
+// decodeToken reads a page token encodeToken made into v.
+func decodeToken(tok string, v any) bool {
 	raw, err := base64.RawURLEncoding.DecodeString(tok)
-	if err != nil {
-		return nil, bad
-	}
-	var c pageCursor
-	if err := json.Unmarshal(raw, &c); err != nil || c.V != pageCursorVersion || len(c.Cals) == 0 {
-		return nil, bad
-	}
-	if !sameTypes(c.Types, types) {
-		return nil, gapi.Errf(gapi.ClassInvalid,
-			"that page_token was issued for event_types [%s], not [%s]. Pass the same event_types, or "+
-				"omit the token to start again", strings.Join(c.Types, ", "), strings.Join(types, ", "))
-	}
-	if c.UID != uid {
-		return nil, gapi.Errf(gapi.ClassInvalid,
-			"that page_token was issued for ical_uid %q, not %q. Pass the same ical_uid, or omit the "+
-				"token to start again", c.UID, uid)
-	}
-	return c.Cals, nil
+	return err == nil && json.Unmarshal(raw, v) == nil
 }
 
 // sameTypes reports whether two type filters keep the same events,
@@ -614,6 +675,14 @@ func sameTypes(a, b []string) bool {
 	return slices.Equal(a, b)
 }
 
+// drain reads pages until the budget is reached or the pages run out.
+//
+// It is §4.5's completeness policy in one place: stop at the budget
+// rather than draining a year of events to throw them away, and hand
+// back the token so the caller can say how to continue. The two read
+// paths had a copy each and had already drifted on what "truncated"
+// means.
+//
 // showCanceled is the caller's promise, passed in rather than read off
 // opts.ShowDeleted. The two are not the same knob: ShowDeleted is what
 // this server asked Google for, and the defect being fixed here is
@@ -984,8 +1053,10 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	}
 	opts := gapi.EventsListOptions{
 		TimeZone: zone.Name(), MaxResults: 250,
-		ShowDeleted: o.ShowCanceled, PageToken: o.PageToken,
+		ShowDeleted: o.ShowCanceled,
 	}
+	read := instancesCursor{V: instancesCursorVersion, Series: digest(c.ID + "\x00" + o.EventID),
+		Canceled: o.ShowCanceled}
 
 	hasFrom, hasTo := strings.TrimSpace(o.From) != "", strings.TrimSpace(o.To) != ""
 	switch {
@@ -1000,6 +1071,10 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 		}
 		out.Window = &win
 		opts.TimeMin, opts.TimeMax = win.Start.String(), win.End.String()
+		read.From, read.To = instantKey(win.Start), instantKey(win.End)
+	}
+	if opts.PageToken, err = read.resume(o.PageToken); err != nil {
+		return render.Instances{}, err
 	}
 
 	budget := o.MaxEvents
@@ -1015,7 +1090,7 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	if err != nil {
 		return render.Instances{}, instancesError(err, o.EventID)
 	}
-	out.Events, out.NextPageToken = events, token
+	out.Events, out.NextPageToken = events, read.next(token)
 	for _, e := range events {
 		if out.Title == "" {
 			out.Title = e.Title
@@ -1044,6 +1119,64 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	// either the budget cut the list, or a page is still waiting.
 	out.Truncated = len(events) > budget || out.NextPageToken != ""
 	return out, nil
+}
+
+// instancesCursor is what list_instances' next_page_token carries:
+// Google's page token, and the read that issued it. Series is a digest of
+// the calendar and series ids. From and To are the window's instants,
+// both empty for the whole series.
+type instancesCursor struct {
+	V        int    `json:"v"`
+	Page     string `json:"p"`
+	Series   string `json:"i"`
+	From     string `json:"f,omitempty"`
+	To       string `json:"e,omitempty"`
+	Canceled bool   `json:"d,omitempty"`
+}
+
+const instancesCursorVersion = 1
+
+// next is Google's page token as this read hands it back, or "".
+func (c instancesCursor) next(page string) string {
+	if page == "" {
+		return ""
+	}
+	c.Page = page
+	return encodeToken(c)
+}
+
+// resume returns Google's page token from tok, or "" for a first page.
+// It refuses a token issued for another read, naming what differs.
+func (c instancesCursor) resume(tok string) (string, error) {
+	if strings.TrimSpace(tok) == "" {
+		return "", nil
+	}
+	var was instancesCursor
+	if !decodeToken(tok, &was) || was.V != instancesCursorVersion || was.Page == "" {
+		return "", errForeignToken
+	}
+	again := "or omit the token to start again"
+	span := func(c instancesCursor) string {
+		if c.From == "" {
+			return "the whole series"
+		}
+		return "the window " + c.From + " to " + c.To
+	}
+	switch {
+	case was.Series != c.Series:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for another series. Pass the calendar and event_id it was issued "+
+				"for, %s", again)
+	case was.From != c.From || was.To != c.To:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for %s, not %s. Pass the same from, to and time_zone, %s",
+			span(was), span(c), again)
+	case was.Canceled != c.Canceled:
+		return "", gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued with show_canceled %t, not %t. Pass the same show_canceled, %s",
+			was.Canceled, c.Canceled, again)
+	}
+	return was.Page, nil
 }
 
 // instancesError says where the id should have come from.

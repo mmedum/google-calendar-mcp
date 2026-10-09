@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -432,6 +433,77 @@ func TestAPageTokenKeepsItsUIDFilter(t *testing.T) {
 	}
 	if _, err := read(token, "AAAAuid-weekly@example.test"); err != nil {
 		t.Fatalf("the same filter was refused: %v", err)
+	}
+}
+
+// A page token carries every input that decides which events Google
+// returns: the search text, the window, the time zone a date window is
+// read in, expand and show_canceled, as well as the type and UID filters.
+// A continuation that changes any of them is refused by name, and one
+// that changes none goes on.
+func TestAPageTokenKeepsItsWholeQuery(t *testing.T) {
+	svc, _ := seeded(t)
+	ctx := context.Background()
+	base := service.ListOptions{From: "2026-03-16", To: "2026-03-31", Expand: true, Query: "review", MaxEvents: 1}
+	first, err := svc.ListEvents(ctx, base)
+	if err != nil || first.NextPageToken == "" {
+		t.Fatalf("want a first page and a token, got %q, %v", first.NextPageToken, err)
+	}
+	for _, c := range []struct {
+		name   string
+		change func(*service.ListOptions)
+		says   string
+	}{
+		{"the search text", func(o *service.ListOptions) { o.Query = "sync" },
+			"issued for another search text. Pass the same query"},
+		{"no search text", func(o *service.ListOptions) { o.Query = "" },
+			"issued for another search text"},
+		{"from", func(o *service.ListOptions) { o.From = "2026-03-17" },
+			"issued for the window 2026-03-15T23:00:00Z to 2026-03-31T22:00:00Z, not 2026-03-16T23:00:00Z to " +
+				"2026-03-31T22:00:00Z"},
+		{"to", func(o *service.ListOptions) { o.To = "2026-04-30" },
+			"not 2026-03-15T23:00:00Z to 2026-04-30T22:00:00Z"},
+		{"the zone a date is read in", func(o *service.ListOptions) { o.TimeZone = "UTC" },
+			"not 2026-03-16T00:00:00Z to 2026-04-01T00:00:00Z. Pass the same from, to and time_zone"},
+		{"no_expand", func(o *service.ListOptions) { o.Expand = false },
+			"issued with no_expand false, not true"},
+		{"show_canceled", func(o *service.ListOptions) { o.ShowCanceled = true },
+			"issued with show_canceled false, not true"},
+		{"event_types", func(o *service.ListOptions) { o.EventTypes = []string{"default"} },
+			"issued for event_types [], not [default]"},
+		{"ical_uid", func(o *service.ListOptions) { o.ICalUID = "AAAAuid-weekly@example.test" },
+			`issued for ical_uid "", not "AAAAuid-weekly@example.test"`},
+	} {
+		o := base
+		c.change(&o)
+		o.PageToken = first.NextPageToken
+		_, err := svc.ListEvents(ctx, o)
+		if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%s: got [%s] %v, want [invalid] saying %q", c.name, got, err, c.says)
+		}
+	}
+	same := base
+	same.PageToken = first.NextPageToken
+	if _, err := svc.ListEvents(ctx, same); err != nil {
+		t.Fatalf("the same query was refused: %v", err)
+	}
+}
+
+// The search text is bound by a digest: a page token goes back to the
+// caller and may be pasted anywhere, and a search term is content.
+func TestAPageTokenDoesNotCarryTheSearchText(t *testing.T) {
+	svc, _ := seeded(t)
+	sched, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-03-16", To: "2026-03-31", Expand: true, Query: "review", MaxEvents: 1})
+	if err != nil || sched.NextPageToken == "" {
+		t.Fatalf("want a token, got %q, %v", sched.NextPageToken, err)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(sched.NextPageToken)
+	if err != nil {
+		t.Fatalf("the token is not base64url: %v", err)
+	}
+	if strings.Contains(string(raw), "review") {
+		t.Fatalf("the page token carries the search text: %s", raw)
 	}
 }
 
