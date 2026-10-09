@@ -123,6 +123,20 @@ func TestEventLineTags(t *testing.T) {
 		{"invented end", func(e *model.Event) { e.EndInvented = true }, "no end time set"},
 		{"birthday is not a meeting", func(e *model.Event) { e.Type = gcal.EventTypeBirthday }, "birthday"},
 		{"out of office", func(e *model.Event) { e.Type = gcal.EventTypeOutOfOffice }, "out of office"},
+		{"declining every overlapping invitation", func(e *model.Event) {
+			e.Type, e.StatusDetails = gcal.EventTypeOutOfOffice, &model.StatusDetails{AutoDecline: "all"}
+		}, "[out of office; declines every overlapping invitation]"},
+		{"focus time declining new ones, chat muted", func(e *model.Event) {
+			e.Type = gcal.EventTypeFocusTime
+			e.StatusDetails = &model.StatusDetails{AutoDecline: "new", ChatStatus: "do_not_disturb"}
+		}, "[focus time; declines new invitations; chat: do not disturb]"},
+		{"working from an office by name", func(e *model.Event) {
+			e.Type = gcal.EventTypeWorkingLocation
+			e.StatusDetails = &model.StatusDetails{WorkingLocation: "office", WorkingLocationLabel: "Annex"}
+		}, "[working location; working from Annex]"},
+		{"working from home", func(e *model.Event) {
+			e.Type, e.StatusDetails = gcal.EventTypeWorkingLocation, &model.StatusDetails{WorkingLocation: "home"}
+		}, "[working location; working from home]"},
 		{"from gmail cannot be edited", func(e *model.Event) { e.Type = gcal.EventTypeFromGmail }, "cannot be edited"},
 		{"location", func(e *model.Event) { e.Location = "Room 4" }, "at Room 4"},
 		{"attachments are counted", func(e *model.Event) {

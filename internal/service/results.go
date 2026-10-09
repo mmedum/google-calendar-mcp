@@ -246,7 +246,18 @@ type EventOut struct {
 	Visibility string `json:"visibility,omitempty"`
 	// Reminders are this account's own, absent when Google sent none.
 	Reminders *RemindersOut `json:"reminders,omitempty"`
-	ETag      string        `json:"etag,omitempty"`
+	// A status event's settings, in the words create_event takes:
+	// auto_decline is none, new or all; chat_status available or
+	// do_not_disturb; working_location home, office or custom, with the
+	// office's or the place's name as its label. A value Google adds
+	// later is shown as Google spells it. The decline message is the
+	// account's own text.
+	AutoDecline          string `json:"auto_decline,omitempty"`
+	DeclineMessage       string `json:"decline_message,omitempty"`
+	ChatStatus           string `json:"chat_status,omitempty"`
+	WorkingLocation      string `json:"working_location,omitempty"`
+	WorkingLocationLabel string `json:"working_location_label,omitempty"`
+	ETag                 string `json:"etag,omitempty"`
 }
 
 // RemindersOut is when this account is reminded of an event, in minutes
@@ -323,6 +334,10 @@ func NewEventOut(e model.Event) EventOut {
 	}
 	if r := e.Reminders; r != nil {
 		o.Reminders = &RemindersOut{Default: r.Default, Popup: r.Popup, Email: r.Email}
+	}
+	if d := e.StatusDetails; d != nil {
+		o.AutoDecline, o.DeclineMessage, o.ChatStatus = d.AutoDecline, d.DeclineMessage, d.ChatStatus
+		o.WorkingLocation, o.WorkingLocationLabel = d.WorkingLocation, d.WorkingLocationLabel
 	}
 	// The same four states the text renders, so a client reading only
 	// this block reaches the same conclusion. "other" is a state rather
@@ -425,6 +440,9 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 	}
 	if e.Reminders != nil {
 		fmt.Fprintf(&b, "your reminders: %s\n", render.Reminders(*e.Reminders))
+	}
+	if d := e.StatusDetails; d != nil && d.DeclineMessage != "" {
+		fmt.Fprintf(&b, "decline message: %s\n", d.DeclineMessage)
 	}
 	if e.Description != "" {
 		fmt.Fprintf(&b, "\n%s\n", e.Description)

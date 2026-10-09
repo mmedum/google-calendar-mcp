@@ -276,9 +276,7 @@ func TestQMatchesTheFieldsGoogleDocuments(t *testing.T) {
 	e.Location = "Room seven"
 	e.Organizer = &gcal.EventPerson{Email: "host@example.test", DisplayName: "Sample Host"}
 	e.Attendees = []gcal.EventAttendee{{Email: "guest@example.test", DisplayName: "Sample Guest"}}
-	e.Unmodeled = map[string]json.RawMessage{
-		"workingLocationProperties": json.RawMessage(`{"officeLocation":{"buildingId":"north","label":"Annex"}}`),
-	}
+	e.WorkingLocationProperties = json.RawMessage(`{"officeLocation":{"buildingId":"north","label":"Annex"}}`)
 	s.AddEvent("primary", e)
 	base := s.Start()
 	defer s.Close()
@@ -360,5 +358,73 @@ func TestRemindersAndVisibilityFollowGooglesRules(t *testing.T) {
 	}
 	if v := s.Events["primary"]["ev-weekly_20260324T130000Z"].Visibility; v != gcal.VisibilityPrivate {
 		t.Fatalf("a less restrictive occurrence was applied: %q", v)
+	}
+}
+
+// The fake refuses a status event Google's guide says Google refuses: on
+// a secondary calendar, without its details, an all-day out-of-office or
+// focus time, a free one, a working location that is not public and
+// free, and an all-day one longer than a day. A patch that would leave an
+// event like that is refused too: an update "must maintain the required
+// fields".
+func TestStatusEventsFollowGooglesGuide(t *testing.T) {
+	s := caltest.Seed()
+	s.AddCalendar("team@group.calendar.example.test", "Sample Team", "Europe/Copenhagen", gcal.RoleOwner, false)
+	base := s.Start()
+	defer s.Close()
+
+	send := func(method, path, body string) int {
+		t.Helper()
+		req, err := http.NewRequest(method, base+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("If-Match", "*")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	const timed = `"start":{"dateTime":"2026-04-01T09:00:00+02:00"},"end":{"dateTime":"2026-04-01T17:00:00+02:00"}`
+	const away = `"eventType":"outOfOffice","outOfOfficeProperties":{"autoDeclineMode":"declineNone"}`
+	const home = `"eventType":"workingLocation","workingLocationProperties":{"type":"homeOffice","homeOffice":{}}`
+	for name, tc := range map[string]struct {
+		calendar, body string
+		want           int
+	}{
+		"out of office": {"primary", `{` + away + `,` + timed + `}`, http.StatusOK},
+		"on a secondary calendar": {"team@group.calendar.example.test", `{` + away + `,` + timed + `}`,
+			http.StatusBadRequest},
+		"without its details": {"primary", `{"eventType":"focusTime",` + timed + `}`, http.StatusBadRequest},
+		"all day": {"primary", `{` + away + `,"start":{"date":"2026-04-01"},"end":{"date":"2026-04-02"}}`,
+			http.StatusBadRequest},
+		"free":                   {"primary", `{` + away + `,"transparency":"transparent",` + timed + `}`, http.StatusBadRequest},
+		"a working location":     {"primary", `{` + home + `,"visibility":"public","transparency":"transparent",` + timed + `}`, http.StatusOK},
+		"a busy working place":   {"primary", `{` + home + `,"visibility":"public",` + timed + `}`, http.StatusBadRequest},
+		"a hidden working place": {"primary", `{` + home + `,"transparency":"transparent",` + timed + `}`, http.StatusBadRequest},
+		"a working place for two days": {"primary", `{` + home + `,"visibility":"public","transparency":"transparent",` +
+			`"start":{"date":"2026-04-01"},"end":{"date":"2026-04-03"}}`, http.StatusBadRequest},
+	} {
+		if got := send(http.MethodPost, "/calendars/"+tc.calendar+"/events", tc.body); got != tc.want {
+			t.Errorf("%s: answered %d, want %d", name, got, tc.want)
+		}
+	}
+
+	var made string
+	for id, e := range s.Events["primary"] {
+		if e.EventType == gcal.EventTypeOutOfOffice {
+			made = id
+		}
+	}
+	if made == "" {
+		t.Fatal("the out-of-office event was not stored")
+	}
+	if got := send(http.MethodPatch, "/calendars/primary/events/"+made, `{"transparency":"transparent"}`); got != http.StatusBadRequest {
+		t.Errorf("a patch making it free answered %d, want 400", got)
+	}
+	if got := send(http.MethodPatch, "/calendars/primary/events/"+made, `{"summary":"Away, renamed"}`); got != http.StatusOK {
+		t.Errorf("a patch keeping the required fields answered %d, want 200", got)
 	}
 }

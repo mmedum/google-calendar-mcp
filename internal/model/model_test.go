@@ -411,3 +411,52 @@ func TestFreeGapsAcrossADaylightSavingTransition(t *testing.T) {
 		t.Fatalf("the day of the spring-forward transition was reported as %v, want 23h", got)
 	}
 }
+
+// A status event's details read back in the words create_event takes. A
+// working location missing its type is read from the block it carries,
+// a value Google adds later passes through as Google spells it, and a
+// block that cannot be read is left out rather than failing the event.
+func TestStatusDetailsReadInTheInputSpelling(t *testing.T) {
+	for _, tc := range []struct {
+		name, eventType, raw string
+		want                 *model.StatusDetails
+	}{
+		{"out of office", gcal.EventTypeOutOfOffice,
+			`{"autoDeclineMode":"declineAllConflictingInvitations","declineMessage":"Back Monday"}`,
+			&model.StatusDetails{AutoDecline: "all", DeclineMessage: "Back Monday"}},
+		{"focus time", gcal.EventTypeFocusTime,
+			`{"autoDeclineMode":"declineOnlyNewConflictingInvitations","chatStatus":"doNotDisturb"}`,
+			&model.StatusDetails{AutoDecline: "new", ChatStatus: "do_not_disturb"}},
+		{"office", gcal.EventTypeWorkingLocation,
+			`{"type":"officeLocation","officeLocation":{"buildingId":"north","label":"Annex"}}`,
+			&model.StatusDetails{WorkingLocation: "office", WorkingLocationLabel: "Annex"}},
+		{"custom without its type", gcal.EventTypeWorkingLocation, `{"customLocation":{"label":"Library"}}`,
+			&model.StatusDetails{WorkingLocation: "custom", WorkingLocationLabel: "Library"}},
+		{"home", gcal.EventTypeWorkingLocation, `{"type":"homeOffice","homeOffice":{}}`,
+			&model.StatusDetails{WorkingLocation: "home"}},
+		{"a mode Google adds later", gcal.EventTypeOutOfOffice, `{"autoDeclineMode":"declineSomeNewWay"}`,
+			&model.StatusDetails{AutoDecline: "declineSomeNewWay"}},
+		{"an unreadable block", gcal.EventTypeOutOfOffice, `{"autoDeclineMode":7}`, nil},
+		{"no block", gcal.EventTypeFocusTime, ``, nil},
+	} {
+		e := gcal.Event{ID: "abcde12345", EventType: tc.eventType}
+		switch tc.eventType {
+		case gcal.EventTypeOutOfOffice:
+			e.OutOfOfficeProperties = []byte(tc.raw)
+		case gcal.EventTypeFocusTime:
+			e.FocusTimeProperties = []byte(tc.raw)
+		default:
+			e.WorkingLocationProperties = []byte(tc.raw)
+		}
+		got, err := model.FromEvent("primary", e, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		switch {
+		case tc.want == nil && got.StatusDetails != nil:
+			t.Errorf("%s: got %+v, want none", tc.name, *got.StatusDetails)
+		case tc.want != nil && (got.StatusDetails == nil || *got.StatusDetails != *tc.want):
+			t.Errorf("%s: got %+v, want %+v", tc.name, got.StatusDetails, *tc.want)
+		}
+	}
+}

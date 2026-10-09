@@ -8,6 +8,7 @@
 package model
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -188,6 +189,127 @@ type Event struct {
 	OrganizerSelf      bool
 	// Attachments are the files on the event. Shown, never written.
 	Attachments []Attachment
+	// StatusDetails are a status event's settings: out of office, focus
+	// time or a working location. Nil on any other event, and on one
+	// whose details Google did not send or this server cannot read.
+	StatusDetails *StatusDetails
+}
+
+// StatusDetails are a status event's settings (§7.4), in the words
+// create_event takes them in. A field that does not belong to the
+// event's type is empty.
+type StatusDetails struct {
+	// AutoDecline is none, new or all: which invitations that overlap
+	// the event Google declines.
+	AutoDecline string
+	// DeclineMessage goes to each organizer whose invitation is
+	// declined. It is the account's own text: shown, never logged (§9).
+	DeclineMessage string
+	// ChatStatus is available or do_not_disturb, on focus time only.
+	ChatStatus string
+	// WorkingLocation is home, office or custom, and
+	// WorkingLocationLabel names the office or the place.
+	WorkingLocation      string
+	WorkingLocationLabel string
+}
+
+// Words is a closed set of values with two spellings each: the one this
+// server's inputs and results use, and Google's.
+type Words [][2]string
+
+// The three vocabularies of a status event.
+var (
+	AutoDeclineWords = Words{
+		{"none", gcal.AutoDeclineNone}, {"new", gcal.AutoDeclineNew}, {"all", gcal.AutoDeclineAll},
+	}
+	ChatStatusWords      = Words{{"available", gcal.ChatAvailable}, {"do_not_disturb", gcal.ChatDoNotDisturb}}
+	WorkingLocationWords = Words{
+		{"home", gcal.WorkingHome}, {"office", gcal.WorkingOffice}, {"custom", gcal.WorkingCustom},
+	}
+)
+
+// Wire is Google's spelling of a word, and whether the word is one.
+func (w Words) Wire(word string) (string, bool) {
+	for _, p := range w {
+		if p[0] == word {
+			return p[1], true
+		}
+	}
+	return "", false
+}
+
+// Word is this server's spelling of Google's value. A value Google adds
+// later comes back as Google spells it, so a result never hides it.
+func (w Words) Word(wire string) string {
+	for _, p := range w {
+		if p[1] == wire {
+			return p[0]
+		}
+	}
+	return wire
+}
+
+// List is the words, for a refusal: "none, new or all".
+func (w Words) List() string {
+	words := make([]string, 0, len(w))
+	for _, p := range w {
+		words = append(words, p[0])
+	}
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
+}
+
+// statusDetailsOf reads a status event's details block. A block this
+// server cannot read is left out rather than failing the read: the
+// caller asked about the event, and the block is the least of it.
+func statusDetailsOf(e gcal.Event) *StatusDetails {
+	raw := e.StatusDetails()
+	if len(raw) == 0 {
+		return nil
+	}
+	var d StatusDetails
+	switch e.EventType {
+	case gcal.EventTypeOutOfOffice:
+		var p gcal.EventOutOfOfficeProperties
+		if json.Unmarshal(raw, &p) != nil {
+			return nil
+		}
+		d.AutoDecline, d.DeclineMessage = AutoDeclineWords.Word(p.AutoDeclineMode), p.DeclineMessage
+	case gcal.EventTypeFocusTime:
+		var p gcal.EventFocusTimeProperties
+		if json.Unmarshal(raw, &p) != nil {
+			return nil
+		}
+		d.AutoDecline, d.DeclineMessage = AutoDeclineWords.Word(p.AutoDeclineMode), p.DeclineMessage
+		d.ChatStatus = ChatStatusWords.Word(p.ChatStatus)
+	case gcal.EventTypeWorkingLocation:
+		var p gcal.EventWorkingLocationProperties
+		if json.Unmarshal(raw, &p) != nil {
+			return nil
+		}
+		// "Any details are specified in a sub-field of the specified
+		// name", so a block without its type still says which it is.
+		kind := p.Type
+		switch {
+		case kind != "":
+		case p.OfficeLocation != nil:
+			kind = gcal.WorkingOffice
+		case p.CustomLocation != nil:
+			kind = gcal.WorkingCustom
+		case len(p.HomeOffice) > 0:
+			kind = gcal.WorkingHome
+		}
+		d.WorkingLocation = WorkingLocationWords.Word(kind)
+		switch {
+		case kind == gcal.WorkingOffice && p.OfficeLocation != nil:
+			d.WorkingLocationLabel = p.OfficeLocation.Label
+		case kind == gcal.WorkingCustom && p.CustomLocation != nil:
+			d.WorkingLocationLabel = p.CustomLocation.Label
+		}
+	}
+	return &d
 }
 
 // Attachment is one file on an event. The file belongs to the Drive
@@ -348,6 +470,7 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		GuestsCanModify:         e.GuestsCanModify,
 		GuestsCanInviteOthers:   e.GuestsCanInviteOthers == nil || *e.GuestsCanInviteOthers,
 		GuestsCanSeeOtherGuests: e.GuestsCanSeeOtherGuests == nil || *e.GuestsCanSeeOtherGuests,
+		StatusDetails:           statusDetailsOf(e),
 	}
 	if e.Reminders != nil {
 		out.Reminders = remindersFrom(e.Reminders.UseDefault, e.Reminders.Overrides)

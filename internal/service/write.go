@@ -322,8 +322,30 @@ type CreateOptions struct {
 	GuestsCanSeeOtherGuests *bool
 	// Conference asks for a Google Meet link on the new event (§17.3).
 	Conference bool
-	Notify     string
-	DryRun     bool
+	// EventType makes a status event: outOfOffice, focusTime or
+	// workingLocation, with the settings below (§7.4).
+	EventType            string
+	AutoDecline          string
+	DeclineMessage       string
+	ChatStatus           string
+	WorkingLocation      string
+	WorkingLocationLabel string
+	Notify               string
+	DryRun               bool
+}
+
+// status is the status event the options ask for, nil when they name
+// none of its inputs.
+func (o CreateOptions) status(onPrimary bool) *plan.Status {
+	s := plan.Status{
+		Type: o.EventType, AutoDecline: o.AutoDecline, DeclineMessage: o.DeclineMessage,
+		ChatStatus: o.ChatStatus, WorkingLocation: o.WorkingLocation, Label: o.WorkingLocationLabel,
+		OnPrimary: onPrimary,
+	}
+	if s == (plan.Status{OnPrimary: onPrimary}) {
+		return nil
+	}
+	return &s
 }
 
 // CreateEvent inserts an event with a client-generated id (§2.11).
@@ -384,17 +406,19 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	if err := draft.BareAddresses(); err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-
-	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organizer, draft.Invites()))
-	if err != nil {
-		return render.WriteReport{}, classifyPlan(err)
-	}
+	draft.Status = o.status(env.cal.Primary)
 
 	id, err := newEventID()
 	if err != nil {
 		return render.WriteReport{}, err
 	}
+	// Built before notify is decided, so a status event given guests is
+	// refused for that rather than asked who to email.
 	body, err := plan.Insert(id, draft)
+	if err != nil {
+		return render.WriteReport{}, classifyPlan(err)
+	}
+	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organizer, draft.Invites()))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -410,18 +434,32 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	if o.Conference && o.DryRun {
 		report.Notes = append(report.Notes, dryRunConferenceNote)
 	}
+	// The event as it would be made, without the create request: read
+	// back, that is conference data with no link in it, a state Google
+	// never answered with.
+	projected := body
+	projected.ConferenceData = nil
+	shown, err := model.FromEvent(env.cal.ID, projected, &env.zone)
+	if err != nil {
+		return render.WriteReport{}, err
+	}
+	if note := autoDeclineNote(shown.StatusDetails); note != "" {
+		report.Notes = append(report.Notes, note)
+	}
 
 	if o.DryRun {
-		// Without the create request: read back, it is conference data
-		// with no link in it, a state Google never answered with.
-		projected := body
-		projected.ConferenceData = nil
-		after, cerr := model.FromEvent(env.cal.ID, projected, &env.zone)
-		if cerr != nil {
-			return render.WriteReport{}, cerr
-		}
-		report.After, report.Requests = &after, gapi.Requests(ctx)
+		report.After, report.Requests = &shown, gapi.Requests(ctx)
 		return report, nil
+	}
+	// Declining every overlapping meeting reaches the organizer of each,
+	// the accepted ones too, and cannot be taken back, so the person is
+	// asked (§9a).
+	if d := shown.StatusDetails; d != nil && d.AutoDecline == autoDeclineAll {
+		if err := ask(ctx, render.AskDecline(render.Decline{
+			CalendarID: env.cal.ID, Calendar: env.cal.Title, Event: shown, Zone: env.zone,
+		})); err != nil {
+			return render.WriteReport{}, err
+		}
 	}
 
 	created, err := s.API.InsertEvent(ctx, env.cal.ID, &body, decision.SendUpdatesFor())
@@ -437,6 +475,28 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	}
 	report.After, report.Requests = &after, gapi.Requests(ctx)
 	return report, nil
+}
+
+// autoDeclineAll is the auto_decline that asks the person.
+const autoDeclineAll = "all"
+
+// autoDeclineNote says what a status event declines and who sees it, or
+// "" when it declines nothing. Tense-neutral, because a dry run prints it
+// too.
+func autoDeclineNote(d *model.StatusDetails) string {
+	if d == nil {
+		return ""
+	}
+	switch d.AutoDecline {
+	case autoDeclineAll:
+		return "Google declines every meeting this overlaps, including the ones you already accepted, and " +
+			"each organizer sees the decline."
+	case "new":
+		return "Google declines each invitation for this time that arrives while it stands, and the " +
+			"organizer sees the decline. Meetings already on the calendar are kept."
+	default:
+		return ""
+	}
 }
 
 // dryRunConferenceNote is what a dry run says about a Meet link it would

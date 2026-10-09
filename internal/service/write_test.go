@@ -2176,3 +2176,128 @@ func TestAddConferenceDryRun(t *testing.T) {
 		t.Error("a dry run wrote something")
 	}
 }
+
+// ------------------------------------------------------- status events
+
+// awayOptions is an out-of-office event on the primary calendar.
+func awayOptions(autoDecline string) service.CreateOptions {
+	return service.CreateOptions{
+		Calendar: "primary", Title: "Away", EventType: "outOfOffice", AutoDecline: autoDecline,
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T17:00:00+02:00",
+	}
+}
+
+// A status event goes to Google with its details, and every read carries
+// them back in the words create_event took them in.
+func TestAStatusEventIsCreatedAndReadBack(t *testing.T) {
+	svc, fake := writeSeed(t)
+	o := awayOptions("new")
+	o.DeclineMessage = "Back on Thursday"
+	out, err := svc.CreateEvent(context.Background(), o)
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	stored := fake.Events["me@example.test"][out.After.ID]
+	if stored.EventType != gcal.EventTypeOutOfOffice || stored.Transparency != gcal.TransparencyOpaque ||
+		string(stored.OutOfOfficeProperties) !=
+			`{"autoDeclineMode":"declineOnlyNewConflictingInvitations","declineMessage":"Back on Thursday"}` {
+		t.Fatalf("Google was sent type %q, transparency %q, details %s",
+			stored.EventType, stored.Transparency, stored.OutOfOfficeProperties)
+	}
+	if !strings.Contains(out.Text(), "Google declines each invitation for this time that arrives while it stands") {
+		t.Errorf("the result does not say what it declines:\n%s", out.Text())
+	}
+	got, zone, err := svc.GetEvent(context.Background(), "primary", out.After.ID, "")
+	if err != nil {
+		t.Fatalf("GetEvent: %v", err)
+	}
+	res := service.NewEventResult(got, zone)
+	if ev := res.Event; ev.EventType != "outOfOffice" || ev.AutoDecline != "new" ||
+		ev.DeclineMessage != "Back on Thursday" || ev.ChatStatus != "" || ev.WorkingLocation != "" {
+		t.Fatalf("read back %+v", ev)
+	}
+	for _, want := range []string{"[out of office; declines new invitations]", "decline message: Back on Thursday"} {
+		if !strings.Contains(res.Render(), want) {
+			t.Errorf("the card does not say %q:\n%s", want, res.Render())
+		}
+	}
+}
+
+// A working location reads back with its place and label, public and
+// free, as Google requires.
+func TestAWorkingLocationReadsBackWithItsPlace(t *testing.T) {
+	svc, _ := writeSeed(t)
+	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
+		Calendar: "me@example.test", Title: "Office day", EventType: "workingLocation",
+		WorkingLocation: "office", WorkingLocationLabel: "Annex", Start: "2026-04-01", End: "2026-04-01",
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	ev := service.NewWriteResult(out).Event
+	if ev.WorkingLocation != "office" || ev.WorkingLocationLabel != "Annex" || !ev.Transparent ||
+		ev.Visibility != "public" || ev.StartDate != "2026-04-01" {
+		t.Fatalf("got %+v", ev)
+	}
+}
+
+// Only the primary calendar holds a status event, so another is refused
+// before anything is written.
+func TestAStatusEventOnAnotherCalendarIsRefused(t *testing.T) {
+	svc, fake := writeSeed(t)
+	o := awayOptions("none")
+	o.Calendar = "Sample Team"
+	_, err := svc.CreateEvent(context.Background(), o)
+	if got := classOf(t, err); got != gapi.ClassUnsupported || !strings.Contains(err.Error(), "primary calendar") {
+		t.Fatalf("got [%s] %v, want [unsupported] naming the primary calendar", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("the refusal must come before any write")
+	}
+}
+
+// A status event with guests is refused for the guests, not asked who to
+// email: the plan is built before notify is decided.
+func TestAStatusEventWithGuestsIsRefusedForThem(t *testing.T) {
+	svc, fake := writeSeed(t)
+	o := awayOptions("none")
+	o.Guests = []string{"partner@elsewhere.test"}
+	_, err := svc.CreateEvent(context.Background(), o)
+	if got := classOf(t, err); got != gapi.ClassBlocked || !strings.Contains(err.Error(), "guests") {
+		t.Fatalf("got [%s] %v, want [blocked] about guests", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Error("the refusal must come before any write")
+	}
+}
+
+// Declining every overlapping meeting is put to the person: without a
+// way to ask, nothing is written, and once confirmed it is one insert.
+// A dry run shows it and asks nothing.
+func TestDecliningEveryMeetingIsPutToThePerson(t *testing.T) {
+	svc, fake := writeSeed(t)
+	_, err := svc.CreateEvent(context.Background(), awayOptions("all"))
+	if got := classOf(t, err); got != gapi.ClassBlocked {
+		t.Fatalf("got [%s] %v, want [blocked] with no way to ask", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Fatal("a decline nobody confirmed was written")
+	}
+
+	dry := awayOptions("all")
+	dry.DryRun = true
+	out, err := svc.CreateEvent(context.Background(), dry)
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if !strings.Contains(out.Text(), "including the ones you already accepted") || len(fake.Wrote()) != 0 {
+		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
+	}
+
+	if _, err := svc.CreateEvent(accepted(), awayOptions("all")); err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+	if w := fake.Wrote(); len(w) != 1 || w[0].Method != "insert" {
+		t.Fatalf("got writes %+v, want one insert", w)
+	}
+}

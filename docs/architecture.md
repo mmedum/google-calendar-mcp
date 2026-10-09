@@ -3,7 +3,7 @@
 **Status: v3.0.1 (2026-10-01), released and verified from outside:** checksums,
 the cosign signature and the provenance attestation, each also against a tampered
 copy, the version in five places, the registry entry, and the Go proxy resolving
-`/v3`. Phase 7 asks the person through the client before the four writes of §9a.
+`/v3`. Phase 7 asks the person through the client before the writes of §9a.
 Still unproven: the `cancel_event` question against a real guest, which is tested
 offline only.
  Phases 0 to 4 —
@@ -526,10 +526,10 @@ Every event write takes a required `scope`:
   performs it, and its result says in plain words that **exceptions
   after the target instance were reset**, because Google's guide says
   they are and no caller expects it. The new series is the original
-  copied whole: its attachments, and the fields this server does not
-  model, such as a label, other applications' extended properties and a
-  status event's details. It leaves behind the conference, which the
-  result says, and what Google sets itself (§18 row 88).
+  copied whole: its attachments, a status event's details, and the
+  fields this server does not model, such as a label and other
+  applications' extended properties. It leaves behind the conference,
+  which the result says, and what Google sets itself (§18 row 88).
 
 There is no default. A write against an event that has a
 `recurringEventId` or a `recurrence` field and no `scope` is refused with
@@ -1026,6 +1026,43 @@ other change to the event (§18 row 97).
 takes `add_conference`, refused on an event that has a conference and
 with `this_and_following`; §17.3 has the rules and the request id.
 
+**Status events are made by `create_event`, not a tool of their own.**
+`event_type` is `outOfOffice`, `focusTime` or `workingLocation`, spelled
+as reads report it. Google's status-events guide sets the rules, and the
+server holds each before a request (§18 row 99):
+
+- Only the primary calendar holds one: "Secondary calendars can't have
+  status events." Passing `primary` or the account's own address, or
+  leaving `calendar` out, reaches it; any other calendar is
+  `[unsupported]`.
+- Out of office and focus time are timed, never all day, and opaque.
+  `auto_decline` is required for them, with no default, by §4.3's
+  reasoning: a decline reaches another person. `none` declines nothing,
+  `new` the invitations that arrive while the event stands, and `all` the
+  meetings already accepted too. `all` asks the person (§9a).
+  `decline_message` goes with a decline and is refused with `none`. Focus
+  time takes `chat_status`, `available` or `do_not_disturb`.
+- A working location is timed or one whole day, public and transparent.
+  `working_location` is `home`, `office` or `custom`, and
+  `working_location_label` names the office or the place. Home has no
+  label. The building, floor and desk ids are not set, because they name
+  the organization's own resources.
+- The server sets the transparency and visibility itself. `free_not_busy`
+  on out of office or focus time, and a visibility other than `public`
+  on a working location, are refused rather than overridden.
+- Guests, optional guests, rooms and a Meet link are refused with
+  `[blocked]`. Google documents nothing about them on a status event, so
+  nothing is sent until a live probe shows what it does.
+
+The three details blocks stay raw JSON on the event, as `conferenceData`
+does, so a read and a split copy carry a detail Google adds later. Every
+read shows `event_type` and the details in the input words: `auto_decline`,
+`decline_message`, `chat_status`, `working_location` and
+`working_location_label`. A value Google adds later is shown as Google
+spells it. Changing a status event's details is not offered: Google's
+guide says an update "must maintain the required fields", and nothing
+asked for it yet.
+
 `respond_to_event` sets the caller's own `responseStatus` and comment. It
 is separate from `update_event` because RSVPing is not editing, the
 permissions differ, and a model that conflates them will try to RSVP by
@@ -1122,7 +1159,7 @@ only the read scopes (§10).
 | `search_events` | `events.list` (`q`) | fanned out; `q` has no field syntax (§2) |
 | `check_availability` | `freebusy.query` | batched at 50; free gaps (§7.3); working-hours mask (§17.2) |
 | `get_settings` | `settings.list`, `colors.get` | the user's zone and week start |
-| `create_event` | `events.insert` | client-side id (§2.11); optional Meet link (§17.3) |
+| `create_event` | `events.insert` | client-side id (§2.11); optional Meet link (§17.3); status events (§7.4) |
 | `update_event` | `events.patch` | `scope` + `notify` + `If-Match`; `add_conference` (§17.3) |
 | `cancel_event` | `events.delete`, `events.patch` | not gated (§7.4) |
 | `move_event` | `events.move` | between calendars |
@@ -1323,7 +1360,7 @@ tools and requests only the read scopes.
 
 `confirm: true` and `allow_public: true` are arguments the model writes,
 and a persuaded model writes them too. So when the client can ask, the
-server asks the person itself, through MCP form elicitation, before four
+server asks the person itself, through MCP form elicitation, before five
 writes:
 
 - `delete_calendar` and `clear_calendar`, always;
@@ -1333,7 +1370,12 @@ writes:
   with a guest, or `external_only` with a guest outside the organizer's
   domain. The email cannot be recalled. A cancel nobody is emailed about
   is frequent and private, and asks nothing, which keeps §9's argument
-  for leaving the tool ungated.
+  for leaving the tool ungated;
+- `create_event` when it makes an out-of-office or focus-time event with
+  `auto_decline: all`. Google declines every meeting it overlaps, the
+  accepted ones too, and each organizer sees the decline, which cannot be
+  recalled. `none` and `new` ask nothing: one declines nothing, and the
+  other only invitations that arrive while the event stands (§7.4).
 
 1. **A second gate, not a replacement.** The arguments stay and are
    checked first. A call a guard refuses asks nothing. The question comes
@@ -1363,7 +1405,9 @@ writes:
    in the server's words: a calendar by its title; a share by who it
    reaches and the role; a cancellation by the event's title, the
    calendar, when it starts with its zone, the scope, and how many guests
-   are emailed and how many of them are outside the organization. Text
+   are emailed and how many of them are outside the organization; a
+   status event by its kind, title and calendar, when it starts, whether
+   it repeats, and the decline message the organizers get. Text
    from Calendar or from the call stands in a code span, on one line,
    made inert as in the sibling servers: invisible characters
    removed, every quote and backtick lookalike made a plain single quote,
@@ -2976,6 +3020,7 @@ what §15 exists to settle, and they are marked.
 | 96 | A release binary resolves an IANA zone on every platform it is built for | Go 1.27.2 `time.LoadLocation`, read 2026-10-09: it looks in "the directory or uncompressed zip file named by the ZONEINFO environment variable", "on a Unix system, the system standard installation location", "$GOROOT/lib/time/zoneinfo.zip" and "the time/tzdata package, if it was imported"; `time/tzdata`: "if the time package cannot find tzdata files on the system, it will use this embedded information" | **Refuted on Windows.** Windows is not a Unix system and a user without Go has no `$GOROOT`, so the Windows archive and the bundle's Windows binary refused every zone. The main package imports `time/tzdata`: about 400 KB on each platform, used only when the machine has no database. A test asks `go list -deps` whether the binary links it, because on Linux the system database comes first and `ZONEINFO` pointed at an empty directory does not stop that, so a test that loads a zone passes either way. **Not yet seen on a Windows machine without Go, tier 3** |
 | 97 | Reminders, visibility and the guests' permissions are the event's, set like any other field | Calendar discovery revision 20261002, read 2026-10-09: `reminders` "Information about the event's reminders for the authenticated user. Note that changing reminders does not also change the updated property of the enclosing event"; `overrides` "The maximum number of override reminders is 5"; `EventReminder.minutes` "between 0 and 40320 (4 weeks in minutes)"; `visibility` "confidential - The event is private. This value is provided for compatibility reasons", and "If the new setting is more restrictive (e.g. from public to private), it is applied to all instances. If the new setting is less restrictive (e.g. from private to public), the change is ignored"; `guestsCanInviteOthers` and `guestsCanSeeOtherGuests` "The default is True". The performance guide on patch: "The modified data you send is merged into the data for the parent object", "Patch requests that contain arrays replace the existing array", "To delete a field, specify the field and set it to null" | **Refuted for reminders: they are the caller's alone**, so an update that changes only them needs no `notify` and sends no `sendUpdates`. Visibility and the permissions are the event's and reach the guests as before. A less restrictive visibility on one occurrence is refused, and a more restrictive one is made with a note that the series changed. The fake holds the limits and both visibility rules. **Not yet seen live, tier 3:** that a patch with `overrides: null` clears the old reminders under `useDefault` true or false, and that Google accepts it at all; and that a more restrictive visibility on an occurrence reaches the series. The live driver sets, replaces, empties and restores reminders on its own event and reads each back, and makes one occurrence of its series private and reads the series |
 | 98 | A conference can only be attached when an event is created | Calendar discovery revision 20261002, read 2026-10-09: `events.patch.conferenceDataVersion` "Version 1 enables support for copying of ConferenceData as well as for creating new conferences using the createRequest field of conferenceData"; `Event.conferenceData` "To persist your changes, remember to set the conferenceDataVersion request parameter to 1 for all event modification requests", and "Reusing Google Meet conference data across different events can cause access issues and expose meeting details to unintended users"; `CreateConferenceRequest.requestId` "Clients should regenerate this ID for every new request. If an ID provided is the same as for the previous request, the request is ignored" | **Refuted: a patch can create one.** `update_event` takes `add_conference`, reversing §17.3's refusal. The request id is a hash of the event id and the etag, because the event id may already have been used by the create and a repeat is ignored. An event with a conference is refused, since the field is replaced whole. A split still copies none, for the reuse warning above. The fake ignores a repeated id per event and drops the request without the version. **Not yet seen live, tier 3:** that a patch with a create request answers with the link or pending as an insert does; and whether Google remembers request ids per event or across events, which decides whether the create's id would really be ignored. The live driver adds a link to its probe event, reads it back, and checks a second request is refused |
+| 99 | Status events are read-only here: create_event makes ordinary events, and the details blocks are written off | Google's status-events guide, read 2026-10-09: "Secondary calendars can't have status events"; focus time and out of office need their properties and `transparency` `opaque`, and "cannot be all-day events"; a working location needs its properties, `visibility` `public` and `transparency` `transparent`, and an all-day one "spans exactly one day"; an update "must maintain the required fields". Calendar discovery revision 20261002, fetched 2026-10-09: `autoDeclineMode` `declineNone`, `declineAllConflictingInvitations` or `declineOnlyNewConflictingInvitations`, the second declining "all conflicting meeting invitations that conflict with the event"; `chatStatus` "available or doNotDisturb"; `declineMessage` on both; `workingLocationProperties.type` `homeOffice`, `officeLocation` or `customLocation`, "Any details are specified in a sub-field of the specified name, but this field may be missing if empty", and `homeOffice` typed `any` | **Reversed: `create_event` makes all three.** `event_type` with `auto_decline` (required, no default, `all` asks the person), `decline_message`, `chat_status`, `working_location` and `working_location_label`, refused on a calendar other than the primary and in every shape the guide refuses; the server sets the transparency and visibility. The blocks are kept raw so a split still carries them whole, and every read shows them in the input words. The fake refuses what the guide refuses, on insert and on a patch. **Not yet probed live, tier 3:** that Google refuses a status event on a secondary calendar; the body Google takes for `home`, sent as `homeOffice: {}`; what it does with guests, rooms, optional guests and a Meet link on a status event, all refused with `[blocked]` until a probe; whether an organizer is emailed about an automatic decline, where the question says only that they see it; and whether a split of a series declining all declines again (row 88) |
 
 ### Deviations from the shared Go MCP server standard
 

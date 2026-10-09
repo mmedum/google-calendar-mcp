@@ -102,6 +102,10 @@ type Draft struct {
 	// refuses one that has a conference because Google would replace it
 	// (§17.3).
 	Conference bool
+
+	// Status makes a new event a status event: out of office, focus time
+	// or a working location. Nil for an ordinary one. Insert only.
+	Status *Status
 }
 
 // Empty reports whether this draft asks for nothing.
@@ -513,6 +517,11 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 		return gcal.Event{}, err
 	}
 	e.Attendees = add
+	if d.Status != nil {
+		if err := d.Status.apply(&e, d); err != nil {
+			return gcal.Event{}, err
+		}
+	}
 	return e, nil
 }
 

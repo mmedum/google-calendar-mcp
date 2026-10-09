@@ -46,8 +46,9 @@ const instructions = "Google Calendar tools. This server answers *when*: calenda
 	"and an event marked free is not. That is what check_availability is for, and it reports a calendar it could " +
 	"not read as unknown rather than as free. " +
 	"Before deleting or clearing a calendar, publishing one, opening one to a whole domain, making somebody an " +
-	"owner, or canceling an event in a way that emails its guests, the server also asks the person through the " +
-	"client when it can; a call they did not confirm is [blocked], and is not made again unless they ask."
+	"owner, canceling an event in a way that emails its guests, or making a status event that declines every " +
+	"meeting it overlaps, the server also asks the person through the client when it can; a call they did not " +
+	"confirm is [blocked], and is not made again unless they ask."
 
 // Deps are what the server needs.
 type Deps struct {

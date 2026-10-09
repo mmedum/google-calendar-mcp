@@ -386,11 +386,8 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 		// An event created without reminders uses the calendar's own.
 		e.Reminders = &gcal.EventReminders{UseDefault: true}
 	}
-	// Google's status-events guide creates each status type with its own
-	// details block. That a create without it is refused is believed
-	// rather than probed, and the message is this fake's own (§18 row 88).
-	if block, ok := statusDetails[e.EventType]; ok && len(e.Unmodeled[block]) == 0 {
-		writeErr(w, http.StatusBadRequest, "invalid", "A "+e.EventType+" event needs "+block)
+	if msg := statusRefusal(s.isPrimary(calID), e); msg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid", msg)
 		return
 	}
 	// "In order to modify attachments the supportsAttachments request
@@ -479,12 +476,56 @@ func (s *Server) askedForConference(calID, eventID, requestID string) {
 	s.conferenceAsked[calID+"/"+eventID] = requestID
 }
 
-// statusDetails names the details block each status event type is
-// created with.
-var statusDetails = map[string]string{
-	gcal.EventTypeFocusTime:       "focusTimeProperties",
-	gcal.EventTypeOutOfOffice:     "outOfOfficeProperties",
-	gcal.EventTypeWorkingLocation: "workingLocationProperties",
+// statusRefusal is why Google would refuse a status event as it would
+// stand after a write, or "". The rules are Google's status-events
+// guide's, which says an update "must maintain the required fields" too;
+// the messages are this fake's own.
+//
+// That a create without its details block is refused is believed rather
+// than probed (§18 row 88).
+func statusRefusal(onPrimary bool, e gcal.Event) string {
+	block := gcal.StatusBlock(e.EventType)
+	if block == "" {
+		return ""
+	}
+	// "Secondary calendars can't have status events."
+	if !onPrimary {
+		return "A " + e.EventType + " event can only be on a primary calendar."
+	}
+	if len(e.StatusDetails()) == 0 {
+		return "A " + e.EventType + " event needs " + block
+	}
+	allDay := e.Start != nil && e.Start.IsAllDay()
+	switch e.EventType {
+	case gcal.EventTypeOutOfOffice, gcal.EventTypeFocusTime:
+		// "cannot be all-day events", and transparency must be opaque.
+		if allDay {
+			return "A " + e.EventType + " event cannot be all day."
+		}
+		if e.Transparency == gcal.TransparencyTransparent {
+			return "A " + e.EventType + " event must be opaque."
+		}
+	case gcal.EventTypeWorkingLocation:
+		if e.Visibility != gcal.VisibilityPublic || e.Transparency != gcal.TransparencyTransparent {
+			return "A workingLocation event must be public and transparent."
+		}
+		// "An all-day event (with start and end dates specified) which
+		// spans exactly one day."
+		if allDay && e.End != nil {
+			from, ferr := time.Parse("2006-01-02", e.Start.Date)
+			to, terr := time.Parse("2006-01-02", e.End.Date)
+			if ferr != nil || terr != nil || !to.Equal(from.AddDate(0, 0, 1)) {
+				return "An all-day workingLocation event must span exactly one day."
+			}
+		}
+	}
+	return ""
+}
+
+// isPrimary reports whether a calendar is the account's primary one.
+func (s *Server) isPrimary(calID string) bool {
+	e, ok := s.Entries[calID]
+	return ok && e.Primary
 }
 
 // patchEvent is events.patch, under If-Match.
@@ -515,6 +556,12 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 		vis = *p.Visibility
 	}
 	if msg := refusedEventFields(vis, p.Reminders); msg != "" {
+		writeErr(w, http.StatusBadRequest, "invalid", msg)
+		return
+	}
+	trial := *cur
+	p.ApplyTo(&trial)
+	if msg := statusRefusal(s.isPrimary(calID), trial); msg != "" {
 		writeErr(w, http.StatusBadRequest, "invalid", msg)
 		return
 	}
@@ -1325,18 +1372,14 @@ func matchesQ(e *gcal.Event, search string) bool {
 	if e.Organizer != nil {
 		fields = append(fields, e.Organizer.DisplayName, e.Organizer.Email)
 	}
-	var where struct {
-		Office struct {
-			BuildingID string `json:"buildingId"`
-			DeskID     string `json:"deskId"`
-			Label      string `json:"label"`
-		} `json:"officeLocation"`
-		Custom struct {
-			Label string `json:"label"`
-		} `json:"customLocation"`
-	}
-	if raw, ok := e.Unmodeled["workingLocationProperties"]; ok && json.Unmarshal(raw, &where) == nil {
-		fields = append(fields, where.Office.BuildingID, where.Office.DeskID, where.Office.Label, where.Custom.Label)
+	var where gcal.EventWorkingLocationProperties
+	if len(e.WorkingLocationProperties) > 0 && json.Unmarshal(e.WorkingLocationProperties, &where) == nil {
+		if o := where.OfficeLocation; o != nil {
+			fields = append(fields, o.BuildingID, o.DeskID, o.Label)
+		}
+		if c := where.CustomLocation; c != nil {
+			fields = append(fields, c.Label)
+		}
 	}
 	for _, f := range fields {
 		if f != "" && strings.Contains(strings.ToLower(f), search) {

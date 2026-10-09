@@ -8,14 +8,16 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
 
 // Question is what the server asks the person before a write that cannot
-// be undone, that widens who can see a calendar, or that emails guests a
-// cancellation (§9a). Text is the message a client shows; accepting it
+// be undone, that widens who can see a calendar, that emails guests a
+// cancellation, or that declines every meeting a status event overlaps
+// (§9a). Text is the message a client shows; accepting it
 // is the confirmation. Every word is the server's, except what stands in
 // backticks, which is quoted from Calendar or from the call and cut to
 // one line. A blank line separates the lines, so a client that draws
@@ -144,6 +146,53 @@ func AskCancel(c Cancel) Question {
 	}
 	return ask(append(lines, "The email cannot be taken back."),
 		c.CalendarID, c.Event.ID, c.Scope, string(c.Decision.Notify), strings.Join(slices.Sorted(slices.Values(c.Guests)), "\x00"))
+}
+
+// Decline is a create_event making a status event that declines every
+// meeting it overlaps, the ones already accepted too.
+type Decline struct {
+	CalendarID, Calendar string
+	// Event is the event as it would be created.
+	Event model.Event
+	Zone  when.Zone
+}
+
+// AskDecline asks before a status event that declines every meeting it
+// overlaps: each organizer sees the decline, which cannot be taken back.
+func AskDecline(d Decline) Question {
+	what := "the out-of-office event"
+	if d.Event.Type == gcal.EventTypeFocusTime {
+		what = "the focus time"
+	}
+	starts := "starts "
+	if d.Event.IsSeries() {
+		starts = "the series starts "
+	}
+	lines := []string{
+		fmt.Sprintf("create_event: add %s %s to your primary calendar %s, and decline every meeting it overlaps?",
+			what, quoted(d.Event.Title), quoted(d.Calendar)),
+		starts + startsAt(d.Event, d.Zone),
+	}
+	if d.Event.IsSeries() {
+		lines = append(lines, "It repeats "+Recurrence(d.Event.Recurrence)+", and declines on every occurrence.")
+	}
+	lines = append(lines, "That includes meetings you already accepted.")
+	message := ""
+	if s := d.Event.StatusDetails; s != nil && s.DeclineMessage != "" {
+		message = s.DeclineMessage
+		lines = append(lines, "Each organizer gets your message: "+quoted(message))
+	}
+	lines = append(lines, "Each organizer sees the decline, and that cannot be taken back.")
+	return ask(lines, d.CalendarID, d.Event.Type, whenKey(d.Event.Start), whenKey(d.Event.End),
+		strings.Join(d.Event.Recurrence, "\n"), message)
+}
+
+// whenKey is one end of an event as a value a question binds.
+func whenKey(w model.When) string {
+	if w.AllDay {
+		return w.Date.String()
+	}
+	return w.At.String()
 }
 
 // startsAt is when an event starts, with its date and zone, in this

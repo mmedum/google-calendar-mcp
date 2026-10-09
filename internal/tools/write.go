@@ -40,6 +40,16 @@ const visibilityHelp = "`visibility` is default, public or private: private show
 	"guests, and public to everybody who can see the calendar. `guests_can_modify`, " +
 	"`guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do."
 
+const statusHelp = "`event_type` makes a status event, which only your primary calendar can hold: outOfOffice, " +
+	"focusTime or workingLocation. Out of office and focus time are timed, never all day, and always show you " +
+	"busy. `auto_decline` is REQUIRED for them, with no default: none declines nothing, new declines " +
+	"invitations that arrive for that time, and all also declines the meetings you already accepted. Google " +
+	"shows each organizer the decline, with `decline_message` if you give one, and all is put to the person " +
+	"first. Focus time takes `chat_status`: available or do_not_disturb. A working location takes " +
+	"`working_location` (home, office or custom) and `working_location_label` for the office or place; it is " +
+	"timed or exactly one whole day, always public, and shows you free. A status event takes no guests, rooms " +
+	"or Meet link."
+
 const etagHelp = "Every write is a patch under If-Match, so it is refused as `[stale]` rather than " +
 	"overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held " +
 	"to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\"."
@@ -60,8 +70,11 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"update_event's `add_conference` adds one to an event later. " +
 			"`optional_guests` invites people as optional; they are emailed like any guest, so they make " +
 			"notify required too. A room cannot be optional. " + addressHelp + " " +
-			remindersHelp + " " + visibilityHelp + " " + notifyHelp + " " + dryRunHelp,
+			remindersHelp + " " + visibilityHelp + " " + statusHelp + " " + notifyHelp + " " + dryRunHelp,
 		Kind: Write,
+		// Asks only before a status event that declines every meeting it
+		// overlaps (§9a).
+		Asks: true,
 		Handle: func(ctx context.Context, in createEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CreateEvent(ctx, service.CreateOptions{
 				Calendar: in.Calendar, Title: in.Title, Start: in.Start, End: in.End,
@@ -72,7 +85,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 				DefaultReminders: in.DefaultReminders, Visibility: in.Visibility,
 				GuestsCanModify: in.GuestsCanModify, GuestsCanInviteOthers: in.GuestsCanInviteOthers,
 				GuestsCanSeeOtherGuests: in.GuestsCanSeeOtherGuests, Conference: in.Conference,
-				Notify: in.Notify, DryRun: in.DryRun,
+				EventType: in.EventType, AutoDecline: in.AutoDecline, DeclineMessage: in.DeclineMessage,
+				ChatStatus: in.ChatStatus, WorkingLocation: in.WorkingLocation,
+				WorkingLocationLabel: in.WorkingLocationLabel, Notify: in.Notify, DryRun: in.DryRun,
 			})
 			if err != nil {
 				return service.WriteResult{}, err
@@ -221,8 +236,16 @@ type createEventIn struct {
 	GuestsCanInviteOthers   *bool  `json:"guests_can_invite_others,omitempty" jsonschema:"Whether guests may invite others. Google's default is true."`
 	GuestsCanSeeOtherGuests *bool  `json:"guests_can_see_other_guests,omitempty" jsonschema:"Whether guests see the guest list. Google's default is true."`
 	Conference              bool   `json:"conference,omitempty" jsonschema:"Ask Google for a Google Meet link. Usually in the answer; if it says the link is still being made, read the event again for it."`
-	Notify                  string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests."`
-	DryRun                  bool   `json:"dry_run,omitempty" jsonschema:"Report what would be created and who would be emailed, without writing."`
+	// The status event inputs (§7.4). Each value is spelled as a read
+	// reports it.
+	EventType            string `json:"event_type,omitempty" jsonschema:"Make a status event on your primary calendar: outOfOffice, focusTime or workingLocation. Leave it out for an ordinary event."`
+	AutoDecline          string `json:"auto_decline,omitempty" jsonschema:"Required for outOfOffice and focusTime, with no default: none, new (invitations that arrive for that time) or all (also the meetings you already accepted, which asks the person first)."`
+	DeclineMessage       string `json:"decline_message,omitempty" jsonschema:"The message each organizer gets with a decline. outOfOffice and focusTime only, and not with auto_decline none."`
+	ChatStatus           string `json:"chat_status,omitempty" jsonschema:"focusTime only: available or do_not_disturb, what Google Chat shows during it."`
+	WorkingLocation      string `json:"working_location,omitempty" jsonschema:"Required for workingLocation: home, office or custom."`
+	WorkingLocationLabel string `json:"working_location_label,omitempty" jsonschema:"The office's name, or the place for custom, as Calendar shows it. Not with home."`
+	Notify               string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests."`
+	DryRun               bool   `json:"dry_run,omitempty" jsonschema:"Report what would be created and who would be emailed, without writing."`
 }
 
 type updateEventIn struct {

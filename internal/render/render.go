@@ -201,6 +201,7 @@ func commonTags(e model.Event) []string {
 	if t := eventTypeTag(e.Type); t != "" {
 		tags = append(tags, t)
 	}
+	tags = append(tags, statusTags(e.StatusDetails)...)
 	if e.EndInvented {
 		tags = append(tags, "no end time set")
 	}
@@ -410,6 +411,47 @@ func eventTypeTag(t string) string {
 	default:
 		return ""
 	}
+}
+
+// statusTags say what a status event does, after its type tag: which
+// invitations it declines, what Chat shows, and where the person works.
+// Declining nothing is the quiet case and has no tag. A value Google adds
+// later is shown as Google spells it.
+func statusTags(d *model.StatusDetails) []string {
+	if d == nil {
+		return nil
+	}
+	var tags []string
+	switch d.AutoDecline {
+	case "", "none":
+	case "new":
+		tags = append(tags, "declines new invitations")
+	case "all":
+		tags = append(tags, "declines every overlapping invitation")
+	default:
+		tags = append(tags, "declines: "+d.AutoDecline)
+	}
+	switch d.ChatStatus {
+	case "":
+	case "do_not_disturb":
+		tags = append(tags, "chat: do not disturb")
+	default:
+		tags = append(tags, "chat: "+d.ChatStatus)
+	}
+	switch {
+	case d.WorkingLocation == "":
+	case d.WorkingLocation == "home":
+		tags = append(tags, "working from home")
+	case d.WorkingLocationLabel != "":
+		tags = append(tags, "working from "+d.WorkingLocationLabel)
+	case d.WorkingLocation == "office":
+		tags = append(tags, "working from an office")
+	case d.WorkingLocation == "custom":
+		tags = append(tags, "working elsewhere")
+	default:
+		tags = append(tags, "working from "+d.WorkingLocation)
+	}
+	return tags
 }
 
 // dayKey groups events by their LOCAL day. It takes no zone: an event's

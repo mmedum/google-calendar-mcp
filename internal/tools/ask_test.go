@@ -177,6 +177,15 @@ var askCases = map[string]askCase{
 		method: "acl.insert", target: "team@group.calendar.example.test",
 		shows: []string{"publish the calendar `Sample Team` to anyone on the internet, as reader"},
 	},
+	"create_event": {
+		args: map[string]any{"calendar": "primary", "title": "Away", "event_type": "outOfOffice",
+			"start": "2026-03-18T09:00:00+01:00", "end": "2026-03-18T17:00:00+01:00",
+			"auto_decline": "all", "decline_message": "Back on Thursday"},
+		method: "insert", target: "me@example.test",
+		shows: []string{"add the out-of-office event `Away` to your primary calendar `Sample Primary`, and " +
+			"decline every meeting it overlaps?", "starts 2026-03-18 09:00-17:00 Europe/Copenhagen",
+			"That includes meetings you already accepted.", "Each organizer gets your message: `Back on Thursday`"},
+	},
 	"cancel_event": {
 		args:   map[string]any{"calendar": "primary", "event_id": "evguests001", "notify": "all"},
 		method: "delete", target: "evguests001",
@@ -240,11 +249,11 @@ func TestEveryAskingWriteWaitsForThePerson(t *testing.T) {
 	}
 }
 
-// Every tool that takes confirm asks, as do share_calendar and
-// cancel_event; the confirm half of the list is read from the published
-// schemas, not typed out.
+// Every tool that takes confirm asks, as do share_calendar,
+// cancel_event and create_event; the confirm half of the list is read
+// from the published schemas, not typed out.
 func TestEveryToolThatTakesConfirmAsks(t *testing.T) {
-	want := map[string]bool{"share_calendar": true, "cancel_event": true}
+	want := map[string]bool{"share_calendar": true, "cancel_event": true, "create_event": true}
 	registered := map[string]bool{}
 	for _, tool := range listTools(t, everything()) {
 		registered[tool.Name] = true
@@ -321,6 +330,58 @@ func TestWhichSharesAsk(t *testing.T) {
 			t.Errorf("%s as %s: asked %d, written %v: %s", tc.who, tc.role, len(qs), written, text(t, res))
 		case tc.want != "" && !strings.Contains(qs[0].Message, tc.want):
 			t.Errorf("%s as %s: %s", tc.who, tc.role, qs[0].Message)
+		}
+	}
+}
+
+// A create asks only for a status event that declines every meeting it
+// overlaps, and a dry run of one shows it without asking or writing. A
+// series says it declines on every occurrence.
+func TestWhichCreatesAsk(t *testing.T) {
+	away := func(extra map[string]any) map[string]any {
+		args := map[string]any{"calendar": "primary", "title": "Away", "event_type": "outOfOffice",
+			"start": "2026-03-18T09:00:00+01:00", "end": "2026-03-18T17:00:00+01:00"}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return args
+	}
+	for _, tc := range []struct {
+		name    string
+		args    map[string]any
+		want    []string
+		written bool
+	}{
+		{"ordinary", map[string]any{"calendar": "primary", "title": "Plain",
+			"start": "2026-03-18T09:00:00+01:00", "end": "2026-03-18T10:00:00+01:00"}, nil, true},
+		{"declines nothing", away(map[string]any{"auto_decline": "none"}), nil, true},
+		{"declines new invitations", away(map[string]any{"auto_decline": "new"}), nil, true},
+		{"dry run", away(map[string]any{"auto_decline": "all", "dry_run": true}), nil, false},
+		{"focus time declining all", away(map[string]any{"event_type": "focusTime", "auto_decline": "all"}),
+			[]string{"add the focus time `Away` to your primary calendar"}, false},
+		{"a series declining all", away(map[string]any{"auto_decline": "all",
+			"recurrence": []string{"RRULE:FREQ=WEEKLY;COUNT=3"}}),
+			[]string{"the series starts 2026-03-18 09:00-17:00", "and declines on every occurrence"}, false},
+	} {
+		p := &person{action: "decline"}
+		cs, fake := connect(t, everything(), "2026-07-28", p)
+		res := callTool(t, cs, &mcp.CallToolParams{Name: "create_event", Arguments: tc.args})
+		qs := p.asked()
+		written := len(fake.Wrote()) > 0
+		if tc.want == nil {
+			if len(qs) != 0 || res.IsError || written != tc.written {
+				t.Errorf("%s: asked %d, written %v: %s", tc.name, len(qs), written, text(t, res))
+			}
+			continue
+		}
+		if len(qs) != 1 || !res.IsError || written {
+			t.Errorf("%s: asked %d, written %v: %s", tc.name, len(qs), written, text(t, res))
+			continue
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(qs[0].Message, w) {
+				t.Errorf("%s: the question does not say %q:\n%s", tc.name, w, qs[0].Message)
+			}
 		}
 	}
 }

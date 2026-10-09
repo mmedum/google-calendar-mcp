@@ -106,6 +106,14 @@ type Event struct {
 	// and fromGmail cannot be created at all (§2.12).
 	EventType string `json:"eventType,omitempty"`
 
+	// The details of a status event, one block per type (§7.4). Each
+	// stays raw JSON, as conferenceData does: a read and a split copy
+	// carry the block whole, so a detail Google adds later is not lost
+	// on the way through. The types below read and write them.
+	OutOfOfficeProperties     json.RawMessage `json:"outOfOfficeProperties,omitempty"`
+	FocusTimeProperties       json.RawMessage `json:"focusTimeProperties,omitempty"`
+	WorkingLocationProperties json.RawMessage `json:"workingLocationProperties,omitempty"`
+
 	// ConferenceData is read here, and a create request is written by
 	// create_event and by update_event's add_conference (§17.3).
 	// It stays raw JSON: the union has a third-party arm this package
@@ -265,6 +273,113 @@ const (
 	EventTypeOutOfOffice     = "outOfOffice"
 	EventTypeWorkingLocation = "workingLocation"
 )
+
+// ------------------------------------------------------- status events
+
+// EventOutOfOfficeProperties are an out-of-office event's details.
+type EventOutOfOfficeProperties struct {
+	AutoDeclineMode string `json:"autoDeclineMode,omitempty"`
+	// DeclineMessage is the account's own text, sent to each organizer
+	// whose invitation is declined. Content: it reaches a result and
+	// never a log (§9).
+	DeclineMessage string `json:"declineMessage,omitempty"`
+}
+
+// EventFocusTimeProperties are a focus-time event's details.
+type EventFocusTimeProperties struct {
+	AutoDeclineMode string `json:"autoDeclineMode,omitempty"`
+	// ChatStatus is what Google Chat shows during the event.
+	ChatStatus     string `json:"chatStatus,omitempty"`
+	DeclineMessage string `json:"declineMessage,omitempty"`
+}
+
+// EventWorkingLocationProperties say where the account works. Type names
+// which of the three blocks holds the details.
+type EventWorkingLocationProperties struct {
+	Type string `json:"type,omitempty"`
+	// HomeOffice is published as "any" and carries nothing.
+	HomeOffice     json.RawMessage        `json:"homeOffice,omitempty"`
+	OfficeLocation *WorkingLocationOffice `json:"officeLocation,omitempty"`
+	CustomLocation *WorkingLocationCustom `json:"customLocation,omitempty"`
+}
+
+// WorkingLocationOffice is an office. Label is what Calendar shows; the
+// ids name a building, floor and desk in the organization's resources.
+type WorkingLocationOffice struct {
+	BuildingID     string `json:"buildingId,omitempty"`
+	FloorID        string `json:"floorId,omitempty"`
+	FloorSectionID string `json:"floorSectionId,omitempty"`
+	DeskID         string `json:"deskId,omitempty"`
+	Label          string `json:"label,omitempty"`
+}
+
+// WorkingLocationCustom is somewhere else, named by its label.
+type WorkingLocationCustom struct {
+	Label string `json:"label,omitempty"`
+}
+
+// autoDeclineMode values. "all" declines meetings already accepted too,
+// and each organizer sees the decline.
+const (
+	AutoDeclineNone = "declineNone"
+	AutoDeclineAll  = "declineAllConflictingInvitations"
+	AutoDeclineNew  = "declineOnlyNewConflictingInvitations"
+)
+
+// chatStatus values on a focus-time event.
+const (
+	ChatAvailable    = "available"
+	ChatDoNotDisturb = "doNotDisturb"
+)
+
+// workingLocationProperties.type values.
+const (
+	WorkingHome   = "homeOffice"
+	WorkingOffice = "officeLocation"
+	WorkingCustom = "customLocation"
+)
+
+// StatusBlock is the JSON name of a status event type's details block,
+// or "" for a type that has none.
+func StatusBlock(eventType string) string {
+	switch eventType {
+	case EventTypeOutOfOffice:
+		return "outOfOfficeProperties"
+	case EventTypeFocusTime:
+		return "focusTimeProperties"
+	case EventTypeWorkingLocation:
+		return "workingLocationProperties"
+	default:
+		return ""
+	}
+}
+
+// StatusDetails returns the raw details block an event of its own type
+// carries, or nil.
+func (e Event) StatusDetails() json.RawMessage {
+	switch e.EventType {
+	case EventTypeOutOfOffice:
+		return e.OutOfOfficeProperties
+	case EventTypeFocusTime:
+		return e.FocusTimeProperties
+	case EventTypeWorkingLocation:
+		return e.WorkingLocationProperties
+	default:
+		return nil
+	}
+}
+
+// Raw is v as JSON, for a details block.
+func Raw(v any) json.RawMessage {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		// Unreachable: the blocks are this package's own structs of
+		// strings. Nil leaves the block out, and the fake and Google both
+		// refuse a status event without one rather than make it wrong.
+		return nil
+	}
+	return raw
+}
 
 // Transparency values. "transparent" means the event does not make the
 // person busy, which is why availability cannot be computed from an
