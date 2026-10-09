@@ -131,7 +131,10 @@ type SchemaTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
-	Annotations json.RawMessage `json:"annotations,omitempty"`
+	// OutputSchema is half the contract: a caller reads the fields it
+	// names, so dropping one breaks it as surely as dropping an input.
+	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
+	Annotations  json.RawMessage `json:"annotations,omitempty"`
 }
 
 // DumpSchemas lists every tool under the full surface.
@@ -169,6 +172,11 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 		if t.InputSchema != nil {
 			if b, err := json.Marshal(t.InputSchema); err == nil {
 				st.InputSchema = b
+			}
+		}
+		if t.OutputSchema != nil {
+			if b, err := json.Marshal(t.OutputSchema); err == nil {
+				st.OutputSchema = b
 			}
 		}
 		if t.Annotations != nil {

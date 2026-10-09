@@ -10,7 +10,9 @@ import (
 )
 
 // schemaDiff compares the binary's tool surface against the last tag's,
-// so a breaking change is visible before it ships.
+// and fails on a change that breaks a caller: a tool or resource removed,
+// an input or output field removed, or an input field newly required.
+// Anything else that changed is reported for a person to look at.
 //
 // With no previous tag it prints the surface and passes: a first release
 // has nothing to diff against, and failing here would block the commit
@@ -29,7 +31,7 @@ func schemaDiff(bin string) error {
 	// reported "no previous tag" on every run from the first commit to
 	// the first release — which is exactly the stretch where the tool
 	// surface changes most, so it was inert when it was most needed.
-	previous, against, err := baseline(current)
+	previous, against, prevFields, err := baseline(current)
 	if err != nil {
 		return err
 	}
@@ -74,9 +76,109 @@ func schemaDiff(bin string) error {
 	for _, n := range removed {
 		fmt.Printf("    - %s  BREAKING\n", n)
 	}
-	// Reported, not failed: removing a tool is sometimes right, and the
-	// definition of done says a person looks at this.
+	curFields, err := currentFields(bin)
+	if err != nil {
+		return err
+	}
+	breaking := append(removed, brokenFields(prevFields, curFields)...)
+	for _, b := range breaking[len(removed):] {
+		fmt.Printf("    ! %s  BREAKING\n", b)
+	}
+	// Failed, not reported: a released surface is a contract, and a
+	// removal that is right goes out as a major version, whose release
+	// commit records the new baseline on purpose.
+	if len(breaking) > 0 {
+		return fmt.Errorf("the tool surface breaks a caller since %s: %d change(s) above", against, len(breaking))
+	}
 	return nil
+}
+
+// toolFields is what a caller relies on in each tool: the fields it may
+// send, the ones it must, and the ones it reads back.
+type toolFields struct {
+	inputs, required, outputs map[string]bool
+}
+
+// fieldsOf reads every tool's fields out of a dump. A dump that carries
+// no output schema, as one from before they were dumped, compares only
+// its inputs.
+func fieldsOf(data []byte) (map[string]toolFields, error) {
+	type schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	var dump struct {
+		Tools []struct {
+			Name         string `json:"name"`
+			InputSchema  schema `json:"input_schema"`
+			OutputSchema schema `json:"output_schema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(data, &dump); err != nil {
+		return nil, err
+	}
+	out := map[string]toolFields{}
+	for _, t := range dump.Tools {
+		f := toolFields{inputs: map[string]bool{}, required: map[string]bool{}, outputs: map[string]bool{}}
+		for p := range t.InputSchema.Properties {
+			f.inputs[p] = true
+		}
+		for _, r := range t.InputSchema.Required {
+			f.required[r] = true
+		}
+		for p := range t.OutputSchema.Properties {
+			f.outputs[p] = true
+		}
+		out[t.Name] = f
+	}
+	return out, nil
+}
+
+// brokenFields lists what a tool kept by name lost: an input or output
+// field removed, or an input newly required. A removed tool is the
+// caller's to report.
+func brokenFields(prev, cur map[string]toolFields) []string {
+	var out []string
+	for _, name := range sortedKeys(prev) {
+		now, kept := cur[name]
+		if !kept {
+			continue
+		}
+		was := prev[name]
+		for _, f := range sortedKeys(was.inputs) {
+			if !now.inputs[f] {
+				out = append(out, fmt.Sprintf("%s: input field %s removed", name, f))
+			}
+		}
+		for _, f := range sortedKeys(now.required) {
+			if !was.required[f] {
+				out = append(out, fmt.Sprintf("%s: input field %s newly required", name, f))
+			}
+		}
+		for _, f := range sortedKeys(was.outputs) {
+			if !now.outputs[f] {
+				out = append(out, fmt.Sprintf("%s: output field %s removed", name, f))
+			}
+		}
+	}
+	return out
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func currentFields(bin string) (map[string]toolFields, error) {
+	out, err := exec.Command(bin, "--dump-schemas").Output()
+	if err != nil {
+		return nil, fmt.Errorf("run %s --dump-schemas: %w", bin, err)
+	}
+	return fieldsOf(out)
 }
 
 func dumpFrom(bin string) (map[string]string, error) {
@@ -144,8 +246,9 @@ const resourcePrefix = "resource "
 // surface map.
 func resourceKey(uri string) string { return resourcePrefix + uri }
 
-// dumpFromTag builds the binary as it was at tag, into a temp directory.
-func dumpFromTag(tag string) (map[string]string, error) {
+// dumpFromTag builds the binary as it was at tag, into a temp directory,
+// and returns its dump.
+func dumpFromTag(tag string) ([]byte, error) {
 	dir, err := os.MkdirTemp("", "schema-diff")
 	if err != nil {
 		return nil, err
@@ -164,7 +267,11 @@ func dumpFromTag(tag string) (map[string]string, error) {
 	if out, err := build.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("build %s: %w: %s", tag, err, out)
 	}
-	return dumpFrom(bin)
+	out, err := exec.Command(bin, "--dump-schemas").Output()
+	if err != nil {
+		return nil, fmt.Errorf("run %s --dump-schemas: %w", bin, err)
+	}
+	return out, nil
 }
 
 // baselineFile is the recorded tool surface, used when no tag exists.
@@ -176,28 +283,36 @@ const baselineFile = "testdata/schema-baseline.json"
 // shipped. Otherwise the committed snapshot stands in, and refreshing it
 // is the deliberate act of saying the change has been looked at — which
 // is the same thing tagging says, at a smaller scale.
-func baseline(current map[string]string) (map[string]string, string, error) {
+func baseline(current map[string]string) (map[string]string, string, map[string]toolFields, error) {
+	data, against := []byte(nil), baselineFile
 	if tag, err := lastTag(); err == nil && tag != "" {
-		previous, derr := dumpFromTag(tag)
+		dump, derr := dumpFromTag(tag)
 		if derr != nil {
 			fmt.Printf("  could not read the surface at %s (%v); falling back to %s\n",
 				tag, derr, baselineFile)
 		} else {
-			return previous, tag, nil
+			data, against = dump, tag
 		}
 	}
-	data, err := os.ReadFile(baselineFile)
-	if os.IsNotExist(err) {
-		return nil, "", nil
-	}
-	if err != nil {
-		return nil, "", fmt.Errorf("read %s: %w", baselineFile, err)
+	if data == nil {
+		var err error
+		data, err = os.ReadFile(baselineFile)
+		if os.IsNotExist(err) {
+			return nil, "", nil, nil
+		}
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("read %s: %w", baselineFile, err)
+		}
 	}
 	previous, err := parseDump(data)
 	if err != nil {
-		return nil, "", fmt.Errorf("parse %s: %w", baselineFile, err)
+		return nil, "", nil, fmt.Errorf("parse %s: %w", against, err)
 	}
-	return previous, baselineFile, nil
+	fields, err := fieldsOf(data)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("parse %s: %w", against, err)
+	}
+	return previous, against, fields, nil
 }
 
 // writeBaseline records the binary's current surface as the baseline.

@@ -1433,9 +1433,13 @@ tag" on every run from the first commit onward, which is the whole
 stretch where the surface changes most — inert exactly when it was most
 needed. `make schema-baseline` records the current surface, and
 refreshing it is the deliberate act of saying the change has been looked
-at, which is what tagging says at a larger scale. The gate reports and
-never fails: removing a tool is sometimes right, and the definition of
-done says a person reads this one.
+at, which is what tagging says at a larger scale. The gate fails on what
+breaks a caller: a tool or resource removed, an input or output field
+removed, or an input newly required. Anything else that changed is
+reported for a person to read. Until 2026-10-09 it reported and never
+failed, and the dump carried no output schemas, so a lost output field
+could not be seen at all; a tag cut before then still compares inputs
+only.
 
 `mcpb`, the bundle manifest gate, is the one this list named before it
 existed. It was built in phase 4 with the bundle, and runs in `make
