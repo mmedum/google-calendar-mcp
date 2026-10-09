@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -528,6 +529,14 @@ func (s *Server) isPrimary(calID string) bool {
 	return ok && e.Primary
 }
 
+// onlyReminders reports whether a patch changes nothing but reminders,
+// which Google says does not move the event's updated time.
+func onlyReminders(p gcal.EventPatch) bool {
+	rest := p
+	rest.Reminders = nil
+	return p.Reminders != nil && reflect.DeepEqual(rest, gcal.EventPatch{})
+}
+
 // patchEvent is events.patch, under If-Match.
 //
 // The etag moves on every write, so a second patch carrying the first
@@ -605,6 +614,13 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 	next.ETag = etag(eventID, s.revs[eventID]+1)
 	s.Events[calID][eventID] = &next
 	s.bumpSync(calID, next)
+	if onlyReminders(p) {
+		// "Changing reminders does not also change the updated property
+		// of the enclosing event", so a read by updatedMin does not see
+		// it. Whether a sync token reports it is not documented, and the
+		// fake keeps reporting it there.
+		next.Updated = cur.Updated
+	}
 	s.mu.Unlock()
 	writeJSON(w, next)
 }

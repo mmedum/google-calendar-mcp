@@ -65,6 +65,10 @@ func main() {
 	// cancels them properly, which mails the guests — so it is asked for.
 	sweep := flag.Bool("sweep-spikes", false,
 		"delete the kept spike A and B events, canceling them to their guests")
+	// The one write on the primary calendar (§9.1). One type per run, so
+	// the three are checked over three runs.
+	status := flag.String("status-type", statusKind,
+		"the one status event made on the primary calendar and deleted: outOfOffice, focusTime or workingLocation")
 	flag.Parse()
 
 	clearSpikeEvents = *sweep
@@ -75,6 +79,13 @@ func main() {
 	showFilter = *show
 
 	out := redact.New(os.Stderr)
+	switch *status {
+	case "outOfOffice", "focusTime", "workingLocation":
+		statusKind = *status
+	default:
+		out.Printf("-status-type is outOfOffice, focusTime or workingLocation, not %q\n", *status)
+		os.Exit(2)
+	}
 	code := run(context.Background(), out, *bin, *profile, *keep)
 	os.Exit(code)
 }
@@ -156,6 +167,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		out.Printf("could not read this account's own address: %v\n", redact.String(err.Error()))
 		return 2
 	}
+	primaryCal.setSelf(self)
 	if err := api.seedRSVP(ctx, scratch, self); err != nil {
 		out.Printf("could not seed the invitation to answer: %v\n", redact.String(err.Error()))
 		return 2
@@ -227,6 +239,12 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	for _, st := range writeSteps(scratch, writes) {
 		r.run(ctx, sess, st)
 	}
+	// The one status event on the primary calendar (§9.1). Its delete is
+	// deferred before it is made, so it runs however the run ends.
+	defer primaryCal.cleanUp(api, out)
+	for _, st := range statusSteps(scratch) {
+		r.run(ctx, sess, st)
+	}
 
 	// Phase 3, on a calendar of its own that create_calendar makes and
 	// delete_calendar removes. It is registered as the driver's own as
@@ -269,6 +287,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike M: conference creation", spikeM},
 		{"spike N: what suppresses nextSyncToken", spikeN},
 		{"spike O: a token from updatedMin", spikeO},
+		{"spike P: a status event on a secondary", spikeP},
 	} {
 		r.total++
 		v, note := sp.run(ctx, out, api, scratch)

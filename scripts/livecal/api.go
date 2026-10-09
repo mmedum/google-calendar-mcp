@@ -149,6 +149,10 @@ func (a *liveAPI) doWithMatch(ctx context.Context, method, path, ifMatch string,
 }
 
 func (a *liveAPI) status(ctx context.Context, method, path, ifMatch string, body, out any) (int, error) {
+	// Every REST call passes the same §9.1 guard the tool calls do.
+	if err := primaryCal.rest(method, path); err != nil {
+		return 0, err
+	}
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)

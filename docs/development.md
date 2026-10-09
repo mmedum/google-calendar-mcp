@@ -89,6 +89,13 @@ What it does to the account, so nothing is a surprise:
   own title, reads it back, and checks a split keeps it. It cannot make a
   Drive file with this server's scopes, so without the variable those
   steps are skipped and owed.
+- It makes **one status event on your primary calendar**, because no
+  other calendar can hold one: about a year ahead, titled "Livecal status
+  probe", declining nothing, and deleted by its id before the run ends,
+  however it ends. Nothing else there is written; a guard in the driver
+  refuses it. `-status-type` picks out of office (the default), focus
+  time or a working location. If the run prints a warning that it could
+  not delete it, delete it by hand.
 - `-show <substring>` prints the redacted body of every step whose name
   contains it. A pass/fail line cannot show a result that is confidently
   wrong, which is how the last three phases each found a defect.

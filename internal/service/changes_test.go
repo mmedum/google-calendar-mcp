@@ -282,6 +282,42 @@ func TestUpdatedSinceReportsWhatChangedAfterIt(t *testing.T) {
 	}
 }
 
+// Google says changing reminders "does not also change the updated
+// property", so a reminders-only update is not reported by a read since
+// a moment, while a change to the event itself is.
+func TestARemindersOnlyChangeIsNotReportedSinceAMoment(t *testing.T) {
+	fake := caltest.Seed()
+	svc := newService(t, fake)
+	clockAt(t, fake, "2026-03-10T08:00:00Z")
+	fake.Touch("primary", "ev-standup")
+	clockAt(t, fake, "2026-03-12T08:00:00Z")
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "ev-standup", PopupReminders: intsptr(10),
+	}); err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	since := service.ChangesOptions{Calendar: "primary", UpdatedSince: "2026-03-11T00:00:00Z"}
+	got, err := svc.ListChanges(context.Background(), since)
+	if err != nil {
+		t.Fatalf("ListChanges: %v", err)
+	}
+	if titles := changedTitles(got); titles != "" {
+		t.Fatalf("changed = %q, want nothing: only reminders changed", titles)
+	}
+
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "ev-standup", Title: strptr("Morning sync, moved"),
+	}); err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	if got, err = svc.ListChanges(context.Background(), since); err != nil {
+		t.Fatalf("ListChanges: %v", err)
+	}
+	if titles := changedTitles(got); titles != "Morning sync, moved" {
+		t.Fatalf("changed = %q, want the retitled event", titles)
+	}
+}
+
 // A bare date is the start of that day in the resolved zone, as a
 // window's from is, and the result echoes the instant it used.
 // Copenhagen is an hour ahead of UTC in March, so 16 March starts at

@@ -229,6 +229,12 @@ func (s *session) answer(id json.RawMessage, method, message string) error {
 // call invokes one tool and returns the text half plus whether the
 // result was an error.
 func (s *session) call(ctx context.Context, tool string, args map[string]any) (callResult, error) {
+	// §9.1, held here rather than by each step: every tool call passes
+	// this guard, so no step can write on the primary calendar but the
+	// one status event the owner allowed.
+	if err := primaryCal.tool(tool, args); err != nil {
+		return callResult{}, err
+	}
 	params := map[string]any{"name": tool}
 	if args != nil {
 		params["arguments"] = args
