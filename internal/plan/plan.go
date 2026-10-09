@@ -310,13 +310,17 @@ type Change struct {
 // else holding one is unprobed for events: it was assumed here, and the
 // live run refuted it for calendars (§18 row 58).
 //
-// A status event comes out of the patch in a shape Google takes, or the
-// patch is refused before anything is sent. A split builds its new series
-// with this too, so the series is checked before the truncate.
+// A status event takes no guests, rooms or Meet link, and comes out of
+// the patch in a shape Google takes, or the patch is refused before
+// anything is sent. A split builds its new series with this too, so the
+// series is checked before the truncate.
 func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 	var p gcal.EventPatch
 	var changes []Change
 
+	if err := d.statusGuests(before.EventType); err != nil {
+		return gcal.EventPatch{}, nil, err
+	}
 	if d.Conference {
 		// A create request that failed holds no conference, so asking
 		// again replaces nothing anybody could join.
@@ -595,12 +599,11 @@ func (d Draft) adding() ([]gcal.EventAttendee, error) {
 				return nil, fmt.Errorf("%w: %q is a room's address, and a room cannot be an optional guest. "+
 					"Book it as a room", ErrInvalid, a)
 			}
-			// The same address as an optional guest and as anything else
-			// asks for two roles at once, and which one Google keeps is
-			// not this server's to guess.
+			// The same address in two lists asks for two roles at once,
+			// and which one Google keeps is not this server's to guess.
+			// Sent as given, it would be two attendees with one address.
 			key := strings.ToLower(a)
-			if prev, ok := listed[key]; ok && prev != list.what &&
-				(list.optional || prev == "an optional guest") {
+			if prev, ok := listed[key]; ok && prev != list.what {
 				return nil, fmt.Errorf("%w: %q is given as both %s and %s. Give it once", ErrInvalid, a, prev, list.what)
 			}
 			listed[key] = list.what

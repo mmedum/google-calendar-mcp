@@ -373,7 +373,8 @@ func TestASplitNamesAnAddressTheSeriesAlreadyHas(t *testing.T) {
 }
 
 // A room cannot be optional, and one address cannot be asked for in two
-// roles at once. Both are refused before anything is written.
+// roles at once, guest and room included. Each is refused before
+// anything is written.
 func TestOptionalGuestsRefuseRoomsAndDoubleRoles(t *testing.T) {
 	svc, fake := writeSeed(t)
 	for _, c := range []struct {
@@ -384,6 +385,11 @@ func TestOptionalGuestsRefuseRoomsAndDoubleRoles(t *testing.T) {
 			"a room cannot be an optional guest"},
 		{service.CreateOptions{Guests: []string{"colleague@example.test"}, OptionalGuests: []string{"COLLEAGUE@example.test"}},
 			"given as both a guest and an optional guest"},
+		{service.CreateOptions{Guests: []string{"Partner <partner@elsewhere.test>"}, Rooms: []string{"partner@elsewhere.test"}},
+			"given as both a guest and a room"},
+		{service.CreateOptions{Guests: []string{"room-sample@resource.calendar.google.com"},
+			Rooms: []string{"room-sample@resource.calendar.google.com"}},
+			"given as both a guest and a room"},
 	} {
 		o := c.o
 		o.Calendar, o.Title, o.Start, o.End, o.Notify = "primary", "Refused", "2026-04-01T09:00:00+02:00", "2026-04-01T10:00:00+02:00", "all"
@@ -2486,5 +2492,58 @@ func TestAStatusEventTakesTheChangesGoogleAllows(t *testing.T) {
 	}
 	if w := fake.Wrote(); len(w) != 2 {
 		t.Fatalf("got writes %+v, want two patches", w)
+	}
+}
+
+// Guests, rooms and a Meet link are refused on an existing status event
+// as on a new one, at every scope and through a split, before notify is
+// decided and before anything is written. Removing a guest is not.
+func TestAStatusEventTakesNoGuestsOnAnyWrite(t *testing.T) {
+	for _, scope := range []string{"instance", "series", "this_and_following"} {
+		for _, tc := range []struct {
+			name   string
+			change func(*service.UpdateOptions)
+		}{
+			{"a guest", func(o *service.UpdateOptions) { o.AddGuests = []string{"partner@elsewhere.test"} }},
+			{"an optional guest", func(o *service.UpdateOptions) {
+				o.AddOptionalGuests = []string{"colleague@example.test"}
+			}},
+			{"a room", func(o *service.UpdateOptions) {
+				o.AddRooms = []string{"room-sample@resource.calendar.google.com"}
+			}},
+			{"a Meet link", func(o *service.UpdateOptions) { o.AddConference = true }},
+		} {
+			if scope == "this_and_following" && tc.name == "a Meet link" {
+				// Refused for the split itself; TestAddConferenceDoesNotGoWithASplit.
+				continue
+			}
+			t.Run(scope+" "+tc.name, func(t *testing.T) {
+				svc, fake := writeSeed(t)
+				occ := statusSeries(t, fake, "evaway00003", gcal.EventTypeOutOfOffice,
+					gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineNone}, false)
+				o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: scope}
+				tc.change(&o)
+				_, err := svc.UpdateEvent(context.Background(), o)
+				if got := classOf(t, err); got != gapi.ClassBlocked ||
+					!strings.Contains(err.Error(), "does not put guests, rooms or a Meet link on an out-of-office event") {
+					t.Fatalf("got [%s] %v, want [blocked] about guests, rooms and Meet", got, err)
+				}
+				if w := fake.Wrote(); len(w) != 0 {
+					t.Fatalf("the refusal came after %d writes: %+v", len(w), w)
+				}
+			})
+		}
+	}
+
+	svc, fake := writeSeed(t)
+	occ := statusSeries(t, fake, "evaway00004", gcal.EventTypeOutOfOffice,
+		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineNone}, false)
+	away := fake.Events["me@example.test"]["evaway00004"]
+	away.Attendees = []gcal.EventAttendee{{Email: "colleague@example.test"}}
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: occ, Scope: "series", RemoveGuests: []string{"colleague@example.test"},
+		Notify: "all",
+	}); err != nil {
+		t.Fatalf("removing a guest: %v", err)
 	}
 }

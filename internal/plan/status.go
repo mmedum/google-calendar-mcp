@@ -13,7 +13,7 @@ import (
 // Status asks for a status event (§7.4): out of office, focus time or a
 // working location. Insert only, because Google does not let an event's
 // type change after it is made; a patch or a split of one is held to the
-// same shapes by statusPatch.
+// same rules by statusGuests and statusPatch.
 //
 // The fields are the caller's words. The rules they are held to are
 // Google's, from its status-events guide, and the guards on what Google
@@ -89,7 +89,7 @@ func (s Status) apply(e *gcal.Event, d Draft) error {
 		return fmt.Errorf("%w: %s can only go on your primary calendar; Google does not allow one on any "+
 			"other. Leave calendar out, or pass primary", ErrUnsupported, what)
 	}
-	if err := d.statusGuests(what); err != nil {
+	if err := d.statusGuests(kind); err != nil {
 		return err
 	}
 	// Held as the caller sent it, before the server sets the busy status
@@ -105,10 +105,16 @@ func (s Status) apply(e *gcal.Event, d Draft) error {
 	return s.away(e, kind, what)
 }
 
-// statusGuests refuses guests, rooms and a Meet link on a status event,
-// new or existing. Google documents nothing about them there, so nothing
-// is sent until a live probe shows what it does (§18 row 99).
-func (d Draft) statusGuests(what string) error {
+// statusGuests refuses guests, rooms and a Meet link on a status event of
+// eventType, new or existing, at any scope and on a split's new series.
+// Google documents nothing about them there, so nothing is sent until a
+// live probe shows what it does (§18 row 99). Removing a guest is not
+// refused. Any other type passes.
+func (d Draft) statusGuests(eventType string) error {
+	what, ok := statusNames[eventType]
+	if !ok {
+		return nil
+	}
 	if len(d.Invites()) > 0 || d.Conference {
 		return fmt.Errorf("%w: this server does not put guests, rooms or a Meet link on %s: what Google "+
 			"does with them there is not yet checked. Create an ordinary event for a meeting", ErrBlocked, what)

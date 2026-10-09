@@ -115,8 +115,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"`add_conference: true` asks Google for a Meet link on an event that has no conference; one " +
 			"that has a conference is refused, because Google would replace it, and the result says " +
 			"whether the link came back or is still being made. It cannot go with `this_and_following`. " +
-			"A change to a status event that Google's rules for it refuse is refused before anything is " +
-			"written. With `this_and_following`, an out-of-office or " +
+			"A status event takes no guests, rooms or Meet link, and a change to one that Google's rules " +
+			"for it refuse is refused before anything is written. With `this_and_following`, an out-of-office or " +
 			"focus-time series that declines every overlapping meeting starts a new series that declines them " +
 			"too, so that split is put to the person first. " +
 			"Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
