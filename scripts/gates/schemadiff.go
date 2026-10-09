@@ -1,60 +1,137 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 )
 
-// schemaDiff compares the binary's tool surface against the last tag's,
-// and fails on a change that breaks a caller: a tool or resource removed,
-// an input or output field removed, or an input field newly required.
-// Anything else that changed is reported for a person to look at.
+// schemaDiff compares the binary's tool surface with the baseline, the
+// surface of the CHANGELOG's newest release, and fails on a change that
+// breaks a caller: a tool or resource removed, an input or output field
+// removed or retyped at any depth, or an input newly required. Anything
+// else that changed is reported for a person to look at.
 //
-// With no previous tag it prints the surface and passes: a first release
-// has nothing to diff against, and failing here would block the commit
-// that creates the baseline.
+// It also fails when the baseline is not the newest release's: an older
+// one protects an older surface, so whatever shipped since could be
+// dropped and nothing would say. With nothing under [Unreleased] the
+// build is that release, so its surface must be the baseline's exactly,
+// which proves a release commit recorded the baseline rather than
+// relabeling it.
+//
+// The baseline is a committed file, never a tag: a shallow checkout has
+// no tags, so a tag-based diff compares against whatever it falls back
+// to, and CI is a shallow checkout.
 func schemaDiff(bin string) error {
-	current, err := dumpFrom(bin)
+	out, err := dumpBytes(bin)
 	if err != nil {
 		return err
 	}
-	if len(current) < 5 {
-		return fmt.Errorf("the binary published %d tools; that is not the surface", len(current))
+	cur, err := readSurface(out)
+	if err != nil {
+		return fmt.Errorf("the binary did not produce a readable surface: %w", err)
 	}
+	if len(cur.entries) < 5 {
+		return fmt.Errorf("the binary published %d tools and resources; that is not the surface", len(cur.entries))
+	}
+	raw, err := os.ReadFile(changelogPath)
+	if err != nil {
+		return err
+	}
+	changelog := string(raw)
+	want := baselineVersion(changelog)
 
-	// A tag is the best baseline, and a committed snapshot is the one
-	// that exists during a phased build. Without the fallback this gate
-	// reported "no previous tag" on every run from the first commit to
-	// the first release — which is exactly the stretch where the tool
-	// surface changes most, so it was inert when it was most needed.
-	previous, against, prevFields, err := baseline(current)
-	if err != nil {
-		return err
-	}
-	if previous == nil {
-		fmt.Printf("  no baseline yet; %d tools in the current surface. "+
-			"`make schema-baseline` records it\n", len(current))
+	data, err := os.ReadFile(baselineFile)
+	if os.IsNotExist(err) {
+		if want != "" {
+			return fmt.Errorf("%s names %s as released, but %s is missing; "+
+				"record it in that release's commit with `make schema-baseline VERSION=%s`",
+				changelogPath, want, baselineFile, want)
+		}
+		// The first release is exactly this state, and it is not a
+		// failure: there is nothing yet to be compatible with.
+		fmt.Printf("  no baseline yet; %d tools and resources in the current surface\n", len(cur.entries))
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("read %s: %w", baselineFile, err)
+	}
+	base, err := readSurface(data)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", baselineFile, err)
+	}
 
-	var removed, changed []string
-	for name, prev := range previous {
-		now, still := current[name]
-		if !still {
+	breaking := compareSurfaces(base, cur)
+	var problems []string
+	if want != "" && base.version != want {
+		problems = append(problems, fmt.Sprintf("the baseline is the %q surface, but %s's newest release is %s; "+
+			"record it in that release's commit with `make schema-baseline VERSION=%s`",
+			base.version, changelogPath, want, want))
+	}
+	if len(breaking) > 0 {
+		problems = append(problems, fmt.Sprintf("the tool surface breaks a caller of %s: %d change(s) above",
+			base.version, len(breaking)))
+	}
+	if len(problems) == 0 && want != "" && sectionFor(changelog, "Unreleased") == "" && !sameSurface(data, out) {
+		problems = append(problems, fmt.Sprintf("nothing is under [Unreleased], so this build is %s, "+
+			"and its surface differs from the baseline. In %s's release commit, run "+
+			"`make schema-baseline VERSION=%s`; otherwise, say what changed under [Unreleased]", want, want, want))
+	}
+	if len(problems) > 0 {
+		return errors.New(strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// surface is one schema dump, read for the diff.
+type surface struct {
+	version string
+	// entries is every tool and resource, keyed by name or by URI, with
+	// what a person should look at when it changes.
+	entries map[string]string
+	fields  map[string]toolFields
+}
+
+func readSurface(data []byte) (surface, error) {
+	var head struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(data, &head); err != nil {
+		return surface{}, err
+	}
+	entries, err := parseDump(data)
+	if err != nil {
+		return surface{}, err
+	}
+	fields, err := fieldsOf(data)
+	if err != nil {
+		return surface{}, err
+	}
+	return surface{version: head.Version, entries: entries, fields: fields}, nil
+}
+
+// compareSurfaces prints what changed from base to cur and returns what
+// breaks a caller.
+func compareSurfaces(base, cur surface) []string {
+	var removed, changed, added []string
+	for name, prev := range base.entries {
+		now, still := cur.entries[name]
+		switch {
+		case !still:
 			removed = append(removed, name)
-			continue
-		}
-		if prev != now {
+		case prev != now:
 			changed = append(changed, name)
 		}
 	}
-	var added []string
-	for name := range current {
-		if _, had := previous[name]; !had {
+	for name := range cur.entries {
+		if _, had := base.entries[name]; !had {
 			added = append(added, name)
 		}
 	}
@@ -62,12 +139,12 @@ func schemaDiff(bin string) error {
 	sort.Strings(changed)
 	sort.Strings(added)
 
-	fmt.Printf("  against %s: %d added, %d changed, %d removed\n", against, len(added), len(changed), len(removed))
+	fmt.Printf("  against %s: %d added, %d changed, %d removed\n", baselineFile, len(added), len(changed), len(removed))
 	for _, n := range added {
 		fmt.Printf("    + %s\n", n)
 	}
 	for _, n := range changed {
-		what := "input schema or description changed"
+		what := "description or schema changed"
 		if strings.HasPrefix(n, resourcePrefix) {
 			what = "description or type changed"
 		}
@@ -76,42 +153,104 @@ func schemaDiff(bin string) error {
 	for _, n := range removed {
 		fmt.Printf("    - %s  BREAKING\n", n)
 	}
-	curFields, err := currentFields(bin)
-	if err != nil {
-		return err
-	}
-	breaking := append(removed, brokenFields(prevFields, curFields)...)
-	for _, b := range breaking[len(removed):] {
+	fields := brokenFields(base.fields, cur.fields)
+	for _, b := range fields {
 		fmt.Printf("    ! %s  BREAKING\n", b)
 	}
-	// Failed, not reported: a released surface is a contract, and a
-	// removal that is right goes out as a major version, whose release
-	// commit records the new baseline on purpose.
-	if len(breaking) > 0 {
-		return fmt.Errorf("the tool surface breaks a caller since %s: %d change(s) above", against, len(breaking))
-	}
-	return nil
+	return append(removed, fields...)
 }
 
-// toolFields is what a caller relies on in each tool: the fields it may
-// send, the ones it must, and the ones it reads back.
+// sameSurface reports whether two dumps publish the same tools and
+// resources, field for field. The version and SDK stamps are not part
+// of it, and neither is key order.
+func sameSurface(a, b []byte) bool {
+	type published struct {
+		Tools     any `json:"tools"`
+		Resources any `json:"resources"`
+	}
+	var x, y published
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
+}
+
+// toolFields is what a caller relies on in each tool, at any depth: the
+// fields it may send and their types, the ones it must send, and the
+// ones it reads back and their types.
+//
+// A path names a field the way a caller reaches it: `start.date`, and
+// `events[].start` for a field of each element of a list.
 type toolFields struct {
-	inputs, required, outputs map[string]bool
+	inputs, outputs map[string]string
+	required        map[string]bool
 }
 
-// fieldsOf reads every tool's fields out of a dump. A dump that carries
-// no output schema, as one from before they were dumped, compares only
-// its inputs.
-func fieldsOf(data []byte) (map[string]toolFields, error) {
-	type schema struct {
-		Properties map[string]json.RawMessage `json:"properties"`
-		Required   []string                   `json:"required"`
+// schemaNode is the part of a JSON Schema the diff walks. The dump
+// carries no $ref, anyOf or oneOf, so properties and items reach every
+// field.
+type schemaNode struct {
+	Type       json.RawMessage        `json:"type"`
+	Properties map[string]*schemaNode `json:"properties"`
+	Items      *schemaNode            `json:"items"`
+	Required   []string               `json:"required"`
+}
+
+// walk records the type of every field under n, and which are required.
+func (n *schemaNode) walk(prefix string, types map[string]string, required map[string]bool) {
+	if n == nil {
+		return
 	}
+	for _, r := range n.Required {
+		required[fieldPath(prefix, r)] = true
+	}
+	for name, child := range n.Properties {
+		path := fieldPath(prefix, name)
+		types[path] = child.typeName()
+		child.walk(path, types, required)
+	}
+	if n.Items != nil {
+		types[prefix+"[]"] = n.Items.typeName()
+		n.Items.walk(prefix+"[]", types, required)
+	}
+}
+
+// typeName is the type as the schema spells it, so `"string"` and
+// `["null","string"]` differ: a field that may now be null breaks a
+// caller that read it as always there.
+func (n *schemaNode) typeName() string {
+	var buf bytes.Buffer
+	if json.Compact(&buf, n.Type) != nil {
+		return string(n.Type)
+	}
+	return buf.String()
+}
+
+func fieldPath(prefix, name string) string {
+	if prefix == "" {
+		return name
+	}
+	return prefix + "." + name
+}
+
+// parentPath is the field a path sits in, or "" at the top.
+func parentPath(path string) string {
+	if strings.HasSuffix(path, "[]") {
+		return strings.TrimSuffix(path, "[]")
+	}
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		return path[:i]
+	}
+	return ""
+}
+
+// fieldsOf reads every tool's fields out of a dump.
+func fieldsOf(data []byte) (map[string]toolFields, error) {
 	var dump struct {
 		Tools []struct {
-			Name         string `json:"name"`
-			InputSchema  schema `json:"input_schema"`
-			OutputSchema schema `json:"output_schema"`
+			Name         string      `json:"name"`
+			InputSchema  *schemaNode `json:"input_schema"`
+			OutputSchema *schemaNode `json:"output_schema"`
 		} `json:"tools"`
 	}
 	if err := json.Unmarshal(data, &dump); err != nil {
@@ -119,23 +258,17 @@ func fieldsOf(data []byte) (map[string]toolFields, error) {
 	}
 	out := map[string]toolFields{}
 	for _, t := range dump.Tools {
-		f := toolFields{inputs: map[string]bool{}, required: map[string]bool{}, outputs: map[string]bool{}}
-		for p := range t.InputSchema.Properties {
-			f.inputs[p] = true
-		}
-		for _, r := range t.InputSchema.Required {
-			f.required[r] = true
-		}
-		for p := range t.OutputSchema.Properties {
-			f.outputs[p] = true
-		}
+		f := toolFields{inputs: map[string]string{}, outputs: map[string]string{}, required: map[string]bool{}}
+		t.InputSchema.walk("", f.inputs, f.required)
+		t.OutputSchema.walk("", f.outputs, map[string]bool{})
 		out[t.Name] = f
 	}
 	return out, nil
 }
 
 // brokenFields lists what a tool kept by name lost: an input or output
-// field removed, or an input newly required. A removed tool is the
+// field removed or retyped, or an input newly required. A field inside
+// one that was removed is not listed again. A removed tool is the
 // caller's to report.
 func brokenFields(prev, cur map[string]toolFields) []string {
 	var out []string
@@ -145,19 +278,29 @@ func brokenFields(prev, cur map[string]toolFields) []string {
 			continue
 		}
 		was := prev[name]
-		for _, f := range sortedKeys(was.inputs) {
-			if !now.inputs[f] {
-				out = append(out, fmt.Sprintf("%s: input field %s removed", name, f))
+		for _, side := range []struct {
+			what     string
+			was, now map[string]string
+		}{{"input", was.inputs, now.inputs}, {"output", was.outputs, now.outputs}} {
+			for _, f := range sortedKeys(side.was) {
+				t, still := side.now[f]
+				_, parentKept := side.now[parentPath(f)]
+				switch {
+				case !still && (parentPath(f) == "" || parentKept):
+					out = append(out, fmt.Sprintf("%s: %s field %s removed", name, side.what, f))
+				case still && t != side.was[f]:
+					out = append(out, fmt.Sprintf("%s: %s field %s changed type from %s to %s", name, side.what, f, side.was[f], t))
+				}
 			}
 		}
+		// A required field is new to a caller only where its parent was
+		// already there: inside an object that is itself new and
+		// optional, a caller who does not send the object is unaffected.
 		for _, f := range sortedKeys(now.required) {
-			if !was.required[f] {
+			parent := parentPath(f)
+			_, parentWas := was.inputs[parent]
+			if !was.required[f] && (parent == "" || parentWas) {
 				out = append(out, fmt.Sprintf("%s: input field %s newly required", name, f))
-			}
-		}
-		for _, f := range sortedKeys(was.outputs) {
-			if !now.outputs[f] {
-				out = append(out, fmt.Sprintf("%s: output field %s removed", name, f))
 			}
 		}
 	}
@@ -173,18 +316,24 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-func currentFields(bin string) (map[string]toolFields, error) {
-	out, err := exec.Command(bin, "--dump-schemas").Output()
+// dumpBytes runs the binary's schema dump with nowhere to find a
+// setting, as the smoke test runs it, so a GCAL_ variable in the
+// maintainer's shell cannot change the surface a gate compares or
+// records.
+func dumpBytes(bin string) ([]byte, error) {
+	cmd := exec.Command(bin, "--dump-schemas")
+	smokeEnv(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("run %s --dump-schemas: %w", bin, err)
 	}
-	return fieldsOf(out)
+	return out, nil
 }
 
 func dumpFrom(bin string) (map[string]string, error) {
-	out, err := exec.Command(bin, "--dump-schemas").Output()
+	out, err := dumpBytes(bin)
 	if err != nil {
-		return nil, fmt.Errorf("run %s --dump-schemas: %w", bin, err)
+		return nil, err
 	}
 	return parseDump(out)
 }
@@ -225,14 +374,6 @@ func parseDump(data []byte) (map[string]string, error) {
 	return out, nil
 }
 
-func lastTag() (string, error) {
-	out, err := exec.Command("git", "describe", "--tags", "--abbrev=0").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 // resourcePrefix distinguishes a resource from a tool in the one map
 // both gates join on: the schema diff builds these keys and live-cover
 // matches them against the driver's steps. It is a constant because a
@@ -246,87 +387,113 @@ const resourcePrefix = "resource "
 // surface map.
 func resourceKey(uri string) string { return resourcePrefix + uri }
 
-// dumpFromTag builds the binary as it was at tag, into a temp directory,
-// and returns its dump.
-func dumpFromTag(tag string) ([]byte, error) {
-	dir, err := os.MkdirTemp("", "schema-diff")
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-
-	worktree := dir + "/src"
-	if out, err := exec.Command("git", "worktree", "add", "--detach", worktree, tag).CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("worktree at %s: %w: %s", tag, err, out)
-	}
-	defer func() { _ = exec.Command("git", "worktree", "remove", "--force", worktree).Run() }()
-
-	bin := dir + "/old-binary"
-	build := exec.Command("go", "build", "-o", bin, "./cmd/google-calendar-mcp")
-	build.Dir = worktree
-	if out, err := build.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("build %s: %w: %s", tag, err, out)
-	}
-	out, err := exec.Command(bin, "--dump-schemas").Output()
-	if err != nil {
-		return nil, fmt.Errorf("run %s --dump-schemas: %w", bin, err)
-	}
-	return out, nil
-}
-
-// baselineFile is the recorded tool surface, used when no tag exists.
+// baselineFile is the surface of the newest release, recorded in that
+// release's commit.
 const baselineFile = "testdata/schema-baseline.json"
 
-// baseline returns the surface to diff against and what to call it.
+// baselineVersion is the release whose surface the baseline must hold:
+// the CHANGELOG's newest heading, or empty before the first release.
 //
-// The tag wins when there is one: it is the surface that actually
-// shipped. Otherwise the committed snapshot stands in, and refreshing it
-// is the deliberate act of saying the change has been looked at — which
-// is the same thing tagging says, at a smaller scale.
-func baseline(current map[string]string) (map[string]string, string, map[string]toolFields, error) {
-	data, against := []byte(nil), baselineFile
-	if tag, err := lastTag(); err == nil && tag != "" {
-		dump, derr := dumpFromTag(tag)
-		if derr != nil {
-			fmt.Printf("  could not read the surface at %s (%v); falling back to %s\n",
-				tag, derr, baselineFile)
-		} else {
-			data, against = dump, tag
+// Between releases that heading is the last tag. In a release commit it
+// is the release being cut, and the baseline is refreshed in that same
+// commit. Refreshing after the tag instead would fail every branch from
+// the moment the tag is pushed until a second change lands.
+func baselineVersion(changelog string) string {
+	for _, line := range strings.Split(changelog, "\n") {
+		rest, ok := strings.CutPrefix(line, "## [")
+		if !ok {
+			continue
+		}
+		v, _, ok := strings.Cut(rest, "]")
+		if ok && v != "Unreleased" {
+			return "v" + v
 		}
 	}
-	if data == nil {
-		var err error
-		data, err = os.ReadFile(baselineFile)
-		if os.IsNotExist(err) {
-			return nil, "", nil, nil
-		}
-		if err != nil {
-			return nil, "", nil, fmt.Errorf("read %s: %w", baselineFile, err)
-		}
-	}
-	previous, err := parseDump(data)
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("parse %s: %w", against, err)
-	}
-	fields, err := fieldsOf(data)
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("parse %s: %w", against, err)
-	}
-	return previous, against, fields, nil
+	return ""
 }
 
-// writeBaseline records the binary's current surface as the baseline.
+// writeBaseline records the surface of the release being cut as the
+// baseline. The release commit runs it, so the baseline lands with the
+// CHANGELOG heading that names it.
+//
+// It compares the build with the current baseline first, and refuses a
+// change that breaks a caller unless the release is a new major version,
+// which is what a break has to ship as. Overwriting first would leave
+// the diff comparing the release with itself.
 func writeBaseline(bin string) error {
-	out, err := exec.Command(bin, "--dump-schemas").Output()
+	out, err := dumpBytes(bin)
 	if err != nil {
-		return fmt.Errorf("run %s --dump-schemas: %w", bin, err)
-	}
-	if _, err := parseDump(out); err != nil {
-		return fmt.Errorf("the binary did not produce a readable surface: %w", err)
-	}
-	if err := os.WriteFile(baselineFile, out, 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("  recorded %s\n", baselineFile)
+	cur, err := readSurface(out)
+	if err != nil {
+		return fmt.Errorf("the binary did not produce a readable surface: %w", err)
+	}
+	raw, err := os.ReadFile(changelogPath)
+	if err != nil {
+		return err
+	}
+	want := baselineVersion(string(raw))
+	if want == "" {
+		return fmt.Errorf("%s names no release yet, so there is no surface to record", changelogPath)
+	}
+	if cur.version != want {
+		return fmt.Errorf("%s is stamped %q, but the release being cut is %s; build it with `make build VERSION=%s`",
+			bin, cur.version, want, want)
+	}
+	data, err := os.ReadFile(baselineFile)
+	switch {
+	case err == nil:
+		base, err := readSurface(data)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", baselineFile, err)
+		}
+		if breaking := compareSurfaces(base, cur); len(breaking) > 0 && !newMajor(base.version, want) {
+			msg := fmt.Sprintf("%s breaks a caller of %s in %d way(s) above, and is not a new major version; %s is unchanged",
+				want, base.version, len(breaking), baselineFile)
+			if base.version == want {
+				msg += fmt.Sprintf(". It already holds %s from an earlier run; restore the last release's "+
+					"baseline from its tag, then run this again", want)
+			}
+			return errors.New(msg)
+		}
+	case !os.IsNotExist(err):
+		return fmt.Errorf("read %s: %w", baselineFile, err)
+	}
+	if err := writeThrough(baselineFile, out); err != nil {
+		return fmt.Errorf("write %s: %w", baselineFile, err)
+	}
+	fmt.Printf("  %s is now the %s surface: %d tools and resources\n", baselineFile, want, len(cur.entries))
+	return nil
+}
+
+// newMajor reports whether release to is a later major version than
+// release from. An unreadable version is not.
+func newMajor(from, to string) bool {
+	major := func(v string) int {
+		head, _, _ := strings.Cut(strings.TrimPrefix(v, "v"), ".")
+		n, err := strconv.Atoi(head)
+		if err != nil {
+			return -1
+		}
+		return n
+	}
+	f, t := major(from), major(to)
+	return f >= 0 && t > f
+}
+
+// writeThrough writes path through a temporary file beside it and a
+// rename, so a failed write leaves whatever was there whole rather than
+// truncated or half-written.
+func writeThrough(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil { //nolint:gosec // a committed file, read by everyone
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
 	return nil
 }

@@ -106,7 +106,10 @@ func logCalls(lg *slog.Logger) mcp.Middleware {
 // SchemaDump is the stable description of the tool surface, for the
 // schema diff.
 type SchemaDump struct {
-	Server     string       `json:"server"`
+	Server string `json:"server"`
+	// Version is the build's, which is how the schema diff tells which
+	// release a recorded baseline holds.
+	Version    string       `json:"version"`
 	SDKVersion string       `json:"sdk_version"`
 	Tools      []SchemaTool `json:"tools"`
 	// Resources are part of the surface a client sees, so they are part
@@ -166,7 +169,7 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 		return fmt.Errorf("server: list tools: %w", err)
 	}
 
-	dump := SchemaDump{Server: Name, SDKVersion: SDKVersion}
+	dump := SchemaDump{Server: Name, Version: d.Version, SDKVersion: SDKVersion}
 	for _, t := range res.Tools {
 		st := SchemaTool{Name: t.Name, Description: t.Description}
 		if t.InputSchema != nil {

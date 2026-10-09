@@ -43,7 +43,9 @@ version is not go.mod's (`/vN`, or none for v0 and v1). `go install
   a tag is only a pointer.
 - A live run of anything that touched the write path or an API response
   shape, **with the transcript read**.
-- `make schema-diff`, read for anything breaking.
+- `make schema-baseline VERSION=vX.Y.Z` in the release-prep commit, after
+  the heading is renamed; `make schema-diff` fails until it is done. A
+  break is recorded only as a new major version.
 - `[Unreleased]` renamed to the version with the date, in a release-prep
   commit, saying exactly what shipped — with an empty `[Unreleased]`
   heading left above it, so day-2 commits have somewhere to land.

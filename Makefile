@@ -133,7 +133,7 @@ schema-diff: build gates ## Diff the tool schemas against the last tag, else the
 	@$(GATES) schema-diff $(BIN)
 
 .PHONY: schema-baseline
-schema-baseline: build gates ## Record the current tool surface as the baseline (deliberate; manual)
+schema-baseline: build gates ## Record the release being cut as the baseline: VERSION=vX.Y.Z, in its release commit
 	@$(GATES) schema-baseline $(BIN)
 
 .PHONY: smoke

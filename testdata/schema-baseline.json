@@ -1,5 +1,6 @@
 {
   "server": "google-calendar-mcp",
+  "version": "v3.0.1",
   "sdk_version": "v1.8.0",
   "tools": [
     {
@@ -48,6 +49,262 @@
         "required": [
           "calendar",
           "event_id"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "notification",
+          "time_zone",
+          "time_zone_source",
+          "api_requests"
         ],
         "type": "object"
       },
@@ -115,6 +372,136 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendars": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "busy": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "end": {
+                        "type": "string"
+                      },
+                      "minutes": {
+                        "type": "integer"
+                      },
+                      "start": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end",
+                      "minutes"
+                    ],
+                    "type": "object"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "calendar_id": {
+                  "type": "string"
+                },
+                "unknown": {
+                  "type": "boolean"
+                },
+                "unknown_reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "calendar_id",
+                "busy"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "free": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "end": {
+                  "type": "string"
+                },
+                "minutes": {
+                  "type": "integer"
+                },
+                "start": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "start",
+                "end",
+                "minutes"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "free_computed_from": {
+            "type": "integer"
+          },
+          "min_minutes": {
+            "type": "integer"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          },
+          "unknown_calendars": {
+            "type": "integer"
+          },
+          "window": {
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "type": "object"
+          },
+          "working_hours": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "window",
+          "time_zone",
+          "time_zone_source",
+          "calendars",
+          "free",
+          "free_computed_from",
+          "unknown_calendars",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "idempotentHint": true,
         "openWorldHint": false,
@@ -142,6 +529,160 @@
         },
         "required": [
           "calendar"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": "object"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "api_requests"
         ],
         "type": "object"
       },
@@ -181,6 +722,160 @@
         },
         "required": [
           "title"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": "object"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "api_requests"
         ],
         "type": "object"
       },
@@ -269,6 +964,262 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "notification",
+          "time_zone",
+          "time_zone_source",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": false,
@@ -300,6 +1251,160 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": "object"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": false,
@@ -316,6 +1421,108 @@
           "calendar": {
             "description": "The calendar id, its title, or \"primary\" for the account's own calendar.",
             "type": "string"
+          }
+        },
+        "required": [
+          "calendar"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": "object"
+          },
+          "description": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "sharing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
           }
         },
         "required": [
@@ -354,6 +1561,147 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "attendees": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "optional": {
+                  "type": "boolean"
+                },
+                "organizer": {
+                  "type": "boolean"
+                },
+                "resource": {
+                  "type": "boolean"
+                },
+                "response": {
+                  "type": "string"
+                },
+                "self": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "email",
+                "response"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": "object"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "event",
+          "time_zone",
+          "time_zone_source"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "idempotentHint": true,
         "openWorldHint": false,
@@ -365,6 +1713,39 @@
       "description": "The account's own Calendar settings: its time zone, which day the week starts on, and the color palette. The time zone here is the last fallback for every other tool, so read it when you need to know what \"today\" or \"9am\" means for this person.",
       "input_schema": {
         "additionalProperties": false,
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar_colors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "event_colors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "format_24_hour": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "week_start": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "time_zone"
+        ],
         "type": "object"
       },
       "annotations": {
@@ -384,6 +1765,73 @@
             "type": "boolean"
           }
         },
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendars": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "access_role": {
+                  "type": "string"
+                },
+                "access_role_means": {
+                  "type": "string"
+                },
+                "can_write": {
+                  "type": "boolean"
+                },
+                "color_id": {
+                  "type": "string"
+                },
+                "hidden": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "original_title": {
+                  "type": "string"
+                },
+                "primary": {
+                  "type": "boolean"
+                },
+                "selected": {
+                  "type": "boolean"
+                },
+                "time_zone": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "time_zone",
+                "access_role",
+                "access_role_means",
+                "selected",
+                "can_write"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "calendars",
+          "count"
+        ],
         "type": "object"
       },
       "annotations": {
@@ -421,6 +1869,154 @@
         },
         "required": [
           "calendar"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "api_requests": {
+            "type": "integer"
+          },
+          "baseline": {
+            "type": "boolean"
+          },
+          "calendar_id": {
+            "type": "string"
+          },
+          "calendar_name": {
+            "type": "string"
+          },
+          "changed": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "all_day": {
+                  "type": "boolean"
+                },
+                "calendar_id": {
+                  "type": "string"
+                },
+                "conference_status": {
+                  "type": "string"
+                },
+                "conference_uri": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "end": {
+                  "type": "string"
+                },
+                "end_date": {
+                  "type": "string"
+                },
+                "etag": {
+                  "type": "string"
+                },
+                "event_type": {
+                  "type": "string"
+                },
+                "free_not_busy": {
+                  "type": "boolean"
+                },
+                "guest_count": {
+                  "type": "integer"
+                },
+                "guest_list_truncated": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "link": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "string"
+                },
+                "organizer": {
+                  "type": "string"
+                },
+                "recurrence": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "recurrence_means": {
+                  "type": "string"
+                },
+                "series_id": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": "string"
+                },
+                "start_date": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "calendar_id",
+                "title",
+                "all_day"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "deleted": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_page_token": {
+            "type": "string"
+          },
+          "skipped": {
+            "type": "integer"
+          },
+          "sync_token": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar_id",
+          "time_zone",
+          "time_zone_source",
+          "baseline",
+          "changed",
+          "deleted",
+          "complete",
+          "api_requests"
         ],
         "type": "object"
       },
@@ -481,6 +2077,166 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendars": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "events": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "all_day": {
+                  "type": "boolean"
+                },
+                "calendar_id": {
+                  "type": "string"
+                },
+                "conference_status": {
+                  "type": "string"
+                },
+                "conference_uri": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "end": {
+                  "type": "string"
+                },
+                "end_date": {
+                  "type": "string"
+                },
+                "etag": {
+                  "type": "string"
+                },
+                "event_type": {
+                  "type": "string"
+                },
+                "free_not_busy": {
+                  "type": "boolean"
+                },
+                "guest_count": {
+                  "type": "integer"
+                },
+                "guest_list_truncated": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "link": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "string"
+                },
+                "organizer": {
+                  "type": "string"
+                },
+                "recurrence": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "recurrence_means": {
+                  "type": "string"
+                },
+                "series_id": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": "string"
+                },
+                "start_date": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "calendar_id",
+                "title",
+                "all_day"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "next_page_token": {
+            "type": "string"
+          },
+          "recurring_expanded": {
+            "type": "boolean"
+          },
+          "shown": {
+            "type": "integer"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "window": {
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "window",
+          "time_zone",
+          "time_zone_source",
+          "calendars",
+          "recurring_expanded",
+          "events",
+          "shown",
+          "matched",
+          "truncated",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "idempotentHint": true,
         "openWorldHint": false,
@@ -532,6 +2288,174 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendar_id": {
+            "type": "string"
+          },
+          "canceled_hidden": {
+            "type": "boolean"
+          },
+          "instances": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "all_day": {
+                  "type": "boolean"
+                },
+                "calendar_id": {
+                  "type": "string"
+                },
+                "canceled": {
+                  "type": "boolean"
+                },
+                "conference_status": {
+                  "type": "string"
+                },
+                "conference_uri": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "end": {
+                  "type": "string"
+                },
+                "end_date": {
+                  "type": "string"
+                },
+                "etag": {
+                  "type": "string"
+                },
+                "event_type": {
+                  "type": "string"
+                },
+                "free_not_busy": {
+                  "type": "boolean"
+                },
+                "guest_count": {
+                  "type": "integer"
+                },
+                "guest_list_truncated": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "link": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "string"
+                },
+                "moved": {
+                  "type": "boolean"
+                },
+                "organizer": {
+                  "type": "string"
+                },
+                "original_start": {
+                  "type": "string"
+                },
+                "recurrence": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "recurrence_means": {
+                  "type": "string"
+                },
+                "series_id": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": "string"
+                },
+                "start_date": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "calendar_id",
+                "title",
+                "all_day"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "next_page_token": {
+            "type": "string"
+          },
+          "series_id": {
+            "type": "string"
+          },
+          "shown": {
+            "type": "integer"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "window": {
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          }
+        },
+        "required": [
+          "series_id",
+          "calendar_id",
+          "time_zone",
+          "time_zone_source",
+          "instances",
+          "shown",
+          "truncated",
+          "canceled_hidden",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "idempotentHint": true,
         "openWorldHint": false,
@@ -551,6 +2475,159 @@
         },
         "required": [
           "calendar"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendar_id": {
+            "type": "string"
+          },
+          "changed": {
+            "additionalProperties": false,
+            "properties": {
+              "public": {
+                "type": "boolean"
+              },
+              "role": {
+                "type": "string"
+              },
+              "role_means": {
+                "type": "string"
+              },
+              "rule_id": {
+                "type": "string"
+              },
+              "scope_type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "who": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "who",
+              "scope_type",
+              "role",
+              "role_means"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "sharing_before": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "calendar_id",
+          "sharing",
+          "public",
+          "api_requests"
         ],
         "type": "object"
       },
@@ -654,6 +2731,160 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "additionalProperties": false,
+            "properties": {
+              "access_role": {
+                "type": "string"
+              },
+              "access_role_means": {
+                "type": "string"
+              },
+              "can_write": {
+                "type": "boolean"
+              },
+              "color_id": {
+                "type": "string"
+              },
+              "hidden": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "original_title": {
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "selected": {
+                "type": "boolean"
+              },
+              "time_zone": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "time_zone",
+              "access_role",
+              "access_role_means",
+              "selected",
+              "can_write"
+            ],
+            "type": "object"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
@@ -712,6 +2943,262 @@
           "calendar",
           "event_id",
           "to_calendar"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "notification",
+          "time_zone",
+          "time_zone_source",
+          "api_requests"
         ],
         "type": "object"
       },
@@ -780,6 +3267,262 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "notification",
+          "time_zone",
+          "time_zone_source",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
@@ -835,6 +3578,166 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendars": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "events": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "all_day": {
+                  "type": "boolean"
+                },
+                "calendar_id": {
+                  "type": "string"
+                },
+                "conference_status": {
+                  "type": "string"
+                },
+                "conference_uri": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "end": {
+                  "type": "string"
+                },
+                "end_date": {
+                  "type": "string"
+                },
+                "etag": {
+                  "type": "string"
+                },
+                "event_type": {
+                  "type": "string"
+                },
+                "free_not_busy": {
+                  "type": "boolean"
+                },
+                "guest_count": {
+                  "type": "integer"
+                },
+                "guest_list_truncated": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "link": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "string"
+                },
+                "organizer": {
+                  "type": "string"
+                },
+                "recurrence": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": [
+                    "null",
+                    "array"
+                  ]
+                },
+                "recurrence_means": {
+                  "type": "string"
+                },
+                "series_id": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": "string"
+                },
+                "start_date": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "calendar_id",
+                "title",
+                "all_day"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "next_page_token": {
+            "type": "string"
+          },
+          "recurring_expanded": {
+            "type": "boolean"
+          },
+          "shown": {
+            "type": "integer"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "window": {
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "window",
+          "time_zone",
+          "time_zone_source",
+          "calendars",
+          "recurring_expanded",
+          "events",
+          "shown",
+          "matched",
+          "truncated",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "idempotentHint": true,
         "openWorldHint": false,
@@ -883,6 +3786,159 @@
         ],
         "type": "object"
       },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendar_id": {
+            "type": "string"
+          },
+          "changed": {
+            "additionalProperties": false,
+            "properties": {
+              "public": {
+                "type": "boolean"
+              },
+              "role": {
+                "type": "string"
+              },
+              "role_means": {
+                "type": "string"
+              },
+              "rule_id": {
+                "type": "string"
+              },
+              "scope_type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "who": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "who",
+              "scope_type",
+              "role",
+              "role_means"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "sharing_before": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "calendar_id",
+          "sharing",
+          "public",
+          "api_requests"
+        ],
+        "type": "object"
+      },
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": false,
@@ -916,6 +3972,159 @@
         "required": [
           "calendar",
           "who"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendar_id": {
+            "type": "string"
+          },
+          "changed": {
+            "additionalProperties": false,
+            "properties": {
+              "public": {
+                "type": "boolean"
+              },
+              "role": {
+                "type": "string"
+              },
+              "role_means": {
+                "type": "string"
+              },
+              "rule_id": {
+                "type": "string"
+              },
+              "scope_type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "who": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "who",
+              "scope_type",
+              "role",
+              "role_means"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "sharing_before": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "calendar_id",
+          "sharing",
+          "public",
+          "api_requests"
         ],
         "type": "object"
       },
@@ -1038,6 +4247,262 @@
         "required": [
           "calendar",
           "event_id"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "notification",
+          "time_zone",
+          "time_zone_source",
+          "api_requests"
         ],
         "type": "object"
       },

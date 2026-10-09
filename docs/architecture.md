@@ -1437,20 +1437,26 @@ task's calendar, offers the tool list and asserts every task FAILS on a
 calendar nobody touched — a scorer that passes there is scoring nothing,
 and without this in `check` that would be found by spending money.
 
-`schema-diff` compares the built tool surface against the last tag, and
-against `testdata/schema-baseline.json` when there is no tag. The
-fallback exists because there was no tag: the gate reported "no previous
-tag" on every run from the first commit onward, which is the whole
-stretch where the surface changes most — inert exactly when it was most
-needed. `make schema-baseline` records the current surface, and
-refreshing it is the deliberate act of saying the change has been looked
-at, which is what tagging says at a larger scale. The gate fails on what
-breaks a caller: a tool or resource removed, an input or output field
-removed, or an input newly required. Anything else that changed is
-reported for a person to read. Until 2026-10-09 it reported and never
-failed, and the dump carried no output schemas, so a lost output field
-could not be seen at all; a tag cut before then still compares inputs
-only.
+`schema-diff` compares the built tool surface against
+`testdata/schema-baseline.json`, the surface of the CHANGELOG's newest
+release, recorded in that release's commit by `make schema-baseline
+VERSION=vX.Y.Z`. It used to diff against the last tag, with the file as
+a fallback, and that was wrong twice: CI's checkout is shallow and has
+no tags, so CI always used the file, which nobody refreshed; and a
+deliberate break had no way through locally, because the tag always
+won. The gate fails on what breaks a caller: a tool or resource removed;
+an input or output field removed or retyped at any depth, `events[].start`
+as much as `events`; or an input newly required where its parent was
+already there. Anything else that changed is reported for a person to
+read. It also fails when the baseline is not the newest release's, and,
+with nothing under `[Unreleased]`, when the build differs from the
+baseline at all, which proves a release commit recorded the baseline
+rather than relabeling it. `schema-baseline` refuses a build stamped
+with another version, and a break unless the release is a new major
+version. The dump runs with nowhere to find a setting, so a `GCAL_`
+variable in the maintainer's shell cannot change the surface. The
+baseline was recorded from the v3.0.1 tag with the dump's output
+schemas backported, so outputs are held from v3.0.1 on.
 
 `mcpb`, the bundle manifest gate, is the one this list named before it
 existed. It was built in phase 4 with the bundle, and runs in `make
