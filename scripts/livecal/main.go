@@ -93,12 +93,21 @@ func main() {
 	// calendar and the calendars this run made (§9.1). A second signal
 	// exits at once, after the first has said what that leaves behind.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	finished := make(chan struct{})
 	go func() {
 		<-ctx.Done()
+		select {
+		case <-finished:
+			// The stop below ended the context, not a signal: a run that
+			// finished was reported as interrupted.
+			return
+		default:
+		}
 		primaryCal.interrupted(out)
 		stop()
 	}()
 	code := run(ctx, out, *bin, *profile, *keep)
+	close(finished)
 	stop()
 	os.Exit(code)
 }
@@ -466,6 +475,13 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 	s.person.next = st.answer
 	res, err := s.callFor(ctx, st, st.arguments())
 	s.person.next = ""
+	if err != nil && ctx.Err() != nil {
+		// Cut short by the interrupt rather than failed by the server:
+		// what it would have answered is not known.
+		r.undetermined++
+		r.out.Printf("?     %-28s not run: the driver was interrupted during it (%v)\n", st.name, err)
+		return
+	}
 	if err != nil {
 		r.failed++
 		r.out.Printf("FAIL  %-28s transport: %v\n", st.name, err)

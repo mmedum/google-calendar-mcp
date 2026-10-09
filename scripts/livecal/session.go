@@ -71,7 +71,13 @@ type callResult struct {
 }
 
 func startServer(ctx context.Context, bin, profile string, p *person) (*session, error) {
-	cmd := exec.CommandContext(ctx, bin)
+	// Not tied to ctx, and in a process group of its own: an interrupt
+	// stops the driver's steps, and the server must outlive it, so the
+	// call in flight completes and close ends the server after the
+	// cleanup. Bound to ctx, or sent the terminal's Ctrl-C with the
+	// driver, it died mid-call and the step read as a failure.
+	cmd := exec.Command(bin)
+	ownGroup(cmd)
 	// The server must read the same login the driver set up with, or the
 	// two halves of the run would be looking at different accounts.
 	//

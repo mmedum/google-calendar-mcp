@@ -93,7 +93,9 @@ What it does to the account, so nothing is a surprise:
   other calendar can hold one: about a year ahead, titled "Livecal status
   probe", declining nothing, and deleted by its id before the run ends.
   Ctrl-C or SIGTERM stops the steps, not the cleanup, and says what to
-  delete if you stop it a second time. Nothing else there is written; a
+  delete if you stop it a second time. The server runs in a process
+  group of its own, so the call in flight finishes; a step the stop cuts
+  short counts as not run, never as failed. Nothing else there is written; a
   guard in the driver refuses it, on the server's tools and on its own
   calls, a move's destination included, and `make cover` tests the guard
   without an account. `-status-type` picks out of office (the default),
