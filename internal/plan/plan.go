@@ -15,6 +15,7 @@ package plan
 import (
 	"errors"
 	"fmt"
+	"net/mail"
 	"slices"
 	"strings"
 
@@ -596,6 +597,61 @@ func guestList(before []gcal.EventAttendee, add []gcal.EventAttendee, remove []s
 		From:  fmt.Sprintf("%d", len(before)),
 		To:    fmt.Sprintf("%d (%d added, %d removed)", len(out), added, removed),
 	}, nil
+}
+
+// Address takes one address as a person or another server writes it —
+// bare, or as an RFC 5322 mailbox with a display name, such as
+// "Jane Doe" <jane@example.test> — and returns the bare address. A Gmail
+// server hands addresses over in the second form.
+//
+// The display name is dropped here and goes nowhere: not to Google, not
+// to a result, not to a log. One address per entry: a list in one string
+// is refused rather than split, because which entries the caller meant
+// as one guest is not this server's to guess.
+func Address(v, what string) (string, error) {
+	v = strings.TrimSpace(v)
+	a, err := mail.ParseAddress(v)
+	if err != nil {
+		if list, lerr := mail.ParseAddressList(v); lerr == nil && len(list) > 1 {
+			return "", fmt.Errorf("%w: %q holds %d addresses in one entry. Give each as its own entry",
+				ErrInvalid, v, len(list))
+		}
+		return "", fmt.Errorf("%w: %q is not an email address, so it cannot be %s", ErrInvalid, v, what)
+	}
+	if err := validAddress(a.Address, what); err != nil {
+		return "", err
+	}
+	return a.Address, nil
+}
+
+// BareAddresses replaces every address in the draft with the bare one
+// Address returns, and drops blank entries. It runs before anything
+// reads the lists, so the reach count, the guest list, the request and
+// the result all see one spelling.
+func (d *Draft) BareAddresses() error {
+	for _, list := range []struct {
+		addrs *[]string
+		what  string
+	}{
+		{&d.AddGuests, "a guest"},
+		{&d.AddOptional, "an optional guest"},
+		{&d.AddRooms, "a room"},
+		{&d.RemoveGuests, "a guest"},
+	} {
+		var bare []string
+		for _, a := range *list.addrs {
+			if strings.TrimSpace(a) == "" {
+				continue
+			}
+			b, err := Address(a, list.what)
+			if err != nil {
+				return err
+			}
+			bare = append(bare, b)
+		}
+		*list.addrs = bare
+	}
+	return nil
 }
 
 // validAddress refuses something that is not an address before it

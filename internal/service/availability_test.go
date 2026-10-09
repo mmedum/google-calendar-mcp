@@ -552,3 +552,22 @@ func TestAGroupPastFiftyCalendarsIsAnswered(t *testing.T) {
 		})
 	}
 }
+
+// A mailbox is asked about by its address, and the answer names the bare
+// one.
+func TestAvailabilityTakesAMailbox(t *testing.T) {
+	fake := caltest.Seed()
+	svc := newService(t, fake)
+	o := day("2026-03-16", "2026-03-16")
+	o.Calendars = []string{`"Sample Team" <team@group.calendar.example.test>`}
+	got, err := svc.Availability(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Availability: %v", err)
+	}
+	if len(got.Answers) != 1 || got.Answers[0].CalendarID != "team@group.calendar.example.test" || got.Answers[0].Unknown {
+		t.Fatalf("answers %+v, want the team calendar by its bare address", got.Answers)
+	}
+	if asked := fake.FreeBusyAsked.Items; len(asked) != 1 || asked[0].ID != "team@group.calendar.example.test" {
+		t.Fatalf("asked Google about %+v, want the bare address", asked)
+	}
+}

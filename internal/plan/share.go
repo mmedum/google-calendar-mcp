@@ -53,6 +53,16 @@ const (
 func ParseAudience(who, scopeType string, existing []model.Sharing) (Audience, error) {
 	who = strings.TrimSpace(who)
 	scopeType = strings.TrimSpace(strings.ToLower(scopeType))
+	if strings.Contains(who, "@") {
+		// A mailbox with a display name shares with its address, and the
+		// rule, the match against existing rules and the result all carry
+		// the bare one.
+		bare, err := Address(who, "somebody to share with")
+		if err != nil {
+			return Audience{}, err
+		}
+		who = bare
+	}
 
 	if scopeType != "" {
 		return audienceFromType(who, scopeType)

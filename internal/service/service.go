@@ -24,6 +24,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
 )
@@ -1325,6 +1326,15 @@ func (s *Service) freeBusyTargets(ctx context.Context, refs []string) (ids []str
 	seen := map[string]bool{}
 	for _, ref := range refs {
 		ref = strings.TrimSpace(ref)
+		if strings.Contains(ref, "@") {
+			// A mailbox with a display name is asked about by its address,
+			// and the answer names the bare one.
+			bare, aerr := plan.Address(ref, "a calendar to check")
+			if aerr != nil {
+				return nil, "", classifyPlan(aerr)
+			}
+			ref = bare
+		}
 		id := ref
 		if ref == "" || strings.EqualFold(ref, "primary") || !strings.Contains(ref, "@") {
 			c, rerr := s.ResolveCalendar(ctx, ref)

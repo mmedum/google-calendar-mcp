@@ -397,6 +397,56 @@ func TestOptionalGuestsRefuseRoomsAndDoubleRoles(t *testing.T) {
 	}
 }
 
+// A guest given as a mailbox, the way a Gmail server hands one over, is
+// invited, counted and removed by its bare address. The reach count reads
+// the domain the address has rather than the bracket after it, so none
+// is allowed for a guest inside the domain and refused for one outside.
+// The display name goes nowhere.
+func TestAGuestGivenAsAMailboxIsItsAddress(t *testing.T) {
+	svc, fake := writeSeed(t)
+	create := func(guest, notify string) (render.WriteReport, error) {
+		return svc.CreateEvent(context.Background(), service.CreateOptions{
+			Calendar: "primary", Title: "Mailbox", Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
+			Guests: []string{guest}, Notify: notify,
+		})
+	}
+	out, err := create(`"Sample Colleague" <colleague@example.test>`, "none")
+	if err != nil {
+		t.Fatalf("a guest inside the domain, given as a mailbox, with none: %v", err)
+	}
+	got := fake.Events["me@example.test"][out.After.ID].Attendees
+	if len(got) != 1 || got[0].Email != "colleague@example.test" {
+		t.Fatalf("attendees %+v, want the bare address", got)
+	}
+	body, err := json.Marshal(service.NewWriteResult(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body)+out.Text(), "Sample Colleague") {
+		t.Fatal("the display name reached the result")
+	}
+
+	if _, err := create(`"Sample Partner" <partner@elsewhere.test>`, "none"); classOf(t, err) != gapi.ClassBlocked {
+		t.Fatalf("none for an outside guest given as a mailbox: %v, want [blocked]", err)
+	}
+	_, err = create(`one@example.test, two@example.test`, "all")
+	if classOf(t, err) != gapi.ClassInvalid || !strings.Contains(err.Error(), "holds 2 addresses in one entry") {
+		t.Fatalf("two addresses in one entry: %v, want [invalid]", err)
+	}
+
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evguests001", Notify: "all",
+		RemoveGuests: []string{`Sample Partner <partner@elsewhere.test>`},
+	}); err != nil {
+		t.Fatalf("removing a guest given as a mailbox: %v", err)
+	}
+	for _, a := range fake.Events["me@example.test"]["evguests001"].Attendees {
+		if a.Email == "partner@elsewhere.test" {
+			t.Fatal("the guest given as a mailbox was not removed")
+		}
+	}
+}
+
 // §4.3.5: dry_run shows the blast radius and writes nothing.
 func TestDryRunWritesNothing(t *testing.T) {
 	svc, fake := writeSeed(t)

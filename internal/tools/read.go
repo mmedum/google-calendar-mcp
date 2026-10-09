@@ -288,7 +288,7 @@ type listChangesIn struct {
 }
 
 type checkAvailabilityIn struct {
-	Calendars   []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read."`
+	Calendars   []string `json:"calendars,omitempty" jsonschema:"Calendar ids, email addresses or titles. Defaults to the account's primary calendar. An address works even for a calendar you cannot read, and may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used."`
 	From        string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
 	To          string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
 	TimeZone    string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`

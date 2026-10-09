@@ -354,6 +354,9 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 		lines := o.Recurrence
 		draft.Recurrence = &lines
 	}
+	if err := draft.BareAddresses(); err != nil {
+		return render.WriteReport{}, classifyPlan(err)
+	}
 
 	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organizer, draft.Invites()))
 	if err != nil {
@@ -528,6 +531,9 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 		Start: o.Start, End: o.End,
 		Recurrence: o.Recurrence, AddGuests: o.AddGuests, RemoveGuests: o.RemoveGuests,
 		AddRooms: o.AddRooms, AddOptional: o.AddOptionalGuests, Transparent: o.Transparent,
+	}
+	if err := draft.BareAddresses(); err != nil {
+		return render.WriteReport{}, classifyPlan(err)
 	}
 	if draft.Empty() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,

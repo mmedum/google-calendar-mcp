@@ -225,7 +225,7 @@ type listSharingIn struct {
 
 type shareCalendarIn struct {
 	Calendar    string `json:"calendar" jsonschema:"The calendar to share. You must own it."`
-	Who         string `json:"who" jsonschema:"An email address, a group address, a domain, or \"anyone\" for the public internet. Required."`
+	Who         string `json:"who" jsonschema:"An email address, a group address, a domain, or \"anyone\" for the public internet. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
 	ScopeType   string `json:"scope_type,omitempty" jsonschema:"user, group, domain or default. Optional: an address is read as one person unless a rule for it already exists."`
 	Role        string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Required."`
 	Notify      string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
@@ -235,7 +235,7 @@ type shareCalendarIn struct {
 
 type unshareCalendarIn struct {
 	Calendar  string `json:"calendar" jsonschema:"The calendar to stop sharing. You must own it."`
-	Who       string `json:"who" jsonschema:"The address, domain, or \"anyone\", whose access should go. Required."`
+	Who       string `json:"who" jsonschema:"The address, domain, or \"anyone\", whose access should go. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
 	ScopeType string `json:"scope_type,omitempty" jsonschema:"user, group, domain or default, when the address alone is ambiguous."`
 	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"Report whose access would go, without writing."`
 }

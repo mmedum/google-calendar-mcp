@@ -404,3 +404,32 @@ func TestAConferenceIsOnlyAttachedAtCreation(t *testing.T) {
 		t.Fatalf("the request does not carry the event id: %s", e.ConferenceData)
 	}
 }
+
+// A Gmail server hands an address over as an RFC 5322 mailbox, with a
+// display name. It is taken as its bare address, which is all that goes
+// on. A list in one entry is refused rather than split.
+func TestAMailboxIsTakenAsItsBareAddress(t *testing.T) {
+	for in, want := range map[string]string{
+		`"Sample Person" <person@example.test>`:  "person@example.test",
+		`"Person, Sample" <person@example.test>`: "person@example.test",
+		`Sample Person <person@example.test>`:    "person@example.test",
+		`<person@example.test>`:                  "person@example.test",
+		` person@example.test `:                  "person@example.test",
+	} {
+		got, err := plan.Address(in, "a guest")
+		if err != nil || got != want {
+			t.Errorf("Address(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for in, want := range map[string]string{
+		`"One" <one@example.test>, "Two" <two@example.test>`: "holds 2 addresses in one entry",
+		`one@example.test, two@example.test`:                 "holds 2 addresses in one entry",
+		`Sample Person`:                                      "is not an email address",
+		`person@localhost`:                                   "is not an email address",
+	} {
+		_, err := plan.Address(in, "a guest")
+		if !errors.Is(err, plan.ErrInvalid) || !strings.Contains(err.Error(), want) {
+			t.Errorf("Address(%q): %v, want invalid saying %q", in, err, want)
+		}
+	}
+}

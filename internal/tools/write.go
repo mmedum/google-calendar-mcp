@@ -28,6 +28,9 @@ const scopeHelp = "`scope` is REQUIRED when the event repeats, and there is no d
 const dryRunHelp = "`dry_run: true` reports exactly what would change and how many guests would be emailed, " +
 	"without writing anything. Use it when you are not certain which event or which occurrence you have."
 
+const addressHelp = "An address may be bare or a mailbox such as \"Sample Person\" <person@example.com>, the way a " +
+	"mail server hands one over; only the address is used, and one entry holds one address."
+
 const etagHelp = "Every write is a patch under If-Match, so it is refused as `[stale]` rather than " +
 	"overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held " +
 	"to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\"."
@@ -47,7 +50,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"still being made, read the event again to get it rather than promising anybody a link. A " +
 			"link can only be attached as the event is created; this server cannot add one afterward. " +
 			"`optional_guests` invites people as optional; they are emailed like any guest, so they make " +
-			"notify required too. A room cannot be optional. " +
+			"notify required too. A room cannot be optional. " + addressHelp + " " +
 			notifyHelp + " " + dryRunHelp,
 		Kind: Write,
 		Handle: func(ctx context.Context, in createEventIn) (service.WriteResult, error) {
@@ -74,7 +77,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"guests added with `add_optional_guests`, and rooms booked with `add_rooms`, applied to " +
 			"the list as it is read, so somebody else's RSVP arriving in between is reported rather than " +
 			"overwritten. An address already on the event keeps the role it has, and the result names it: " +
-			"this server does not make a guest optional or required. " + scopeHelp + " " +
+			"this server does not make a guest optional or required. " + addressHelp + " " + scopeHelp + " " +
 			"`this_and_following` is two calls: the original series is ended before this occurrence and a " +
 			"NEW series starts at it with a new id, and any exception after this occurrence is reset. The " +
 			"result says so. " + notifyHelp + " " + etagHelp + " " + dryRunHelp + " " +

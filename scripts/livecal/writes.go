@@ -465,6 +465,47 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
+			// §18 row 93: a guest given as a mailbox, as a Gmail server
+			// hands one over, is its bare address. A dry run, so the
+			// address is never sent anywhere.
+			name: "a guest given as a mailbox",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"event_id": w.created, "add_guests": []string{`"Livecal Nobody" <` + outsideGuest + `>`},
+					"notify": "external_only", "dry_run": true,
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "a mailbox was refused: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "1 added") {
+					return fail, "the dry run does not add the one guest"
+				}
+				if strings.Contains(r.text, "Livecal Nobody") {
+					return fail, "the display name reached the result"
+				}
+				return pass, "taken as its bare address, the display name dropped"
+			},
+		},
+		{
+			name: "two addresses in one entry refused",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{
+					"event_id": w.created, "add_guests": []string{outsideGuest + ", " + outsideGuest},
+					"notify": "external_only", "dry_run": true,
+				})
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[invalid]") {
+					return fail, "a list in one entry was not refused as invalid: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid]"
+			},
+		},
+		{
 			// §4.4: the etag the caller decided on is held to. The one
 			// captured above is now the previous version.
 			name: "stale etag refused",
