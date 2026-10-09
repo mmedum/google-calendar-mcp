@@ -89,7 +89,7 @@ type Draft struct {
 	// Reminders replaces this account's reminders for the event. Nil
 	// leaves them. Google keeps them per person, so a write that changes
 	// only them reaches nobody (OnlyReminders).
-	Reminders *Reminders
+	Reminders *model.Reminders
 	// Visibility is default, public or private. Nil leaves it.
 	Visibility *string
 	// What a guest may do. Nil leaves each as it is.
@@ -104,7 +104,8 @@ type Draft struct {
 	Conference bool
 
 	// Status makes a new event a status event: out of office, focus time
-	// or a working location. Nil for an ordinary one. Insert only.
+	// or a working location. Nil, or one naming no type and no setting,
+	// is an ordinary event. Insert only.
 	Status *Status
 }
 
@@ -126,31 +127,24 @@ func (d Draft) OnlyReminders() bool {
 	return d.Reminders != nil && rest.Empty()
 }
 
-// Reminders is a reminder set a caller asks for: back to the calendar's
-// own, or exactly the popups and emails given, in minutes before the
-// start. Both lists empty, and not Default, means no reminders.
-type Reminders struct {
-	Default bool
-	Popup   []int
-	Email   []int
-}
-
-// NewReminders reads the three reminder inputs, and is nil when none was
-// given. Giving either list replaces the whole set, so a list left out
-// is empty rather than kept. defaults puts the event back on the
-// calendar's own reminders and cannot go with a list.
-func NewReminders(defaults bool, popup, email *[]int) (*Reminders, error) {
+// NewReminders reads the three reminder inputs into the set a caller asks
+// for, and is nil when none was given: back to the calendar's own, or
+// exactly the popups and emails given, in minutes before the start.
+// Giving either list replaces the whole set, so a list left out is empty
+// rather than kept. defaults puts the event back on the calendar's own
+// reminders and cannot go with a list.
+func NewReminders(defaults bool, popup, email *[]int) (*model.Reminders, error) {
 	if popup == nil && email == nil {
 		if !defaults {
 			return nil, nil
 		}
-		return &Reminders{Default: true}, nil
+		return &model.Reminders{Default: true}, nil
 	}
 	if defaults {
 		return nil, fmt.Errorf("%w: default_reminders puts the event back on the calendar's own reminders, "+
 			"and popup_reminders or email_reminders replaces them. Pass one or the other", ErrInvalid)
 	}
-	r := &Reminders{}
+	r := &model.Reminders{}
 	if popup != nil {
 		r.Popup = slices.Clone(*popup)
 	}
@@ -182,8 +176,8 @@ func NewReminders(defaults bool, popup, email *[]int) (*Reminders, error) {
 	return r, nil
 }
 
-// wire is the reminder set as Google takes it.
-func (r Reminders) wire() *gcal.EventReminders {
+// remindersWire is a reminder set as Google takes it.
+func remindersWire(r model.Reminders) *gcal.EventReminders {
 	if r.Default {
 		return &gcal.EventReminders{UseDefault: true}
 	}
@@ -226,7 +220,8 @@ func remindersText(r *gcal.EventReminders) string {
 
 // visibilities are the values a write may send, in order of how many
 // people see the details: public to all readers of the calendar, default
-// as the calendar decides, private to the guests alone.
+// as the calendar decides, private to the guests alone. Google ranks only
+// public below private; default in the middle is a belief (§18 row 101).
 var visibilities = []string{gcal.VisibilityPublic, gcal.VisibilityDefault, gcal.VisibilityPrivate}
 
 // visibilityRank orders a visibility from least to most restrictive. An
@@ -386,7 +381,7 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 	setBool("guests_can_see_other_guests", orTrue(before.GuestsCanSeeOtherGuests), d.GuestsCanSeeOtherGuests,
 		&p.GuestsCanSeeOtherGuests)
 	if d.Reminders != nil {
-		to := d.Reminders.wire()
+		to := remindersWire(*d.Reminders)
 		from, next := remindersText(before.Reminders), remindersText(to)
 		if from != next {
 			p.Reminders = to
@@ -491,7 +486,7 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 		e.Visibility = v
 	}
 	if d.Reminders != nil {
-		e.Reminders = d.Reminders.wire()
+		e.Reminders = remindersWire(*d.Reminders)
 	}
 	if d.GuestsCanModify != nil {
 		e.GuestsCanModify = *d.GuestsCanModify

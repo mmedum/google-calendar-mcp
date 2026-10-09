@@ -105,9 +105,11 @@ type Def[In any, Out service.Rendered] struct {
 	Name        string
 	Description string
 	Kind        Kind
-	// Asks puts the write to the person through the client before it is
-	// made, when the service reaches its question (§9a).
-	Asks   bool
+	// Asks, when set, puts the write to the person through the client
+	// before it is made, when the service reaches its question (§9a). It
+	// says when, as the description's closing sentence reads it: "before
+	// the write", or the writes that ask.
+	Asks   string
 	Handle func(ctx contextContext, in In) (Out, error)
 }
 
@@ -132,9 +134,9 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 		// unless the flag is set.
 		tool.Meta = mcp.Meta{interactionKey: true}
 	}
-	if def.Asks {
+	if def.Asks != "" {
 		d.asking.markAsks(def.Name)
-		tool.Description += asksNote
+		tool.Description += asksNote(def.Asks)
 		// Every destructive tool that asks, asks before every write, so
 		// the server's question can stand in for the mark.
 		if def.Kind == Destructive {
@@ -144,7 +146,7 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 	mcp.AddTool(s, tool, func(ctx contextContext, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		var zero Out
 		var p *person
-		if def.Asks {
+		if def.Asks != "" {
 			var err error
 			if ctx, p, err = d.asking.begin(ctx, req, def.Name, in, d.Config.RequirePrompt); err != nil {
 				return nil, zero, fail(err)
@@ -222,9 +224,13 @@ func annotationsFor(k Kind) *mcp.ToolAnnotations {
 
 func ptr[T any](v T) *T { return &v }
 
-// asksNote closes the description of every tool that asks the person.
-const asksNote = " When the client can, the server also asks the person before the write; a call they do not " +
-	"confirm is [blocked], and is not made again unless they ask."
+// asksNote closes the description of every tool that asks the person,
+// saying when it asks: a tool that asks only before some of its writes
+// says which, so a model does not expect a question on the others.
+func asksNote(when string) string {
+	return " When the client can, the server also asks the person " + when + "; a call they do not " +
+		"confirm is [blocked], and is not made again unless they ask."
+}
 
 // fail turns an error into the tool result the standard specifies:
 // "[class] actionable message", never a protocol error.

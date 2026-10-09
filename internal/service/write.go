@@ -309,8 +309,8 @@ type CreateOptions struct {
 	// PopupReminders and EmailReminders are this account's reminders, in
 	// minutes before the start. Either one given replaces the calendar's
 	// default ones, and an empty list given alone means none.
-	PopupReminders []int
-	EmailReminders []int
+	PopupReminders *[]int
+	EmailReminders *[]int
 	// DefaultReminders keeps the calendar's own, which is also what an
 	// event gets when no list is given.
 	DefaultReminders bool
@@ -332,20 +332,6 @@ type CreateOptions struct {
 	WorkingLocationLabel string
 	Notify               string
 	DryRun               bool
-}
-
-// status is the status event the options ask for, nil when they name
-// none of its inputs.
-func (o CreateOptions) status(onPrimary bool) *plan.Status {
-	s := plan.Status{
-		Type: o.EventType, AutoDecline: o.AutoDecline, DeclineMessage: o.DeclineMessage,
-		ChatStatus: o.ChatStatus, WorkingLocation: o.WorkingLocation, Label: o.WorkingLocationLabel,
-		OnPrimary: onPrimary,
-	}
-	if s == (plan.Status{OnPrimary: onPrimary}) {
-		return nil
-	}
-	return &s
 }
 
 // CreateEvent inserts an event with a client-generated id (§2.11).
@@ -398,15 +384,20 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	draft.GuestsCanSeeOtherGuests = o.GuestsCanSeeOtherGuests
 	// A list is given when it is not nil, so an empty one given alone
 	// means no reminders at all.
-	draft.Reminders, err = plan.NewReminders(o.DefaultReminders, listGiven(o.PopupReminders),
-		listGiven(o.EmailReminders))
+	draft.Reminders, err = plan.NewReminders(o.DefaultReminders, o.PopupReminders, o.EmailReminders)
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
 	if err := draft.BareAddresses(); err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	draft.Status = o.status(env.cal.Primary)
+	// An ordinary event asks for no status, which plan.Insert leaves as
+	// it is.
+	draft.Status = &plan.Status{
+		Type: o.EventType, AutoDecline: o.AutoDecline, DeclineMessage: o.DeclineMessage,
+		ChatStatus: o.ChatStatus, WorkingLocation: o.WorkingLocation, Label: o.WorkingLocationLabel,
+		OnPrimary: env.cal.Primary,
+	}
 
 	id, err := newEventID()
 	if err != nil {
@@ -478,7 +469,7 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 }
 
 // autoDeclineAll is the auto_decline that asks the person.
-const autoDeclineAll = "all"
+var autoDeclineAll = model.AutoDeclineWords.Word(gcal.AutoDeclineAll)
 
 // autoDeclineNote says what a status event declines and who sees it, or
 // "" when it declines nothing. Tense-neutral, because a dry run prints it
@@ -491,7 +482,7 @@ func autoDeclineNote(d *model.StatusDetails) string {
 	case autoDeclineAll:
 		return "Google declines every meeting this overlaps, including the ones you already accepted, and " +
 			"each organizer sees the decline."
-	case "new":
+	case model.AutoDeclineWords.Word(gcal.AutoDeclineNew):
 		return "Google declines each invitation for this time that arrives while it stands, and the " +
 			"organizer sees the decline. Meetings already on the calendar are kept."
 	default:
@@ -503,14 +494,6 @@ func autoDeclineNote(d *model.StatusDetails) string {
 // ask for: there is no link to report, because nothing was asked.
 const dryRunConferenceNote = "A Google Meet link would be requested. Nothing is written by a dry run, so " +
 	"there is no link to report here."
-
-// listGiven is a list input as given, nil when it was left out.
-func listGiven(v []int) *[]int {
-	if v == nil {
-		return nil
-	}
-	return &v
-}
 
 // conferenceNote says what actually happened to a requested Meet link.
 //
@@ -861,8 +844,9 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 ) (render.WriteReport, error) {
 	if draft.Conference {
 		// The new series is a new event, and a split mints no
-		// conference for it (§17.3).
-		return render.WriteReport{}, gapi.Errf(gapi.ClassUnsupported,
+		// conference for it (§17.3). Google could make one, so this is
+		// the server's guard: [blocked], as on an event that has one.
+		return render.WriteReport{}, gapi.Errf(gapi.ClassBlocked,
 			"add_conference cannot go with this_and_following: a split starts a new series and does not "+
 				"make a conference for it. Split first, then add the link to the new series with scope:series")
 	}

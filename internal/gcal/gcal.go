@@ -339,21 +339,6 @@ const (
 	WorkingCustom = "customLocation"
 )
 
-// StatusBlock is the JSON name of a status event type's details block,
-// or "" for a type that has none.
-func StatusBlock(eventType string) string {
-	switch eventType {
-	case EventTypeOutOfOffice:
-		return "outOfOfficeProperties"
-	case EventTypeFocusTime:
-		return "focusTimeProperties"
-	case EventTypeWorkingLocation:
-		return "workingLocationProperties"
-	default:
-		return ""
-	}
-}
-
 // StatusDetails returns the raw details block an event of its own type
 // carries, or nil.
 func (e Event) StatusDetails() json.RawMessage {
@@ -1291,16 +1276,6 @@ func NewConferenceRequest(requestID string) json.RawMessage {
 func ConferenceRequestID(eventID, etag string) string {
 	sum := sha256.Sum256([]byte(eventID + "\x00" + etag))
 	return hex.EncodeToString(sum[:16])
-}
-
-// ConferenceRequestOf is the request id an event's conference data
-// carries, or "" when it carries no create request.
-func ConferenceRequestOf(raw json.RawMessage) string {
-	var data conferenceData
-	if len(raw) == 0 || json.Unmarshal(raw, &data) != nil || data.CreateRequest == nil {
-		return ""
-	}
-	return data.CreateRequest.RequestID
 }
 
 // ReadConference reads what a result needs out of an event's raw

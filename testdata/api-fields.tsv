@@ -143,7 +143,7 @@ EventAttendee	email	modeled	who the guest is; counted in a refusal, never logged
 EventAttendee	id	modeled	carried whole through a guest-list patch
 EventAttendee	optional	modeled	carried whole through a guest-list patch, shown on get_event, and set by create_event's optional_guests and update_event's add_optional_guests (§18 row 92)
 EventAttendee	organizer	modeled	marks the organizer's own row
-EventAttendee	resource	modeled	a room or other resource: not a guest, never counted toward notify, and set by create_event's rooms (§4.3, §18 rows 84, 85)
+EventAttendee	resource	modeled	a room or other resource, sent for create_event's rooms, update_event's add_rooms and a room's address given as a guest; who counts toward notify is decided by the address, not this flag (§4.3, §18 rows 84, 85)
 EventAttendee	responseStatus	modeled	the RSVP, shown and set by respond_to_event
 EventAttendee	self	modeled	the account's own row, which is not trusted alone (§18 row 50)
 EventBirthdayProperties	contact	out	as Event.birthdayProperties: immutable, and only on a birthday event (§2.12)

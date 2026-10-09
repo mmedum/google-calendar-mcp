@@ -130,7 +130,7 @@ schemas: build ## Dump the tool schemas
 	$(BIN) --dump-schemas > schemas.json
 
 .PHONY: schema-diff
-schema-diff: build gates ## Diff the tool schemas against the last tag, else the recorded baseline
+schema-diff: build gates ## Diff the tool schemas against the newest release's recorded baseline
 	@$(GATES) schema-diff $(BIN)
 
 .PHONY: schema-baseline

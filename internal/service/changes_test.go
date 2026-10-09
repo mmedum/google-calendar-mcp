@@ -293,7 +293,7 @@ func TestARemindersOnlyChangeIsNotReportedSinceAMoment(t *testing.T) {
 	fake.Touch("primary", "ev-standup")
 	clockAt(t, fake, "2026-03-12T08:00:00Z")
 	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "ev-standup", PopupReminders: intsptr(10),
+		Calendar: "primary", EventID: "ev-standup", PopupReminders: ptr([]int{10}),
 	}); err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestARemindersOnlyChangeIsNotReportedSinceAMoment(t *testing.T) {
 	}
 
 	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "ev-standup", Title: strptr("Morning sync, moved"),
+		Calendar: "primary", EventID: "ev-standup", Title: ptr("Morning sync, moved"),
 	}); err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
 	}

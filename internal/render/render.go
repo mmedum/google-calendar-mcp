@@ -423,24 +423,24 @@ func statusTags(d *model.StatusDetails) []string {
 	}
 	var tags []string
 	switch d.AutoDecline {
-	case "", "none":
-	case "new":
+	case "", model.AutoDeclineWords.Word(gcal.AutoDeclineNone):
+	case model.AutoDeclineWords.Word(gcal.AutoDeclineNew):
 		tags = append(tags, "declines new invitations")
-	case "all":
+	case model.AutoDeclineWords.Word(gcal.AutoDeclineAll):
 		tags = append(tags, "declines every overlapping invitation")
 	default:
 		tags = append(tags, "declines: "+d.AutoDecline)
 	}
 	switch d.ChatStatus {
 	case "":
-	case "do_not_disturb":
+	case model.ChatStatusWords.Word(gcal.ChatDoNotDisturb):
 		tags = append(tags, "chat: do not disturb")
 	default:
 		tags = append(tags, "chat: "+d.ChatStatus)
 	}
 	switch {
 	case d.WorkingLocation == "":
-	case d.WorkingLocation == "home":
+	case d.WorkingLocation == model.WorkingLocationWords.Word(gcal.WorkingHome):
 		tags = append(tags, "working from home")
 	case d.WorkingLocationLabel != "":
 		tags = append(tags, "working from "+d.WorkingLocationLabel)

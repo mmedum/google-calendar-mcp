@@ -303,6 +303,32 @@ func TestEveryToolThatTakesConfirmAsks(t *testing.T) {
 	}
 }
 
+// A tool that asks before only some of its writes says which, so a model
+// does not expect a question on the rest; a destructive tool asks before
+// every write and says so.
+func TestAnAskingToolSaysWhenItAsks(t *testing.T) {
+	want := map[string]string{
+		"delete_calendar": "asks the person before the write;",
+		"clear_calendar":  "asks the person before the write;",
+		"share_calendar": "asks the person before a share that publishes the calendar, opens it to a whole " +
+			"domain, or makes somebody an owner;",
+		"cancel_event": "asks the person before a cancellation that emails a guest;",
+		"create_event": "asks the person before it makes an out-of-office or focus-time event with " +
+			"auto_decline all;",
+		"update_event": "asks the person before a this_and_following split whose new series declines every " +
+			"meeting it overlaps;",
+	}
+	for _, tool := range listTools(t, everything()) {
+		if w, ok := want[tool.Name]; ok && !strings.Contains(tool.Description, w) {
+			t.Errorf("%s does not say %q:\n%s", tool.Name, w, tool.Description)
+		}
+		delete(want, tool.Name)
+	}
+	if len(want) != 0 {
+		t.Errorf("not registered: %v", want)
+	}
+}
+
 // A client that cannot ask gets no question, and the arguments are the
 // guard; GCAL_REQUIRE_PROMPT refuses the write instead.
 func TestAClientThatCannotAsk(t *testing.T) {

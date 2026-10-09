@@ -885,6 +885,53 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
+			// §18 row 101: where default ranks is this server's belief.
+			// The series is made public, one occurrence default, and the
+			// series read: Google applies default to the series only if it
+			// ranks default above public, as the server does.
+			name: "the series made public",
+			tool: "update_event",
+			args: on(map[string]any{"event_id": weeklyID, "scope": "series", "visibility": "public"}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				return pass, "the series is public"
+			},
+		},
+		{
+			name: "a default occurrence",
+			tool: "update_event",
+			args: on(map[string]any{
+				"event_id": weeklyID, "original_start": "2026-03-17T14:00:00+01:00",
+				"scope": "instance", "visibility": "default",
+			}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "makes the whole series default") {
+					return fail, "the result does not say the series changed: " + truncate(r.text, 300)
+				}
+				return pass, "made, with a note that the series changed"
+			},
+		},
+		{
+			name: "the series is default",
+			tool: "get_event",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if strings.Contains(r.text, "[public") || strings.Contains(r.text, "; public") {
+					return fail, "the series is still public: Google does not rank default above public, so " +
+						"the note the step before printed is false (§18 row 101)"
+				}
+				return pass, "a default occurrence made a public series default, as the server ranks it"
+			},
+		},
+		{
 			// §7.4: an occurrence is canceled with a status patch, not
 			// deleted, because that is how one date leaves a series.
 			name: "cancel one occurrence",

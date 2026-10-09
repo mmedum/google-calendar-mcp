@@ -616,7 +616,7 @@ func decodeCursor(tok string, q listQuery) (map[string]string, error) {
 	was := c.Query
 	again := "or omit the token to start again"
 	switch {
-	case !sameTypes(was.Types, q.Types):
+	case !slices.Equal(was.Types, q.Types):
 		return nil, gapi.Errf(gapi.ClassInvalid,
 			"that page_token was issued for event_types [%s], not [%s]. Pass the same event_types, %s",
 			strings.Join(was.Types, ", "), strings.Join(q.Types, ", "), again)
@@ -664,15 +664,6 @@ func encodeToken(v any) string {
 func decodeToken(tok string, v any) bool {
 	raw, err := base64.RawURLEncoding.DecodeString(tok)
 	return err == nil && json.Unmarshal(raw, v) == nil
-}
-
-// sameTypes reports whether two type filters keep the same events,
-// whatever order they were given in.
-func sameTypes(a, b []string) bool {
-	a, b = slices.Clone(a), slices.Clone(b)
-	slices.Sort(a)
-	slices.Sort(b)
-	return slices.Equal(a, b)
 }
 
 // drain reads pages until the budget is reached or the pages run out.
@@ -757,17 +748,22 @@ var filterTypes = []string{
 }
 
 // eventTypes checks a type filter against Google's six and spells each
-// one as Google does. Case does not matter, and a repeat is dropped.
+// one as Google does, in Google's order, each once. Case does not
+// matter, so one filter given two ways comes out the same.
 func eventTypes(asked []string) ([]string, error) {
-	var out []string
+	keep := map[string]bool{}
 	for _, a := range asked {
 		i := slices.IndexFunc(filterTypes, func(t string) bool { return strings.EqualFold(t, strings.TrimSpace(a)) })
 		if i < 0 {
 			return nil, gapi.Errf(gapi.ClassInvalid,
 				"%q is not an event type. event_types takes %s", a, strings.Join(filterTypes, ", "))
 		}
-		if !slices.Contains(out, filterTypes[i]) {
-			out = append(out, filterTypes[i])
+		keep[filterTypes[i]] = true
+	}
+	var out []string
+	for _, t := range filterTypes {
+		if keep[t] {
+			out = append(out, t)
 		}
 	}
 	return out, nil

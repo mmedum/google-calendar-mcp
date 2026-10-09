@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
 	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
@@ -390,7 +391,7 @@ func TestAConferenceIsAskedForOnCreateAndOnAnEventWithNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
-	if got := gcal.ConferenceRequestOf(p.ConferenceData); got != gcal.ConferenceRequestID("abcdef0123456789", `"v3"`) ||
+	if got := caltest.ConferenceRequestOf(p.ConferenceData); got != gcal.ConferenceRequestID("abcdef0123456789", `"v3"`) ||
 		got == "abcdef0123456789" {
 		t.Fatalf("the request id is %q", got)
 	}

@@ -55,8 +55,8 @@ var statusNames = map[string]string{
 	gcal.EventTypeWorkingLocation: "a working location",
 }
 
-// EventType is the status type asked for, "" for an ordinary event.
-func (s Status) EventType() (string, error) {
+// eventType is the status type asked for, "" for an ordinary event.
+func (s Status) eventType() (string, error) {
 	v := strings.TrimSpace(s.Type)
 	if v == "" {
 		return "", nil
@@ -72,7 +72,7 @@ func (s Status) EventType() (string, error) {
 // apply makes e the status event s asks for, or refuses it. e is the
 // event Insert built, and d the draft it came from.
 func (s Status) apply(e *gcal.Event, d Draft) error {
-	kind, err := s.EventType()
+	kind, err := s.eventType()
 	if err != nil {
 		return err
 	}

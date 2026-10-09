@@ -416,7 +416,7 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 			e.ConferenceData = nil
 		} else {
 			s.mu.Lock()
-			s.askedForConference(calID, e.ID, gcal.ConferenceRequestOf(e.ConferenceData))
+			s.askedForConference(calID, e.ID, ConferenceRequestOf(e.ConferenceData))
 			s.mu.Unlock()
 			e.ConferenceData = conferenceAnswer(e.ConferenceData, s.ConferenceFails)
 		}
@@ -462,6 +462,8 @@ func refusedEventFields(visibility string, r *gcal.EventReminders) string {
 }
 
 // visibilityRank orders visibility from least to most restrictive.
+// Default in the middle is the server's belief, not Google's word (§18
+// row 101), so the fake cannot tell the two apart.
 func visibilityRank(v string) int {
 	switch v {
 	case gcal.VisibilityPublic:
@@ -490,7 +492,7 @@ func (s *Server) askedForConference(calID, eventID, requestID string) {
 // That a create without its details block is refused is believed rather
 // than probed (§18 row 88).
 func statusRefusal(onPrimary bool, e gcal.Event) string {
-	block := gcal.StatusBlock(e.EventType)
+	block := statusBlocks[e.EventType]
 	if block == "" {
 		return ""
 	}
@@ -526,6 +528,27 @@ func statusRefusal(onPrimary bool, e gcal.Event) string {
 		}
 	}
 	return ""
+}
+
+// statusBlocks are the JSON names of each status type's details block.
+var statusBlocks = map[string]string{
+	gcal.EventTypeOutOfOffice:     "outOfOfficeProperties",
+	gcal.EventTypeFocusTime:       "focusTimeProperties",
+	gcal.EventTypeWorkingLocation: "workingLocationProperties",
+}
+
+// ConferenceRequestOf is the request id an event's conference data
+// carries, or "" when it carries no create request.
+func ConferenceRequestOf(raw json.RawMessage) string {
+	var data struct {
+		CreateRequest *struct {
+			RequestID string `json:"requestId"`
+		} `json:"createRequest"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &data) != nil || data.CreateRequest == nil {
+		return ""
+	}
+	return data.CreateRequest.RequestID
 }
 
 // isPrimary reports whether a calendar is the account's primary one.
@@ -607,7 +630,7 @@ func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, event
 	// Google answers it with a conference it makes. Without version 1 it
 	// is ignored, as on an insert; and "If an ID provided is the same as
 	// for the previous request, the request is ignored."
-	if id := gcal.ConferenceRequestOf(p.ConferenceData); id != "" &&
+	if id := ConferenceRequestOf(p.ConferenceData); id != "" &&
 		r.URL.Query().Get("conferenceDataVersion") == "1" && s.conferenceAsked[calID+"/"+eventID] != id {
 		s.askedForConference(calID, eventID, id)
 		next.ConferenceData = conferenceAnswer(p.ConferenceData, s.ConferenceFails)

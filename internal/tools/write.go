@@ -44,8 +44,7 @@ const statusHelp = "`event_type` makes a status event, which only your primary c
 	"focusTime or workingLocation. Out of office and focus time are timed, never all day, and always show you " +
 	"busy. `auto_decline` is REQUIRED for them, with no default: none declines nothing, new declines " +
 	"invitations that arrive for that time, and all also declines the meetings you already accepted. Google " +
-	"shows each organizer the decline, with `decline_message` if you give one, and all is put to the person " +
-	"first. Focus time takes `chat_status`: available or do_not_disturb. A working location takes " +
+	"shows each organizer the decline, with `decline_message` if you give one. Focus time takes `chat_status`: available or do_not_disturb. A working location takes " +
 	"`working_location` (home, office or custom) and `working_location_label` for the office or place; it is " +
 	"timed or exactly one whole day, always public, and shows you free. A status event takes no guests, rooms " +
 	"or Meet link."
@@ -72,9 +71,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"notify required too. A room cannot be optional. " + addressHelp + " " +
 			remindersHelp + " " + visibilityHelp + " " + statusHelp + " " + notifyHelp + " " + dryRunHelp,
 		Kind: Write,
-		// Asks only before a status event that declines every meeting it
-		// overlaps (§9a).
-		Asks: true,
+		Asks: "before it makes an out-of-office or focus-time event with auto_decline all",
 		Handle: func(ctx context.Context, in createEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CreateEvent(ctx, service.CreateOptions{
 				Calendar: in.Calendar, Title: in.Title, Start: in.Start, End: in.End,
@@ -105,10 +102,12 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"guests added with `add_optional_guests`, and rooms booked with `add_rooms`, applied to " +
 			"the list as it is read, so somebody else's RSVP arriving in between is reported rather than " +
 			"overwritten. An address already on the event keeps the role it has, and the result names it: " +
-			"this server does not make a guest optional or required. " + addressHelp + " " + scopeHelp + " " +
+			"this server does not make a guest optional or required, and a call that would add nothing else " +
+			"is refused as having nothing to change. " + addressHelp + " " + scopeHelp + " " +
 			"`this_and_following` is two calls: the original series is ended before this occurrence and a " +
 			"NEW series starts at it with a new id, and any exception after this occurrence is reset. The " +
-			"result says so. " + remindersHelp + " A write that changes only reminders needs no `notify`. " +
+			"result says so. " + remindersHelp + " A write that changes only reminders needs no `notify`, except " +
+			"with `this_and_following`, whose new series reaches the guests. " +
 			visibilityHelp + " On one occurrence, Google ignores a less restrictive visibility, so it is " +
 			"refused, and applies a more restrictive one to the whole series, which the result says. " +
 			notifyHelp + " " + etagHelp + " " + dryRunHelp + " " +
@@ -118,12 +117,10 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"A status event takes no guests, rooms or Meet link, and a change to one that Google's rules " +
 			"for it refuse is refused before anything is written. With `this_and_following`, an out-of-office or " +
 			"focus-time series that declines every overlapping meeting starts a new series that declines them " +
-			"too, so that split is put to the person first. " +
+			"too. " +
 			"Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
 		Kind: IdempotentWrite,
-		// Asks only before a split whose new series declines every
-		// meeting it overlaps (§9a).
-		Asks: true,
+		Asks: "before a this_and_following split whose new series declines every meeting it overlaps",
 		Handle: func(ctx context.Context, in updateEventIn) (service.WriteResult, error) {
 			out, err := d.Service.UpdateEvent(ctx, service.UpdateOptions{
 				Calendar: in.Calendar, EventID: in.EventID, OriginalStart: in.OriginalStart,
@@ -156,7 +153,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"Read that rule twice here: canceling with no notification removes the meeting from YOUR " +
 			"calendar and leaves it on your guests'. They will still turn up. " + etagHelp + " " + dryRunHelp,
 		Kind: Canceling,
-		Asks: true,
+		Asks: "before a cancellation that emails a guest",
 		Handle: func(ctx context.Context, in cancelEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CancelEvent(ctx, service.CancelOptions{
 				Calendar: in.Calendar, EventID: in.EventID, OriginalStart: in.OriginalStart,
@@ -235,8 +232,8 @@ type createEventIn struct {
 	FreeNotBusy    bool     `json:"free_not_busy,omitempty" jsonschema:"Mark the time as free rather than busy, so it does not block availability."`
 	// The reminder lists are told apart from absent by nil, so an empty
 	// list given alone means no reminders.
-	PopupReminders          []int  `json:"popup_reminders,omitempty" jsonschema:"Popup reminders for you, in minutes before the start, 0 to 40320. Replaces the calendar's default reminders; an empty list given alone means none."`
-	EmailReminders          []int  `json:"email_reminders,omitempty" jsonschema:"Email reminders for you, in minutes before the start, 0 to 40320. At most five reminders in all."`
+	PopupReminders          *[]int `json:"popup_reminders,omitempty" jsonschema:"Popup reminders for you, in minutes before the start, 0 to 40320. Replaces the calendar's default reminders; an empty list given alone means none."`
+	EmailReminders          *[]int `json:"email_reminders,omitempty" jsonschema:"Email reminders for you, in minutes before the start, 0 to 40320. At most five reminders in all."`
 	DefaultReminders        bool   `json:"default_reminders,omitempty" jsonschema:"Use the calendar's own reminders, which is also what happens when no list is given."`
 	Visibility              string `json:"visibility,omitempty" jsonschema:"default, public or private. Private shows the details only to the guests."`
 	GuestsCanModify         *bool  `json:"guests_can_modify,omitempty" jsonschema:"Whether guests may change the event. Google's default is false."`

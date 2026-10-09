@@ -192,7 +192,7 @@ func TestCreateEventBooksRoomsWithoutReachingAnybody(t *testing.T) {
 			t.Fatalf("%+v: sent sendUpdates=%q", o, got)
 		}
 		if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-			Calendar: "primary", EventID: out.After.ID, Title: strptr("Renamed"), Notify: "none",
+			Calendar: "primary", EventID: out.After.ID, Title: ptr("Renamed"), Notify: "none",
 		}); err != nil {
 			t.Fatalf("%+v: a later update with none: %v", o, err)
 		}
@@ -362,7 +362,7 @@ func TestASplitNamesAnAddressTheSeriesAlreadyHas(t *testing.T) {
 	}
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evseries001_20260331T120000Z", Scope: "this_and_following",
-		Notify: "all", Title: strptr("Later review"), AddOptionalGuests: []string{"colleague@example.test"},
+		Notify: "all", Title: ptr("Later review"), AddOptionalGuests: []string{"colleague@example.test"},
 	})
 	if err != nil {
 		t.Fatalf("split: %v", err)
@@ -517,7 +517,7 @@ func TestUpdatePatchesUnderIfMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evsolo00001", Location: strptr("Room 2"),
+		Calendar: "primary", EventID: "evsolo00001", Location: ptr("Room 2"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -542,7 +542,7 @@ func TestUpdatePatchesUnderIfMatch(t *testing.T) {
 func TestAnEtagThatMovedIsStale(t *testing.T) {
 	svc, fake := writeSeed(t)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evsolo00001", Location: strptr("Room 2"),
+		Calendar: "primary", EventID: "evsolo00001", Location: ptr("Room 2"),
 		ETag: `"something-older"`,
 	})
 	if got := classOf(t, err); got != gapi.ClassStale {
@@ -557,7 +557,7 @@ func TestAnEtagThatMovedIsStale(t *testing.T) {
 func TestForceWritesWithAStarAndSaysSo(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evsolo00001", Location: strptr("Room 2"), Force: true,
+		Calendar: "primary", EventID: "evsolo00001", Location: ptr("Room 2"), Force: true,
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -574,7 +574,7 @@ func TestForceWritesWithAStarAndSaysSo(t *testing.T) {
 func TestUpdateRefusesARecurringEventWithoutAScope(t *testing.T) {
 	svc, fake := writeSeed(t)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evseries001", Title: strptr("Renamed"),
+		Calendar: "primary", EventID: "evseries001", Title: ptr("Renamed"),
 	})
 	if got := classOf(t, err); got != gapi.ClassInvalid {
 		t.Fatalf("got [%s], want [invalid]: %v", got, err)
@@ -593,7 +593,7 @@ func TestScopeSeriesFollowsAnInstanceToItsParent(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evseries001_20260324T130000Z",
-		Scope: "series", Title: strptr("Weekly sync"),
+		Scope: "series", Title: ptr("Weekly sync"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -611,7 +611,7 @@ func TestScopeSeriesFollowsAnInstanceToItsParent(t *testing.T) {
 func TestScopeInstanceAgainstTheSeriesIDIsRefused(t *testing.T) {
 	svc, _ := writeSeed(t)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evseries001", Scope: "instance", Title: strptr("Renamed"),
+		Calendar: "primary", EventID: "evseries001", Scope: "instance", Title: ptr("Renamed"),
 	})
 	if got := classOf(t, err); got != gapi.ClassInvalid {
 		t.Fatalf("got [%s], want [invalid]: %v", got, err)
@@ -627,7 +627,7 @@ func TestAnOccurrenceIsAddressableByItsScheduledStart(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evseries001", OriginalStart: "2026-03-24T14:00:00+01:00",
-		Scope: "instance", Location: strptr("Room 3"),
+		Scope: "instance", Location: ptr("Room 3"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -644,7 +644,7 @@ func TestAnOriginalStartThatNamesNoOccurrenceSaysWhy(t *testing.T) {
 	svc, _ := writeSeed(t)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evseries001", OriginalStart: "2026-06-02T14:00:00+02:00",
-		Scope: "instance", Location: strptr("Room 3"),
+		Scope: "instance", Location: ptr("Room 3"),
 	})
 	if got := classOf(t, err); got != gapi.ClassNotFound {
 		t.Fatalf("got [%s], want [not_found]: %v", got, err)
@@ -661,7 +661,7 @@ func TestThisAndFollowingIsTwoCallsAndSaysWhatItReset(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evseries001", OriginalStart: "2026-03-31T14:00:00+02:00",
-		Scope: "this_and_following", Title: strptr("Weekly sync"),
+		Scope: "this_and_following", Title: ptr("Weekly sync"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -939,7 +939,8 @@ func TestRespondRefusesThisAndFollowingAsUnsupported(t *testing.T) {
 	}
 }
 
-func strptr(s string) *string { return &s }
+// ptr is v by pointer, for an input whose absence means "leave it".
+func ptr[T any](v T) *T { return &v }
 
 // §4.7: one tool call is one API request, and where it cannot be, the
 // exceptions are named. This is the guard that stops the count creeping
@@ -968,7 +969,7 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 		}, "list, settings, insert"},
 		{"update", 4, func(s *service.Service) error {
 			_, err := s.UpdateEvent(context.Background(), service.UpdateOptions{
-				Calendar: "primary", EventID: "evsolo00001", Location: strptr("Room 2"),
+				Calendar: "primary", EventID: "evsolo00001", Location: ptr("Room 2"),
 			})
 			return err
 		}, "list, settings, read, patch"},
@@ -1001,7 +1002,7 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 			_, err := s.UpdateEvent(context.Background(), service.UpdateOptions{
 				Calendar: "primary", EventID: "evseries001",
 				OriginalStart: "2026-03-31T14:00:00+02:00",
-				Scope:         "this_and_following", Title: strptr("Renamed"),
+				Scope:         "this_and_following", Title: ptr("Renamed"),
 			})
 			return err
 		}, "list, settings, read occurrence, read parent, truncate, insert"},
@@ -1158,7 +1159,7 @@ func TestASplitCarriesWhatThisServerDoesNotModel(t *testing.T) {
 
 	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evoffice001_20260331T070000Z",
-		Scope: "this_and_following", Title: strptr("Office days, later"),
+		Scope: "this_and_following", Title: ptr("Office days, later"),
 	}); err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
 	}
@@ -1215,7 +1216,7 @@ func TestBothHalvesOfASplitCarryTheNotifyChoice(t *testing.T) {
 
 	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evsplitgs01_20260331T140000Z",
-		Scope: "this_and_following", Title: strptr("Renamed"), Notify: "all",
+		Scope: "this_and_following", Title: ptr("Renamed"), Notify: "all",
 	}); err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
 	}
@@ -1257,7 +1258,7 @@ func TestTheReportedRequestCountIsTheTruth(t *testing.T) {
 		}},
 		{"update", func(s *service.Service) (int, error) {
 			o, err := s.UpdateEvent(context.Background(), service.UpdateOptions{
-				Calendar: "primary", EventID: "evsolo00001", Location: strptr("Room 2"),
+				Calendar: "primary", EventID: "evsolo00001", Location: ptr("Room 2"),
 			})
 			return o.Requests, err
 		}},
@@ -1265,7 +1266,7 @@ func TestTheReportedRequestCountIsTheTruth(t *testing.T) {
 			o, err := s.UpdateEvent(context.Background(), service.UpdateOptions{
 				Calendar: "primary", EventID: "evseries001",
 				OriginalStart: "2026-03-31T14:00:00+02:00",
-				Scope:         "this_and_following", Title: strptr("Renamed"),
+				Scope:         "this_and_following", Title: ptr("Renamed"),
 			})
 			return o.Requests, err
 		}},
@@ -1366,7 +1367,7 @@ func TestThisAndFollowingOnAnAllDaySeries(t *testing.T) {
 
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evallday001", OriginalStart: "2026-03-31",
-		Scope: "this_and_following", Title: strptr("Renamed all-day"),
+		Scope: "this_and_following", Title: ptr("Renamed all-day"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -1439,7 +1440,7 @@ func TestAnEtagFromTheOccurrenceWorksWithScopeSeries(t *testing.T) {
 	}
 	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evseries001_20260324T130000Z",
-		Scope: "series", Title: strptr("Renamed"), ETag: occ.ETag,
+		Scope: "series", Title: ptr("Renamed"), ETag: occ.ETag,
 	}); err != nil {
 		t.Fatalf("an etag read from the occurrence was refused under scope:series: %v", err)
 	}
@@ -1468,7 +1469,7 @@ func TestAnEventOrganizedByACalendarStillKnowsWhoIsInside(t *testing.T) {
 	fake.AddEvent("team@group.calendar.example.test", ev)
 
 	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "Sample Team", EventID: "evteamev001", Location: strptr("Room 9"), Notify: "none",
+		Calendar: "Sample Team", EventID: "evteamev001", Location: ptr("Room 9"), Notify: "none",
 	}); err != nil {
 		t.Fatalf("notify:none was refused for a same-domain colleague: %v", err)
 	}
@@ -1479,7 +1480,7 @@ func TestAnEventOrganizedByACalendarStillKnowsWhoIsInside(t *testing.T) {
 	ev2.Attendees = []gcal.EventAttendee{{Email: "partner@elsewhere.test"}}
 	fake.AddEvent("team@group.calendar.example.test", ev2)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "Sample Team", EventID: "evteamev002", Location: strptr("Room 9"), Notify: "none",
+		Calendar: "Sample Team", EventID: "evteamev002", Location: ptr("Room 9"), Notify: "none",
 	})
 	if got := classOf(t, err); got != gapi.ClassBlocked {
 		t.Fatalf("got [%s], want [blocked] for a guest genuinely outside the domain", got)
@@ -1493,7 +1494,7 @@ func TestAnEventOrganizedByACalendarStillKnowsWhoIsInside(t *testing.T) {
 func TestADryRunProjectsTheChange(t *testing.T) {
 	svc, _ := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evsolo00001", Location: strptr("Room 9"), DryRun: true,
+		Calendar: "primary", EventID: "evsolo00001", Location: ptr("Room 9"), DryRun: true,
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -1914,17 +1915,13 @@ func TestAMoveGoogleRefusedIsNotAmbiguous(t *testing.T) {
 	}
 }
 
-func intsptr(v ...int) *[]int { return &v }
-
-func boolptr(v bool) *bool { return &v }
-
 // Reminders are kept per person, so a write that changes only them
 // reaches nobody: on an event with a guest outside the organization it
 // needs no notify, and sends no sendUpdates.
 func TestARemindersOnlyUpdateReachesNobody(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evguests001", PopupReminders: intsptr(10), EmailReminders: intsptr(1440),
+		Calendar: "primary", EventID: "evguests001", PopupReminders: ptr([]int{10}), EmailReminders: ptr([]int{1440}),
 	})
 	if err != nil {
 		t.Fatalf("a reminders-only update asked for notify: %v", err)
@@ -1946,12 +1943,43 @@ func TestARemindersOnlyUpdateReachesNobody(t *testing.T) {
 	}
 }
 
+// A split that changes only reminders still makes a new series, which
+// reaches the series' guests, so it needs notify like any other write.
+func TestARemindersOnlySplitStillNeedsNotify(t *testing.T) {
+	svc, fake := writeSeed(t)
+	series := caltest.Recurring("evsplitgs02", "Weekly with guests",
+		"2026-03-17T16:00:00+01:00", "2026-03-17T17:00:00+01:00", "Europe/Copenhagen",
+		"RRULE:FREQ=WEEKLY;COUNT=4")
+	series.Organizer = &gcal.EventPerson{Email: "me@example.test", Self: true}
+	series.Attendees = []gcal.EventAttendee{
+		{Email: "me@example.test", Self: true, Organizer: true},
+		{Email: "partner@elsewhere.test"},
+	}
+	fake.AddEvent("me@example.test", series)
+	fake.AddEvent("me@example.test", caltest.Instance("evsplitgs02_20260331T140000Z", "evsplitgs02",
+		"Weekly with guests", "2026-03-31T16:00:00+02:00", "2026-03-31T17:00:00+02:00", "Europe/Copenhagen",
+		"2026-03-31T16:00:00+02:00"))
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evsplitgs02_20260331T140000Z", Scope: "this_and_following",
+		PopupReminders: ptr([]int{10}),
+	})
+	if err == nil {
+		t.Fatal("a reminders-only split went through with no notify")
+	}
+	if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), "notify") {
+		t.Fatalf("got [%s] %v, want [invalid] asking for notify", got, err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Fatalf("the refusal came after writes: %+v", fake.Wrote())
+	}
+}
+
 // Anything else alongside the reminders is the event's, and reaches its
 // guests as before.
 func TestRemindersWithAnotherChangeStillNeedNotify(t *testing.T) {
 	svc, _ := writeSeed(t)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evguests001", PopupReminders: intsptr(10), Visibility: strptr("private"),
+		Calendar: "primary", EventID: "evguests001", PopupReminders: ptr([]int{10}), Visibility: ptr("private"),
 	})
 	if got := classOf(t, err); got != gapi.ClassInvalid || !strings.Contains(err.Error(), "pass notify") {
 		t.Fatalf("got [%s] %v, want notify required", got, err)
@@ -1965,7 +1993,7 @@ func TestALessRestrictiveVisibilityOnAnOccurrenceIsRefused(t *testing.T) {
 	fake.Events["me@example.test"]["evseries001_20260324T130000Z"].Visibility = gcal.VisibilityPrivate
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evseries001_20260324T130000Z", Scope: "instance",
-		Visibility: strptr("public"),
+		Visibility: ptr("public"),
 	})
 	if got := classOf(t, err); got != gapi.ClassUnsupported || !strings.Contains(err.Error(), "scope:series") {
 		t.Fatalf("got [%s] %v, want [unsupported] naming scope:series", got, err)
@@ -1981,7 +2009,7 @@ func TestAMoreRestrictiveVisibilityOnAnOccurrenceSaysItReachesTheSeries(t *testi
 	svc, fake := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: "evseries001_20260324T130000Z", Scope: "instance",
-		Visibility: strptr("private"),
+		Visibility: ptr("private"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -2001,8 +2029,8 @@ func TestCreateEventSetsRemindersVisibilityAndPermissions(t *testing.T) {
 	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
 		Calendar: "primary", Title: "Quiet planning",
 		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T10:00:00+02:00",
-		PopupReminders: []int{30}, Visibility: "private",
-		GuestsCanInviteOthers: boolptr(false), GuestsCanModify: boolptr(true),
+		PopupReminders: ptr([]int{30}), Visibility: "private",
+		GuestsCanInviteOthers: ptr(false), GuestsCanModify: ptr(true),
 	})
 	if err != nil {
 		t.Fatalf("CreateEvent: %v", err)
@@ -2050,7 +2078,7 @@ func TestANewEventUsesTheCalendarsReminders(t *testing.T) {
 func TestADryRunProjectsReminders(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: "evsolo00001", EmailReminders: intsptr(), DryRun: true,
+		Calendar: "primary", EventID: "evsolo00001", EmailReminders: ptr([]int{}), DryRun: true,
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -2154,8 +2182,8 @@ func TestAddConferenceDoesNotGoWithASplit(t *testing.T) {
 		Calendar: "primary", EventID: "evseries001_20260331T120000Z", Scope: "this_and_following",
 		AddConference: true,
 	})
-	if got := classOf(t, err); got != gapi.ClassUnsupported || !strings.Contains(err.Error(), "scope:series") {
-		t.Fatalf("got [%s] %v, want [unsupported] naming scope:series", got, err)
+	if got := classOf(t, err); got != gapi.ClassBlocked || !strings.Contains(err.Error(), "scope:series") {
+		t.Fatalf("got [%s] %v, want [blocked] naming scope:series", got, err)
 	}
 	if len(fake.Wrote()) != 0 {
 		t.Error("the refusal must come before any write")
@@ -2404,7 +2432,7 @@ func TestASplitThatDeclinesOnlyNewInvitationsAsksNothing(t *testing.T) {
 	occ := statusSeries(t, fake, "evaway00002", gcal.EventTypeOutOfOffice,
 		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineNew}, false)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: occ, Scope: "this_and_following", Title: strptr("Away"),
+		Calendar: "primary", EventID: occ, Scope: "this_and_following", Title: ptr("Away"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
@@ -2434,22 +2462,22 @@ func TestAStatusEventIsHeldToGooglesRulesOnEveryWrite(t *testing.T) {
 		says            string
 	}{
 		{"free out of office, split", gcal.EventTypeOutOfOffice, away, false, "this_and_following",
-			func(o *service.UpdateOptions) { o.Transparent = boolptr(true) },
+			func(o *service.UpdateOptions) { o.Transparent = ptr(true) },
 			gapi.ClassInvalid, "an out-of-office event always shows you as busy"},
 		{"free out of office, whole series", gcal.EventTypeOutOfOffice, away, false, "series",
-			func(o *service.UpdateOptions) { o.Transparent = boolptr(true) },
+			func(o *service.UpdateOptions) { o.Transparent = ptr(true) },
 			gapi.ClassInvalid, "an out-of-office event always shows you as busy"},
 		{"free out of office, one occurrence", gcal.EventTypeOutOfOffice, away, false, "instance",
-			func(o *service.UpdateOptions) { o.Transparent = boolptr(true) },
+			func(o *service.UpdateOptions) { o.Transparent = ptr(true) },
 			gapi.ClassInvalid, "an out-of-office event always shows you as busy"},
 		{"all-day focus time, split", gcal.EventTypeFocusTime, focus, false, "this_and_following",
 			func(o *service.UpdateOptions) { o.Start, o.End = "2026-03-31", "2026-03-31" },
 			gapi.ClassUnsupported, "focus time cannot be all day"},
 		{"a private working location, split", gcal.EventTypeWorkingLocation, home, false, "this_and_following",
-			func(o *service.UpdateOptions) { o.Visibility = strptr("private") },
+			func(o *service.UpdateOptions) { o.Visibility = ptr("private") },
 			gapi.ClassInvalid, "a working location is always public"},
 		{"a busy working location, whole series", gcal.EventTypeWorkingLocation, home, false, "series",
-			func(o *service.UpdateOptions) { o.Transparent = boolptr(false) },
+			func(o *service.UpdateOptions) { o.Transparent = ptr(false) },
 			gapi.ClassInvalid, "a working location always shows you free"},
 		{"a two-day working location, split", gcal.EventTypeWorkingLocation, home, true, "this_and_following",
 			func(o *service.UpdateOptions) { o.End = "2026-04-01" },
@@ -2486,7 +2514,7 @@ func TestAStatusEventTakesTheChangesGoogleAllows(t *testing.T) {
 		gcal.EventWorkingLocationProperties{Type: gcal.WorkingCustom,
 			CustomLocation: &gcal.WorkingLocationCustom{Label: "Library"}}, true)
 	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
-		Calendar: "primary", EventID: office, Scope: "series", Title: strptr("Library day"),
+		Calendar: "primary", EventID: office, Scope: "series", Title: ptr("Library day"),
 	}); err != nil {
 		t.Fatalf("a new title: %v", err)
 	}

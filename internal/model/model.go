@@ -249,14 +249,12 @@ func (w Words) Word(wire string) string {
 	return wire
 }
 
-// List is the words, for a refusal: "none, new or all".
+// List is the words, for a refusal: "none, new or all". Every set has
+// at least two.
 func (w Words) List() string {
 	words := make([]string, 0, len(w))
 	for _, p := range w {
 		words = append(words, p[0])
-	}
-	if len(words) < 2 {
-		return strings.Join(words, "")
 	}
 	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
 }

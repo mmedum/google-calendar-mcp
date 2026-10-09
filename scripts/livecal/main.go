@@ -171,7 +171,8 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}()
 	}
 
-	if err := api.seed(ctx, scratch); err != nil {
+	uids, err := api.seed(ctx, scratch)
+	if err != nil {
 		out.Printf("could not fill the scratch calendar: %v\n", err)
 		return 2
 	}
@@ -195,10 +196,10 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 2
 	}
 	state.canceledOccurrence = canceled
-	// The UIDs the ical_uid steps filter on. A failed read leaves one
-	// empty, and those steps say they were skipped rather than fail.
-	state.timedUID, _ = api.iCalUID(ctx, scratch, timedID)
-	state.weeklyUID, _ = api.iCalUID(ctx, scratch, weeklyID)
+	// The UIDs the ical_uid steps filter on, from the inserts' answers.
+	// One missing leaves the steps that need it skipped rather than
+	// failed.
+	state.timedUID, state.weeklyUID = uids[timedID], uids[weeklyID]
 	out.Printf("filled with %d invented events; the occurrence on %s was canceled\n\n",
 		len(seedEvents()), canceled)
 

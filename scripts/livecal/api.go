@@ -491,25 +491,32 @@ func seedEvents() []seedEvent {
 	}
 }
 
-func (a *liveAPI) seed(ctx context.Context, cal string) error {
+// seed fills the calendar, and returns the iCalendar UID Google gave each
+// event, by event id, from the insert's own answer.
+func (a *liveAPI) seed(ctx context.Context, cal string) (map[string]string, error) {
+	uids := map[string]string{}
 	for _, e := range seedEvents() {
 		if err := gcal.ValidEventID(e.id); err != nil {
-			return err
+			return nil, err
 		}
 		// sendUpdates=none is correct here and nowhere else: these events
 		// have no guests, so nothing can be sent, and saying so keeps the
 		// driver from ever mailing a real person.
-		if err := a.do(ctx, http.MethodPost,
-			"/calendars/"+cal+"/events?sendUpdates=none", e.body, nil); err != nil {
-			return err
+		var made struct {
+			ICalUID string `json:"iCalUID"`
 		}
+		if err := a.do(ctx, http.MethodPost,
+			"/calendars/"+cal+"/events?sendUpdates=none", e.body, &made); err != nil {
+			return nil, err
+		}
+		uids[e.id] = made.ICalUID
 		if e.after != nil {
 			if err := e.after(ctx, a, cal); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
-	return nil
+	return uids, nil
 }
 
 // primaryAddress is the signed-in account's own calendar id, which is
@@ -695,15 +702,6 @@ type seedState struct {
 	// timed event and the weekly series. No tool shows one; a caller
 	// holds one from an invitation email.
 	timedUID, weeklyUID string
-}
-
-// iCalUID reads one event's iCalendar UID.
-func (a *liveAPI) iCalUID(ctx context.Context, cal, id string) (string, error) {
-	var out struct {
-		ICalUID string `json:"iCalUID"`
-	}
-	err := a.do(ctx, http.MethodGet, "/calendars/"+cal+"/events/"+id, nil, &out)
-	return out.ICalUID, err
 }
 
 // removeOneOccurrence cancels the second occurrence of the weekly
