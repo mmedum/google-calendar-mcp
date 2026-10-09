@@ -1674,11 +1674,19 @@ VERSION=vX.Y.Z`. It used to diff against the last tag, with the file as
 a fallback, and that was wrong twice: CI's checkout is shallow and has
 no tags, so CI always used the file, which nobody refreshed; and a
 deliberate break had no way through locally, because the tag always
-won. The gate fails on what breaks a caller: a tool or resource removed;
-an input or output field removed or retyped at any depth, `events[].start`
-as much as `events`; or an input newly required where its parent was
-already there. Anything else that changed is reported for a person to
-read. It also fails when the baseline is not the newest release's, and,
+won. The gate fails on what breaks a caller, at any depth,
+`events[].start` as much as `events`: a tool, resource or field removed;
+an input that takes fewer types than it did, or no longer takes a value
+it listed; an output that may return a type it did not, or may be
+missing where it was required; or an input newly required where its
+parent was already there. Types are compared one way, as JSON Schema
+2020-12 reads them (validation §6.1.1): a list of types allows any of
+them, and an integer is a number. So an input that becomes nullable or takes a number for an
+integer breaks nobody, and an output that may now be null does. Anything
+else that changed is reported for a person to read, and an output that
+may carry a value it did not list, or an input newly limited to a list,
+is named: whether either breaks a caller depends on what the server did
+before. It also fails when the baseline is not the newest release's, and,
 with nothing under `[Unreleased]`, when the build differs from the
 baseline at all, which proves a release commit recorded the baseline
 rather than relabeling it. `schema-baseline` refuses a build stamped

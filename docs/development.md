@@ -30,7 +30,7 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make pins` | actions pinned to SHAs, tools pinned to versions, and a tool run locally pinned to the version the release runs |
 | `make live-cover` | every published tool has a step in the live driver |
 | `make parity` | `make check` and `ci.yml` run the same things |
-| `make schema-diff` | the tool surface against the newest release's recorded baseline; fails on a removed tool or resource, a field removed or retyped at any depth, a newly required input, or a baseline that is not the newest release's |
+| `make schema-diff` | the tool surface against the newest release's recorded baseline; fails, at any depth, on a removed tool, resource or field, an input that takes fewer types or loses a listed value or is newly required, an output that may return another type or be missing where it was required, or a baseline that is not the newest release's; reports an output that may carry a new listed value |
 | `make smoke` | the binary over stdio, and a clean exit on disconnect |
 | `make mcpb` | the bundle manifest describes the bundle the packer stages |
 | `make release` | `.goreleaser.yaml` builds what the packer stages, and signs and uploads it; `release.yml` runs `gates release-tag` before goreleaser |
