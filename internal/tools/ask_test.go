@@ -109,13 +109,25 @@ func withGuests(e *gcal.Event) {
 // A nil p declares no elicitation; opts adjust the client further.
 func connect(t *testing.T, cfg config.Config, protocol string, p *person, opts ...func(*mcp.ClientOptions)) (*mcp.ClientSession, *caltest.Server) {
 	t.Helper()
+	srv, fake := newServer(t, cfg)
+	return connectTo(t, srv, protocol, p, opts...), fake
+}
+
+// newServer is a server over a fresh fake.
+func newServer(t *testing.T, cfg config.Config) (*mcp.Server, *caltest.Server) {
+	t.Helper()
 	fake := fixtures(t)
 	base := fake.Start()
 	t.Cleanup(fake.Close)
 	api := gapi.New(nil)
 	api.Base = base
 	api.MaxRetries = 0
-	srv := server.New(server.Deps{Service: service.New(api, cfg), Config: cfg, Version: "test"})
+	return server.New(server.Deps{Service: service.New(api, cfg), Config: cfg, Version: "test"}), fake
+}
+
+// connectTo connects one more client to srv, as connect does.
+func connectTo(t *testing.T, srv *mcp.Server, protocol string, p *person, opts ...func(*mcp.ClientOptions)) *mcp.ClientSession {
+	t.Helper()
 	ct, st := mcp.NewInMemoryTransports()
 	ss, err := srv.Connect(context.Background(), st, nil)
 	if err != nil {
@@ -135,7 +147,7 @@ func connect(t *testing.T, cfg config.Config, protocol string, p *person, opts .
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cs.Close() })
-	return cs, fake
+	return cs
 }
 
 // askCase is a call that clears a tool's own guards and reaches its
@@ -538,7 +550,10 @@ func TestARoleChangeAsks(t *testing.T) {
 // requiresUserInteraction mark only for a client that cannot ask; with
 // both, the person would answer twice for one call. The two are every
 // tool here that both carries the mark and asks every time: a new name
-// needs a look at whether it really asks every time.
+// needs a look at whether it really asks every time. Each protocol lists
+// on one server, the client that can ask first, so a mark dropped from
+// the server's own tool rather than from a copy shows for the clients
+// after it.
 func TestTheMarkIsForAClientThatCannotAsk(t *testing.T) {
 	marked := func(cs *mcp.ClientSession) string {
 		t.Helper()
@@ -555,14 +570,27 @@ func TestTheMarkIsForAClientThatCannotAsk(t *testing.T) {
 		slices.Sort(out)
 		return strings.Join(out, " ")
 	}
-	for _, protocol := range protocols {
-		cs, _ := connect(t, everything(), protocol, &person{action: "accept"})
-		if got := marked(cs); got != "" {
-			t.Errorf("%s, a client that can ask: marked %q, want none", protocol, got)
+	urlAlone := func(o *mcp.ClientOptions) {
+		o.Capabilities = &mcp.ClientCapabilities{
+			Elicitation: &mcp.ElicitationCapabilities{URL: &mcp.URLElicitationCapabilities{}},
 		}
-		cs, _ = connect(t, everything(), protocol, nil)
-		if got, want := marked(cs), "clear_calendar delete_calendar"; got != want {
-			t.Errorf("%s, a client that cannot ask: marked %q, want %q", protocol, got, want)
+	}
+	for _, protocol := range protocols {
+		srv, _ := newServer(t, everything())
+		for _, c := range []struct {
+			client string
+			p      *person
+			opts   []func(*mcp.ClientOptions)
+			want   string
+		}{
+			{"a client that can ask", &person{action: "accept"}, nil, ""},
+			{"a client with no elicitation", nil, nil, "clear_calendar delete_calendar"},
+			{"a client with URL elicitation alone", &person{action: "accept"},
+				[]func(*mcp.ClientOptions){urlAlone}, "clear_calendar delete_calendar"},
+		} {
+			if got := marked(connectTo(t, srv, protocol, c.p, c.opts...)); got != c.want {
+				t.Errorf("%s, %s: marked %q, want %q", protocol, c.client, got, c.want)
+			}
 		}
 	}
 }

@@ -2530,6 +2530,29 @@ Written down, not changed: a share to a group below owner asks nothing,
 although a group can be as large as a domain. The asking set is the one
 the maintainer chose.
 
+**The interaction mark's review.** A sibling server's review of the
+same change (§9a item 3) found three gaps, and all three held here.
+Fixed from it:
+
+10. **No test showed the mark is dropped from a copy.** Each client had
+    a server of its own. Now, on every protocol, one server lists for a
+    client that can ask, then for one with no elicitation and one with
+    URL elicitation alone. Dropping the mark from the server's own tool
+    fails it.
+11. **§18 row 83 left out an `Elicitation` hook.** A Claude Code hook
+    that accepts now confirms these deletes alone, where the mark used
+    to stop the call first. Row 83 and the CHANGELOG say so.
+12. **A comment said Claude Code prompts for the mark in every
+    permission mode.** The evidence is that it prompts even under an
+    allow rule, and the comment says that now.
+
+Written down, not changed: on protocol 2026-07-28 capabilities travel
+per request. A client can declare form elicitation to `tools/list` and
+none to `tools/call`, and get neither the mark nor a question. That
+gives a misbehaving client nothing it lacked: such a client answers the
+server's question itself, and can accept with nobody present (§18
+row 80).
+
 ## 17. Open decisions
 
 1. **Incremental sync.** `syncToken` is designed for a client with a
@@ -2762,7 +2785,7 @@ what §15 exists to settle, and they are marked.
 | 80 | A client that declares elicitation has a person to answer it | Tier 2, from a sibling server's evidence log: `claude -p` 2.1.284 against a probe, and the Codex source at `codex-rs/codex-mcp/src/elicitation.rs` | **Refuted.** `claude -p` declares it and answers `cancel` in milliseconds; Codex under approval policy `never` with full access accepts a fieldless form. So a refusal never says the person declined, and an unattended client that declares elicitation cannot make these writes |
 | 81 | A client draws a question as plain text | Tier 2, from a sibling server's evidence log: VS Code's `mcpElicitationService.ts` builds the message as a `MarkdownString` | **Refuted.** Calendar text in a question stands in a code span, and the server's own lines hold no Markdown (§9a) |
 | 82 | A 503 on a write may be retried, and a 404 on a retried delete means it was never there | `google/rpc/code.proto` in googleapis, `UNAVAILABLE`, read 2026-10-01: "Note that it is not always safe to retry non-idempotent operations", HTTP mapping 503 | **Refuted for both.** A 5xx or a lost answer on `events.move` or `acl.insert` is `[ambiguous_outcome]`, like `events.insert` and `calendars.insert`, never `[unavailable]`, which invites a retry. A delete whose first attempt got a 5xx or no answer and whose retry got 404 or 410 is `[ambiguous_outcome]`: that first attempt most likely landed. A 404 after a 429 stays `[not_found]`, since Google did not act on the 429 |
-| 83 | A destructive tool should carry both `requiresUserInteraction` and the server's own question | Tier 2: the owner was asked twice for one delete in google-docs-mcp (2026-10-09); the MCP spec, GitHub's `delete_repository`, Supabase, and Claude Code's own documentation of the mark | **Refuted.** No source recommends two hard gates for one call; GitHub and Supabase confirm with `destructiveHint` plus a form elicitation, and Claude Code scopes the mark to "tools whose permission prompt is itself the point". The mark is now sent only to a client that cannot ask |
+| 83 | A destructive tool should carry both `requiresUserInteraction` and the server's own question | Tier 2: the owner was asked twice for one delete in google-docs-mcp (2026-10-09); the MCP spec, GitHub's `delete_repository`, Supabase, and Claude Code's own documentation of the mark | **Refuted.** No source recommends two hard gates for one call; GitHub and Supabase confirm with `destructiveHint` plus a form elicitation, and Claude Code scopes the mark to "tools whose permission prompt is itself the point". The mark is now sent only to a client that cannot ask. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to stop the call before it reached the server |
 
 ### Deviations from the shared Go MCP server standard
 
