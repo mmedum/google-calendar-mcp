@@ -83,6 +83,12 @@ What it does to the account, so nothing is a surprise:
   address it shares a calendar with is in `example.test`, which cannot
   resolve. `-spike-notify` is what arms the steps and spikes that mail a
   real person, and they say so before they run.
+- `GCAL_LIVE_ATTACHMENT` arms the attachment steps. Set it to the link of
+  a Drive file you made for the purpose, with an invented name and
+  nothing in it. The driver attaches it to its weekly series under its
+  own title, reads it back, and checks a split keeps it. It cannot make a
+  Drive file with this server's scopes, so without the variable those
+  steps are skipped and owed.
 - `-show <substring>` prints the redacted body of every step whose name
   contains it. A pass/fail line cannot show a result that is confidently
   wrong, which is how the last three phases each found a defect.

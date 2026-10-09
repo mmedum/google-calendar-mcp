@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -442,6 +443,63 @@ func TestGetEvent(t *testing.T) {
 	}
 	if z.Name() == "" {
 		t.Fatal("GetEvent returned no zone")
+	}
+}
+
+// TestAReadShowsTheFilesOnAnEvent: Google returns attachments on a read
+// with no parameter. The card lists each with the Drive file id that
+// hands it to a Drive server, and a list row counts them.
+func TestAReadShowsTheFilesOnAnEvent(t *testing.T) {
+	fake := caltest.Seed()
+	planning := caltest.Timed("ev-files", "Planning", "2026-03-16T11:00:00+01:00", "2026-03-16T12:00:00+01:00",
+		"Europe/Copenhagen")
+	planning.Attachments = []gcal.EventAttachment{
+		{FileID: "AAAAfile1", FileURL: "https://drive.example.test/AAAAfile1", Title: "Sample agenda",
+			MimeType: "application/pdf", IconLink: "https://drive.example.test/icon.png"},
+		{FileURL: "https://files.example.test/AAAAfile2"},
+	}
+	fake.AddEvent("primary", planning)
+	svc := newService(t, fake)
+	ctx := context.Background()
+
+	e, z, err := svc.GetEvent(ctx, "primary", "ev-files", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := service.NewEventResult(e, z)
+	got, err := json.Marshal(card.Attachments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"title":"Sample agenda","file_id":"AAAAfile1","url":"https://drive.example.test/AAAAfile1",` +
+		`"mime_type":"application/pdf"},{"url":"https://files.example.test/AAAAfile2"}]`
+	if string(got) != want {
+		t.Fatalf("attachments = %s, want %s", got, want)
+	}
+	for _, line := range []string{
+		"Attachments (2):", "  Sample agenda (application/pdf)", "    file id: AAAAfile1", "  (no title)",
+	} {
+		if !strings.Contains(card.Render(), line+"\n") {
+			t.Fatalf("the card does not carry %q:\n%s", line, card.Render())
+		}
+	}
+
+	sched, err := svc.ListEvents(ctx, service.ListOptions{From: "2026-03-16", To: "2026-03-16", Expand: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := service.NewScheduleResult(sched)
+	for _, ev := range rows.Events {
+		want := 0
+		if ev.ID == "ev-files" {
+			want = 2
+		}
+		if ev.AttachmentCount != want {
+			t.Fatalf("%s has attachment_count %d, want %d", ev.ID, ev.AttachmentCount, want)
+		}
+	}
+	if !strings.Contains(rows.Render(), "Planning  [2 attachments]") {
+		t.Fatalf("the list row does not count the files:\n%s", rows.Render())
 	}
 }
 

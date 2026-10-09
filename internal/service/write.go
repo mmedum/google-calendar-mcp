@@ -830,8 +830,8 @@ func insertMessage(err error) string {
 // splitBody builds the new series a this_and_following write inserts.
 //
 // It carries the parent's content forward — the guests, the description,
-// the transparency, and every field this server does not model, such as
-// attachments, extended properties and a status event's details —
+// the attachments, and every field this server does not model, such as
+// a label, extended properties and a status event's details —
 // because "this and following" means the same event from here on, with
 // the change applied. What it does NOT carry is the parent's id, its
 // etag or its instance exceptions: those belong to the event being left

@@ -137,6 +137,14 @@ func leakRules() []leakRule {
 			re:   regexp.MustCompile(`https://(www\.)?google\.com/calendar/event\?eid=[A-Za-z0-9_\-]+`),
 		},
 		{
+			// A Drive or Docs link names somebody's file by its id, and an
+			// event card prints the link of every file attached. Drive ids
+			// are long; a synthetic one here is short.
+			name: "Google Drive file link",
+			re: regexp.MustCompile(`(?i:https?://(?:drive|docs)\.google\.com)/[^\s"'<>)\]]*` +
+				`(?:/d/|[?&]id=)[A-Za-z0-9_\-]{20,}`),
+		},
+		{
 			// A refresh token's literal prefix.
 			name: "OAuth refresh token",
 			re:   regexp.MustCompile(`\b1//[0-9A-Za-z_\-]{20,}\b`),

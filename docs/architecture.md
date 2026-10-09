@@ -320,7 +320,9 @@ subscribed list, events and their recurrences, availability, sharing,
 colors and the user's own settings. Out (**decided**): everything a
 meeting *produces* rather than *is* — the Meet recording, the notes
 document, the file attached to an event — which belongs to the servers
-built on the Drive and Docs APIs. Google Tasks is a separate API and a
+built on the Drive and Docs APIs. Which files are attached is a fact
+about the event, so a read shows it, with the Drive file id that hands
+the file over; this server never opens or writes one (§7.2). Google Tasks is a separate API and a
 separate server. A conference attached to an event is a Calendar field
 and is in scope; the Meet API's recordings and transcripts are not
 (§17.3).
@@ -516,8 +518,8 @@ Every event write takes a required `scope`:
   performs it, and its result says in plain words that **exceptions
   after the target instance were reset**, because Google's guide says
   they are and no caller expects it. The new series is the original
-  copied whole, fields this server does not model included:
-  attachments, a label, other applications' extended properties and a
+  copied whole: its attachments, and the fields this server does not
+  model, such as a label, other applications' extended properties and a
   status event's details. It leaves behind the conference, which the
   result says, and what Google sets itself (§18 row 88).
 
@@ -888,6 +890,15 @@ free text with no field scoping (§2), so a model treats an empty result
 as "found nothing" rather than "there is nothing".
 
 `get_event` returns one event whole. `list_instances` expands one series.
+
+**Attachments are shown, never written.** Google returns them on a read
+with no parameter. The event card lists each with its title, type, link
+and Drive file id, and every list row counts them as
+`attachment_count`. A title is text somebody else wrote, so it is
+treated like a description: shown as written, never logged (§9). The
+file itself is the Drive server's, and the file id is what it takes.
+No tool adds or removes an attachment; a series split carries the
+parent's (§4.2, §18 row 90).
 
 ### 7.3 Availability
 
@@ -2836,6 +2847,7 @@ what §15 exists to settle, and they are marked.
 | 87 | Free/busy answers for a group under `calendars`, like any other id | Calendar discovery revision 20261002: `items[].id` is "The identifier of a calendar or a group"; the reply's `groups` is "Expansion of groups", each a list of member calendar ids; `groupExpansionMax` "An error is returned for a group with more members than this value. Maximum value is 100." | **Refuted by the reference: a group answers under `groups`**, and the server read only `calendars`, so every group came back unknown. A group's answer is now its members' busy time merged, sent with `groupExpansionMax: 100`; one member unread, an expansion error or no members makes it unknown, never free (§4.6). `calendarExpansionMax` caps the calendars one request answers at 50, a group's members included, so the calendars a group pushes past it are asked about again on their own, up to 200. A live check waits on a probe outside the driver, which prints counts only, because a group is other people's calendars and the driver reads only its own |
 | 88 | The new series of a split can be built from the fields this server models | Calendar discovery revision 20261005, read 2026-10-09: `Event.attachments` "In order to modify attachments the supportsAttachments request parameter should be set to true"; `eventLabelId` "To set or change this property, you need to specify eventLabelVersion=1"; the status-events guide: to create a working location, "Include the workingLocationProperties field" | **Refuted.** The copy was decoded into the modeled fields, so the new series lost the parent's attachments, label, extended properties and status details, and a working-location series went to Google without the details its guide says a create needs. An event now keeps every field it does not model, the split carries them, and the insert sets `supportsAttachments=true` when it carries files and `eventLabelVersion=1` when it carries a label. It leaves `kind`, `locked`, `gadget` and `hangoutLink` behind, which Google sets itself. **Not yet probed live, tier 3:** that Google refuses a status event created without its details; that it drops attachments and a label sent without their parameter rather than refusing them; that it accepts the other carried fields on an insert, such as `privateCopy`, `source` and an attachment's read-only `fileId`; and whether creating an out-of-office series that declines conflicts declines them again. The fake holds the first two. A refusal costs more than before, because it lands after the truncate, as `[ambiguous_outcome]`. The live driver checks that a private extended property survives a split. A split carrying an attachment is owed; one carrying a working location needs a recurring status event on the primary calendar, which §9.1 does not allow the driver |
 | 89 | `events.list` filters by event type, and leaving the filter out returns every type | Calendar discovery revision 20261005, read 2026-10-09: `eventTypes` is repeated, an enum of `birthday`, `default`, `focusTime`, `fromGmail`, `outOfOffice` and `workingLocation`, "If unset, returns all event types." | **Confirmed in the reference; the live steps are written and not yet run.** `list_events` and `search_events` take `event_types` and send each as `eventTypes`. The page token carries the filter, and a continuation under another one is refused, because Google resumes a token only for the query that issued it. The fake refuses a value outside the enum and counts an event with no type as `default`. The live steps filter the scratch calendar, whose events are all ordinary, on `focusTime` and expect none, then on `default` and expect them all |
+| 90 | A read returns an event's attachments without asking, and an attachment's `fileId` is the Drive file id | Calendar discovery revision 20261005, read 2026-10-09: `supportsAttachments` is a parameter of `events.insert`, `import`, `patch` and `update` only, not of `get`, `list` or `instances`; `EventAttachment.fileId` "For Google Drive files, this is the ID of the corresponding Files resource entry in the Drive API" | **Confirmed in the reference; not yet seen live, tier 3.** `get_event` lists the attachments and every event row counts them. The live driver attaches the Drive file `GCAL_LIVE_ATTACHMENT` names to the weekly series, reads it back, and checks a split carries it. Without that variable those steps are skipped and owed: the driver cannot create a Drive file with the scopes this server asks for |
 
 ### Deviations from the shared Go MCP server standard
 

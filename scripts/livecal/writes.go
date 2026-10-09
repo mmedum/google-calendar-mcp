@@ -500,7 +500,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			// server does not model included. The seed put a private
 			// extended property on the series, and only a direct read
 			// can see it.
-			name: "the split keeps what it does not model",
+			name: "the split keeps what the series carried",
 			tool: "get_event",
 			argsFn: func() map[string]any {
 				return on(map[string]any{"event_id": w.splitFrom})
@@ -522,7 +522,14 @@ func writeSteps(scratch string, w *writeState) []step {
 				if got != splitValue {
 					return fail, "the new series lost the private extended property the series carried"
 				}
-				return pass, "the new series kept the series' private extended property"
+				if attachmentURL() == "" {
+					return pass, "the new series kept the series' private extended property; " +
+						"the attachment half is owed (" + envAttachment + " is unset)"
+				}
+				if !strings.Contains(r.text, "Attachments (1):") {
+					return fail, "the new series lost the file attached to the series"
+				}
+				return pass, "the new series kept the series' private extended property and its file"
 			},
 		},
 		{

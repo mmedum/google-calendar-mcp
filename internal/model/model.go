@@ -170,6 +170,19 @@ type Event struct {
 	AttendeesTruncated bool
 	Organizer          string
 	OrganizerSelf      bool
+	// Attachments are the files on the event. Shown, never written.
+	Attachments []Attachment
+}
+
+// Attachment is one file on an event. The file belongs to the Drive
+// server, and FileID is what a caller hands it.
+type Attachment struct {
+	// Title is text somebody else wrote: content, shown and never logged
+	// (§9).
+	Title    string
+	FileID   string
+	URL      string
+	MimeType string
 }
 
 // IsSeries reports whether this is a recurring parent.
@@ -299,6 +312,11 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 		out.Attendees = append(out.Attendees, Attendee{
 			Email: a.Email, Name: a.DisplayName, Response: a.ResponseStatus,
 			Optional: a.Optional, Resource: a.Resource, Self: a.Self, Organizer: a.Organizer,
+		})
+	}
+	for _, a := range e.Attachments {
+		out.Attachments = append(out.Attachments, Attachment{
+			Title: a.Title, FileID: a.FileID, URL: a.FileURL, MimeType: a.MimeType,
 		})
 	}
 	return out, nil

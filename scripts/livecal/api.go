@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,14 @@ const (
 	// weekly series carries into a split.
 	splitKey   = "livecalSplit"
 	splitValue = "carried"
+	// attachTitle is the title the driver gives the file it attaches.
+	attachTitle = "Livecal attachment probe"
+	// envAttachment names a Drive file the account can open, as its
+	// link. The server asks for no Drive scope, so the driver cannot make
+	// a file of its own: the person running it makes one for the purpose,
+	// with an invented name and nothing in it. Unset, the attachment
+	// steps are skipped and owed.
+	envAttachment = "GCAL_LIVE_ATTACHMENT"
 )
 
 // Event ids are base32hex: lowercase a-v and the digits, 5 to 1024
@@ -352,6 +361,22 @@ func (a *liveAPI) getEvent(ctx context.Context, cal, id string) (instanceRow, er
 	return row, err
 }
 
+// attachmentURL is the Drive file the attachment steps use, or "".
+func attachmentURL() string { return strings.TrimSpace(os.Getenv(envAttachment)) }
+
+// attach puts that file on an event under the driver's own title. The
+// server writes no attachment, so the driver does, and does nothing when
+// no file was named.
+func (a *liveAPI) attach(ctx context.Context, cal, id string) error {
+	link := attachmentURL()
+	if link == "" {
+		return nil
+	}
+	return a.do(ctx, http.MethodPatch,
+		"/calendars/"+cal+"/events/"+id+"?sendUpdates=none&supportsAttachments=true",
+		map[string]any{"attachments": []map[string]any{{"fileUrl": link, "title": attachTitle}}}, nil)
+}
+
 // privateProperty reads one private extended property off an event. No
 // tool shows one, so this is the only way to see whether a split kept
 // it.
@@ -441,6 +466,11 @@ func seedEvents() []seedEvent {
 				"extendedProperties": map[string]any{
 					"private": map[string]any{splitKey: splitValue},
 				},
+			},
+			// The attachment, when a file was named, so a read shows it
+			// and the split step can check the new series kept it.
+			after: func(ctx context.Context, a *liveAPI, cal string) error {
+				return a.attach(ctx, cal, weeklyID)
 			},
 		},
 		{

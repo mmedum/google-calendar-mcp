@@ -936,10 +936,11 @@ func TestAScopeReachesTheEventItNames(t *testing.T) {
 }
 
 // The new series of a this_and_following write is the parent copied, so
-// it keeps the fields this server has no struct field for. It used to be
-// built from the decoded fields alone: attachments and another
-// application's properties were lost, and a working-location series went
-// to Google without the details a create needs (§18 row 88).
+// it keeps its attachments and the fields this server has no struct
+// field for. It used to be built from the decoded fields alone:
+// attachments and another application's properties were lost, and a
+// working-location series went to Google without the details a create
+// needs (§18 row 88).
 func TestASplitCarriesWhatThisServerDoesNotModel(t *testing.T) {
 	svc, fake := writeSeed(t)
 	var series gcal.Event

@@ -125,6 +125,9 @@ func TestEventLineTags(t *testing.T) {
 		{"out of office", func(e *model.Event) { e.Type = gcal.EventTypeOutOfOffice }, "out of office"},
 		{"from gmail cannot be edited", func(e *model.Event) { e.Type = gcal.EventTypeFromGmail }, "cannot be edited"},
 		{"location", func(e *model.Event) { e.Location = "Room 4" }, "at Room 4"},
+		{"attachments are counted", func(e *model.Event) {
+			e.Attachments = []model.Attachment{{Title: "Sample agenda"}, {Title: "Sample notes"}}
+		}, "2 attachments"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -322,13 +325,14 @@ func TestBothLineRenderersCarryTheSameTags(t *testing.T) {
 	e.Transparent = true
 	e.Location = "Room 4"
 	e.Attendees = []model.Attendee{{Email: "a@example.test"}}
+	e.Attachments = []model.Attachment{{Title: "Sample agenda"}}
 
 	schedule := render.EventLine(e, z)
 	instance := render.InstanceLine(e, z)
 
 	for _, want := range []string{
 		"out of office", "no end time set", "guest list truncated by Google",
-		"free", "at Room 4", "1 guest",
+		"free", "at Room 4", "1 guest", "1 attachment;",
 	} {
 		if !strings.Contains(schedule, want) {
 			t.Fatalf("EventLine does not mention %q:\n%s", want, schedule)

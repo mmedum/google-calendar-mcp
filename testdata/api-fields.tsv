@@ -16,7 +16,7 @@
 #
 # resource	field	verdict	reason
 Event	anyoneCanAddSelf	out	deprecated in Google's own field description. A split carries it whole (§4.2)
-Event	attachments	out	a file on an event belongs to the Drive API and to the server built on it; this one answers when, not what (§1). A split carries them whole (§4.2)
+Event	attachments	modeled	shown on reads, never written: the card lists each file with the Drive file id that hands it to a Drive server, and a list row counts them. A split carries them whole, with supportsAttachments (§4.2, §7.2)
 Event	attendees	modeled	the guest list, and the reason notify is required on any write that can reach a person (§4.3)
 Event	attendeesOmitted	modeled	Google truncated the list; a renderer that ignores it shows a meeting as smaller than it is
 Event	birthdayProperties	out	immutable, and only on eventType=birthday. The renderer marks such events so a model does not try to reschedule one (§2.12). A split carries it whole (§4.2)
@@ -130,11 +130,11 @@ EntryPoint	password	out	phone and SIP details. A result shows the video link onl
 EntryPoint	pin	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
 EntryPoint	regionCode	out	phone and SIP details. A result shows the video link only, and a passcode or pin is a secret this server does not print
 EntryPoint	uri	modeled	the link a person clicks
-EventAttachment	fileId	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
-EventAttachment	fileUrl	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
-EventAttachment	iconLink	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
-EventAttachment	mimeType	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
-EventAttachment	title	out	as Event.attachments: a file on an event belongs to the Drive server (§1)
+EventAttachment	fileId	modeled	the Drive file id, shown as file_id: what hands the file to a Drive server (§7.2)
+EventAttachment	fileUrl	modeled	the link to open the file, shown as url, and what a split sends to add it to the new series
+EventAttachment	iconLink	modeled	never shown; carried so a split hands back the attachment it read
+EventAttachment	mimeType	modeled	shown as mime_type, so a caller knows what kind of file it is before asking for it
+EventAttachment	title	modeled	text somebody else wrote, like a description: shown as written, never logged (§9)
 EventAttendee	additionalGuests	modeled	carried whole through a guest-list patch, so a guest's +1 is kept (§4.4)
 EventAttendee	asyncOperation	out	read-only, added by Google after this record began: a group guest whose members Google is still listing. Not read; the guest count takes the group as one guest either way
 EventAttendee	comment	modeled	an RSVP note, kept when respond_to_event changes the answer

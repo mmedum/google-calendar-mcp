@@ -27,7 +27,8 @@ const SDKVersion = "v1.8.0"
 
 const instructions = "Google Calendar tools. This server answers *when*: calendars, the events on them, and who " +
 	"is free. What a meeting produces — a recording, a notes document, an attachment — belongs to the Drive and " +
-	"Docs servers. " +
+	"Docs servers. get_event lists the files attached to an event with each one's Drive file id, which is what " +
+	"those servers take; this server never opens a file. " +
 	"Start with list_calendars: every other tool takes a calendar, the ids come from there, and it reports each " +
 	"calendar's time zone, which is what times are read against. " +
 	"Time is the thing to be careful about here. An all-day event is a DATE and has no time of day; it is never " +

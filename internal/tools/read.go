@@ -106,6 +106,8 @@ func registerRead(s *mcp.Server, d Deps) {
 		Name: "get_event",
 		Description: "One event in full, including its guests and their responses, its recurrence rule if it has " +
 			"one, and its etag. " + zoneHelp + " " +
+			"It lists the files attached to the event with each one's Drive file id; this server never opens a " +
+			"file, so pass the id to a Drive server to read one. " +
 			"An event id is unique per calendar and not globally, so `calendar` is required alongside it. " +
 			"Ids come from list_events or search_events.",
 		Kind: Read,

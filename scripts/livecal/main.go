@@ -628,6 +628,14 @@ const (
 	scratchZone = "Europe/Copenhagen"
 )
 
+// noAttachment skips a step that needs a Drive file to attach.
+func noAttachment() string {
+	if attachmentURL() == "" {
+		return "owed: set " + envAttachment + " to the link of a Drive file made for this run"
+	}
+	return ""
+}
+
 // liveUncovered names tools that have no step here, and why.
 //
 // `gates live-cover` reads it: a tool with neither a step nor an entry
@@ -992,6 +1000,46 @@ func steps(scratch string, state seedState) []step {
 					return fail, "the timed event does not render its start in the calendar's zone"
 				}
 				return pass, "rendered 09:00 in " + scratchZone
+			},
+		},
+		{
+			// §18 row 90: a read shows the file on an event without
+			// asking for it, with the Drive file id that hands it over.
+			name: "get_event shows an attachment",
+			tool: "get_event",
+			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
+			skip: noAttachment,
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "Attachments (1):") {
+					return fail, "the card does not list the file the driver attached"
+				}
+				if !strings.Contains(r.text, "file id: ") {
+					return fail, "the attachment has no Drive file id"
+				}
+				if !strings.Contains(r.text, attachTitle) {
+					return pass, "listed with its file id, under a title Google chose rather than the driver's"
+				}
+				return pass, "listed with its file id and the title the driver gave"
+			},
+		},
+		{
+			name: "a list row counts the attachment",
+			tool: "list_events",
+			args: cal(map[string]any{"no_expand": true}),
+			skip: noAttachment,
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				for _, row := range linesWith(r.text, weeklyTitle) {
+					if strings.Contains(row, "1 attachment") {
+						return pass, "the series row counts its file"
+					}
+				}
+				return fail, "the series row does not count the file attached to it"
 			},
 		},
 		{

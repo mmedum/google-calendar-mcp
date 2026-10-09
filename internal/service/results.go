@@ -228,7 +228,10 @@ type EventOut struct {
 	// reported as an event that does not.
 	ConferenceURI    string `json:"conference_uri,omitempty"`
 	ConferenceStatus string `json:"conference_status,omitempty"`
-	ETag             string `json:"etag,omitempty"`
+	// AttachmentCount is how many files are on the event. get_event
+	// lists them.
+	AttachmentCount int    `json:"attachment_count,omitempty"`
+	ETag            string `json:"etag,omitempty"`
 }
 
 // Render implements Rendered.
@@ -265,8 +268,9 @@ func NewEventOut(e model.Event) EventOut {
 		SeriesID: e.SeriesID, Transparent: e.Transparent,
 		GuestCount: e.GuestCount(""), GuestsTruncated: e.AttendeesTruncated,
 		Organizer: e.Organizer, Link: e.Link, ETag: e.ETag,
-		AllDay:        e.Start.AllDay,
-		ConferenceURI: e.Conference.URI,
+		AllDay:          e.Start.AllDay,
+		ConferenceURI:   e.Conference.URI,
+		AttachmentCount: len(e.Attachments),
 	}
 	// The same four states the text renders, so a client reading only
 	// this block reaches the same conclusion. "other" is a state rather
@@ -306,8 +310,20 @@ type EventResult struct {
 	TimeZone   string        `json:"time_zone"`
 	ZoneSource string        `json:"time_zone_source"`
 	Attendees  []AttendeeOut `json:"attendees,omitempty"`
+	// Attachments are the files on the event. This server never opens
+	// one; file_id is what a Drive server takes.
+	Attachments []AttachmentOut `json:"attachments,omitempty"`
 
 	text string
+}
+
+// AttachmentOut is one file on an event. Its title is text somebody else
+// wrote, shown as it was written.
+type AttachmentOut struct {
+	Title    string `json:"title,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	URL      string `json:"url,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
 }
 
 // AttendeeOut is one guest.
@@ -333,6 +349,11 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 		out.Attendees = append(out.Attendees, AttendeeOut{
 			Email: a.Email, Name: a.Name, Response: a.Response,
 			Optional: a.Optional, Resource: a.Resource, Self: a.Self, Organizer: a.Organizer,
+		})
+	}
+	for _, a := range e.Attachments {
+		out.Attachments = append(out.Attachments, AttachmentOut{
+			Title: a.Title, FileID: a.FileID, URL: a.URL, MimeType: a.MimeType,
 		})
 	}
 
@@ -373,6 +394,9 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 		if e.AttendeesTruncated {
 			b.WriteString("  (Google truncated this guest list)\n")
 		}
+	}
+	if len(e.Attachments) > 0 {
+		b.WriteString(render.Attachments(e.Attachments))
 	}
 	if e.IsInstance() {
 		fmt.Fprintf(&b, "\nOne occurrence of series %s.\n", e.SeriesID)

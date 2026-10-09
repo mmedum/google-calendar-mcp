@@ -375,7 +375,7 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	// parameter should be set to true." That they are dropped without it,
 	// rather than refused, is believed rather than probed (§18 row 88).
 	if r.URL.Query().Get("supportsAttachments") != "true" {
-		delete(e.Unmodeled, "attachments")
+		e.Attachments = nil
 	}
 	// Version 0 of eventLabelVersion "assumes no event label support",
 	// so a label sent without version 1 is dropped.

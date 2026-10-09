@@ -127,6 +127,21 @@ func TestSyncAndPageTokensAreRedacted(t *testing.T) {
 	}
 }
 
+// A file attached to an event is somebody's document, and its link and
+// its id both name it. The id is anchored on the card's label.
+func TestAttachedFilesAreRedacted(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"    https://drive.google.com/open?id=AAAAfile1", "    [drive-url]"},
+		{"see HTTPS://DOCS.GOOGLE.COM/document/d/AAAAfile2/edit today", "see [drive-url] today"},
+		{"    file id: AAAAfile1", "    file id: [file-id]"},
+	}
+	for _, tc := range cases {
+		if got := redact.String(tc.in); got != tc.want {
+			t.Errorf("String(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // A Meet link is joinable by anybody holding it, so the redactor's job
 // is to miss none. These are the three it used to miss — found when
 // CodeQL flagged the line for over-matching and the opposite turned out

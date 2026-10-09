@@ -34,6 +34,12 @@ func TestLeakRulesCatchTheirShapeAndAllowTheReserved(t *testing.T) {
 			"https://www.google.com/calendar/" + "event?eid=" + "QUJD",
 			"https://www.google.com/calendar/" + "r"},
 		{"OAuth refresh token", "1//" + strings.Repeat("t", 20), "1//" + strings.Repeat("t", 19)},
+		{"Google Drive file link",
+			"https://drive.google.com/file/d/" + strings.Repeat("f", 20) + "/view",
+			"https://drive.google.com/open?id=" + strings.Repeat("f", 19)},
+		{"Google Drive file link",
+			"https://DOCS.google.com/document/d/" + strings.Repeat("f", 20) + "/edit",
+			"https://docs.example.test/document/d/" + strings.Repeat("f", 20) + "/edit"},
 	}
 	rules := leakRules()
 	// A group calendar id is also an address, so findings are counted

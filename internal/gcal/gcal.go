@@ -111,6 +111,12 @@ type Event struct {
 	// three fields a result needs.
 	ConferenceData json.RawMessage `json:"conferenceData,omitempty"`
 
+	// Attachments are the files on the event, usually Drive files. Reads
+	// show them and nothing here writes them, except a series split,
+	// which carries the parent's (§4.2). The file itself belongs to the
+	// Drive server; FileID is what hands it over.
+	Attachments []EventAttachment `json:"attachments,omitempty"`
+
 	// ETag backs If-Match on every write (§4.4).
 	ETag string `json:"etag,omitempty"`
 
@@ -118,9 +124,9 @@ type Event struct {
 	// name, kept as Google sent it. No result shows it. It exists so an
 	// event copied whole keeps what this package does not understand:
 	// the new series of a this_and_following split (§2.8) is the parent
-	// copied, and decoding into the fields above alone dropped its
-	// attachments, another application's extended properties and a
-	// working location's details — which Google needs to create one.
+	// copied, and decoding into the fields above alone dropped another
+	// application's extended properties and a working location's
+	// details — which Google needs to create one.
 	Unmodeled map[string]json.RawMessage `json:"-"`
 }
 
@@ -182,13 +188,28 @@ func (e Event) MarshalJSON() ([]byte, error) {
 
 // HasAttachments reports whether the event carries file attachments,
 // which Google keeps only when the write says it supports them.
-func (e Event) HasAttachments() bool { return len(e.Unmodeled["attachments"]) > 0 }
+func (e Event) HasAttachments() bool { return len(e.Attachments) > 0 }
 
 // HasLabel reports whether the event names an event label, which Google
 // reads only when the write says it supports labels.
 func (e Event) HasLabel() bool {
 	var id string
 	return json.Unmarshal(e.Unmodeled["eventLabelId"], &id) == nil && id != ""
+}
+
+// EventAttachment is one file on an event.
+//
+// Title is text somebody else wrote, like a description: it reaches a
+// renderer and never a log (§9). All five fields are carried, so a
+// split hands Google back the attachment it read, icon included.
+type EventAttachment struct {
+	// FileID is the Drive file's id, which Google sets.
+	FileID string `json:"fileId,omitempty"`
+	// FileURL is the link to the file, and what Google needs to add one.
+	FileURL  string `json:"fileUrl,omitempty"`
+	Title    string `json:"title,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
+	IconLink string `json:"iconLink,omitempty"`
 }
 
 // EventPerson is the creator or organizer of an event.

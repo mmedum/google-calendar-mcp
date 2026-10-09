@@ -184,10 +184,41 @@ func commonTags(e model.Event) []string {
 	if e.AttendeesTruncated {
 		tags = append(tags, "guest list truncated by Google")
 	}
+	if n := len(e.Attachments); n > 0 {
+		tags = append(tags, fmt.Sprintf("%d attachment%s", n, plural(n)))
+	}
 	if e.Location != "" {
 		tags = append(tags, "at "+e.Location)
 	}
 	return tags
+}
+
+// Attachments lists the files on an event, for its card.
+//
+// The title is printed as its owner wrote it, as a description is. The
+// file id comes first after it, because it is what hands the file to a
+// Drive server, and this server never opens a file itself (§1).
+func Attachments(files []model.Attachment) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nAttachments (%d):\n", len(files))
+	for _, f := range files {
+		title := f.Title
+		if title == "" {
+			title = "(no title)"
+		}
+		if f.MimeType != "" {
+			title += " (" + f.MimeType + ")"
+		}
+		fmt.Fprintf(&b, "  %s\n", title)
+		if f.FileID != "" {
+			fmt.Fprintf(&b, "    file id: %s\n", f.FileID)
+		}
+		if f.URL != "" {
+			fmt.Fprintf(&b, "    %s\n", f.URL)
+		}
+	}
+	b.WriteString("  A Drive server opens these by file id; this one does not.\n")
+	return b.String()
 }
 
 // ConferenceLine is how an event says where to join it, or that there

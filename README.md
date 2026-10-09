@@ -9,7 +9,8 @@ against your own Google account.
 
 It answers **when** — calendars, the events on them, and who is free. What
 a meeting produces (a recording, a notes document, an attachment) belongs
-to servers built on the Meet, Docs and Drive APIs.
+to servers built on the Meet, Docs and Drive APIs. `get_event` names the
+files attached to an event, with the Drive file id those servers take.
 
 ## What makes this one different
 
@@ -101,7 +102,7 @@ Every setting is in `docs/configuration.md`.
 | `get_calendar` | One calendar in full, including who it is shared with. |
 | `list_events` | The events on one or more calendars in a window, or only the kinds you name, such as out of office. |
 | `search_events` | Free-text search across a window. |
-| `get_event` | One event, with its guests and their responses. |
+| `get_event` | One event, with its guests and their responses, and the files attached to it. |
 | `list_instances` | The occurrences of one repeating event, with the dates that were moved or removed. |
 | `list_changes` | What changed since you last looked, including **deletions** — which a list cannot report, because a deleted event simply stops matching. Hands back a sync token to pass in next time. |
 | `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. Takes an optional working-hours mask. |
