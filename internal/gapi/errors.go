@@ -270,7 +270,12 @@ var Planned = map[Class]string{}
 type counterKey struct{}
 
 // WithCounter returns a context that counts the requests made under it.
+// A context that counts already keeps its counter, so a write made a
+// second time counts the requests of both tries.
 func WithCounter(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(counterKey{}).(*atomic.Int64); ok {
+		return ctx
+	}
 	var n atomic.Int64
 	return context.WithValue(ctx, counterKey{}, &n)
 }

@@ -119,6 +119,9 @@ type Server struct {
 	// revs counts patches per event, so an etag moves on every write and
 	// a stale If-Match is refused the way Google refuses it.
 	revs map[string]int
+	// afterRead is what ChangeAfterRead set up, keyed by calendar id, a
+	// slash and event id.
+	afterRead map[string]func(*gcal.Event)
 	// conferenceAsked is the last conference request id each event was
 	// sent, keyed by calendar and event id: Google ignores a request
 	// that repeats it.
@@ -1590,9 +1593,42 @@ func (s *Server) getEvent(w http.ResponseWriter, calID, eventID string) {
 		e.ConferenceData = conferenceReady(e.ConferenceData)
 	}
 	out := *e
+	key := calID + "/" + eventID
+	if edit, ok := s.afterRead[key]; ok {
+		delete(s.afterRead, key)
+		// The lists are copied, so the edit does not reach the answer to
+		// this read, which shares them.
+		next := *e
+		next.Attendees, next.Recurrence = slices.Clone(e.Attendees), slices.Clone(e.Recurrence)
+		if edit != nil {
+			edit(&next)
+		}
+		if s.revs == nil {
+			s.revs = map[string]int{}
+		}
+		s.revs[eventID]++
+		next.ETag = etag(eventID, s.revs[eventID]+1)
+		s.Events[calID][eventID] = &next
+		s.bumpSync(calID, next)
+	}
 	s.mu.Unlock()
 
 	writeJSON(w, out)
+}
+
+// ChangeAfterRead changes an event once, right after the next read of
+// it, as a write between that read and the one that follows would: its
+// etag moves, and edit, when not nil, changes it too. Google did this by
+// itself to an event moments after moving it (§18 row 103), so a write
+// under the read's etag is refused with 412 and the next read sees the
+// change.
+func (s *Server) ChangeAfterRead(calID, eventID string, edit func(*gcal.Event)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.afterRead == nil {
+		s.afterRead = map[string]func(*gcal.Event){}
+	}
+	s.afterRead[calID+"/"+eventID] = edit
 }
 
 func (s *Server) listACL(w http.ResponseWriter, calID string) {

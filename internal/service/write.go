@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -285,6 +286,108 @@ func ifMatch(addressedETag, targetETag, callerETag string, force bool) (string, 
 		return "", nil
 	}
 	return targetETag, nil
+}
+
+// ------------------------------------------------------------ one retry
+
+// retrying makes a write, and makes it once more when Google refused it
+// with 412 under an etag this server read itself (§4.4).
+//
+// A caller's etag is a statement about the version they read, so a 412
+// under it stays [stale]. Without one, the etag is this server's own
+// read, and a 412 says only that the event changed in the moment between
+// that read and the write. Google changes an event by itself moments
+// after moving it: a move straight back met that in two live runs of
+// three (§18 row 103). The second try reads afresh and plans again, and
+// attempt.commit holds it to what the first try planned.
+func retrying(ctx context.Context, callerETag string,
+	write func(context.Context, *attempt) (render.WriteReport, error),
+) (render.WriteReport, error) {
+	// One counter for both tries, so api_requests counts every request.
+	ctx = gapi.WithCounter(ctx)
+	at := &attempt{}
+	report, err := write(ctx, at)
+	if callerETag != "" || at.first == nil || !preconditionFailed(err) {
+		return report, err
+	}
+	if report, err = write(ctx, at); err != nil {
+		return render.WriteReport{}, err
+	}
+	report.Notes = append(report.Notes, retriedNote)
+	return report, nil
+}
+
+// retriedNote says a write was made on its second try.
+const retriedNote = "Google refused the first try because the event changed after this server read it. " +
+	"The event was read again, nothing this write changes, reaches or asked you about had changed, and the " +
+	"write was made against the fresh copy."
+
+// preconditionFailed reports whether Google answered 412 anywhere in
+// err's chain. Every *gapi.Error in it is looked at, because a wrapper
+// that rewords a failure carries no status of its own.
+func preconditionFailed(err error) bool {
+	var e *gapi.Error
+	for errors.As(err, &e) {
+		if e.Status == http.StatusPreconditionFailed {
+			return true
+		}
+		err = e.Unwrap()
+	}
+	return false
+}
+
+// attempt is one try at a write that retrying may make twice.
+type attempt struct {
+	// first is what the first try planned, set just before its request.
+	first *planned
+}
+
+// planned is what a try was about to do, as the caller and the person
+// see it: the event it writes, the guests it reaches and how many of
+// them are outside, what it changes, and the question it put to the
+// person.
+type planned struct {
+	event   string
+	reached []string
+	outside int
+	changes []plan.Change
+	asked   *render.Question
+}
+
+// plannedFor is the plan of a write to target under decision.
+func plannedFor(target model.Event, account string, decision plan.Decision,
+	changes []plan.Change, asked *render.Question,
+) planned {
+	var reached []string
+	for _, a := range target.Guests(account) {
+		reached = append(reached, strings.ToLower(a.Email))
+	}
+	slices.Sort(reached)
+	return planned{event: target.ID, reached: reached, outside: decision.Reach.External,
+		changes: changes, asked: asked}
+}
+
+// commit is the last step before a write's request. The first try
+// records its plan and puts its question to the person. A second try
+// asks nothing: the person's answer and the caller's notify were given
+// for the first plan, so it goes ahead only if the plan it made from a
+// fresh read is that one.
+func (a *attempt) commit(ctx context.Context, p planned) error {
+	if a.first == nil {
+		if p.asked != nil {
+			if err := ask(ctx, *p.asked); err != nil {
+				return err
+			}
+		}
+		a.first = &p
+		return nil
+	}
+	if !reflect.DeepEqual(*a.first, p) {
+		return gapi.Errf(gapi.ClassStale,
+			"this event changed after this server read it, in what this write changes, who it reaches or "+
+				"what you were asked, so nothing was written. Read it again with get_event and make the call again")
+	}
+	return nil
 }
 
 // ------------------------------------------------------------- creating
@@ -622,6 +725,13 @@ type UpdateOptions struct {
 
 // UpdateEvent patches an event under If-Match (§4.4).
 func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.WriteReport, error) {
+	return retrying(ctx, o.ETag, func(ctx context.Context, at *attempt) (render.WriteReport, error) {
+		return s.updateEvent(ctx, o, at)
+	})
+}
+
+// updateEvent is one try at UpdateEvent.
+func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt) (render.WriteReport, error) {
 	// Checked before anything is read: it depends on nothing but the
 	// caller's own arguments, and refusing after four requests spends
 	// somebody's quota to say "you asked for nothing".
@@ -676,7 +786,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	draft.Zone = env.zone
 
 	if scope == recur.ScopeThisAndFollowing {
-		return s.thisAndFollowing(ctx, env, before, draft, o, note)
+		return s.thisAndFollowing(ctx, env, before, draft, o, note, at)
 	}
 
 	target, targetModel, aimed, err := s.aim(ctx, env, scope, raw, before, o.EventID)
@@ -742,6 +852,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if declines {
 		report.Notes = append(report.Notes, declinesMoreNote)
 	}
+	var question *render.Question
 	if o.DryRun || declines {
 		shown, err := model.FromEvent(env.cal.ID, afterRaw, &env.zone)
 		if err != nil {
@@ -751,11 +862,13 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 			report.After, report.Requests = &shown, gapi.Requests(ctx)
 			return report, nil
 		}
-		if err := ask(ctx, render.AskDecline(render.Decline{
+		q := render.AskDecline(render.Decline{
 			CalendarID: env.cal.ID, Calendar: env.cal.Title, Event: shown, Zone: env.zone, Was: &targetModel,
-		})); err != nil {
-			return render.WriteReport{}, err
-		}
+		})
+		question = &q
+	}
+	if err := at.commit(ctx, plannedFor(targetModel, env.organizer, decision, changes, question)); err != nil {
+		return render.WriteReport{}, err
 	}
 
 	updated, err := s.API.PatchEvent(ctx, env.cal.ID, target.ID, &patch, decision.SendUpdatesFor(), etag)
@@ -864,7 +977,7 @@ func notFoundHint(err error, id, originalStart string) error {
 // the later occurrences now belong to a DIFFERENT event with a different
 // id.
 func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target model.Event,
-	draft plan.Draft, o UpdateOptions, note string,
+	draft plan.Draft, o UpdateOptions, note string, at *attempt,
 ) (render.WriteReport, error) {
 	if draft.Conference {
 		// The new series is a new event, and a split mints no
@@ -970,12 +1083,19 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	// Asked before the truncate, as create_event asks before its insert:
 	// whether Google declines again for a series it already declined for
 	// is not probed (§18 row 88), so the new one is treated as new (§9a).
+	var question *render.Question
 	if d := shown.StatusDetails; d != nil && d.AutoDecline == autoDeclineAll {
-		if err := ask(ctx, render.AskDecline(render.Decline{
+		q := render.AskDecline(render.Decline{
 			CalendarID: env.cal.ID, Calendar: env.cal.Title, Event: shown, Zone: env.zone, Split: true,
-		})); err != nil {
-			return render.WriteReport{}, err
-		}
+		})
+		question = &q
+	}
+	// The truncate is the request a 412 can refuse, so the rule it cuts
+	// the series to is part of the plan as well.
+	truncate := plan.Change{Field: "recurrence", From: strings.Join(parentRaw.Recurrence, " "), To: beforeRule}
+	if err := at.commit(ctx, plannedFor(parent, env.organizer, decision,
+		append(slices.Clone(changes), truncate), question)); err != nil {
+		return render.WriteReport{}, err
 	}
 
 	// Truncate first. If the insert then fails, the caller has a series
@@ -1190,6 +1310,13 @@ type CancelOptions struct {
 // protects nobody, and turning it on would also arm clear_calendar. What
 // protects it instead is the required scope and the required notify.
 func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.WriteReport, error) {
+	return retrying(ctx, o.ETag, func(ctx context.Context, at *attempt) (render.WriteReport, error) {
+		return s.cancelEvent(ctx, o, at)
+	})
+}
+
+// cancelEvent is one try at CancelEvent.
+func (s *Service) cancelEvent(ctx context.Context, o CancelOptions, at *attempt) (render.WriteReport, error) {
 	ctx, env, err := s.prepare(ctx, o.Calendar, o.TimeZone)
 	if err != nil {
 		return render.WriteReport{}, err
@@ -1255,27 +1382,29 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 	// Asked only when the cancellation emails somebody: that email cannot
 	// be taken back, and a cancel nobody hears about is frequent and
 	// private (§9a).
-	confirm := func() error {
-		if !decision.Emails() {
-			return nil
+	confirm := func(changes []plan.Change) error {
+		var question *render.Question
+		if decision.Emails() {
+			// this_and_following writes to the series and starts at the
+			// occurrence, which is what the person has to see.
+			// It is shown from its scheduled start, which is where the
+			// series is cut even when that occurrence was moved.
+			shown := targetModel
+			if scope == recur.ScopeThisAndFollowing {
+				shown = before
+				shown.Start, shown.End = scheduledStart(before), model.When{}
+			}
+			var guests []string
+			for _, a := range targetModel.Guests(env.organizer) {
+				guests = append(guests, a.Email)
+			}
+			q := render.AskCancel(render.Cancel{
+				CalendarID: env.cal.ID, Calendar: env.cal.Title, Event: shown, Zone: env.zone,
+				Scope: string(scope), Decision: decision, Guests: guests,
+			})
+			question = &q
 		}
-		// this_and_following writes to the series and starts at the
-		// occurrence, which is what the person has to see.
-		// It is shown from its scheduled start, which is where the series
-		// is cut even when that occurrence was moved.
-		shown := targetModel
-		if scope == recur.ScopeThisAndFollowing {
-			shown = before
-			shown.Start, shown.End = scheduledStart(before), model.When{}
-		}
-		var guests []string
-		for _, a := range targetModel.Guests(env.organizer) {
-			guests = append(guests, a.Email)
-		}
-		return ask(ctx, render.AskCancel(render.Cancel{
-			CalendarID: env.cal.ID, Calendar: env.cal.Title, Event: shown, Zone: env.zone,
-			Scope: string(scope), Decision: decision, Guests: guests,
-		}))
+		return at.commit(ctx, plannedFor(targetModel, env.organizer, decision, changes, question))
 	}
 
 	switch scope {
@@ -1296,7 +1425,7 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 			report.After, report.Requests = &after, gapi.Requests(ctx)
 			return report, nil
 		}
-		if err := confirm(); err != nil {
+		if err := confirm(report.Changes); err != nil {
 			return render.WriteReport{}, err
 		}
 		updated, perr := s.API.PatchEvent(ctx, env.cal.ID, target.ID,
@@ -1328,7 +1457,7 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 			report.Requests = gapi.Requests(ctx)
 			return report, nil
 		}
-		if err := confirm(); err != nil {
+		if err := confirm(nil); err != nil {
 			return render.WriteReport{}, err
 		}
 		derr := s.API.DeleteEvent(ctx, env.cal.ID, target.ID, decision.SendUpdatesFor(), etag)
@@ -1348,7 +1477,8 @@ func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.Writ
 // belonged to, which is what the caller asked for here rather than a
 // surprise.
 func (s *Service) cancelFollowing(ctx context.Context, env *writeEnv, parentRaw gcal.Event,
-	parent, target model.Event, etag, sendUpdates string, report render.WriteReport, confirm func() error,
+	parent, target model.Event, etag, sendUpdates string, report render.WriteReport,
+	confirm func([]plan.Change) error,
 ) (render.WriteReport, error) {
 	if !target.IsInstance() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
@@ -1384,7 +1514,7 @@ func (s *Service) cancelFollowing(ctx context.Context, env *writeEnv, parentRaw 
 		report.After, report.Requests = &parent, gapi.Requests(ctx)
 		return report, nil
 	}
-	if err := confirm(); err != nil {
+	if err := confirm(report.Changes); err != nil {
 		return render.WriteReport{}, err
 	}
 	lines := []string{rule}
@@ -1476,6 +1606,13 @@ type MoveOptions struct {
 // MoveEvent changes which calendar an event belongs to, which is to say
 // who organizes it.
 func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteReport, error) {
+	return retrying(ctx, o.ETag, func(ctx context.Context, at *attempt) (render.WriteReport, error) {
+		return s.moveEvent(ctx, o, at)
+	})
+}
+
+// moveEvent is one try at MoveEvent.
+func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (render.WriteReport, error) {
 	// There is nothing to split when an event simply changes calendars,
 	// whether or not it repeats, so this is answered before anything is
 	// read (§2.8).
@@ -1552,6 +1689,9 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 		report.After, report.Requests = &targetModel, gapi.Requests(ctx)
 		return report, nil
 	}
+	if err := at.commit(ctx, plannedFor(targetModel, env.organizer, decision, report.Changes, nil)); err != nil {
+		return render.WriteReport{}, err
+	}
 	moved, err := s.API.MoveEvent(ctx, env.cal.ID, target.ID, dest.ID, decision.SendUpdatesFor(), etag)
 	if err != nil {
 		return render.WriteReport{}, moveError(err, target.ID, dest.ID)
@@ -1607,6 +1747,13 @@ type RespondOptions struct {
 // by patching the whole attendee array — which is how everybody else's
 // response gets overwritten.
 func (s *Service) RespondToEvent(ctx context.Context, o RespondOptions) (render.WriteReport, error) {
+	return retrying(ctx, o.ETag, func(ctx context.Context, at *attempt) (render.WriteReport, error) {
+		return s.respondToEvent(ctx, o, at)
+	})
+}
+
+// respondToEvent is one try at RespondToEvent.
+func (s *Service) respondToEvent(ctx context.Context, o RespondOptions, at *attempt) (render.WriteReport, error) {
 	// Both of these read only the caller's own arguments, so they are
 	// answered before a request is spent. "this and following" is
 	// refused whether or not the event repeats: there is no such
@@ -1672,6 +1819,11 @@ func (s *Service) RespondToEvent(ctx context.Context, o RespondOptions) (render.
 	if o.DryRun {
 		report.After, report.Requests = &targetModel, gapi.Requests(ctx)
 		return report, nil
+	}
+	// The list sent is the one this try read, so another guest's answer
+	// that arrived before a second try is kept, not overwritten.
+	if err := at.commit(ctx, plannedFor(targetModel, env.organizer, decision, report.Changes, nil)); err != nil {
+		return render.WriteReport{}, err
 	}
 	updated, err := s.API.PatchEvent(ctx, env.cal.ID, target.ID,
 		&gcal.EventPatch{Attendees: &attendees}, decision.SendUpdatesFor(), etag)

@@ -51,7 +51,9 @@ const statusHelp = "`event_type` makes a status event, which only your primary c
 
 const etagHelp = "Every write is a patch under If-Match, so it is refused as `[stale]` rather than " +
 	"overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held " +
-	"to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\"."
+	"to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". " +
+	"Without `etag`, a write refused that way is read again and made once more if nothing it changes, " +
+	"reaches or asked about has changed, and the result says so."
 
 func registerWrite(s *mcp.Server, d Deps) {
 	add(s, d, Def[createEventIn, service.WriteResult]{

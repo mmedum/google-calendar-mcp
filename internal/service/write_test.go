@@ -1605,6 +1605,202 @@ func TestMoveWithAnEtagThatMovedIsStale(t *testing.T) {
 	}
 }
 
+// §18 row 103: Google changes an event by itself moments after moving
+// it, so a move straight back, made under the etag of the server's own
+// read, met a 412 in two live runs of three. With no etag from the
+// caller, the server reads the event again and moves it once more, and
+// the result says so.
+func TestAMoveStraightBackIsMadeAfterOneFreshRead(t *testing.T) {
+	svc, fake := writeSeed(t)
+	ctx := context.Background()
+	if _, err := svc.MoveEvent(ctx, service.MoveOptions{
+		Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+	}); err != nil {
+		t.Fatalf("MoveEvent: %v", err)
+	}
+	fake.ChangeAfterRead("team@group.calendar.example.test", "evsolo00001", nil)
+
+	out, err := svc.MoveEvent(ctx, service.MoveOptions{
+		Calendar: "Sample Team", EventID: "evsolo00001", ToCalendar: "primary",
+	})
+	if err != nil {
+		t.Fatalf("the move back: %v", err)
+	}
+	w := fake.Wrote()
+	if len(w) != 3 || w[1].IfMatch != `"evsolo00001-1"` || w[2].IfMatch != `"evsolo00001-2"` {
+		t.Fatalf("got writes %+v, want the move, the move back Google refused, and the move back under the "+
+			"fresh etag", w)
+	}
+	if out.After == nil || out.After.CalendarID != "me@example.test" {
+		t.Fatalf("the event did not land back on the primary calendar: %+v", out.After)
+	}
+	if !strings.Contains(out.Text(), "Google refused the first try because the event changed after this "+
+		"server read it") {
+		t.Fatalf("the result does not say the move was made on its second try:\n%s", out.Text())
+	}
+	// Read, refused move, read, move, read back: both tries are counted.
+	if out.Requests != 5 {
+		t.Fatalf("api_requests = %d, want 5", out.Requests)
+	}
+}
+
+// A caller's etag is a statement about the version they read, so a 412
+// under it stays [stale]: the server does not read again for them. The
+// series is where that needs saying: the caller's etag is the
+// occurrence's, the write goes to the series, and a fresh read of an
+// occurrence nobody changed would let a second try through.
+func TestAnEtagFromTheCallerIsNotReadAgainAfterA412(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.ChangeAfterRead("me@example.test", "evseries001", nil)
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evseries001_20260324T130000Z", Scope: "series",
+		Location: ptr("Room 2"), ETag: `"evseries001_20260324T130000Z-1"`,
+	})
+	if got := classOf(t, err); got != gapi.ClassStale {
+		t.Fatalf("got [%s] %v, want [stale]", got, err)
+	}
+	if w := fake.Wrote(); len(w) != 1 || w[0].EventID != "evseries001" {
+		t.Fatalf("got writes %+v, want only the patch of the series Google refused", w)
+	}
+}
+
+// Every write to an existing event, made without an etag, is made once
+// more after a fresh read when Google refuses the first try with 412,
+// and a question put to the person is not put again.
+func TestEveryEventWriteIsMadeAfterOneFreshRead(t *testing.T) {
+	const cal = "me@example.test"
+	for _, c := range []struct {
+		name, changed, method string
+		write                 func(context.Context, *service.Service) (render.WriteReport, error)
+		asks                  int
+	}{
+		{"update", "evsolo00001", "patch", func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+			return s.UpdateEvent(ctx, service.UpdateOptions{Calendar: "primary", EventID: "evsolo00001",
+				Location: ptr("Room 2")})
+		}, 0},
+		{"a split", "evseries001", "patch", func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+			return s.UpdateEvent(ctx, service.UpdateOptions{Calendar: "primary", EventID: "evseries001",
+				OriginalStart: "2026-03-31T14:00:00+02:00", Scope: "this_and_following", Title: ptr("Renamed")})
+		}, 0},
+		{"cancel, telling the guests", "evguests001", "delete",
+			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+				return s.CancelEvent(ctx, service.CancelOptions{Calendar: "primary", EventID: "evguests001",
+					Notify: "all"})
+			}, 1},
+		{"cancel one occurrence", "evseries001_20260324T130000Z", "patch",
+			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+				return s.CancelEvent(ctx, service.CancelOptions{Calendar: "primary",
+					EventID: "evseries001_20260324T130000Z", Scope: "instance"})
+			}, 0},
+		{"cancel this and following", "evseries001", "patch",
+			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+				return s.CancelEvent(ctx, service.CancelOptions{Calendar: "primary", EventID: "evseries001",
+					OriginalStart: "2026-03-31T14:00:00+02:00", Scope: "this_and_following"})
+			}, 0},
+		{"respond", "evinvite001", "patch", func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+			return s.RespondToEvent(ctx, service.RespondOptions{Calendar: "primary", EventID: "evinvite001",
+				Response: "accepted", Notify: "all"})
+		}, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := writeSeed(t)
+			fake.ChangeAfterRead(cal, c.changed, nil)
+			var asked []render.Question
+			out, err := c.write(service.WithAsker(context.Background(), counting{&asked}), svc)
+			if err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			var tries []string
+			for _, w := range fake.Wrote() {
+				if w.Method == c.method && w.EventID == c.changed {
+					tries = append(tries, w.IfMatch)
+				}
+			}
+			if len(tries) != 2 || tries[0] != `"`+c.changed+`-1"` || tries[1] != `"`+c.changed+`-2"` {
+				t.Fatalf("got If-Match %q on the %ss of %s, want the refused etag then the fresh one",
+					tries, c.method, c.changed)
+			}
+			if !strings.Contains(out.Text(), "the write was made against the fresh copy") {
+				t.Fatalf("the result does not say the write was made on its second try:\n%s", out.Text())
+			}
+			if len(asked) != c.asks {
+				t.Fatalf("the person was asked %d times, want %d", len(asked), c.asks)
+			}
+		})
+	}
+}
+
+// A second try is made only when its fresh read leaves the write as it
+// was: the same changes, the same people reached, the same question.
+// Otherwise the caller's notify and the person's answer were given for
+// something else, and the write is [stale].
+func TestASecondTryThatWouldDoSomethingElseIsStale(t *testing.T) {
+	for _, c := range []struct {
+		name, event, method string
+		edit                func(*gcal.Event)
+		write               func(context.Context, *service.Service) (render.WriteReport, error)
+	}{
+		{"a guest arrived", "evguests001", "delete",
+			func(e *gcal.Event) {
+				e.Attendees = append(e.Attendees, gcal.EventAttendee{Email: "newcomer@example.test"})
+			},
+			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+				return s.CancelEvent(ctx, service.CancelOptions{Calendar: "primary", EventID: "evguests001",
+					Notify: "all"})
+			}},
+		{"the field it writes changed", "evsolo00001", "patch",
+			func(e *gcal.Event) { e.Location = "Room 9" },
+			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+				return s.UpdateEvent(ctx, service.UpdateOptions{Calendar: "primary", EventID: "evsolo00001",
+					Location: ptr("Room 2")})
+			}},
+		{"its own answer changed", "evinvite001", "patch",
+			func(e *gcal.Event) { e.Attendees[1].ResponseStatus = gcal.ResponseTentative },
+			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
+				return s.RespondToEvent(ctx, service.RespondOptions{Calendar: "primary", EventID: "evinvite001",
+					Response: "accepted", Notify: "all"})
+			}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := writeSeed(t)
+			fake.ChangeAfterRead("me@example.test", c.event, c.edit)
+			_, err := c.write(accepted(), svc)
+			if got := classOf(t, err); got != gapi.ClassStale ||
+				!strings.Contains(err.Error(), "so nothing was written") {
+				t.Fatalf("got [%s] %v, want [stale] saying nothing was written", got, err)
+			}
+			if w := fake.Wrote(); len(w) != 1 || w[0].Method != c.method {
+				t.Fatalf("got writes %+v, want only the %s Google refused", w, c.method)
+			}
+		})
+	}
+}
+
+// The second try writes what it read: an answer another guest gave in
+// between is kept rather than replaced by the list the first try read.
+func TestASecondTryKeepsWhatArrivedBetween(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.ChangeAfterRead("me@example.test", "evinvite001", func(e *gcal.Event) {
+		e.Attendees[2].ResponseStatus = gcal.ResponseAccepted
+	})
+	if _, err := svc.RespondToEvent(context.Background(), service.RespondOptions{
+		Calendar: "primary", EventID: "evinvite001", Response: "accepted", Notify: "all",
+	}); err != nil {
+		t.Fatalf("RespondToEvent: %v", err)
+	}
+	got, _, err := svc.GetEvent(context.Background(), "primary", "evinvite001", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	answers := map[string]string{}
+	for _, a := range got.Attendees {
+		answers[a.Email] = a.Response
+	}
+	if answers["other@example.test"] != gcal.ResponseAccepted || answers["me@example.test"] != gcal.ResponseAccepted {
+		t.Fatalf("got answers %v, want the other guest's new answer kept beside this account's", answers)
+	}
+}
+
 // TestCreateEventAsksForAMeetLinkAndSaysItIsNotThereYet is §17.3's
 // whole point: Google makes the conference asynchronously, so a result
 // that announced a link on the strength of having asked for one would

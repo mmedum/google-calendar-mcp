@@ -660,13 +660,23 @@ written.
   produced the plan.** A 412 becomes `[stale]` with "re-read and try
   again", never a silent retry — a retry here would apply the caller's
   intent to a resource somebody else has since changed.
+- **One exception, said in the result: an event write whose etag is
+  the server's own read.** When the caller passed no `etag`, a 412 says
+  only that the event changed in the moment between this server's read
+  and its write, and Google makes such changes itself moments after a
+  move (§18 row 103). The write is then read again, planned again, and
+  made once more if the new plan writes the same changes, reaches the
+  same guests and asks the person the same question; otherwise it is
+  `[stale]`. A second 412 is `[stale]`, and a caller's own `etag` is
+  held as before. The calendar and sharing writes keep the plain rule.
 - **`If-Match: *` is available and is not the default.** It exists for
   the caller who genuinely means "whatever it says now", and saying so is
   an explicit flag.
 - **Guest lists are read before they are written.** Adding an attendee is
   a read-modify-write on the array, never a replacement of it, so an RSVP
-  that arrived between the read and the write is reported as `[stale]`
-  rather than overwritten.
+  that arrived between the read and the write is never overwritten: it is
+  `[stale]`, or, under the exception above, kept by the second try's
+  fresh read.
 - **`events.move` carries `If-Match` too, and finding that out is the
   argument for §15.** It is not a patch — a POST with the destination in
   the query string and no body — and nothing Google publishes says the
@@ -3149,6 +3159,7 @@ what §15 exists to settle, and they are marked.
 | 100 | A calendar past `calendarExpansionMax` is left out of the free/busy answer | Calendar discovery revision 20261005, read 2026-10-09: `calendarExpansionMax` "Maximal number of calendars for which FreeBusy information is to be provided. Optional. Maximum value is 50"; `Error.reason` "tooManyCalendarsRequested - The number of calendars requested is too large for a single query" | **Not settled, tier 3.** Google names the reason and not where it lands: a calendar past the cap may be left out, or answered with that error. Nor does it say whether a group's members count toward the cap (row 87), and row 12's live run, with no cap set, saw 51 entries come back. The server treats both shapes as no answer and asks those calendars again on their own, up to 200; one still past the cap is unknown, never free, with the reason in words. The fake answers either way, and the tests hold both. A live check needs a group of more than fifty readable members, which the driver cannot make, so it waits on the group probe row 87 names; the probe should count both shapes |
 | 101 | `default` visibility ranks between `public` and `private` when Google compares one occurrence's visibility with the series' | Calendar discovery revision 20261002, read 2026-10-09: `visibility` "If the new setting is more restrictive (e.g. from public to private), it is applied to all instances. If the new setting is less restrictive (e.g. from private to public), the change is ignored"; `default` "Uses the default visibility for events on the calendar" | **A belief, tier 3.** The reference ranks public below private and says nothing of `default`, which takes the calendar's own setting. The server and the fake both put it in the middle: private to default, and default to public, on one occurrence are refused as ignored, and public to default is made with a note that the whole series changed. Ranked otherwise by Google, the server would refuse a change Google makes, or report as made one Google ignores, the worse of the two. The live driver makes its series public, one occurrence default, and reads the series |
 | 102 | A change to an out-of-office or focus-time event that declines all declines nothing new, so only a create asks | Calendar discovery revision 20261005, read 2026-10-09: `autoDeclineMode` `declineAllConflictingInvitations`, "meaning that all conflicting meeting invitations that conflict with the event are declined", with nothing on when; `Event.start` "For a recurring event, this is the start time of the first instance". The status-events and recurring-events guides, read 2026-10-09, say nothing about an update to either | **Not settled; treated as refuted until a probe.** A move, a later end or more occurrences put meetings inside the event that were outside it, and the reference does not say they are spared. `update_event` asks the person before a change that makes such an event cover time it did not, at any scope, and a dry run says so; a change that only shrinks the time asks nothing (§7.4, §9a). The time is read from the rule, so a canceled occurrence of a series counts as covered: whether a change to the whole series brings one back is not probed either. One occurrence is judged by the details it carries when read on its own, which Google is believed to copy from its series; one read without them asks nothing. No tool changes `auto_decline` on an existing event, so a switch to `all` has no path yet; the check counts one as more. **Not yet probed live, tier 3**, and the driver cannot: its one status event declines nothing, and the probe needs another organizer's meeting on the primary calendar |
+| 103 | A 412 under the etag of this server's own read means somebody else changed the event, so it is `[stale]` | **Live, 2026-10-09**, three passes of the driver: in passes 2 and 3, `move_event back` — the driver's own event, with no guests, moved straight back from the calendar the step before had moved it to, with no `etag` from the caller — read the event and was refused with 412 under that read's etag. Pass 1 moved it back. Nothing else wrote to either scratch calendar | **Refuted: Google changes a just-moved event by itself, moments after the move.** What it changes is not known. An event write made without the caller's `etag` — update, the split's truncate, cancel, move and respond — now reads the event again after a 412, plans the write again and makes it once more, if the new plan makes the same changes, reaches the same guests and asks the person the same question. The result says so. Otherwise, and after a second 412, it is `[stale]`. A caller's `etag` stays strict, because it names the version they decided on. The calendar and sharing writes keep the plain rule: no such change has been seen there. The fake changes an event once after a read, on request. **Not yet seen live:** that the second try lands. The driver's move back says which try it took |
 
 ### Deviations from the shared Go MCP server standard
 

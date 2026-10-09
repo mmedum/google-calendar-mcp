@@ -1034,7 +1034,12 @@ func writeSteps(scratch string, w *writeState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				return pass, "moved back, leaving the scratch calendar as it was"
+				// Google changes a just-moved event by itself, and the
+				// move back met that two runs in three (§18 row 103).
+				if strings.Contains(r.text, "the write was made against the fresh copy") {
+					return pass, "moved back on the second try, after Google changed the event (§18 row 103)"
+				}
+				return pass, "moved back on the first try, leaving the scratch calendar as it was"
 			},
 		},
 		{
