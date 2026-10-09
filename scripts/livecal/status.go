@@ -44,6 +44,12 @@ type primaryGuard struct {
 	// asked is set once the one status event has been asked for; a
 	// second create on the primary calendar is refused.
 	asked bool
+	// start is when the status event asked for starts, as it was sent,
+	// so a person told to delete it by hand is told exactly where.
+	start string
+	// refused is set when the create was answered with a refusal, so
+	// nothing was made and nothing is left to delete.
+	refused bool
 	// made is the status event's id, the only one the cleanup may delete.
 	made string
 }
@@ -73,10 +79,17 @@ func (g *primaryGuard) setSelf(self string) {
 	g.self = self
 }
 
+// namesLocked is names for a caller that does not hold mu.
+func (g *primaryGuard) namesLocked(v any) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.names(v)
+}
+
 // names reports whether a calendar reference reaches the primary
 // calendar. A missing or empty one does, because the server resolves it
 // to the primary; anything but a string is taken as one, so an argument
-// shape this does not know fails closed.
+// shape this does not know fails closed. The caller holds mu.
 func (g *primaryGuard) names(v any) bool {
 	s, ok := v.(string)
 	if !ok {
@@ -108,6 +121,7 @@ func (g *primaryGuard) tool(name string, args map[string]any) error {
 	}
 	if name == "create_event" && !g.asked && theStatusEvent(args) {
 		g.asked = true
+		g.start, _ = args["start"].(string)
 		return nil
 	}
 	return fmt.Errorf("%s on the primary calendar was not called: the driver writes nothing there but "+
@@ -131,6 +145,18 @@ func theStatusEvent(args map[string]any) bool {
 func (g *primaryGuard) rest(method, path string) error {
 	if method == http.MethodGet {
 		return nil
+	}
+	// A move names its destination in the query, and moving an event
+	// onto the primary calendar is a write there.
+	if _, query, ok := strings.Cut(path, "?"); ok {
+		q, err := url.ParseQuery(query)
+		if err != nil {
+			return fmt.Errorf("%s with a query the driver cannot read was not sent (§9.1)", method)
+		}
+		if dest, named := q["destination"]; named && (len(dest) != 1 || g.namesLocked(dest[0])) {
+			return fmt.Errorf("%s moving an event onto the primary calendar was not sent: the driver writes "+
+				"nothing there but one status event (§9.1)", method)
+		}
 	}
 	cal, rest := "", ""
 	switch {
@@ -160,12 +186,13 @@ func (g *primaryGuard) rest(method, path string) error {
 		"status event it made (§9.1)", method)
 }
 
-// remember records the status event's id, from a create result or from an
-// ambiguous one that names the id it used.
-func (g *primaryGuard) remember(text string) string {
-	id := field(text, "id: ")
+// answered records how the create was answered: the status event's id,
+// from a result or from an ambiguous one that names the id it used; or
+// a refusal, which made nothing. It returns the id, if known.
+func (g *primaryGuard) answered(r callResult) string {
+	id := field(r.text, "id: ")
 	if id == "" {
-		if _, after, ok := strings.Cut(text, "It used the id "); ok {
+		if _, after, ok := strings.Cut(r.text, "It used the id "); ok {
 			if f := strings.Fields(after); len(f) > 0 {
 				id = f[0]
 			}
@@ -176,7 +203,38 @@ func (g *primaryGuard) remember(text string) string {
 	if id != "" {
 		g.made = id
 	}
+	// A refusal made nothing. An ambiguous outcome may have made the
+	// event, so it is still looked for.
+	if r.isError && g.made == "" && !strings.Contains(r.text, "[ambiguous_outcome]") {
+		g.refused = true
+	}
 	return g.made
+}
+
+// pending reports whether the status event may exist: it was asked for
+// and not refused.
+func (g *primaryGuard) pending() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.asked && !g.refused
+}
+
+// byHand is what a person deletes when the driver cannot: the invented
+// title and the start that was sent.
+func (g *primaryGuard) byHand() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return fmt.Sprintf("%q starting %s on your primary calendar", statusTitle, g.start)
+}
+
+// interrupted is said when the run is stopped by a signal. The steps stop
+// and the cleanup still runs; this says what to delete if the driver is
+// stopped again before it finishes.
+func (g *primaryGuard) interrupted(out *redact.Printer) {
+	out.Printf("\ninterrupted: no further steps run, and the cleanup still does. Stop it again to exit at once.\n")
+	if g.pending() {
+		out.Printf("If you do, delete %s by hand.\n", g.byHand())
+	}
 }
 
 // madeID is the status event's id, empty until it is known.
@@ -190,16 +248,13 @@ func (g *primaryGuard) madeID() string {
 // steps run, so it runs however the run ends. Its output names no title
 // or calendar: the primary calendar's title is the person's.
 func (g *primaryGuard) cleanUp(api *liveAPI, out *redact.Printer) {
-	g.mu.Lock()
-	asked, id := g.asked, g.made
-	g.mu.Unlock()
-	switch {
-	case !asked:
+	if !g.pending() {
 		return
-	case id == "":
-		out.Printf("\nWARNING: the status event on the primary calendar was asked for and its id is not known.\n")
-		out.Printf("Look on your primary calendar around %s for %q and delete it by hand.\n",
-			statusDay(), statusTitle)
+	}
+	id := g.madeID()
+	if id == "" {
+		out.Printf("\nWARNING: the status event on the primary calendar may have been made, and its id is not known.\n")
+		out.Printf("Look for %s and delete it by hand.\n", g.byHand())
 		return
 	}
 	err := api.do(context.Background(), http.MethodDelete,
@@ -207,7 +262,7 @@ func (g *primaryGuard) cleanUp(api *liveAPI, out *redact.Printer) {
 	if err != nil && !strings.Contains(err.Error(), "returned 410") && !strings.Contains(err.Error(), "returned 404") {
 		out.Printf("\nWARNING: could not delete the status event %s from the primary calendar: %v\n",
 			redact.ID(id), redact.String(err.Error()))
-		out.Printf("Delete %q on %s by hand; this driver must leave nothing behind.\n", statusTitle, statusDay())
+		out.Printf("Delete %s by hand; this driver must leave nothing behind.\n", g.byHand())
 		return
 	}
 	out.Printf("\nthe status event on the primary calendar was deleted by its id\n")
@@ -224,9 +279,6 @@ func statusStart() time.Time {
 	d := time.Now().In(loc).AddDate(1, 0, 0)
 	return time.Date(d.Year(), d.Month(), d.Day(), 10, 0, 0, 0, loc)
 }
-
-// statusDay is the status event's date.
-func statusDay() string { return statusStart().Format("2006-01-02") }
 
 // statusArgs is the create_event call for this run's status event, on
 // cal. Nothing it carries declines anything.
@@ -285,7 +337,7 @@ func statusSteps(scratch string) []step {
 			tool: "create_event",
 			args: statusArgs("primary"),
 			check: func(r callResult) (verdict, string) {
-				id := primaryCal.remember(r.text)
+				id := primaryCal.answered(r)
 				switch {
 				case r.isError:
 					return fail, "Google or the server refused the status event; the body is withheld (§9.1)"

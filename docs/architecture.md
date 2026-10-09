@@ -1351,13 +1351,18 @@ Two structural rules, not matters of care:
    calendar can test one. The driver may make exactly one status event
    per run on the primary calendar: about a year ahead, with an invented
    title, declining nothing, read back by its id, and deleted by its id
-   in the same run. The delete is deferred before the event is made, so
-   it runs however the run ends. Nothing else there is written, and the
-   driver enforces it rather than trusting each step: one guard sits on
-   both of its paths to Google, the server's tools and its own REST
-   calls. It refuses every write that names the primary calendar —
-   `primary`, the account's address, or no calendar at all — except that
-   one create and the delete of the id it made. A step on the primary
+   in the same run. The delete is deferred before the event is made, and
+   Ctrl-C or SIGTERM stops the steps rather than the process, so it runs
+   however the run ends; a second signal exits at once, after the first
+   has printed the title and start to delete by hand. Nothing else there
+   is written, and the driver enforces it rather than trusting each step:
+   one guard sits on both of its paths to Google, the server's tools and
+   its own REST calls. It refuses every write that names the primary
+   calendar — `primary`, the account's address, or no calendar at all,
+   as the calendar written or as a move's destination — except that one
+   create and the delete of the id it made. A create that was refused
+   leaves nothing to delete and is not reported as one. The guard's tests
+   need no account and run in `make cover`. A step on the primary
    calendar prints no body and no text from its result, because the
    primary calendar's title is the person's own. `-status-type` picks
    which of the three types a run makes.

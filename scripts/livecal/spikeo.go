@@ -80,10 +80,17 @@ func spikeO(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		} `json:"items"`
 	}
 	q := url.Values{"syncToken": {token}, "showDeleted": {"true"}}
-	if err := api.do(ctx, http.MethodGet, events+"?"+q.Encode(), nil, &synced); err != nil {
-		// Never the whole URL: it carries the token.
-		return pass, "Google issued a token from an updatedMin read and REFUSED it as a sync token, " +
-			"so withholding it is right"
+	status, serr := api.status(ctx, http.MethodGet, events+"?"+q.Encode(), "", nil, &synced)
+	switch {
+	case serr == nil:
+	case status >= 400 && status < 500:
+		// Never the error: it carries the URL, and the URL the token.
+		return pass, fmt.Sprintf("Google issued a token from an updatedMin read and REFUSED it as a sync "+
+			"token (HTTP %d), so withholding it is right", status)
+	default:
+		// No answer, or a 5xx, says nothing about the token.
+		return undetermined, fmt.Sprintf("the sync with the token got no answer to read (HTTP %d); "+
+			"run the spike again", status)
 	}
 	for _, it := range synced.Items {
 		if it.ID == timedID {

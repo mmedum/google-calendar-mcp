@@ -58,8 +58,9 @@ lint:
 	$(GO) run $(GOLANGCI_LINT) run
 
 .PHONY: test
-test: ## Unit tests with the race detector and coverage
+test: ## Unit tests with the race detector and coverage, and the live driver's offline guard tests
 	$(GO) test -race -coverpkg=./internal/...,./cmd/... -coverprofile=cov.out -covermode=atomic ./...
+	$(GO) test -race -tags=live ./scripts/livecal
 
 .PHONY: gates
 gates: ## Build the repository's own checks

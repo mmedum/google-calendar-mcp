@@ -19,7 +19,7 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make vet` | `go vet`, including the `live` build tag so tagged files keep compiling |
 | `make tidy` | `go.mod` and `go.sum` are what `go mod tidy` would write |
 | `make lint` | golangci-lint, including `forbidigo` for the stdout rule |
-| `make cover` | race tests, and an 80% floor **per package**, not on the average |
+| `make cover` | race tests, and an 80% floor **per package**, not on the average; also the live driver's guard tests, which need no account |
 | `make vuln` | govulncheck |
 | `make licenses` | the dependency license allow-list |
 | `make secrets` | gitleaks |
@@ -91,11 +91,14 @@ What it does to the account, so nothing is a surprise:
   steps are skipped and owed.
 - It makes **one status event on your primary calendar**, because no
   other calendar can hold one: about a year ahead, titled "Livecal status
-  probe", declining nothing, and deleted by its id before the run ends,
-  however it ends. Nothing else there is written; a guard in the driver
-  refuses it. `-status-type` picks out of office (the default), focus
-  time or a working location. If the run prints a warning that it could
-  not delete it, delete it by hand.
+  probe", declining nothing, and deleted by its id before the run ends.
+  Ctrl-C or SIGTERM stops the steps, not the cleanup, and says what to
+  delete if you stop it a second time. Nothing else there is written; a
+  guard in the driver refuses it, on the server's tools and on its own
+  calls, a move's destination included, and `make cover` tests the guard
+  without an account. `-status-type` picks out of office (the default),
+  focus time or a working location. If the run prints a warning that it
+  could not delete it, delete what the warning names by hand.
 - `-show <substring>` prints the redacted body of every step whose name
   contains it. A pass/fail line cannot show a result that is confidently
   wrong, which is how the last three phases each found a defect.

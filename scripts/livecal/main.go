@@ -27,8 +27,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
@@ -86,7 +88,18 @@ func main() {
 		out.Printf("-status-type is outOfOffice, focusTime or workingLocation, not %q\n", *status)
 		os.Exit(2)
 	}
-	code := run(context.Background(), out, *bin, *profile, *keep)
+	// Ctrl-C or SIGTERM stops the steps rather than the process, so the
+	// deferred cleanup still deletes the status event on the primary
+	// calendar and the calendars this run made (§9.1). A second signal
+	// exits at once, after the first has said what that leaves behind.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-ctx.Done()
+		primaryCal.interrupted(out)
+		stop()
+	}()
+	code := run(ctx, out, *bin, *profile, *keep)
+	stop()
 	os.Exit(code)
 }
 
@@ -290,6 +303,11 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		{"spike P: a status event on a secondary", spikeP},
 	} {
 		r.total++
+		if ctx.Err() != nil {
+			r.undetermined++
+			out.Printf("?     %-28s not run: the driver was interrupted\n", sp.name)
+			continue
+		}
 		v, note := sp.run(ctx, out, api, scratch)
 		switch v {
 		case pass:
@@ -305,6 +323,10 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 
 	out.Printf("\n%d question(s) put to the person, %d declined\n", asked.asked, asked.declined)
 	out.Printf("\n%d steps, %d failed, %d undetermined\n", r.total, r.failed, r.undetermined)
+	if ctx.Err() != nil {
+		out.Printf("\nThe run was interrupted, so this count is not a result.\n")
+		return 1
+	}
 	if r.failed > 0 {
 		out.Printf("\nRead the transcript above rather than this count. A sibling's driver twice\n")
 		out.Printf("reported success while its results were wrong.\n")
@@ -421,6 +443,11 @@ func readsOnlyInvented(args map[string]any, invented map[string]bool) bool {
 
 func (r *results) run(ctx context.Context, s *session, st step) {
 	r.total++
+	if ctx.Err() != nil {
+		r.undetermined++
+		r.out.Printf("?     %-28s not run: the driver was interrupted\n", st.name)
+		return
+	}
 	if st.skip != nil {
 		if why := st.skip(); why != "" {
 			r.undetermined++
