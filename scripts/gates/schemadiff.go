@@ -220,6 +220,21 @@ type schemaNode struct {
 	Required   []string               `json:"required"`
 }
 
+// UnmarshalJSON takes a boolean schema as well. true allows any value,
+// which a node with no type already means; false allows none.
+func (n *schemaNode) UnmarshalJSON(b []byte) error {
+	switch string(bytes.TrimSpace(b)) {
+	case "true":
+		*n = schemaNode{}
+		return nil
+	case "false":
+		*n = schemaNode{Type: json.RawMessage(`[]`)}
+		return nil
+	}
+	type plain schemaNode
+	return json.Unmarshal(b, (*plain)(n))
+}
+
 // walk records every field under n, and which are required.
 func (n *schemaNode) walk(prefix string, into fieldSet) {
 	if n == nil {

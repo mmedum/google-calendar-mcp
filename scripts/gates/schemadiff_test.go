@@ -221,3 +221,35 @@ func TestValuesThatMayBreakAreReported(t *testing.T) {
 		t.Fatalf("got  %q\nwant %q", got, want)
 	}
 }
+
+// A schema may be the boolean true, any value, or false, none. Reading
+// true as no type at all would fail an input that widens to it, and
+// reading it as an error would stop the gate on a valid dump.
+func TestBooleanSchemas(t *testing.T) {
+	dump := func(input, output string) map[string]toolFields {
+		t.Helper()
+		got, err := fieldsOf([]byte(`{"tools":[{"name":"t",
+			"input_schema":{"type":"object","properties":{"v":{"type":"array","items":` + input + `}}},
+			"output_schema":{"type":"object","properties":{"v":{"type":"array","items":` + output + `}}}}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	for _, c := range []struct {
+		name           string
+		was, now       [2]string
+		wantBreakCount int
+	}{
+		{"an input widening to any value", [2]string{`{"type":"string"}`, `{}`}, [2]string{`true`, `{}`}, 0},
+		{"an input narrowing from any value", [2]string{`true`, `{}`}, [2]string{`{"type":"string"}`, `{}`}, 1},
+		{"an output narrowing from any value", [2]string{`{}`, `true`}, [2]string{`{}`, `{"type":"string"}`}, 0},
+		{"an output widening to any value", [2]string{`{}`, `{"type":"string"}`}, [2]string{`{}`, `true`}, 1},
+		{"an input that takes nothing now", [2]string{`{"type":"string"}`, `{}`}, [2]string{`false`, `{}`}, 1},
+	} {
+		got := brokenFields(dump(c.was[0], c.was[1]), dump(c.now[0], c.now[1]))
+		if len(got) != c.wantBreakCount {
+			t.Errorf("%s: %q, want %d break(s)", c.name, got, c.wantBreakCount)
+		}
+	}
+}
