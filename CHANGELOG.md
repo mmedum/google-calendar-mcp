@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `create_event` takes `rooms` and `update_event` takes `add_rooms`: rooms and other resources to book, sent to Google as resources. A room is not a guest, so it does not make `notify` required.
+
 ### Changed
 
 - A delete asks once in Claude Code, not twice. In a client that can ask the person, `delete_calendar` and `clear_calendar` no longer carry the `requiresUserInteraction` mark; the server's own question, which shows what the call destroys, is the confirmation. To see only that question, add both tools to Claude Code's allow list. A Claude Code `Elicitation` hook that accepts now confirms them alone.
+
+### Fixed
+
+- A room's address given as a guest no longer counts as a guest outside your organization, so `notify: none` is allowed on an event whose only guest is a room.
+- `update_event` counts the guests it adds. Adding a guest to an event that had none now asks for `notify`, and `notify: none` is refused for a guest outside your organization; both went through before.
 
 ### Security
 

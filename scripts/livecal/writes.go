@@ -354,6 +354,43 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
+			// §4.3.2 and §18 row 86: a guest the write adds is reached by
+			// it, so adding one to an event with none asks. Refused before
+			// a request is built, so the address is never sent.
+			name: "notify required when an update adds a guest",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "add_guests": []string{outsideGuest}})
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "a guest was added without a notify decision"
+				}
+				if !strings.Contains(r.text, "[invalid]") || !strings.Contains(r.text, "1 guest") {
+					return fail, "the refusal is not [invalid] naming one guest: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [invalid], counting the guest the update adds"
+			},
+		},
+		{
+			// §4.3.4 for the same write: none is refused for an outside
+			// guest the update adds.
+			name: "none refused when an update adds an outside guest",
+			tool: "update_event",
+			argsFn: func() map[string]any {
+				return on(map[string]any{"event_id": w.created, "add_guests": []string{outsideGuest}, "notify": "none"})
+			},
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "notify:none was accepted for an outside guest the update adds"
+				}
+				if !strings.Contains(r.text, "[blocked]") {
+					return fail, "the refusal is not classified blocked: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked]"
+			},
+		},
+		{
 			// §4.4: the etag the caller decided on is held to. The one
 			// captured above is now the previous version.
 			name: "stale etag refused",

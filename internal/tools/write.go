@@ -52,7 +52,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			out, err := d.Service.CreateEvent(ctx, service.CreateOptions{
 				Calendar: in.Calendar, Title: in.Title, Start: in.Start, End: in.End,
 				TimeZone: in.TimeZone, Description: in.Description, Location: in.Location,
-				Guests: in.Guests, Recurrence: in.Recurrence, Transparent: in.FreeNotBusy,
+				Guests: in.Guests, Rooms: in.Rooms, Recurrence: in.Recurrence, Transparent: in.FreeNotBusy,
 				Conference: in.Conference, Notify: in.Notify, DryRun: in.DryRun,
 			})
 			if err != nil {
@@ -67,7 +67,8 @@ func registerWrite(s *mcp.Server, d Deps) {
 		Description: "Change an event. Only the fields you pass are touched; everything else is left exactly " +
 			"as it is, so this can never drop a guest list or flatten a series the way a whole-resource " +
 			"write does. " +
-			"Guests are added and removed one at a time with `add_guests` and `remove_guests`, applied to " +
+			"Guests are added and removed one at a time with `add_guests` and `remove_guests`, and rooms " +
+			"booked with `add_rooms`, applied to " +
 			"the list as it is read, so somebody else's RSVP arriving in between is reported rather than " +
 			"overwritten. " + scopeHelp + " " +
 			"`this_and_following` is two calls: the original series is ended before this occurrence and a " +
@@ -83,7 +84,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 				Scope: in.Scope, TimeZone: in.TimeZone,
 				Title: in.Title, Description: in.Description, Location: in.Location,
 				Start: in.Start, End: in.End, Recurrence: in.Recurrence,
-				AddGuests: in.AddGuests, RemoveGuests: in.RemoveGuests,
+				AddGuests: in.AddGuests, RemoveGuests: in.RemoveGuests, AddRooms: in.AddRooms,
 				Transparent: in.FreeNotBusy,
 				Notify:      in.Notify, ETag: in.ETag, Force: in.Force, DryRun: in.DryRun,
 			})
@@ -176,6 +177,7 @@ type createEventIn struct {
 	Description string   `json:"description,omitempty" jsonschema:"Longer text on the event."`
 	Location    string   `json:"location,omitempty" jsonschema:"Where it is."`
 	Guests      []string `json:"guests,omitempty" jsonschema:"Email addresses to invite. Passing any of these makes notify required."`
+	Rooms       []string `json:"rooms,omitempty" jsonschema:"Addresses of rooms or other resources to book. A room is not a guest, so it does not make notify required."`
 	Recurrence  []string `json:"recurrence,omitempty" jsonschema:"RFC 5545 lines, such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10."`
 	FreeNotBusy bool     `json:"free_not_busy,omitempty" jsonschema:"Mark the time as free rather than busy, so it does not block availability."`
 	Conference  bool     `json:"conference,omitempty" jsonschema:"Ask Google for a Google Meet link. Usually in the answer; if it says the link is still being made, read the event again for it."`
@@ -197,7 +199,8 @@ type updateEventIn struct {
 	End          string    `json:"end,omitempty" jsonschema:"New end. For an all-day event this is the last day, included."`
 	Recurrence   *[]string `json:"recurrence,omitempty" jsonschema:"New RFC 5545 lines. An empty list stops the event repeating."`
 	AddGuests    []string  `json:"add_guests,omitempty" jsonschema:"Email addresses to invite, added to the guests already there."`
-	RemoveGuests []string  `json:"remove_guests,omitempty" jsonschema:"Email addresses to uninvite."`
+	RemoveGuests []string  `json:"remove_guests,omitempty" jsonschema:"Email addresses to uninvite, rooms included."`
+	AddRooms     []string  `json:"add_rooms,omitempty" jsonschema:"Addresses of rooms or other resources to book. A room is not a guest."`
 	FreeNotBusy  *bool     `json:"free_not_busy,omitempty" jsonschema:"Mark the time free rather than busy."`
 
 	Notify string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests."`

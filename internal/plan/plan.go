@@ -69,6 +69,12 @@ type Draft struct {
 	// (§4.4).
 	AddGuests    []string
 	RemoveGuests []string
+	// AddRooms are rooms and other resources to book. They go with
+	// `resource: true`, the one way Google documents to name a resource,
+	// and only as they are added: "Can only be set when the attendee is
+	// added to the event for the first time" (EventAttendee.resource).
+	// RemoveGuests takes a room's address as well.
+	AddRooms []string
 
 	// Transparent marks the event as not making the person busy.
 	Transparent *bool
@@ -84,7 +90,7 @@ type Draft struct {
 func (d Draft) Empty() bool {
 	return d.Title == nil && d.Description == nil && d.Location == nil &&
 		d.Start == "" && d.End == "" && d.Recurrence == nil &&
-		len(d.AddGuests) == 0 && len(d.RemoveGuests) == 0 && d.Transparent == nil
+		len(d.AddGuests) == 0 && len(d.RemoveGuests) == 0 && len(d.AddRooms) == 0 && d.Transparent == nil
 }
 
 // Change is one field a write alters, in the exact values that went over
@@ -172,8 +178,12 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 		}
 	}
 
-	if len(d.AddGuests) > 0 || len(d.RemoveGuests) > 0 {
-		list, gc, gerr := guestList(before.Attendees, d.AddGuests, d.RemoveGuests, before.AttendeesOmitted)
+	if len(d.AddGuests) > 0 || len(d.RemoveGuests) > 0 || len(d.AddRooms) > 0 {
+		add, aerr := d.adding()
+		if aerr != nil {
+			return gcal.EventPatch{}, nil, aerr
+		}
+		list, gc, gerr := guestList(before.Attendees, add, d.RemoveGuests, before.AttendeesOmitted)
 		if gerr != nil {
 			return gcal.EventPatch{}, nil, gerr
 		}
@@ -239,17 +249,35 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 	if len(d.RemoveGuests) > 0 {
 		return gcal.Event{}, fmt.Errorf("%w: a new event has no guests to remove", ErrInvalid)
 	}
-	for _, g := range d.AddGuests {
-		g = strings.TrimSpace(g)
-		if g == "" {
-			continue
-		}
-		if err := validAddress(g, "a guest"); err != nil {
-			return gcal.Event{}, err
-		}
-		e.Attendees = append(e.Attendees, gcal.EventAttendee{Email: g})
+	add, err := d.adding()
+	if err != nil {
+		return gcal.Event{}, err
 	}
+	e.Attendees = add
 	return e, nil
+}
+
+// adding is the attendees the draft adds: its guests, then its rooms
+// marked as resources.
+func (d Draft) adding() ([]gcal.EventAttendee, error) {
+	var out []gcal.EventAttendee
+	for _, list := range []struct {
+		addrs []string
+		room  bool
+		what  string
+	}{{d.AddGuests, false, "a guest"}, {d.AddRooms, true, "a room"}} {
+		for _, a := range list.addrs {
+			a = strings.TrimSpace(a)
+			if a == "" {
+				continue
+			}
+			if err := validAddress(a, list.what); err != nil {
+				return nil, err
+			}
+			out = append(out, gcal.EventAttendee{Email: a, Resource: list.room})
+		}
+	}
+	return out, nil
 }
 
 // times turns the caller's start and end into the wire pair.
@@ -450,7 +478,7 @@ func cleanRecurrence(lines []string) ([]string, error) {
 // count and their id, and rebuilding the array from it would erase all
 // three on every guest on the event, on any write that touched the list
 // at all. Read-modify-write means the values that were read.
-func guestList(before []gcal.EventAttendee, add, remove []string, truncated bool) ([]gcal.EventAttendee, *Change, error) {
+func guestList(before []gcal.EventAttendee, add []gcal.EventAttendee, remove []string, truncated bool) ([]gcal.EventAttendee, *Change, error) {
 	if truncated {
 		return nil, nil, fmt.Errorf(
 			"%w: Google truncated this event's guest list, so the server cannot change it without dropping the "+
@@ -480,18 +508,11 @@ func guestList(before []gcal.EventAttendee, add, remove []string, truncated bool
 	}
 	added := 0
 	for _, g := range add {
-		g = strings.TrimSpace(g)
-		if g == "" {
+		if have[strings.ToLower(g.Email)] {
 			continue
 		}
-		if err := validAddress(g, "a guest"); err != nil {
-			return nil, nil, err
-		}
-		if have[strings.ToLower(g)] {
-			continue
-		}
-		have[strings.ToLower(g)] = true
-		out = append(out, gcal.EventAttendee{Email: g})
+		have[strings.ToLower(g.Email)] = true
+		out = append(out, g)
 		added++
 	}
 	if added == 0 && removed == 0 {

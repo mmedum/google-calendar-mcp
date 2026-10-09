@@ -168,6 +168,68 @@ func TestCreateEventPassesTheNotifyChoiceThrough(t *testing.T) {
 	}
 }
 
+// A room is booked as a resource and reaches nobody, whether it comes as
+// a room or as a guest address; so notify is not asked for, and none is
+// not refused.
+func TestCreateEventBooksRoomsWithoutReachingAnybody(t *testing.T) {
+	const room = "room-sample@resource.calendar.google.com"
+	for _, o := range []service.CreateOptions{
+		{Rooms: []string{room}},
+		{Guests: []string{room}, Notify: "none"},
+	} {
+		svc, fake := writeSeed(t)
+		o.Calendar, o.Title, o.Start, o.End = "primary", "In a room", "2026-04-01T09:00:00+02:00", "2026-04-01T10:00:00+02:00"
+		out, err := svc.CreateEvent(context.Background(), o)
+		if err != nil {
+			t.Fatalf("%+v: %v", o, err)
+		}
+		created := fake.Events["me@example.test"][out.After.ID]
+		if len(created.Attendees) != 1 || created.Attendees[0].Email != room || created.Attendees[0].Resource != (len(o.Rooms) > 0) {
+			t.Fatalf("%+v: attendees %+v", o, created.Attendees)
+		}
+		if got := fake.Wrote()[0].SendUpdates; got != o.Notify {
+			t.Fatalf("%+v: sent sendUpdates=%q", o, got)
+		}
+	}
+}
+
+// Adding a guest reaches that guest, on an event that had nobody: notify
+// is required, and none is refused for somebody outside the domain.
+// Adding a room is not reaching anybody.
+func TestUpdateEventCountsTheGuestsItAdds(t *testing.T) {
+	svc, fake := writeSeed(t)
+	add := func(notify string, guests, rooms []string) error {
+		_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+			Calendar: "primary", EventID: "evsolo00001", AddGuests: guests, AddRooms: rooms, Notify: notify,
+		})
+		return err
+	}
+	outside := []string{"partner@elsewhere.test"}
+	if err := add("", outside, nil); classOf(t, err) != gapi.ClassInvalid {
+		t.Fatalf("no notify: %v, want [invalid]", err)
+	}
+	if err := add("none", outside, nil); classOf(t, err) != gapi.ClassBlocked {
+		t.Fatalf("none: %v, want [blocked]", err)
+	}
+	if len(fake.Wrote()) != 0 {
+		t.Fatalf("refusals wrote %+v", fake.Wrote())
+	}
+	// Splitting a series at an occurrence is a write that adds them too.
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evseries001_20260331T120000Z", Scope: "this_and_following",
+		AddGuests: outside, Notify: "none",
+	})
+	if classOf(t, err) != gapi.ClassBlocked {
+		t.Fatalf("none on this_and_following: %v, want [blocked]", err)
+	}
+	if err := add("", nil, []string{"room-sample@resource.calendar.google.com"}); err != nil {
+		t.Fatalf("adding a room: %v", err)
+	}
+	if got := fake.Events["me@example.test"]["evsolo00001"].Attendees; len(got) != 1 || !got[0].Resource {
+		t.Fatalf("the room went in as %+v", got)
+	}
+}
+
 // §4.3.5: dry_run shows the blast radius and writes nothing.
 func TestDryRunWritesNothing(t *testing.T) {
 	svc, fake := writeSeed(t)

@@ -296,6 +296,8 @@ type CreateOptions struct {
 	Description string
 	Location    string
 	Guests      []string
+	// Rooms are rooms and other resources to book, sent as resources.
+	Rooms       []string
 	Recurrence  []string
 	Transparent bool
 	// Conference asks for a Google Meet link on the new event (§17.3).
@@ -331,7 +333,7 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	title := o.Title
 	draft := plan.Draft{
 		Title: &title, Start: o.Start, End: o.End, Zone: env.zone,
-		AddGuests: o.Guests, Conference: o.Conference,
+		AddGuests: o.Guests, AddRooms: o.Rooms, Conference: o.Conference,
 	}
 	if o.Description != "" {
 		draft.Description = &o.Description
@@ -498,6 +500,7 @@ type UpdateOptions struct {
 	Recurrence   *[]string
 	AddGuests    []string
 	RemoveGuests []string
+	AddRooms     []string
 	Transparent  *bool
 
 	Notify string
@@ -515,7 +518,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 		Title: o.Title, Description: o.Description, Location: o.Location,
 		Start: o.Start, End: o.End,
 		Recurrence: o.Recurrence, AddGuests: o.AddGuests, RemoveGuests: o.RemoveGuests,
-		Transparent: o.Transparent,
+		AddRooms: o.AddRooms, Transparent: o.Transparent,
 	}
 	if draft.Empty() {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
@@ -555,7 +558,7 @@ func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel, o.AddGuests...))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -705,7 +708,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, parent))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, parent, o.AddGuests...))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
