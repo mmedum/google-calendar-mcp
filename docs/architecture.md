@@ -445,8 +445,9 @@ either accommodates them or lies.
   second can fail after the first succeeded.
 - **No search across calendars.** `events.list` takes one `calendarId`.
   Searching several is several requests, fanned out by this server.
-- **`q` is a free-text match, not a field query.** It has no documented
-  syntax, no field scoping and no guarantee about which fields it reads.
+- **`q` is a free-text match, not a field query.** Google documents the
+  fields it reads, but it has no field syntax, so a search cannot be
+  narrowed to one of them, and how it matches words is not documented.
   A result set from `q` is a suggestion (§7.2).
 - **No way to know whether mail was actually sent.** The API reports
   nothing about notifications. `sendUpdates` is a request, and §2.6 says
@@ -897,9 +898,15 @@ sends. A page token carries the UID as it carries the type filter (§18
 row 94).
 
 `search_events` is `events.list` with `q`, fanned out across the named
-calendars. Its description states plainly that `q` is undocumented
-free text with no field scoping (§2), so a model treats an empty result
-as "found nothing" rather than "there is nothing".
+calendars. Google documents the fields `q` reads: the title,
+description and location, each guest's and the organizer's name and
+address, and a working location's building, desk and labels, plus
+built-in words such as "Out of office" that match those kinds of event
+in any language. The description says so. It also says there is no
+field syntax, that how words are matched is not documented, and that an
+event the caller sees only as busy has nothing to match, so a model
+still treats an empty result as "found nothing" rather than "there is
+nothing" (§18 row 95).
 
 `get_event` returns one event whole. `list_instances` expands one series.
 
@@ -1073,7 +1080,7 @@ the read scopes (§10).
 | `list_events` | `events.list` | `expand` vs `series` required (§7.2) |
 | `get_event` | `events.get` | |
 | `list_instances` | `events.instances` | |
-| `search_events` | `events.list` (`q`) | fanned out; `q` is unscoped (§2) |
+| `search_events` | `events.list` (`q`) | fanned out; `q` has no field syntax (§2) |
 | `check_availability` | `freebusy.query` | batched at 50; free gaps (§7.3); working-hours mask (§17.2) |
 | `get_settings` | `settings.list`, `colors.get` | the user's zone and week start |
 | `create_event` | `events.insert` | client-side id (§2.11); optional Meet link (§17.3) |
@@ -2906,6 +2913,7 @@ what §15 exists to settle, and they are marked.
 | 92 | An optional guest is a quieter guest, and adding an address already on an event is a no-op worth no mention | Calendar discovery revision 20261005, read 2026-10-09: `EventAttendee.optional` "Whether this is an optional attendee. Optional. The default is False"; the reference says nothing about optional attendees and notifications | **Refuted for the first: nothing says Google mails an optional guest less, so one counts toward `notify` like any guest.** `create_event` takes `optional_guests` and `update_event` `add_optional_guests`; a room is refused there, and so is one address in two roles. **Refuted for the second:** an address the caller asks to add as optional that is already a required guest is a role change the server does not make, and skipping it in silence reads as done. The result now names every added address the event already had. **Not yet seen live, tier 3:** that Google keeps `optional: true` as sent. The live driver creates an event whose only optional guest is the account itself, which reaches nobody, and reads the role back |
 | 93 | An address arrives bare | RFC 5322 §3.4: `mailbox = name-addr / addr-spec`, so `"Sample Person" <person@example.com>` is one address; Calendar discovery revision 20261005, `EventAttendee.email` "must be a valid email address as per RFC5322"; Go `net/mail.ParseAddress` "parses a single RFC 5322 address" | **Refuted: a Gmail server returns the name-addr form, and the old check refused its space**, so a hand-off from mail to calendar failed. Every address input is now parsed as one mailbox and the bare address replaces it before the reach count, the request or the result reads it. A list in one entry is refused. Some strings the old check passed, such as two dots in a row, are now refused before a request rather than by Google. Nothing here depends on Google: it receives the bare address, as before. The live driver passes a mailbox to a dry run and checks the display name is not in the result |
 | 94 | `events.list` finds an event by its iCalendar UID, alongside a window | Calendar discovery revision 20261005, read 2026-10-09: `iCalUID` "Specifies an event ID in the iCalendar format to be provided in the response. Optional. Use this if you want to search for an event by its iCalendar ID"; `syncToken` lists `iCalUID` among the parameters that "cannot be specified together with nextSyncToken"; `Event.iCalUID` "in recurring events, all occurrences of one event have different ids while they all share the same iCalUIDs" | **Confirmed in the reference for the lookup and the sharing; the window is a belief.** `list_events` takes `ical_uid` and sends it as `iCalUID`. The reference forbids it only with a sync token. It says nothing about `timeMin` and `timeMax`, so that Google applies the window alongside it is **not yet seen live, tier 3**; the fake applies both. The live driver reads the UIDs Google gave the seeded timed event and weekly series, filters on each, and filters on the timed event's UID over a window that leaves its day out, expecting nothing |
+| 95 | `q` is undocumented free text, and Google does not say which fields it reads | Calendar discovery revision 20261005, read 2026-10-09: `q` "Free text search terms to find events that match these terms in the following fields: summary, description, location, attendee's displayName, attendee's email, organizer's displayName, organizer's email, workingLocationProperties.officeLocation.buildingId, workingLocationProperties.officeLocation.deskId, workingLocationProperties.officeLocation.label, workingLocationProperties.customLocation.label", and "These search terms also match predefined keywords against all display title translations of working location, out-of-office, and focus-time events" | **Refuted: the fields are documented now.** `search_events`, the server instructions and §7.2 name them. What stays true, and stays in the description: there is no field syntax, how words are matched is not documented, and an event seen only as busy has nothing to match, so an empty result is still not proof. The fake matches the documented fields; the built-in words are not modeled |
 
 ### Deviations from the shared Go MCP server standard
 

@@ -39,7 +39,8 @@ const instructions = "Google Calendar tools. This server answers *when*: calenda
 	"before calling. " +
 	"list_events with expand=true gives each occurrence of a repeating event; with no_expand it gives the series " +
 	"once with its rule. Ask for what you mean: they answer different questions. " +
-	"search_events is Google's undocumented free-text match with no field syntax, so an empty result means the " +
+	"search_events matches free text against the fields Google documents, such as the title, location and " +
+	"guests, with no field syntax. How it matches words is not documented, so an empty result means the " +
 	"search found nothing, not that nothing exists — fall back to list_events when you need certainty. " +
 	"Never answer \"are they free\" from a list of events: events you cannot see the details of are still busy, " +
 	"and an event marked free is not. That is what check_availability is for, and it reports a calendar it could " +

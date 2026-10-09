@@ -278,15 +278,24 @@ func TestListEventsWarnsAboutTheRecurrenceChoice(t *testing.T) {
 	}
 }
 
-// TestSearchDescribesItsOwnUnreliability: Google's q is undocumented
-// free text, and a model must not read an empty result as proof.
+// TestSearchDescribesItsOwnUnreliability: Google documents which fields
+// q reads (discovery revision 20261005) but not how it matches words,
+// and an event seen only as busy has nothing to match. So the
+// description names the fields, says there is no field syntax, and
+// still says an empty result is not proof.
 func TestSearchDescribesItsOwnUnreliability(t *testing.T) {
 	tool := names(listTools(t, baseConfig()))["search_events"]
 	lower := strings.ToLower(tool.Description)
-	for _, want := range []string{"undocumented", "found nothing"} {
+	for _, want := range []string{
+		"the title, description and location", "guests' and organizer's names and addresses",
+		"no field syntax", "how words are matched is not documented", "found nothing",
+	} {
 		if !strings.Contains(lower, want) {
-			t.Fatalf("search_events does not warn that an empty result is not proof:\n%s", tool.Description)
+			t.Fatalf("search_events does not say %q:\n%s", want, tool.Description)
 		}
+	}
+	if strings.Contains(lower, "undocumented") || strings.Contains(lower, "does not say which fields") {
+		t.Fatalf("search_events still calls the searched fields undocumented:\n%s", tool.Description)
 	}
 }
 

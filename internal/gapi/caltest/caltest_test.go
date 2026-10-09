@@ -3,6 +3,7 @@ package caltest_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -261,5 +262,52 @@ func TestUpdatedMinIncludesDeletionsAndRefusesASyncToken(t *testing.T) {
 	}
 	if status, _ := get("updatedMin=2026-03-11T00:00:00Z&syncToken=caltest-sync-0"); status != http.StatusBadRequest {
 		t.Fatalf("updatedMin with a sync token answered %d, want 400", status)
+	}
+}
+
+// q matches the fields the discovery document names, so a search for a
+// guest's address, the organizer's name, a location or a working
+// location's label finds the event, and one for text in none of them
+// does not.
+func TestQMatchesTheFieldsGoogleDocuments(t *testing.T) {
+	s := caltest.Seed()
+	e := caltest.Timed("ev-office", "Desk day", "2026-03-16T08:00:00+01:00", "2026-03-16T17:00:00+01:00",
+		"Europe/Copenhagen")
+	e.Location = "Room seven"
+	e.Organizer = &gcal.EventPerson{Email: "host@example.test", DisplayName: "Sample Host"}
+	e.Attendees = []gcal.EventAttendee{{Email: "guest@example.test", DisplayName: "Sample Guest"}}
+	e.Unmodeled = map[string]json.RawMessage{
+		"workingLocationProperties": json.RawMessage(`{"officeLocation":{"buildingId":"north","label":"Annex"}}`),
+	}
+	s.AddEvent("primary", e)
+	base := s.Start()
+	defer s.Close()
+
+	found := func(q string) bool {
+		t.Helper()
+		resp, err := http.Get(base + "/calendars/primary/events?q=" + url.QueryEscape(q))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var list gcal.EventList
+		if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range list.Items {
+			if it.ID == "ev-office" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, q := range []string{"room seven", "guest@example.test", "Sample Guest", "Sample Host",
+		"host@example.test", "north", "annex"} {
+		if !found(q) {
+			t.Errorf("q=%q did not find the event", q)
+		}
+	}
+	if found("nowhere on the event") {
+		t.Error("q matched text that is in none of the documented fields")
 	}
 }

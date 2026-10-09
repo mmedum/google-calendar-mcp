@@ -428,6 +428,27 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
+			// §18 row 95: q reads the location, among the fields Google
+			// documents. The update above set this one.
+			name: "search_events matches a location",
+			tool: "search_events",
+			args: map[string]any{
+				"calendars": []string{scratch}, "from": "2026-04-01", "to": "2026-04-01", "query": "Room two",
+			},
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, writtenTitle) {
+					// The index is eventually consistent, as on the
+					// read-side search step.
+					return undetermined, "the event was not found by its location; Google's index may not " +
+						"have caught up with a change made seconds ago"
+				}
+				return pass, "found the event by its location, not its title"
+			},
+		},
+		{
 			// §4.3.2 and §18 row 86: a guest the write adds is reached by
 			// it, so adding one to an event with none asks. Refused before
 			// a request is built, so the address is never sent.

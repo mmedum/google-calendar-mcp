@@ -1171,8 +1171,7 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		if uid := q.Get("iCalUID"); uid != "" && s.uidOf(calID, e) != uid {
 			continue
 		}
-		if search != "" && !strings.Contains(strings.ToLower(e.Summary), search) &&
-			!strings.Contains(strings.ToLower(e.Description), search) {
+		if search != "" && !matchesQ(e, search) {
 			continue
 		}
 		if tm := q.Get("timeMin"); tm != "" && endsBefore(e, tm) {
@@ -1212,6 +1211,41 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 var listTypes = []string{
 	gcal.EventTypeBirthday, gcal.EventTypeDefault, gcal.EventTypeFocusTime,
 	gcal.EventTypeFromGmail, gcal.EventTypeOutOfOffice, gcal.EventTypeWorkingLocation,
+}
+
+// matchesQ is q over the fields the discovery document names: the
+// summary, description and location, each attendee's and the
+// organizer's display name and email, and a working location's
+// building, desk and labels. A lowercase substring is this fake's guess
+// at the matching, which Google does not document, and the built-in
+// words for status events are not modeled.
+func matchesQ(e *gcal.Event, search string) bool {
+	fields := []string{e.Summary, e.Description, e.Location}
+	for _, a := range e.Attendees {
+		fields = append(fields, a.DisplayName, a.Email)
+	}
+	if e.Organizer != nil {
+		fields = append(fields, e.Organizer.DisplayName, e.Organizer.Email)
+	}
+	var where struct {
+		Office struct {
+			BuildingID string `json:"buildingId"`
+			DeskID     string `json:"deskId"`
+			Label      string `json:"label"`
+		} `json:"officeLocation"`
+		Custom struct {
+			Label string `json:"label"`
+		} `json:"customLocation"`
+	}
+	if raw, ok := e.Unmodeled["workingLocationProperties"]; ok && json.Unmarshal(raw, &where) == nil {
+		fields = append(fields, where.Office.BuildingID, where.Office.DeskID, where.Office.Label, where.Custom.Label)
+	}
+	for _, f := range fields {
+		if f != "" && strings.Contains(strings.ToLower(f), search) {
+			return true
+		}
+	}
+	return false
 }
 
 // uidOf is an event's iCalUID. An occurrence carries its series' UID:

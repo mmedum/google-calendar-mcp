@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `search_events` and the server's instructions name the fields Google matches the search text against: the title, description and location, the guests' and organizer's names and addresses, and a working location's labels. Google now documents them. The description still says there is no field syntax and that an empty result is not proof the event does not exist.
 - A delete asks once in Claude Code, not twice. In a client that can ask the person, `delete_calendar` and `clear_calendar` no longer carry the `requiresUserInteraction` mark; the server's own question, which shows what the call destroys, is the confirmation. To see only that question, add both tools to Claude Code's allow list. A Claude Code `Elicitation` hook that accepts now confirms them alone.
 
 ### Fixed

@@ -85,10 +85,13 @@ func registerRead(s *mcp.Server, d Deps) {
 	add(s, d, Def[searchEventsIn, service.ScheduleResult]{
 		Name: "search_events",
 		Description: "Find events matching free text in a window. " + windowHelp + " " +
-			"Important: Google's event search is undocumented free text with no field scoping — you cannot search " +
-			"\"attendee:someone\" or restrict it to titles, and Google does not say which fields it reads. " +
-			"Treat an empty result as \"this search found nothing\", not as \"there is no such event\", and fall " +
-			"back to list_events over the window when you need certainty. " +
+			"Google documents the fields the text is matched against: the title, description and location, the " +
+			"guests' and organizer's names and addresses, and a working location's labels; words such as " +
+			"\"Out of office\" also match those kinds of event, in any language. There is no field syntax: you " +
+			"cannot search \"attendee:someone\" or restrict it to titles. How words are matched is not " +
+			"documented, and an event you can see only as busy has nothing to match, so treat an empty result " +
+			"as \"this search found nothing\", not as \"there is no such event\", and fall back to list_events " +
+			"over the window when you need certainty. " +
 			"event_types narrows the search to some kinds of event, as on list_events. " +
 			"Searching several calendars costs one request each.",
 		Kind: Read,
@@ -255,7 +258,7 @@ type listEventsIn struct {
 }
 
 type searchEventsIn struct {
-	Query      string   `json:"query" jsonschema:"Free text. Google decides which fields this matches; there is no field syntax."`
+	Query      string   `json:"query" jsonschema:"Free text, matched against the title, description, location, and the guests' and organizer's names and addresses. There is no field syntax."`
 	Calendars  []string `json:"calendars,omitempty" jsonschema:"Calendar ids or titles. Defaults to the primary calendar."`
 	From       string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
 	To         string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`

@@ -339,7 +339,8 @@ type ListOptions struct {
 	To   string
 	// Expand chooses instances over series parents (§2.9).
 	Expand bool
-	// Query is the free-text q. Undocumented and unscoped (§2).
+	// Query is the free-text q, matched against fields Google documents,
+	// with no field syntax (§2).
 	Query string
 	// ShowCanceled includes canceled events (§2.13).
 	ShowCanceled bool
