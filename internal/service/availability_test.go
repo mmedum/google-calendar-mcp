@@ -429,3 +429,77 @@ func TestHiddenCalendarsAreFilteredNotRefetched(t *testing.T) {
 		}
 	}
 }
+
+// A group is answered from the member calendars Google expands it to:
+// busy when any of them is, and named as a group of so many.
+func TestAvailabilityAnswersForAGroup(t *testing.T) {
+	svc, fake := seeded(t)
+	const group = "team-group@example.test"
+	fake.Groups[group] = []string{"ann@example.test", "bo@example.test"}
+	fake.Busy["ann@example.test"] = []gcal.TimePeriod{{Start: "2026-03-16T09:00:00+01:00", End: "2026-03-16T10:00:00+01:00"}}
+	fake.Busy["bo@example.test"] = []gcal.TimePeriod{{Start: "2026-03-16T09:30:00+01:00", End: "2026-03-16T11:00:00+01:00"}}
+	o := day("2026-03-16", "2026-03-16")
+	o.Calendars = []string{group}
+	got, err := svc.Availability(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Availability: %v", err)
+	}
+	a := got.Answers[0]
+	if a.Unknown || a.Members != 2 || len(a.Busy) != 1 ||
+		a.Busy[0].Start.T.Format("15:04") != "09:00" || a.Busy[0].End.T.Format("15:04") != "11:00" {
+		t.Fatalf("the group's answer is %+v, want busy 09:00-11:00 over 2 calendars", a)
+	}
+	if fake.FreeBusyAsked.GroupExpansionMax != 100 {
+		t.Fatalf("asked groupExpansionMax=%d, want the documented 100", fake.FreeBusyAsked.GroupExpansionMax)
+	}
+	if !strings.Contains(got.Text(), group+" (a group of 2 calendars)") {
+		t.Fatalf("the text does not say it is a group:\n%s", got.Text())
+	}
+}
+
+// A group Google could not expand, expanded to nobody, or with a member
+// it could not read is unknown, never free (§4.6).
+func TestAGroupWithAnUnreadMemberIsUnknown(t *testing.T) {
+	const group = "team-group@example.test"
+	for _, tc := range []struct {
+		name   string
+		setup  func(*caltest.Server)
+		reason string
+	}{
+		{"a member unread", func(f *caltest.Server) {
+			f.Groups[group] = []string{"ann@example.test", "bo@example.test"}
+			f.FreeBusyErrors["bo@example.test"] = "notFound"
+		}, "1 of its 2 calendars could not be read"},
+		{"a member missing", func(f *caltest.Server) {
+			f.Groups[group] = []string{"ann@example.test", "bo@example.test"}
+			f.FreeBusyOmit["bo@example.test"] = true
+		}, "1 of its 2 calendars could not be read"},
+		{"not expanded", func(f *caltest.Server) {
+			f.Groups[group] = []string{"ann@example.test"}
+			f.GroupErrors[group] = "notFound"
+		}, "Google could not expand this group: no such calendar, or this account cannot see it"},
+		{"too big", func(f *caltest.Server) {
+			for i := range 101 {
+				f.Groups[group] = append(f.Groups[group], fmt.Sprintf("member%d@example.test", i))
+			}
+		}, "Google could not expand this group: groupTooBig"},
+		{"empty", func(f *caltest.Server) { f.Groups[group] = []string{} }, "Google expanded this group to no calendars"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, fake := seeded(t)
+			tc.setup(fake)
+			o := day("2026-03-16", "2026-03-16")
+			o.Calendars = []string{group}
+			got, err := svc.Availability(context.Background(), o)
+			if err != nil {
+				t.Fatalf("Availability: %v", err)
+			}
+			if a := got.Answers[0]; !a.Unknown || a.Reason != tc.reason || len(a.Busy) != 0 {
+				t.Fatalf("got %+v, want unknown because %q", a, tc.reason)
+			}
+			if got.GapsFrom != 0 || len(got.Gaps) != 0 {
+				t.Fatalf("free time offered from an unknown group: %+v", got.Gaps)
+			}
+		})
+	}
+}

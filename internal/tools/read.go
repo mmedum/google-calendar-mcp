@@ -174,6 +174,7 @@ func registerRead(s *mcp.Server, d Deps) {
 			"on calendars whose events you cannot read, and it respects events marked \"free\", so a list of " +
 			"events is not the same answer. " +
 			"A calendar that could not be read comes back as UNKNOWN, never as free — do not book over it. " +
+			"A group's address is answered for its members together, and is unknown if any of them is. " +
 			"The result also reports the gaps when nobody is busy; min_minutes drops the ones too short to " +
 			"use. " +
 			"working_from, working_to and working_days mask the gaps to a working week: a window is one " +

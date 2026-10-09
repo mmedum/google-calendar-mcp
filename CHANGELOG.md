@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A room's address given as a guest no longer counts as a guest outside your organization, so `notify: none` is allowed on an event whose only guest is a room.
+- `check_availability` answers for a group's address: its members' busy time together, with how many calendars it covers. It reported every group unknown. A group with a member that cannot be read, or one Google cannot expand, is still unknown, never free.
 - `update_event` counts the guests it adds. Adding a guest to an event that had none now asks for `notify`, and `notify: none` is refused for a guest outside your organization; both went through before.
 
 ### Security

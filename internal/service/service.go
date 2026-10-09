@@ -1065,6 +1065,7 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 		req := &gcal.FreeBusyRequest{
 			TimeMin: win.Start.String(), TimeMax: win.End.String(),
 			TimeZone: zone.Name(), CalendarExpansionMax: FreeBusyBatch,
+			GroupExpansionMax: maxGroupMembers,
 		}
 		for _, id := range batch {
 			req.Items = append(req.Items, gcal.FreeBusyRequestItem{ID: id})
@@ -1098,14 +1099,62 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 	return report, nil
 }
 
-// answerFor turns one calendar's slot in the response into an answer,
-// and a missing slot into "unknown" rather than into "free".
+// maxGroupMembers is the most member calendars Google expands a group
+// to; a bigger group is an error, not a partial list (discovery,
+// FreeBusyRequest.groupExpansionMax).
+const maxGroupMembers = 100
+
+// answerFor turns one calendar's or group's slot in the response into an
+// answer.
+func answerFor(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
+	if g, ok := resp.Groups[id]; ok {
+		if _, isCalendar := resp.Calendars[id]; !isCalendar {
+			return groupAnswer(id, g, resp, zone)
+		}
+	}
+	return calendarAnswer(id, resp, zone)
+}
+
+// groupAnswer is a group's members' busy time together. It is unknown
+// when Google could not expand the group, expanded it to nobody, or
+// could not read a member: one member unread is somebody who may be
+// busy, and a group answered as free on that is §4.6's defect.
+func groupAnswer(id string, g gcal.FreeBusyGroup, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
+	out := model.Availability{CalendarID: id, Members: len(g.Calendars)}
+	switch {
+	case len(g.Errors) > 0:
+		out.Unknown, out.Reason = true, "Google could not expand this group: "+freeBusyReason(g.Errors[0])
+		return out
+	case len(g.Calendars) == 0:
+		out.Unknown, out.Reason = true, "Google expanded this group to no calendars"
+		return out
+	}
+	unread := 0
+	var busy []model.Busy
+	for _, m := range g.Calendars {
+		a := calendarAnswer(m, resp, zone)
+		if a.Unknown {
+			unread++
+			continue
+		}
+		busy = append(busy, a.Busy...)
+	}
+	if unread > 0 {
+		out.Unknown, out.Reason = true, fmt.Sprintf("%d of its %d calendars could not be read", unread, len(g.Calendars))
+		return out
+	}
+	out.Busy = model.Merge(busy)
+	return out
+}
+
+// calendarAnswer turns one calendar's slot in the response into an
+// answer, and a missing slot into "unknown" rather than into "free".
 //
 // A calendar Google did not answer for is the case that matters:
 // calendarExpansionMax truncating the query looks exactly like this, and
 // the difference between "no busy blocks" and "no answer" is somebody's
 // meeting.
-func answerFor(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
+func calendarAnswer(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
 	out := model.Availability{CalendarID: id}
 	cal, ok := resp.Calendars[id]
 	if !ok {

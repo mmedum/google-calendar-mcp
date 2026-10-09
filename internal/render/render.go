@@ -488,7 +488,11 @@ func (r AvailabilityReport) Text() string {
 	fmt.Fprintf(&b, "%s\n%s\n\n", r.Window, r.Zone.Explain())
 
 	for _, a := range r.Answers {
-		fmt.Fprintf(&b, "%s\n", a.CalendarID)
+		if a.Members > 0 {
+			fmt.Fprintf(&b, "%s (a group of %d calendars)\n", a.CalendarID, a.Members)
+		} else {
+			fmt.Fprintf(&b, "%s\n", a.CalendarID)
+		}
 		switch {
 		case a.Unknown:
 			// Never "free". §4.6: a model that cannot tell these apart

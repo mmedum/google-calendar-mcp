@@ -366,6 +366,9 @@ type Availability struct {
 	Busy       []Busy
 	Unknown    bool
 	Reason     string
+	// Members is how many calendars a group stands for, zero for a
+	// calendar.
+	Members int
 }
 
 // Merge returns the busy intervals of every calendar as one ordered,

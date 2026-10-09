@@ -46,6 +46,14 @@ type Server struct {
 	// which is what a query truncated by calendarExpansionMax looks
 	// like: no busy list, no error, no row. It must not read as "free".
 	FreeBusyOmit map[string]bool
+	// Groups are group addresses and the member calendars free/busy
+	// expands each to; GroupErrors makes one fail to expand. Google
+	// documents only that a group bigger than groupExpansionMax is an
+	// error; the reason the fake gives it is its own.
+	Groups      map[string][]string
+	GroupErrors map[string]string
+	// FreeBusyAsked is the last free/busy request served.
+	FreeBusyAsked gcal.FreeBusyRequest
 	// Settings the user has.
 	Settings []gcal.Setting
 
@@ -121,6 +129,8 @@ func New() *Server {
 		Busy:           map[string][]gcal.TimePeriod{},
 		FreeBusyErrors: map[string]string{},
 		FreeBusyOmit:   map[string]bool{},
+		Groups:         map[string][]string{},
+		GroupErrors:    map[string]string{},
 		Fail:           map[string]int{},
 		FailMessage:    map[string]string{},
 	}
@@ -1283,21 +1293,46 @@ func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid", "too many calendars in one freeBusy query")
 		return
 	}
+	s.mu.Lock()
+	s.FreeBusyAsked = req
+	s.mu.Unlock()
 	out := gcal.FreeBusyResponse{
 		TimeMin: req.TimeMin, TimeMax: req.TimeMax,
 		Calendars: map[string]gcal.FreeBusyCalendar{},
 	}
-	for _, it := range req.Items {
-		if s.FreeBusyOmit[it.ID] {
-			continue
+	calendar := func(id string) {
+		if s.FreeBusyOmit[id] {
+			return
 		}
-		if reason, bad := s.FreeBusyErrors[it.ID]; bad {
-			out.Calendars[it.ID] = gcal.FreeBusyCalendar{
+		if reason, bad := s.FreeBusyErrors[id]; bad {
+			out.Calendars[id] = gcal.FreeBusyCalendar{
 				Errors: []gcal.FreeBusyError{{Domain: "calendar", Reason: reason}},
 			}
+			return
+		}
+		out.Calendars[id] = gcal.FreeBusyCalendar{Busy: s.Busy[id]}
+	}
+	for _, it := range req.Items {
+		members, isGroup := s.Groups[it.ID]
+		if !isGroup {
+			calendar(it.ID)
 			continue
 		}
-		out.Calendars[it.ID] = gcal.FreeBusyCalendar{Busy: s.Busy[it.ID]}
+		if out.Groups == nil {
+			out.Groups = map[string]gcal.FreeBusyGroup{}
+		}
+		reason, bad := s.GroupErrors[it.ID]
+		if !bad && req.GroupExpansionMax > 0 && len(members) > req.GroupExpansionMax {
+			reason, bad = "groupTooBig", true
+		}
+		if bad {
+			out.Groups[it.ID] = gcal.FreeBusyGroup{Errors: []gcal.FreeBusyError{{Domain: "calendar", Reason: reason}}}
+			continue
+		}
+		out.Groups[it.ID] = gcal.FreeBusyGroup{Calendars: members}
+		for _, m := range members {
+			calendar(m)
+		}
 	}
 	writeJSON(w, out)
 }
