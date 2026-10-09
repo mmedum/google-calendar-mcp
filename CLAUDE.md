@@ -30,7 +30,9 @@ and Drive APIs.
 
    Two of these are structural rather than a matter of care, and must
    stay that way: **fixtures are generated, never recorded**, and the
-   **live driver reads only a calendar it created and filled itself**;
+   **live driver reads only a calendar it created and filled itself**,
+   save the one status event §9.1's narrow exception, approved by the
+   owner on 2026-10-09, lets it make and delete on the primary calendar;
    the evals harness reads only the in-memory calendar of `caltest`.
    `docs/architecture.md` §9.1 is the full specification, including why
    every rule in the leak gate is an allow-list anchored on a shape the

@@ -6,6 +6,11 @@ copy, the version in five places, the registry entry, and the Go proxy resolving
 `/v3`. Phase 7 asks the person through the client before the writes of §9a.
 Still unproven: the `cancel_event` question against a real guest, which is tested
 offline only.
+
+**Unreleased, and none of it run live yet:** everything under `[Unreleased]` in
+the CHANGELOG, which is phase 8 in §16. Spikes O and P are pending, the
+attachment steps are owed until a run sets `GCAL_LIVE_ATTACHMENT`, and the
+tier-3 rows of §18 from 85 on wait on that run or on the group probe.
  Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
@@ -2708,6 +2713,24 @@ Breaking, so 3.0.0: a client that declares elicitation and answers with
 nobody present, as `claude -p` does, can no longer make these writes.
 The module path moves to `/v3`.
 
+**Phase 8 — the gap analysis (unreleased). Built 2026-10-09; not yet run
+live.** What `[Unreleased]` lists: rooms and optional guests,
+`event_types` and `ical_uid`, attachments on reads, `updated_since`,
+reminders, visibility and guest permissions, `add_conference`, status
+events on `create_event`, a group's free/busy answer, page tokens bound to
+their query, and the time zone database in the binary. Its review found a
+split of a status series that skipped the status rules and the question,
+guests sent to an existing status event, page tokens reusable under
+another query, `tooManyCalendarsRequested` read as an answer, and gaps in
+the live driver's primary-calendar guard; all are fixed.
+
+**Next: the live run, with the transcript read, before any release.**
+`make live` once per `-status-type`, which makes and deletes the one
+status event §9.1 allows; spikes O and P; the attachment steps, with
+`GCAL_LIVE_ATTACHMENT` set; and the group probe of §18 rows 87 and 100,
+outside the driver. Each settles tier-3 rows of §18 from 85 on. Rooms and
+a split of a status series stay unproven: the driver can make neither.
+
 ### 16a. Found by review, and fixed
 
 Five defects the phase 1 review turned up in code phases 0 and 1 had
@@ -2912,7 +2935,8 @@ row 80).
    undecided.
 
    **Decided in phase 4: a parameter on `create_event`, and nothing
-   else.** A tool would be a second way to make an event, and the link
+   else.** *Superseded on 2026-10-09 for an existing event; see the
+   reversal below.* A tool would be a second way to make an event, and the link
    belongs to the event's creation rather than to a separate act.
    `conference: true` sends a create request whose `requestId` is the
    EVENT id, so a retry of a create whose answer was never seen (§2.11)
@@ -2932,7 +2956,7 @@ row 80).
    conference to an event that already exists is refused with what to do
    instead, rather than silently dropped: `events.patch` can carry
    conference data and this server does not write it, so saying so is the
-   honest half. **Decided, with the boundary named.**
+   honest half. **Decided, with the boundary named; reversed below.**
 
    **Reversed 2026-10-09: `update_event` takes `add_conference`.** A
    meeting often gets its link after it is made, and the refusal sent the
@@ -3083,7 +3107,7 @@ what §15 exists to settle, and they are marked.
 | 85 | A client names a room by flagging the attendee as a resource | Calendar discovery revision 20261002, `EventAttendee.resource`: "Whether the attendee is a resource. Can only be set when the attendee is added to the event for the first time." | **Confirmed in the reference; not yet seen live with a real room**, which the driver cannot create. `create_event` takes `rooms` and `update_event` `add_rooms`, sent with `resource: true`, as is a room's address given as a guest. The flag does not decide who is counted: it holds whatever the call that added the attendee said, so a person passed as a room would carry it and slip past §4.3.4. The address decides, by row 84 |
 | 86 | A write reaches the guests the event already has | Read against §4.3, 2026-10-09 | **Refuted: it reaches the guests it adds too.** `update_event` counted the event as read, so adding a guest to an event with none asked for no `notify`, and `none` went through for a guest outside the domain. The count now includes the guests a write adds, on both halves of a series split |
 | 87 | Free/busy answers for a group under `calendars`, like any other id | Calendar discovery revision 20261002: `items[].id` is "The identifier of a calendar or a group"; the reply's `groups` is "Expansion of groups", each a list of member calendar ids; `groupExpansionMax` "An error is returned for a group with more members than this value. Maximum value is 100." | **Refuted by the reference: a group answers under `groups`**, and the server read only `calendars`, so every group came back unknown. A group's answer is now its members' busy time merged, sent with `groupExpansionMax: 100`; one member unread, an expansion error or no members makes it unknown, never free (§4.6). `calendarExpansionMax` caps the calendars one request answers at 50, and this server believes a group's members count toward it, so the calendars a group pushes past it are asked about again on their own, up to 200. That belief, and what Google sends for a calendar past the cap, are row 100's. A live check waits on a probe outside the driver, which prints counts only, because a group is other people's calendars and the driver reads only its own |
-| 88 | The new series of a split can be built from the fields this server models | Calendar discovery revision 20261005, read 2026-10-09: `Event.attachments` "In order to modify attachments the supportsAttachments request parameter should be set to true"; `eventLabelId` "To set or change this property, you need to specify eventLabelVersion=1"; the status-events guide: to create a working location, "Include the workingLocationProperties field" | **Refuted.** The copy was decoded into the modeled fields, so the new series lost the parent's attachments, label, extended properties and status details, and a working-location series went to Google without the details its guide says a create needs. An event now keeps every field it does not model, the split carries them, and the insert sets `supportsAttachments=true` when it carries files and `eventLabelVersion=1` when it carries a label. It leaves `kind`, `locked`, `gadget` and `hangoutLink` behind, which Google sets itself. **Not yet probed live, tier 3:** that Google refuses a status event created without its details; that it drops attachments and a label sent without their parameter rather than refusing them; that it accepts the other carried fields on an insert, such as `privateCopy`, `source` and an attachment's read-only `fileId`; and whether creating an out-of-office series that declines conflicts declines them again. Until that is probed, a split whose new series declines all asks the person, as a create does, and every split of a status series is held to the status-event rules before the truncate. The fake holds the first two. A refusal costs more than before, because it lands after the truncate, as `[ambiguous_outcome]`. The live driver checks that a private extended property survives a split. A split carrying an attachment is owed; one carrying a working location needs a recurring status event on the primary calendar, which §9.1 does not allow the driver |
+| 88 | The new series of a split can be built from the fields this server models | Calendar discovery revision 20261005, read 2026-10-09: `Event.attachments` "In order to modify attachments the supportsAttachments request parameter should be set to true"; `eventLabelId` "To set or change this property, you need to specify eventLabelVersion=1"; the status-events guide: to create a working location, "Include the workingLocationProperties field" | **Refuted.** The copy was decoded into the modeled fields, so the new series lost the parent's attachments, label, extended properties and status details, and a working-location series went to Google without the details its guide says a create needs. An event now keeps every field it does not model, the split carries them, and the insert sets `supportsAttachments=true` when it carries files and `eventLabelVersion=1` when it carries a label. It leaves `kind`, `locked`, `gadget` and `hangoutLink` behind, which Google sets itself. **Not yet probed live, tier 3:** that Google refuses a status event created without its details; that it drops attachments and a label sent without their parameter rather than refusing them; that it accepts the other carried fields on an insert, such as `privateCopy`, `source` and an attachment's read-only `fileId`; and whether creating an out-of-office series that declines conflicts declines them again. Until that is probed, a split whose new series declines all asks the person, as a create does, and every split of a status series is held to the status-event rules before the truncate. The fake holds the first two. A refusal costs more than before, because it lands after the truncate, as `[ambiguous_outcome]`. The live driver checks that a private extended property survives a split, and that a split carries an attachment when `GCAL_LIVE_ATTACHMENT` is set; without it that step is owed. A split carrying a working location needs a recurring status event on the primary calendar, which §9.1 does not allow the driver |
 | 89 | `events.list` filters by event type, and leaving the filter out returns every type | Calendar discovery revision 20261005, read 2026-10-09: `eventTypes` is repeated, an enum of `birthday`, `default`, `focusTime`, `fromGmail`, `outOfOffice` and `workingLocation`, "If unset, returns all event types." | **Confirmed in the reference; the live steps are written and not yet run.** `list_events` and `search_events` take `event_types` and send each as `eventTypes`. The page token carries the filter with the rest of the query, and a continuation under another one is refused, because Google resumes a token only for the query that issued it (§7.2). The fake refuses a value outside the enum and counts an event with no type as `default`. The live steps filter the scratch calendar, whose events are all ordinary, on `focusTime` and expect none, then on `default` and expect them all |
 | 90 | A read returns an event's attachments without asking, and an attachment's `fileId` is the Drive file id | Calendar discovery revision 20261005, read 2026-10-09: `supportsAttachments` is a parameter of `events.insert`, `import`, `patch` and `update` only, not of `get`, `list` or `instances`; `EventAttachment.fileId` "For Google Drive files, this is the ID of the corresponding Files resource entry in the Drive API" | **Confirmed in the reference; not yet seen live, tier 3.** `get_event` lists the attachments and every event row counts them. The live driver attaches the Drive file `GCAL_LIVE_ATTACHMENT` names to the weekly series, reads it back, and checks a split carries it. Without that variable those steps are skipped and owed: the driver cannot create a Drive file with the scopes this server asks for |
 | 91 | A read by modification time is a supported way to follow a calendar, and its sync token chains | Calendar discovery revision 20261005, read 2026-10-09: `updatedMin` "Lower bound for an event's last modification time (as a RFC3339 timestamp) to filter by. When specified, entries deleted since this time will always be included regardless of showDeleted"; `Event.updated` "Updating event reminders will not cause this to change"; `syncToken` lists `updatedMin` among the parameters that "cannot be specified together with nextSyncToken". The sync guide, read 2026-10-09: the legacy way "is no longer recommended as it is more error-prone with respect to missed updates". The errors guide: 410 `updatedMinTooLongAgo`, "The requested minimum modification time lies too far in the past" | **Refuted as the way to follow a calendar; kept as a one-off look back.** `list_changes` takes `updated_since` and sends it as `updatedMin`, refused alongside `sync_token` before a request is spent. Its description and its result say what it misses. A 410 under it names a later moment or a baseline as the cure. **Not yet probed, tier 3:** whether a read with `updatedMin` issues a sync token and whether that token chains, so the server hands back none; how far back Google allows; and whether the bound includes the moment itself. The fake includes it. A page token from such a read carries the moment, and a continuation without it or with another is refused, so no page of the chain hands back a token. The live driver reads the scratch calendar since an hour before the run and expects the seeded events and no token, and spike O asks the two open questions directly |
