@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1096,6 +1097,16 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		return
 	}
 
+	// eventTypes is an enum in the discovery document, repeated for
+	// several, and "If unset, returns all event types."
+	types := q["eventTypes"]
+	for _, t := range types {
+		if !slices.Contains(listTypes, t) {
+			writeErr(w, http.StatusBadRequest, "invalid", "Invalid value for eventTypes: "+t)
+			return
+		}
+	}
+
 	var items []gcal.Event
 	for _, e := range s.Events[calID] {
 		// §2.9: singleEvents decides which of the two shapes comes back.
@@ -1121,6 +1132,9 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 			continue // §2.13
 		case single && isParent, !single && isInstance:
 			continue // §2.9: one shape or the other, never both
+		}
+		if len(types) > 0 && !slices.Contains(types, typeOf(*e)) {
+			continue
 		}
 		if search != "" && !strings.Contains(strings.ToLower(e.Summary), search) &&
 			!strings.Contains(strings.ToLower(e.Description), search) {
@@ -1152,6 +1166,20 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		out.NextSyncToken = syncTokenFor(s.currentSeq(calID))
 	}
 	writeJSON(w, out)
+}
+
+// listTypes is the eventTypes enum of events.list.
+var listTypes = []string{
+	gcal.EventTypeBirthday, gcal.EventTypeDefault, gcal.EventTypeFocusTime,
+	gcal.EventTypeFromGmail, gcal.EventTypeOutOfOffice, gcal.EventTypeWorkingLocation,
+}
+
+// typeOf is an event's type, which Google defaults to "default".
+func typeOf(e gcal.Event) string {
+	if e.EventType == "" {
+		return gcal.EventTypeDefault
+	}
+	return e.EventType
 }
 
 // syncPage answers events.list?syncToken=…

@@ -168,11 +168,14 @@ func sharingModel(rows []SharingOut) []model.Sharing {
 
 // ScheduleResult is list_events and search_events.
 type ScheduleResult struct {
-	Window        WindowOut  `json:"window"`
-	TimeZone      string     `json:"time_zone"`
-	ZoneSource    string     `json:"time_zone_source"`
-	Calendars     []string   `json:"calendars"`
-	Expanded      bool       `json:"recurring_expanded"`
+	Window     WindowOut `json:"window"`
+	TimeZone   string    `json:"time_zone"`
+	ZoneSource string    `json:"time_zone_source"`
+	Calendars  []string  `json:"calendars"`
+	Expanded   bool      `json:"recurring_expanded"`
+	// EventTypes echoes the type filter, absent when the read had none,
+	// so a caller can tell a short list from a filtered one.
+	EventTypes    []string   `json:"event_types,omitempty"`
 	Events        []EventOut `json:"events"`
 	Shown         int        `json:"shown"`
 	Matched       int        `json:"matched"`
@@ -239,6 +242,7 @@ func NewScheduleResult(s render.Schedule) ScheduleResult {
 		ZoneSource:    string(s.Zone.Source),
 		Calendars:     s.Calendars,
 		Expanded:      s.Expanded,
+		EventTypes:    s.EventTypes,
 		Shown:         len(s.Events),
 		Matched:       s.Matched,
 		Truncated:     s.Truncated,

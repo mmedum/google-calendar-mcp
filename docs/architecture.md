@@ -871,9 +871,16 @@ which it got.
 
 Defaults that are decided: canceled events are excluded unless asked
 for (§2.13); `maxResults` is the API's 250 per page and the server pages
-to its own event budget (§4.5); `eventTypes` is unfiltered, but the
+to its own event budget (§4.5); `eventTypes` is unfiltered by default, but the
 renderer marks birthdays, focus-time, out-of-office and working-location
 events as what they are rather than as meetings (§2.12).
+
+Both schedule reads take `event_types`, Google's own six spellings, to
+keep only some kinds, such as `outOfOffice`. An unknown one is refused
+before a request is spent. The result names the filter in both halves,
+so a short list is not read as the whole schedule. A page token carries
+the filter, and a continuation under another one is refused (§18 row
+89).
 
 `search_events` is `events.list` with `q`, fanned out across the named
 calendars. Its description states plainly that `q` is undocumented
@@ -2828,6 +2835,7 @@ what §15 exists to settle, and they are marked.
 | 86 | A write reaches the guests the event already has | Read against §4.3, 2026-10-09 | **Refuted: it reaches the guests it adds too.** `update_event` counted the event as read, so adding a guest to an event with none asked for no `notify`, and `none` went through for a guest outside the domain. The count now includes the guests a write adds, on both halves of a series split |
 | 87 | Free/busy answers for a group under `calendars`, like any other id | Calendar discovery revision 20261002: `items[].id` is "The identifier of a calendar or a group"; the reply's `groups` is "Expansion of groups", each a list of member calendar ids; `groupExpansionMax` "An error is returned for a group with more members than this value. Maximum value is 100." | **Refuted by the reference: a group answers under `groups`**, and the server read only `calendars`, so every group came back unknown. A group's answer is now its members' busy time merged, sent with `groupExpansionMax: 100`; one member unread, an expansion error or no members makes it unknown, never free (§4.6). `calendarExpansionMax` caps the calendars one request answers at 50, a group's members included, so the calendars a group pushes past it are asked about again on their own, up to 200. A live check waits on a probe outside the driver, which prints counts only, because a group is other people's calendars and the driver reads only its own |
 | 88 | The new series of a split can be built from the fields this server models | Calendar discovery revision 20261005, read 2026-10-09: `Event.attachments` "In order to modify attachments the supportsAttachments request parameter should be set to true"; `eventLabelId` "To set or change this property, you need to specify eventLabelVersion=1"; the status-events guide: to create a working location, "Include the workingLocationProperties field" | **Refuted.** The copy was decoded into the modeled fields, so the new series lost the parent's attachments, label, extended properties and status details, and a working-location series went to Google without the details its guide says a create needs. An event now keeps every field it does not model, the split carries them, and the insert sets `supportsAttachments=true` when it carries files and `eventLabelVersion=1` when it carries a label. It leaves `kind`, `locked`, `gadget` and `hangoutLink` behind, which Google sets itself. **Not yet probed live, tier 3:** that Google refuses a status event created without its details; that it drops attachments and a label sent without their parameter rather than refusing them; that it accepts the other carried fields on an insert, such as `privateCopy`, `source` and an attachment's read-only `fileId`; and whether creating an out-of-office series that declines conflicts declines them again. The fake holds the first two. A refusal costs more than before, because it lands after the truncate, as `[ambiguous_outcome]`. The live driver checks that a private extended property survives a split. A split carrying an attachment is owed; one carrying a working location needs a recurring status event on the primary calendar, which §9.1 does not allow the driver |
+| 89 | `events.list` filters by event type, and leaving the filter out returns every type | Calendar discovery revision 20261005, read 2026-10-09: `eventTypes` is repeated, an enum of `birthday`, `default`, `focusTime`, `fromGmail`, `outOfOffice` and `workingLocation`, "If unset, returns all event types." | **Confirmed in the reference; the live steps are written and not yet run.** `list_events` and `search_events` take `event_types` and send each as `eventTypes`. The page token carries the filter, and a continuation under another one is refused, because Google resumes a token only for the query that issued it. The fake refuses a value outside the enum and counts an event with no type as `default`. The live steps filter the scratch calendar, whose events are all ordinary, on `focusTime` and expect none, then on `default` and expect them all |
 
 ### Deviations from the shared Go MCP server standard
 

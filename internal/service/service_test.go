@@ -283,6 +283,84 @@ func TestSearchEventsFindsByText(t *testing.T) {
 	}
 }
 
+// TestEventTypesKeepOnlyThoseKinds: event_types reaches Google as
+// eventTypes, in Google's spelling, and the result names the filter so a
+// short list is not read as the whole schedule.
+func TestEventTypesKeepOnlyThoseKinds(t *testing.T) {
+	fake := caltest.Seed()
+	away := caltest.Timed("ev-away", "Away", "2026-03-16T08:00:00+01:00", "2026-03-16T17:00:00+01:00",
+		"Europe/Copenhagen")
+	away.EventType = gcal.EventTypeOutOfOffice
+	fake.AddEvent("primary", away)
+	svc := newService(t, fake)
+
+	sched, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-03-16", To: "2026-03-16", Expand: true,
+		EventTypes: []string{"OUTOFOFFICE", "outOfOffice"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var titles []string
+	for _, e := range sched.Events {
+		titles = append(titles, e.Title)
+	}
+	if got := strings.Join(titles, ","); got != "Away" {
+		t.Fatalf("got %s, want only the out-of-office event", got)
+	}
+	if got := strings.Join(sched.EventTypes, ","); got != "outOfOffice" {
+		t.Fatalf("the filter reads %q, want outOfOffice once", got)
+	}
+	if !strings.Contains(sched.Text(), "only these event types: outOfOffice") {
+		t.Fatalf("the text does not name the filter:\n%s", sched.Text())
+	}
+}
+
+func TestAnUnknownEventTypeIsRefusedBeforeAnyRequest(t *testing.T) {
+	svc, fake := seeded(t)
+	_, err := svc.ListEvents(context.Background(), service.ListOptions{
+		From: "2026-03-16", To: "2026-03-16", EventTypes: []string{"meeting"},
+	})
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class = %s, want invalid", cls)
+	}
+	if !strings.Contains(err.Error(), "default, birthday, focusTime, fromGmail, outOfOffice, workingLocation") {
+		t.Fatalf("the refusal does not name the six types: %v", err)
+	}
+	if n := len(fake.Served()); n != 0 {
+		t.Fatalf("spent %d requests on a filter that cannot work", n)
+	}
+}
+
+// A Google page token resumes only the query that issued it, so a
+// continuation under another type filter is refused rather than read.
+// The same filter in another order or spelling is the same filter.
+func TestAPageTokenKeepsItsTypeFilter(t *testing.T) {
+	svc, _ := seeded(t)
+	ctx := context.Background()
+	read := func(token string, types ...string) (string, error) {
+		sched, err := svc.ListEvents(ctx, service.ListOptions{
+			From: "2026-03-16", To: "2026-03-31", Expand: true,
+			EventTypes: types, MaxEvents: 1, PageToken: token,
+		})
+		return sched.NextPageToken, err
+	}
+	token, err := read("", "default", "focusTime")
+	if err != nil || token == "" {
+		t.Fatalf("want a first page and a token, got %q, %v", token, err)
+	}
+	_, err = read(token)
+	if cls := classOf(t, err); cls != gapi.ClassInvalid {
+		t.Fatalf("class = %s, want invalid", cls)
+	}
+	if !strings.Contains(err.Error(), "issued for event_types [default, focusTime], not []") {
+		t.Fatalf("the refusal does not name both filters: %v", err)
+	}
+	if _, err := read(token, "FOCUSTIME", "default"); err != nil {
+		t.Fatalf("the same filter was refused: %v", err)
+	}
+}
+
 func TestFanOutCountsItsRequests(t *testing.T) {
 	svc, _ := seeded(t)
 	sched, err := svc.ListEvents(context.Background(), service.ListOptions{

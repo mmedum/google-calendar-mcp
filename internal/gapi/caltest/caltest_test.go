@@ -197,3 +197,28 @@ func TestConferenceDataIsIgnoredWithoutTheVersion(t *testing.T) {
 		t.Fatalf("an insert with the version did not come back pending: %+v", c)
 	}
 }
+
+// eventTypes is an enum in the discovery document, so the fake refuses a
+// value outside it. The service refuses one first; this holds the fake
+// to the same rule for whatever else calls it.
+func TestAnEventTypeOutsideTheEnumIsRefused(t *testing.T) {
+	s := caltest.Seed()
+	base := s.Start()
+	defer s.Close()
+
+	status := func(types string) int {
+		t.Helper()
+		resp, err := http.Get(base + "/calendars/primary/events?eventTypes=" + types)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := status("meeting"); got != http.StatusBadRequest {
+		t.Fatalf("eventTypes=meeting answered %d, want 400", got)
+	}
+	if got := status("outOfOffice"); got != http.StatusOK {
+		t.Fatalf("eventTypes=outOfOffice answered %d, want 200", got)
+	}
+}

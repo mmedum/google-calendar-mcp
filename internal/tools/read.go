@@ -57,6 +57,7 @@ func registerRead(s *mcp.Server, d Deps) {
 			"\"what is on this week\". With expand=false it appears once, as a series with its recurrence rule, " +
 			"which is what you want before changing the whole series. " +
 			"Canceled events are hidden unless show_canceled is set. " +
+			"event_types keeps only some kinds of event, such as outOfOffice, and the result names the filter. " +
 			"Use search_events to find an event by text; use check_availability to find free time, because a list " +
 			"of events is not the same as being free.",
 		Kind: Read,
@@ -66,6 +67,7 @@ func registerRead(s *mcp.Server, d Deps) {
 				From: in.From, To: in.To,
 				Expand:       !in.NoExpand,
 				ShowCanceled: in.ShowCanceled,
+				EventTypes:   in.EventTypes,
 				MaxEvents:    in.MaxEvents, PageToken: in.PageToken,
 			})
 			if err != nil {
@@ -82,14 +84,16 @@ func registerRead(s *mcp.Server, d Deps) {
 			"\"attendee:someone\" or restrict it to titles, and Google does not say which fields it reads. " +
 			"Treat an empty result as \"this search found nothing\", not as \"there is no such event\", and fall " +
 			"back to list_events over the window when you need certainty. " +
+			"event_types narrows the search to some kinds of event, as on list_events. " +
 			"Searching several calendars costs one request each.",
 		Kind: Read,
 		Handle: func(ctx context.Context, in searchEventsIn) (service.ScheduleResult, error) {
 			sched, err := d.Service.ListEvents(ctx, service.ListOptions{
 				Calendars: in.Calendars, TimeZone: in.TimeZone,
 				From: in.From, To: in.To, Query: in.Query,
-				Expand:    true,
-				MaxEvents: in.MaxEvents, PageToken: in.PageToken,
+				Expand:     true,
+				EventTypes: in.EventTypes,
+				MaxEvents:  in.MaxEvents, PageToken: in.PageToken,
 			})
 			if err != nil {
 				return service.ScheduleResult{}, err
@@ -227,20 +231,22 @@ type listEventsIn struct {
 	// Spelled as the negative so the default (expand) is the zero value.
 	// A model that omits it gets occurrences, which is what "what is on
 	// this week" means.
-	NoExpand     bool   `json:"no_expand,omitempty" jsonschema:"Return repeating events once as a series with its rule, instead of as each occurrence."`
-	ShowCanceled bool   `json:"show_canceled,omitempty" jsonschema:"Include canceled events, which are hidden by default."`
-	MaxEvents    int    `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
-	PageToken    string `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
+	NoExpand     bool     `json:"no_expand,omitempty" jsonschema:"Return repeating events once as a series with its rule, instead of as each occurrence."`
+	ShowCanceled bool     `json:"show_canceled,omitempty" jsonschema:"Include canceled events, which are hidden by default."`
+	EventTypes   []string `json:"event_types,omitempty" jsonschema:"Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type."`
+	MaxEvents    int      `json:"max_events,omitempty" jsonschema:"Cap on events returned. The server has its own budget and says when it truncated."`
+	PageToken    string   `json:"page_token,omitempty" jsonschema:"Continue a truncated read, from next_page_token."`
 }
 
 type searchEventsIn struct {
-	Query     string   `json:"query" jsonschema:"Free text. Google decides which fields this matches; there is no field syntax."`
-	Calendars []string `json:"calendars,omitempty" jsonschema:"Calendar ids or titles. Defaults to the primary calendar."`
-	From      string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
-	To        string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
-	TimeZone  string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
-	MaxEvents int      `json:"max_events,omitempty" jsonschema:"Cap on events returned."`
-	PageToken string   `json:"page_token,omitempty" jsonschema:"Continue a truncated search, from next_page_token."`
+	Query      string   `json:"query" jsonschema:"Free text. Google decides which fields this matches; there is no field syntax."`
+	Calendars  []string `json:"calendars,omitempty" jsonschema:"Calendar ids or titles. Defaults to the primary calendar."`
+	From       string   `json:"from" jsonschema:"Start of the window: yyyy-mm-dd or RFC3339. Required."`
+	To         string   `json:"to" jsonschema:"End of the window: yyyy-mm-dd or RFC3339. Required."`
+	TimeZone   string   `json:"time_zone,omitempty" jsonschema:"IANA zone to read the window and show the times in."`
+	EventTypes []string `json:"event_types,omitempty" jsonschema:"Only events of these types: default, birthday, focusTime, fromGmail, outOfOffice, workingLocation. Leave it out for every type."`
+	MaxEvents  int      `json:"max_events,omitempty" jsonschema:"Cap on events returned."`
+	PageToken  string   `json:"page_token,omitempty" jsonschema:"Continue a truncated search, from next_page_token."`
 }
 
 type getEventIn struct {

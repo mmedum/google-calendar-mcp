@@ -513,9 +513,15 @@ func TestEveryToolAnswers(t *testing.T) {
 		{"list_events", map[string]any{
 			"from": "2026-03-16", "to": "2026-03-17", "time_zone": "America/Chicago",
 		}, "America/Chicago"},
+		{"list_events", map[string]any{
+			"from": "2026-03-16", "to": "2026-03-17", "event_types": []string{"default"},
+		}, "only these event types: default"},
 		{"search_events", map[string]any{
 			"query": "sync", "from": "2026-03-16", "to": "2026-03-31",
 		}, "Morning sync"},
+		{"search_events", map[string]any{
+			"query": "sync", "from": "2026-03-16", "to": "2026-03-31", "event_types": []string{"focusTime"},
+		}, "No events of those types"},
 		{"get_event", map[string]any{"calendar": "primary", "event_id": "ev-standup"}, "Morning sync"},
 		{"get_event", map[string]any{"calendar": "primary", "event_id": "ev-holiday"}, "all day"},
 		{"list_instances", map[string]any{

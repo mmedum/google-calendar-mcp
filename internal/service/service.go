@@ -342,6 +342,9 @@ type ListOptions struct {
 	Query string
 	// ShowCanceled includes canceled events (§2.13).
 	ShowCanceled bool
+	// EventTypes keeps only events of these types. Empty means every
+	// type, which is what Google does when the filter is left out.
+	EventTypes []string
 	// MaxEvents overrides the configured budget.
 	MaxEvents int
 	PageToken string
@@ -352,6 +355,11 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 	if err := s.ready(); err != nil {
 		return render.Schedule{}, err
 	}
+	types, err := eventTypes(o.EventTypes)
+	if err != nil {
+		return render.Schedule{}, err
+	}
+	o.EventTypes = types
 	refs := o.Calendars
 	if len(refs) == 0 {
 		refs = []string{"primary"}
@@ -392,7 +400,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		budget = s.Cfg.MaxEvents
 	}
 
-	resume, err := decodeCursor(o.PageToken)
+	resume, err := decodeCursor(o.PageToken, o.EventTypes)
 	if err != nil {
 		return render.Schedule{}, err
 	}
@@ -427,7 +435,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 		perCalendar = 1
 	}
 
-	sched := render.Schedule{Window: win, Zone: zone, Expanded: o.Expand}
+	sched := render.Schedule{Window: win, Zone: zone, Expanded: o.Expand, EventTypes: o.EventTypes}
 	for _, c := range cals {
 		sched.Calendars = append(sched.Calendars, c.Title)
 	}
@@ -464,7 +472,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 			next[cals[i].ID] = r.token
 		}
 	}
-	sched.NextPageToken = encodeCursor(next)
+	sched.NextPageToken = encodeCursor(next, o.EventTypes)
 
 	sort.Slice(sched.Events, func(i, j int) bool {
 		return sortKey(sched.Events[i]) < sortKey(sched.Events[j])
@@ -492,6 +500,7 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		Query:        o.Query,
 		ShowDeleted:  o.ShowCanceled,
 		TimeZone:     zone.Name(),
+		EventTypes:   o.EventTypes,
 		MaxResults:   250,
 		PageToken:    pageToken,
 	}
@@ -528,18 +537,24 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 // continuation skips it rather than reading it again. It stays a single
 // opaque string, so the tool schema is unchanged and a caller still just
 // passes back what it was given.
+//
+// It also holds the type filter the read was made with. Google resumes a
+// token only for the query that issued it, so a continuation with
+// another filter would skip or repeat rows while its result named the
+// new one.
 type pageCursor struct {
-	V    int               `json:"v"`
-	Cals map[string]string `json:"c"`
+	V     int               `json:"v"`
+	Cals  map[string]string `json:"c"`
+	Types []string          `json:"t,omitempty"`
 }
 
 const pageCursorVersion = 1
 
-func encodeCursor(tokens map[string]string) string {
+func encodeCursor(tokens map[string]string, types []string) string {
 	if len(tokens) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(pageCursor{V: pageCursorVersion, Cals: tokens})
+	b, err := json.Marshal(pageCursor{V: pageCursorVersion, Cals: tokens, Types: types})
 	if err != nil {
 		// Unreachable for a map of strings, and a lost token is better
 		// than a bad one: an empty cursor reads as "nothing more", which
@@ -550,7 +565,8 @@ func encodeCursor(tokens map[string]string) string {
 }
 
 // decodeCursor returns the per-calendar tokens, or nil for a first read.
-func decodeCursor(tok string) (map[string]string, error) {
+// It refuses a token issued under another type filter than types.
+func decodeCursor(tok string, types []string) (map[string]string, error) {
 	if strings.TrimSpace(tok) == "" {
 		return nil, nil
 	}
@@ -565,7 +581,21 @@ func decodeCursor(tok string) (map[string]string, error) {
 	if err := json.Unmarshal(raw, &c); err != nil || c.V != pageCursorVersion || len(c.Cals) == 0 {
 		return nil, bad
 	}
+	if !sameTypes(c.Types, types) {
+		return nil, gapi.Errf(gapi.ClassInvalid,
+			"that page_token was issued for event_types [%s], not [%s]. Pass the same event_types, or "+
+				"omit the token to start again", strings.Join(c.Types, ", "), strings.Join(types, ", "))
+	}
 	return c.Cals, nil
+}
+
+// sameTypes reports whether two type filters keep the same events,
+// whatever order they were given in.
+func sameTypes(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
 }
 
 // showCanceled is the caller's promise, passed in rather than read off
@@ -632,6 +662,30 @@ func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, 
 		}
 		opts.PageToken = page.NextPageToken
 	}
+}
+
+// filterTypes are the types events.list can filter on, in Google's
+// spelling, which is also how a read reports an event's type.
+var filterTypes = []string{
+	gcal.EventTypeDefault, gcal.EventTypeBirthday, gcal.EventTypeFocusTime,
+	gcal.EventTypeFromGmail, gcal.EventTypeOutOfOffice, gcal.EventTypeWorkingLocation,
+}
+
+// eventTypes checks a type filter against Google's six and spells each
+// one as Google does. Case does not matter, and a repeat is dropped.
+func eventTypes(asked []string) ([]string, error) {
+	var out []string
+	for _, a := range asked {
+		i := slices.IndexFunc(filterTypes, func(t string) bool { return strings.EqualFold(t, strings.TrimSpace(a)) })
+		if i < 0 {
+			return nil, gapi.Errf(gapi.ClassInvalid,
+				"%q is not an event type. event_types takes %s", a, strings.Join(filterTypes, ", "))
+		}
+		if !slices.Contains(out, filterTypes[i]) {
+			out = append(out, filterTypes[i])
+		}
+	}
+	return out, nil
 }
 
 // GetEvent reads one event.

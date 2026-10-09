@@ -795,6 +795,40 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
+			// §18 row 89. Every event the seed wrote is an ordinary one,
+			// so a focus-time filter that Google honors finds none, and
+			// one it ignored would return them all.
+			name: "event_types keeps a kind out",
+			tool: "list_events",
+			args: cal(map[string]any{"event_types": []string{"focusTime"}}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, "only these event types: focusTime") {
+					return fail, "the result does not name the filter"
+				}
+				if strings.Contains(r.text, timedTitle) || strings.Contains(r.text, weeklyTitle) {
+					return fail, "ordinary events came back under a focus-time filter"
+				}
+				return pass, "no ordinary event under a focus-time filter, and the filter is named"
+			},
+		},
+		{
+			name: "event_types keeps a kind in",
+			tool: "list_events",
+			args: cal(map[string]any{"event_types": []string{"default"}}),
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 200)
+				}
+				if !strings.Contains(r.text, timedTitle) || !strings.Contains(r.text, weeklyTitle) {
+					return fail, "the default filter dropped an ordinary event"
+				}
+				return pass, "the ordinary events are default events"
+			},
+		},
+		{
 			// SPIKE D, as a step. This is the defect every surveyed
 			// server has: an all-day event read from a negative-offset
 			// zone renders a day early.

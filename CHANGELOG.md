@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `create_event` takes `rooms` and `update_event` takes `add_rooms`: rooms and other resources to book, sent to Google as resources. A room is not a guest, so it does not make `notify` required. An address there that is not a room's still counts as a guest.
+- `list_events` and `search_events` take `event_types`, to keep only some kinds of event: `default`, `birthday`, `focusTime`, `fromGmail`, `outOfOffice` or `workingLocation`. The result names the filter as `event_types`.
 
 ### Changed
 

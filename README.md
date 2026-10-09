@@ -99,7 +99,7 @@ Every setting is in `docs/configuration.md`.
 |---|---|
 | `list_calendars` | Every calendar this account can see, with ids, time zones and your access level. Start here. |
 | `get_calendar` | One calendar in full, including who it is shared with. |
-| `list_events` | The events on one or more calendars in a window. |
+| `list_events` | The events on one or more calendars in a window, or only the kinds you name, such as out of office. |
 | `search_events` | Free-text search across a window. |
 | `get_event` | One event, with its guests and their responses. |
 | `list_instances` | The occurrences of one repeating event, with the dates that were moved or removed. |

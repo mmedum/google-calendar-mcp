@@ -43,6 +43,9 @@ type Schedule struct {
 	// instances (§2.9). The two return different things and a reader
 	// must know which they got.
 	Expanded bool
+	// EventTypes is the type filter the read was made with, empty when it
+	// had none. A reader must know the list leaves the other types out.
+	EventTypes []string
 }
 
 // Text renders a schedule.
@@ -59,10 +62,17 @@ func (s Schedule) Text() string {
 	} else {
 		b.WriteString("recurring events are shown once, as a series with its rule\n")
 	}
+	if len(s.EventTypes) > 0 {
+		fmt.Fprintf(&b, "only these event types: %s\n", strings.Join(s.EventTypes, ", "))
+	}
 	b.WriteString("\n")
 
 	if len(s.Events) == 0 {
-		b.WriteString("No events in that window.\n")
+		if len(s.EventTypes) > 0 {
+			b.WriteString("No events of those types were found in that window.\n")
+		} else {
+			b.WriteString("No events in that window.\n")
+		}
 		b.WriteString(s.footer())
 		return b.String()
 	}
