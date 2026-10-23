@@ -75,6 +75,16 @@ func calendarSteps(c *calendarState) []step {
 			return out
 		}
 	}
+	// titled is args for the two wider shares, which carry the title this
+	// account reads the probe calendar by: the name "manage_calendar my
+	// view" gave it.
+	titled := func(extra map[string]any) func() map[string]any {
+		with := map[string]any{"calendar_title": probeMyName}
+		for k, v := range extra {
+			with[k] = v
+		}
+		return args(with)
+	}
 
 	return []step{
 		{
@@ -265,11 +275,33 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
+			// The wider shares carry the calendar's title as this account
+			// reads it. The calendar's own title is not that, since this
+			// account renamed it for itself, so it is refused before a
+			// request is built.
+			name: "widen_calendar_access refuses another title",
+			tool: "widen_calendar_access",
+			argsFn: args(map[string]any{
+				"calendar_title": probeRenamed, "who": probeGuest, "role": "reader", "notify": "none",
+				"confirm": true,
+			}),
+			skip: c.needProbe,
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "a calendar was shared outside under a title that is not the one read"
+				}
+				if !strings.Contains(r.text, "[stale]") || !strings.Contains(r.text, "calendar_title") {
+					return fail, "the refusal is not [stale] naming calendar_title: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [stale], naming calendar_title"
+			},
+		},
+		{
 			// A wider share needs confirm, as a delete does. Refused
 			// before a request is built.
 			name: "widen_calendar_access needs confirm",
 			tool: "widen_calendar_access",
-			argsFn: args(map[string]any{
+			argsFn: titled(map[string]any{
 				"who": probeGuest, "role": "reader", "notify": "none",
 			}),
 			skip: c.needProbe,
@@ -288,7 +320,7 @@ func calendarSteps(c *calendarState) []step {
 			// request is built, so nothing reaches Google.
 			name: "widen_calendar_access needs notify",
 			tool: "widen_calendar_access",
-			argsFn: args(map[string]any{
+			argsFn: titled(map[string]any{
 				"who": probeGuest, "role": "reader", "confirm": true,
 			}),
 			skip: c.needProbe,
@@ -307,7 +339,7 @@ func calendarSteps(c *calendarState) []step {
 			// rounding it either way would email the wrong set of people.
 			name: "widen_calendar_access refuses external_only",
 			tool: "widen_calendar_access",
-			argsFn: args(map[string]any{
+			argsFn: titled(map[string]any{
 				"who": probeGuest, "role": "reader", "notify": "external_only", "confirm": true,
 			}),
 			skip: c.needProbe,
@@ -327,7 +359,7 @@ func calendarSteps(c *calendarState) []step {
 			// none can arrive.
 			name: "widen_calendar_access",
 			tool: "widen_calendar_access",
-			argsFn: args(map[string]any{
+			argsFn: titled(map[string]any{
 				"who": probeGuest, "role": "reader", "notify": "none", "confirm": true,
 			}),
 			skip: c.needProbe,
@@ -356,7 +388,7 @@ func calendarSteps(c *calendarState) []step {
 			// it must be a patch rather than a second rule.
 			name: "widen_calendar_access changes a role",
 			tool: "widen_calendar_access",
-			argsFn: args(map[string]any{
+			argsFn: titled(map[string]any{
 				"who": probeGuest, "role": "writer", "notify": "none", "confirm": true,
 			}),
 			skip: c.needProbe,
@@ -403,7 +435,7 @@ func calendarSteps(c *calendarState) []step {
 		{
 			name: "publish_calendar needs confirm",
 			tool: "publish_calendar",
-			argsFn: args(map[string]any{
+			argsFn: titled(map[string]any{
 				"who": "anyone", "role": "freeBusyReader", "notify": "none",
 			}),
 			skip: c.needProbe,
@@ -423,7 +455,7 @@ func calendarSteps(c *calendarState) []step {
 			// step's question.
 			name: "publish_calendar to a domain, dry run",
 			tool: "publish_calendar",
-			argsFn: args(map[string]any{
+			argsFn: titled(map[string]any{
 				"who": "example.test", "role": "freeBusyReader", "notify": "none", "dry_run": true,
 			}),
 			skip: c.needProbe,
@@ -443,7 +475,7 @@ func calendarSteps(c *calendarState) []step {
 			// removed by the next step.
 			name: "publish_calendar",
 			tool: "publish_calendar",
-			argsFn: args(map[string]any{
+			argsFn: titled(map[string]any{
 				"who": "anyone", "role": "freeBusyReader", "notify": "none", "confirm": true,
 			}),
 			skip: c.needProbe,

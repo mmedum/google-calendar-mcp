@@ -82,6 +82,20 @@ func TestOnlyTheWholeCalendarDeletesPromptEveryCall(t *testing.T) {
 	}
 }
 
+// The wider shares require the calendar's title in the schema, so every
+// call to one carries the name of the calendar it opens, and a client
+// that asks before the call shows it.
+func TestAWideShareRequiresTheCalendarTitle(t *testing.T) {
+	got := names(listTools(t, tools.FullSurface(baseConfig())))
+	for _, name := range wideSharingTools {
+		in, _ := got[name].InputSchema.(map[string]any)
+		required, _ := in["required"].([]any)
+		if !slices.Contains(required, any("calendar_title")) {
+			t.Errorf("%s requires %v, want calendar_title among them", name, required)
+		}
+	}
+}
+
 // list_sharing reads and changes nothing, and its annotation says so
 // even though the sharing gate removes it.
 func TestListSharingIsAnnotatedReadOnly(t *testing.T) {
@@ -194,14 +208,16 @@ func TestTheCalendarToolsAnswerThroughTheProtocol(t *testing.T) {
 			"calendar": "primary", "who": "somebody@elsewhere.test", "role": "reader", "notify": "none",
 		}, want: "widen_calendar_access", isError: true},
 		{name: "publish_calendar", args: map[string]any{
-			"calendar": "primary", "who": "anyone", "role": "freeBusyReader", "notify": "none",
+			"calendar": "primary", "calendar_title": "Sample Primary", "who": "anyone", "role": "freeBusyReader",
+			"notify": "none",
 		}, want: "[blocked]", isError: true},
 		{name: "publish_calendar", args: map[string]any{
-			"calendar": "primary", "who": "anyone", "role": "freeBusyReader", "notify": "none", "dry_run": true,
+			"calendar": "primary", "calendar_title": "Sample Primary", "who": "anyone", "role": "freeBusyReader",
+			"notify": "none", "dry_run": true,
 		}, want: "PUBLIC"},
 		{name: "widen_calendar_access", args: map[string]any{
-			"calendar": "primary", "who": "somebody@elsewhere.test", "role": "reader", "notify": "none",
-			"dry_run": true,
+			"calendar": "primary", "calendar_title": "Sample Primary", "who": "somebody@elsewhere.test",
+			"role": "reader", "notify": "none", "dry_run": true,
 		}, want: "outside your organization"},
 		{name: "unshare_calendar", args: map[string]any{
 			"calendar": "primary", "who": "colleague@example.test", "dry_run": true,

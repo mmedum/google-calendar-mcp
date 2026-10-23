@@ -238,8 +238,8 @@ func TestShareCalendarOnAPersonalAccountTakesNobody(t *testing.T) {
 // no confirm and writes nothing either.
 func TestPublishCalendarNeedsConfirmAndSaysItPublishes(t *testing.T) {
 	svc, fake := calendarSeed(t)
-	o := service.PublishOptions{Calendar: "team@group.calendar.example.test", Who: "anyone", Role: "reader",
-		Notify: "none"}
+	o := service.PublishOptions{Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team",
+		Who: "anyone", Role: "reader", Notify: "none"}
 
 	_, err := svc.PublishCalendar(context.Background(), o)
 	if cls := classOf(t, err); cls != gapi.ClassBlocked || !strings.Contains(err.Error(), "confirm:true") {
@@ -275,8 +275,8 @@ func TestPublishCalendarNeedsConfirmAndSaysItPublishes(t *testing.T) {
 func TestPublishCalendarOpensADomainAndTakesNoPerson(t *testing.T) {
 	svc, _ := calendarSeed(t)
 	got, err := svc.PublishCalendar(context.Background(), service.PublishOptions{
-		Calendar: "team@group.calendar.example.test", Who: "example.test", Role: "freeBusyReader",
-		Notify: "none", Confirm: true,
+		Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "example.test",
+		Role: "freeBusyReader", Notify: "none", Confirm: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -289,19 +289,70 @@ func TestPublishCalendarOpensADomainAndTakesNoPerson(t *testing.T) {
 	}
 
 	_, err = svc.PublishCalendar(context.Background(), service.PublishOptions{
-		Calendar: "team@group.calendar.example.test", Who: "colleague@example.test", Role: "reader",
-		Notify: "none", Confirm: true,
+		Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "colleague@example.test",
+		Role: "reader", Notify: "none", Confirm: true,
 	})
 	if cls := classOf(t, err); cls != gapi.ClassInvalid || !strings.Contains(err.Error(), "share_calendar") {
 		t.Fatalf("got [%s] %v, want [invalid] naming share_calendar", cls, err)
 	}
 
 	_, err = svc.PublishCalendar(context.Background(), service.PublishOptions{
-		Calendar: "team@group.calendar.example.test", Who: "example.test", Role: "owner",
-		Notify: "none", Confirm: true,
+		Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "example.test",
+		Role: "owner", Notify: "none", Confirm: true,
 	})
 	if cls := classOf(t, err); cls != gapi.ClassInvalid || !strings.Contains(err.Error(), "widen_calendar_access") {
 		t.Fatalf("a domain made owner: got [%s] %v, want [invalid]", cls, err)
+	}
+}
+
+// The two wider shares carry the calendar's title, so a client that asks
+// before the call shows which calendar it opens, and a title that is not
+// the calendar's is refused [stale] with nothing written, a dry run
+// included. "Team" reaches "Sample Team" as a fragment of its title,
+// which is exactly the call whose prompt would not say what it opens.
+func TestAWideShareNamesTheCalendarItOpens(t *testing.T) {
+	for _, c := range []struct {
+		name, calendar, title string
+		dryRun                bool
+		want                  gapi.Class
+	}{
+		{"no title", "team@group.calendar.example.test", "", false, gapi.ClassInvalid},
+		{"another calendar's title", "team@group.calendar.example.test", "Sample Primary", false, gapi.ClassStale},
+		{"a fragment of the title", "Team", "Team", false, gapi.ClassStale},
+		{"another case", "team@group.calendar.example.test", "sample team", false, gapi.ClassStale},
+		{"a dry run with another title", "team@group.calendar.example.test", "Sample Primary", true,
+			gapi.ClassStale},
+		{"the title, padded", "Team", "  Sample Team ", false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			_, published := svc.PublishCalendar(context.Background(), service.PublishOptions{
+				Calendar: c.calendar, CalendarTitle: c.title, Who: "anyone", Role: "freeBusyReader",
+				Notify: "none", Confirm: true, DryRun: c.dryRun,
+			})
+			_, widened := svc.WidenCalendarAccess(context.Background(), service.WidenOptions{
+				Calendar: c.calendar, CalendarTitle: c.title, Who: "somebody@elsewhere.test", Role: "reader",
+				Notify: "none", Confirm: true, DryRun: c.dryRun,
+			})
+			for tool, err := range map[string]error{"publish_calendar": published, "widen_calendar_access": widened} {
+				if c.want == "" {
+					if err != nil {
+						t.Fatalf("%s: %v", tool, err)
+					}
+					continue
+				}
+				if cls := classOf(t, err); cls != c.want || !strings.Contains(err.Error(), "calendar_title") {
+					t.Fatalf("%s: got [%s] %v, want [%s] naming calendar_title", tool, cls, err, c.want)
+				}
+			}
+			wantWrites := 2
+			if c.want != "" {
+				wantWrites = 0
+			}
+			if w := fake.Wrote(); len(w) != wantWrites {
+				t.Fatalf("got writes %+v, want %d", w, wantWrites)
+			}
+		})
 	}
 }
 
@@ -323,8 +374,8 @@ func TestWidenCalendarAccessTakesOutsidersAndOwners(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			svc, fake := calendarSeed(t)
 			got, err := svc.WidenCalendarAccess(context.Background(), service.WidenOptions{
-				Calendar: "team@group.calendar.example.test", Who: c.who, Role: c.role, Notify: "none",
-				Confirm: c.confirm,
+				Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: c.who,
+				Role: c.role, Notify: "none", Confirm: c.confirm,
 			})
 			if c.want != "" {
 				if cls := classOf(t, err); cls != c.want || !strings.Contains(err.Error(), c.says) {
@@ -581,8 +632,8 @@ func TestSharingDryRunNotesClaimNothingHappened(t *testing.T) {
 	ctx := context.Background()
 
 	shared, err := svc.PublishCalendar(ctx, service.PublishOptions{
-		Calendar: "team@group.calendar.example.test", Who: "anyone", Role: "writer",
-		Notify: "none", DryRun: true,
+		Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "anyone",
+		Role: "writer", Notify: "none", DryRun: true,
 	})
 	if err != nil {
 		t.Fatal(err)

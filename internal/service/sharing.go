@@ -184,6 +184,9 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 // PublishOptions is what publish_calendar takes.
 type PublishOptions struct {
 	Calendar string
+	// CalendarTitle is the calendar's title as the caller read it
+	// (heldTitle).
+	CalendarTitle string
 	// Who is "anyone", or a domain.
 	Who     string
 	Role    string
@@ -198,6 +201,9 @@ type PublishOptions struct {
 func (s *Service) PublishCalendar(ctx context.Context, o PublishOptions) (render.SharingReport, error) {
 	ctx, cal, before, err := s.openSharing(ctx, o.Calendar)
 	if err != nil {
+		return render.SharingReport{}, err
+	}
+	if err := heldTitle(cal, o.CalendarTitle); err != nil {
 		return render.SharingReport{}, err
 	}
 	audience, err := plan.ParsePublic(o.Who)
@@ -237,13 +243,14 @@ func (s *Service) PublishCalendar(ctx context.Context, o PublishOptions) (render
 
 // WidenOptions is what widen_calendar_access takes.
 type WidenOptions struct {
-	Calendar  string
-	Who       string
-	ScopeType string
-	Role      string
-	Notify    string
-	Confirm   bool
-	DryRun    bool
+	Calendar      string
+	CalendarTitle string
+	Who           string
+	ScopeType     string
+	Role          string
+	Notify        string
+	Confirm       bool
+	DryRun        bool
 }
 
 // WidenCalendarAccess shares a calendar with a person or a group outside
@@ -252,6 +259,9 @@ type WidenOptions struct {
 func (s *Service) WidenCalendarAccess(ctx context.Context, o WidenOptions) (render.SharingReport, error) {
 	ctx, cal, before, err := s.openSharing(ctx, o.Calendar)
 	if err != nil {
+		return render.SharingReport{}, err
+	}
+	if err := heldTitle(cal, o.CalendarTitle); err != nil {
 		return render.SharingReport{}, err
 	}
 	audience, err := plan.ParseAudience(o.Who, o.ScopeType, before)
@@ -307,6 +317,28 @@ func (s *Service) openSharing(ctx context.Context, ref string) (context.Context,
 		return ctx, model.Calendar{}, nil, err
 	}
 	return ctx, cal, before, nil
+}
+
+// heldTitle refuses a wider share whose calendar_title is not the title
+// of the calendar the call reached. The title is the name the person
+// knows the calendar by, and carrying it in the call is what lets a
+// client that asks before the call show which calendar it opens; an id
+// or a fragment of a title shows nothing a person recognizes. Compared
+// exactly, past spaces at either end, and checked before anything else,
+// a dry run included, so a refusal that names the calendar never
+// supplies the witness.
+func heldTitle(cal model.Calendar, given string) error {
+	given = strings.TrimSpace(given)
+	if given == "" {
+		return gapi.Errf(gapi.ClassInvalid, "calendar_title is required: the title list_calendars shows for "+
+			"this calendar, so the call names the calendar it opens; nothing was sent")
+	}
+	if given != strings.TrimSpace(cal.Title) {
+		return gapi.Errf(gapi.ClassStale, "calendar_title %q is not the title of calendar %s; "+
+			"nothing was sent. Read list_calendars again and pass the title it shows, after checking it is the "+
+			"calendar to open", given, cal.ID)
+	}
+	return nil
 }
 
 // outside reports whether an audience's address is outside the

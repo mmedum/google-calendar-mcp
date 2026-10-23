@@ -135,6 +135,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"whoever already looked, so this is publishing rather than sharing. " +
 			"`role` is what they may do: freeBusyReader, which shows only when you are busy, reader, " +
 			"writerWithoutPrivateAccess or writer; never owner. " +
+			"`calendar_title` is the calendar's title as list_calendars shows it, so the call names the " +
+			"calendar it opens; a title that is not this calendar's is refused [stale]. " +
 			"It needs `confirm: true` on the call, and the server it runs in has to have been started with the " +
 			"destructive tools enabled. To share with named people inside your organization use " +
 			"share_calendar, and outside it or as an owner, widen_calendar_access. " +
@@ -143,8 +145,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 		PromptEveryCall: true,
 		Handle: func(ctx context.Context, in publishCalendarIn) (service.SharingResult, error) {
 			out, err := d.Service.PublishCalendar(ctx, service.PublishOptions{
-				Calendar: in.Calendar, Who: in.Who, Role: in.Role, Notify: in.Notify,
-				Confirm: in.Confirm, DryRun: in.DryRun,
+				Calendar: in.Calendar, CalendarTitle: in.CalendarTitle, Who: in.Who, Role: in.Role,
+				Notify: in.Notify, Confirm: in.Confirm, DryRun: in.DryRun,
 			})
 			if err != nil {
 				return service.SharingResult{}, err
@@ -161,6 +163,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"outside your organization unless its domain is your account's own, and every address is outside " +
 			"a personal Google account. `role` is freeBusyReader, reader, writerWithoutPrivateAccess, writer " +
 			"or owner. Owner access includes changing who else can see the calendar, and removing you. " +
+			"`calendar_title` is the calendar's title as list_calendars shows it, so the call names the " +
+			"calendar it opens; a title that is not this calendar's is refused [stale]. " +
 			"It needs `confirm: true` on the call, and the server it runs in has to have been started with the " +
 			"destructive tools enabled. Inside your organization and below owner, use share_calendar; for " +
 			"\"anyone\" or a whole domain, publish_calendar. " +
@@ -168,8 +172,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 		Kind: WideSharing,
 		Handle: func(ctx context.Context, in widenCalendarIn) (service.SharingResult, error) {
 			out, err := d.Service.WidenCalendarAccess(ctx, service.WidenOptions{
-				Calendar: in.Calendar, Who: in.Who, ScopeType: in.ScopeType, Role: in.Role,
-				Notify: in.Notify, Confirm: in.Confirm, DryRun: in.DryRun,
+				Calendar: in.Calendar, CalendarTitle: in.CalendarTitle, Who: in.Who, ScopeType: in.ScopeType,
+				Role: in.Role, Notify: in.Notify, Confirm: in.Confirm, DryRun: in.DryRun,
 			})
 			if err != nil {
 				return service.SharingResult{}, err
@@ -289,10 +293,11 @@ type shareCalendarIn struct {
 }
 
 type publishCalendarIn struct {
-	Calendar string `json:"calendar" jsonschema:"The calendar to publish. You must own it."`
-	Who      string `json:"who" jsonschema:"\"anyone\" for the public internet, or a domain such as example.com for everybody in it. Required."`
-	Role     string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. Required."`
-	Notify   string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
+	Calendar      string `json:"calendar" jsonschema:"The calendar to publish. You must own it."`
+	CalendarTitle string `json:"calendar_title" jsonschema:"The calendar's title exactly as list_calendars shows it. Required; refused [stale] when it is not this calendar's title."`
+	Who           string `json:"who" jsonschema:"\"anyone\" for the public internet, or a domain such as example.com for everybody in it. Required."`
+	Role          string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. Required."`
+	Notify        string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
 	// Not required in the schema, as on the deletes: the refusal says
 	// what the call would open, which a schema error would not.
 	Confirm bool `json:"confirm,omitempty" jsonschema:"Must be true. Without it the call is refused."`
@@ -300,13 +305,14 @@ type publishCalendarIn struct {
 }
 
 type widenCalendarIn struct {
-	Calendar  string `json:"calendar" jsonschema:"The calendar to share. You must own it."`
-	Who       string `json:"who" jsonschema:"An email address or a group address, outside your organization or to be an owner. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
-	ScopeType string `json:"scope_type,omitempty" jsonschema:"user or group. Optional: an address is read as one person unless a rule for it already exists."`
-	Role      string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Required."`
-	Notify    string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
-	Confirm   bool   `json:"confirm,omitempty" jsonschema:"Must be true. Without it the call is refused."`
-	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"Report who would gain access, without writing. Needs no confirm."`
+	Calendar      string `json:"calendar" jsonschema:"The calendar to share. You must own it."`
+	CalendarTitle string `json:"calendar_title" jsonschema:"The calendar's title exactly as list_calendars shows it. Required; refused [stale] when it is not this calendar's title."`
+	Who           string `json:"who" jsonschema:"An email address or a group address, outside your organization or to be an owner. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
+	ScopeType     string `json:"scope_type,omitempty" jsonschema:"user or group. Optional: an address is read as one person unless a rule for it already exists."`
+	Role          string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Required."`
+	Notify        string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
+	Confirm       bool   `json:"confirm,omitempty" jsonschema:"Must be true. Without it the call is refused."`
+	DryRun        bool   `json:"dry_run,omitempty" jsonschema:"Report who would gain access, without writing. Needs no confirm."`
 }
 
 type unshareCalendarIn struct {

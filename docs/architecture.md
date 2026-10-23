@@ -1199,6 +1199,15 @@ identical.
   - The two wider tools register only with sharing on and
     `GCAL_ENABLE_DESTRUCTIVE=true`, need `confirm: true` on the call
     (a dry run needs none), and are annotated destructive.
+  - Each takes `calendar_title`, the calendar's title as
+    `list_calendars` shows it, required in the schema. It is compared
+    with the title of the calendar the call reached, exactly but for
+    spaces at the ends, and a title that differs is refused `[stale]`
+    before anything else, a dry run included. `calendar` may be an id or
+    a fragment of a title, neither of which tells a person which calendar
+    a call opens; the title does, in the client's prompt (the standard's
+    §3: where a question showed what an argument means, the argument
+    carries it).
   - `share_calendar` refuses a wider share with `[blocked]`, naming the
     tool that takes it and its flag, before it asks for `notify`. It
     lowers the role of a rule the calendar already has whoever the rule
@@ -1272,8 +1281,8 @@ only the read scopes (§10).
 | `manage_calendar` | `calendars.patch`, `calendarList.insert/patch/delete` | three axes (§7.5) |
 | `list_sharing` | `acl.list` | |
 | `share_calendar` | `acl.insert`, `acl.patch` | people and groups inside the organization, below owner; `notify` required |
-| `publish_calendar` | `acl.insert`, `acl.patch` | **gated**, needs `confirm`; the public or a domain; marked (§9a) |
-| `widen_calendar_access` | `acl.insert`, `acl.patch` | **gated**, needs `confirm`; outside the organization, or an owner |
+| `publish_calendar` | `acl.insert`, `acl.patch` | **gated**, needs `confirm` and the calendar's title; the public or a domain; marked (§9a) |
+| `widen_calendar_access` | `acl.insert`, `acl.patch` | **gated**, needs `confirm` and the calendar's title; outside the organization, or an owner |
 | `unshare_calendar` | `acl.delete` | |
 | `delete_calendar` | `calendars.delete` | **gated**, needs `confirm` |
 | `clear_calendar` | `calendars.clear` | **gated**, needs `confirm` |
@@ -1527,7 +1536,8 @@ What stays is what holds on every client:
    §4.3); `notify: none` is refused with a guest outside the
    organization; every write is a patch under the etag of its read
    (§4.4); the primary calendar cannot be deleted and only it can be
-   cleared; `share_calendar` stops at the organization (§7.6), and
+   cleared; `share_calendar` stops at the organization, and the two
+   wider shares take the calendar's title as read (§7.6); and
    `create_event` refuses `auto_decline: all` (§7.4).
 4. **`dry_run`** on every write.
 5. **Annotations.** `readOnlyHint` is on the read tools and
@@ -1556,9 +1566,11 @@ What stays is what holds on every client:
    or delete, and the staleness gate holds each name there to the
    published tools.
 7. **What a client's prompt shows.** A client's prompt shows the call's
-   arguments. Where the question showed what the arguments did not, the
-   result still says it: a dry run, the notes on a status event that
-   declines every meeting, and who is emailed.
+   arguments. The question named the calendar a share opened, so the two
+   wider shares carry its title as an argument (§7.6). Where the question
+   showed what no argument can, the result still says it: a dry run, the
+   notes on a status event that declines every meeting, and who is
+   emailed.
 
 `GCAL_REQUIRE_PROMPT`, which refused the asking writes on a client that
 could not ask, went with the question. A configuration that still turns
@@ -2896,8 +2908,8 @@ commits:
   changes the operator's settings.
 - Sharing is three tools by reach (§7.6): `share_calendar` inside the
   organization below owner, and `publish_calendar`, marked, and
-  `widen_calendar_access` behind the destructive flag with `confirm`.
-  `allow_public` is gone.
+  `widen_calendar_access` behind the destructive flag with `confirm` and
+  the calendar's title as read. `allow_public` is gone.
 - `auto_decline: all` is `create_event_declining_all`, behind
   `GCAL_ENABLE_DECLINE_ALL` (§7.4).
 - The module path is `/v4`.
@@ -2908,7 +2920,8 @@ permission rules to the published tools and lets the docs name a
 removed setting. Three refusals wait on probes Q to S (§17 item 6).
 
 **Owed before release:** a live run, its transcript read, driving the
-new sharing steps on the probe calendar (the refusals,
+new sharing steps on the probe calendar (the refusals, one of them a
+title that is not the one this account reads,
 `widen_calendar_access` to the probe address and back, a domain dry run,
 and one public free/busy rule removed by the next step), both decline-all
 refusals on the scratch calendar, and a run with no question put; then
@@ -3025,6 +3038,15 @@ row 80).
     three sharing tools.
 17. **The schema diff could not see a resource declared broken:** a
     removed resource's key carries a prefix no entry names.
+18. **`CLAUDE.md` hard rule 10 named only the two deletes** as behind
+    `GCAL_ENABLE_DESTRUCTIVE`. It names the two wider shares and the
+    decline-all flag now, and says a risky form of a write is a tool of
+    its own.
+19. **The wider shares named no calendar a person recognizes.**
+    `calendar` may be an id or a fragment of a title, so a client's
+    prompt did not show which calendar a call opens. Both take
+    `calendar_title` now, refused `[stale]` when it is not the title of
+    the calendar the call reached (§7.6).
 
 Written down, not changed:
 
@@ -3038,9 +3060,6 @@ Written down, not changed:
   other events' organizers by Google's own doing, and no parameter of
   this insert governs it. `create_event` with `auto_decline` `new` was
   the same before.
-- `CLAUDE.md` hard rule 10 names only the two deletes as behind
-  `GCAL_ENABLE_DESTRUCTIVE`; the two wider shares are too now. That file
-  is the maintainer's to change.
 
 ## 17. Open decisions
 

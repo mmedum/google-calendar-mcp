@@ -196,7 +196,9 @@ none.
   `delete_calendar` and `clear_calendar` — and the two that widen who can
   see a calendar — `publish_calendar` and `widen_calendar_access` — are
   not registered at all unless `GCAL_ENABLE_DESTRUCTIVE=true`, and each
-  still needs `confirm: true` on the call. `cancel_event` is deliberately not behind
+  still needs `confirm: true` on the call. The two shares also take the
+  calendar's title as `list_calendars` shows it, so the call names the
+  calendar it opens. `cancel_event` is deliberately not behind
   that flag: canceling a meeting is what a calendar is for, Google keeps
   the record, and a gate everybody turns on protects nobody.
   `docs/architecture.md` §9 argues it. What guards it instead is the

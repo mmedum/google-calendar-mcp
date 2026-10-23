@@ -18,8 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- `publish_calendar` publishes a calendar to "anyone" or opens it to everybody in a domain, or changes the access such a rule gives, never as owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, needs `confirm: true` on the call, and Claude Code prompts on every call to it.
-- `widen_calendar_access` shares a calendar with a person or a group outside your organization, or makes somebody an owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, and needs `confirm: true` on the call.
+- `publish_calendar` publishes a calendar to "anyone" or opens it to everybody in a domain, or changes the access such a rule gives, never as owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, needs `confirm: true` and the calendar's title as read on the call, and Claude Code prompts on every call to it.
+- `widen_calendar_access` shares a calendar with a person or a group outside your organization, or makes somebody an owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, and needs `confirm: true` and the calendar's title as read on the call.
 - `create_event_declining_all` makes an out-of-office or focus-time event on your primary calendar that declines every meeting it overlaps, the ones you already accepted included. It is registered only with the new `GCAL_ENABLE_DECLINE_ALL=true`, off by default.
 
 ### Removed

@@ -24,6 +24,7 @@ var argumentFor = map[string]any{
 	"from": "2026-03-16", "to": "2026-03-17", "query": "sync", "who": "colleague@example.test",
 	"role": "reader", "notify": "none", "response": "accepted",
 	"to_calendar": "team@group.calendar.example.test", "confirm": true, "event_type": "outOfOffice",
+	"calendar_title": "Sample Primary",
 }
 
 // §3: the model never widens its own reach. Only the operator turns a

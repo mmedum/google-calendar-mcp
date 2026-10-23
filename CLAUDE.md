@@ -91,9 +91,17 @@ and Drive APIs.
    extend `internal/gcal`. No code is imported from any other project.
 10. **Destructive tools are unregistered** unless
     `GCAL_ENABLE_DESTRUCTIVE=true`, and each still needs `confirm: true`
-    on the call. Those are `delete_calendar` and `clear_calendar`.
-    `cancel_event` is deliberately **not** among them — §9 argues why,
-    and the argument is not to be quietly reversed.
+    on the call. Those are `delete_calendar` and `clear_calendar`, and,
+    with sharing on, the two shares that widen who can see a calendar:
+    `publish_calendar` for the public or a domain, and
+    `widen_calendar_access` for somebody outside the organization or an
+    owner. Both also take the calendar's title as read.
+    `create_event_declining_all` has a flag of its own,
+    `GCAL_ENABLE_DECLINE_ALL`. A risky form of a write is a tool of its
+    own, never an argument of the ordinary one (§7.6). Registration is
+    the control: the server asks nobody, and the mark on a tool is never
+    counted as one (§9a). `cancel_event` is deliberately **not** among
+    them — §9 argues why, and the argument is not to be quietly reversed.
 11. **Every published API method has a written verdict.** All 38 are in
     §8a, used or written off with a reason, and the gate fails on a
     method with no verdict, a client call with no row, and a verdict for

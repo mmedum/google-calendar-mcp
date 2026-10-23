@@ -60,8 +60,9 @@ by construction rather than by your vigilance.
   Google rather than by this server's own politeness.
 - **It asks the person nothing.** Your client approves each call. What
   holds on every client is in the server: the registration flags,
-  `confirm` on the deletes, the required `notify` and `scope`, the etag a
-  write is made under, and `dry_run`. `delete_calendar`,
+  `confirm` on the deletes, the calendar's title on the two wider shares,
+  the required `notify` and `scope`, the etag a write is made under, and
+  `dry_run`. `delete_calendar`,
   `clear_calendar` and `publish_calendar` carry Claude Code's
   `requiresUserInteraction`, which makes Claude Code prompt on every call; no other client reads it, so it
   is never the control.
