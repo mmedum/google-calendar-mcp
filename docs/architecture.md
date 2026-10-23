@@ -17,9 +17,10 @@ Attachments are read, counted and carried by a split. A write read again after
 Google changes a just-moved event lands on its second try, and the sync token
 of a read since a moment chains. A probe outside the driver answered a real
 group of 13 members from its members. Still owed: the real-guest steps and
-spikes A and B (`-spike-notify` with guest addresses), a group past 50
-calendars, §18 row 102, the body Google takes for a home working location,
-and a stop part way through, which no run has made since its fix.
+spikes A and B (`-spike-notify`, with `-spike-invitees` naming the guests),
+a group past 50 calendars, §18 row 102, the body Google takes for a home
+working location, and a stop part way through, which no run has made since
+its fix.
 Phases 0 to 4 —
 the scaffolding and the time model with the six read tools; `internal/recur`,
 `list_instances` and `check_availability`; `internal/plan`, the five event
@@ -1450,15 +1451,47 @@ Two structural rules, not matters of care:
    per run for the same reason — a deleted event does not release its id,
    and Google answers a re-insert with 409.
 
+   **A title proves nothing, so adoption never rests on one.** The driver
+   writes a marker into the description of every scratch calendar it
+   creates, and adopts a calendar only when the list entry carries its
+   title, that marker, the `owner` role and the signed-in account as its
+   `dataOwner`. Anything missing fails closed: the run creates its own,
+   which costs a calendar from the quota and never somebody else's
+   events. Reading `dataOwner` here is the driver's need, not the
+   server's; §8b's verdict on the field stands, and the address is never
+   printed. Emptying leaves every event that has a guest besides the
+   account itself, because removing it either mails the guest or, with
+   `sendUpdates=none`, leaves the meeting on their calendar (§18 row 43).
+   `-sweep-spikes` cancels them to their guests.
+
+   **A default run mails nobody.** No event or share it writes names
+   anybody but the account itself or an address under `.test`, and no
+   request it sends asks Google to notify. A second guard on both of the
+   driver's paths to Google holds that, the way the primary-calendar
+   guard below holds its rule. `-spike-notify` is the only thing that
+   lets a run reach a person, and it is refused unless `-spike-invitees`
+   names every configured guest; the guard then lets those addresses
+   through and no other.
+
    **One narrow exception, decided by the owner on 2026-10-09.** A status
    event can only live on the primary calendar (§7.4), so no scratch
    calendar can test one. The driver may make exactly one status event
    per run on the primary calendar: about a year ahead, with an invented
    title, declining nothing, read back by its id, and deleted by its id
-   in the same run. The delete is deferred before the event is made, and
-   Ctrl-C or SIGTERM stops the steps rather than the process, so it runs
-   however the run ends; a second signal exits at once, after the first
-   has printed the title and start to delete by hand. Nothing else there
+   in the same run. Before the create goes out, the driver writes a
+   record of it: an owner-only file in the temporary directory, named for
+   the run, with the title and start, and the id as soon as the server
+   names it (the server mints the id, so it cannot be known sooner). A
+   record that cannot be written stops the create. The delete is deferred
+   before the event is made, and Ctrl-C, SIGTERM or a closed terminal
+   (SIGHUP) stops the steps rather than the process, so it runs however
+   the run ends; SIGPIPE is ignored, so a transcript pipe the hangup
+   closed cannot kill it either. A second signal exits at once, after the
+   first has printed the title, the start and the record to delete by
+   hand. The delete is read back: the event is gone only when the read
+   answers 404 or 410 or shows it cancelled, and only then is the record
+   removed. A cleanup that fails keeps the record and prints its path.
+   Nothing else there
    is written, and the driver enforces it rather than trusting each step:
    one guard sits on both of its paths to Google, the server's tools and
    its own REST calls. It refuses every write that names the primary

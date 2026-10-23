@@ -70,7 +70,10 @@ What it does to the account, so nothing is a surprise:
   run left, and creates a second for the move steps. Calendar creation is
   quota-counted and deleting one does not refund it, so `-keep` leaves
   them for the next run: `go run -tags=live ./scripts/livecal -bin
-  ./google-calendar-mcp -keep`.
+  ./google-calendar-mcp -keep`. It adopts only a calendar with the
+  driver's marker in its description that this account owns; one that
+  merely has the title is left alone. Emptying leaves every event with a
+  guest besides you, unless `-sweep-spikes` cancels them to their guests.
 - The calendar and sharing steps make a third calendar through
   `create_calendar` and remove it through `delete_calendar`, which costs
   one creation per run and is the only way to drive those two tools at
@@ -89,7 +92,10 @@ What it does to the account, so nothing is a surprise:
   the driver writes has no guests but the account itself, and the one
   address it shares a calendar with is in `example.test`, which cannot
   resolve. `-spike-notify` is what arms the steps and spikes that mail a
-  real person, and they say so before they run.
+  real person, and they say so before they run. It is refused unless
+  `-spike-invitees` names every address the `GCAL_LIVE_GUEST_*`
+  variables set, comma-separated. A guard on the server's tools and on
+  the driver's own calls refuses any other address.
 - `GCAL_LIVE_ATTACHMENT` arms the attachment steps. Set it to the link of
   a Drive file you made for the purpose, with an invented name and
   nothing in it. The driver attaches it to its weekly series under its
@@ -99,8 +105,12 @@ What it does to the account, so nothing is a surprise:
 - It makes **one status event on your primary calendar**, because no
   other calendar can hold one: about a year ahead, titled "Livecal status
   probe", declining nothing, and deleted by its id before the run ends.
-  Ctrl-C or SIGTERM stops the steps, not the cleanup, and says what to
-  delete if you stop it a second time. The server runs in a process
+  Before it is made, the driver records its title and start, and then its
+  id, in an owner-only file in the temporary directory named for the run.
+  The delete is read back, and the file is removed only once the event is
+  gone; if the cleanup fails, the warning names the file. Ctrl-C, SIGTERM
+  or closing the terminal stops the steps, not the cleanup, and says what
+  to delete if you stop it a second time. The server runs in a process
   group of its own, so the call in flight finishes; a step the stop cuts
   short counts as not run, never as failed. Nothing else there is written; a
   guard in the driver refuses it, on the server's tools and on its own

@@ -200,8 +200,14 @@ func (s *session) answer(id json.RawMessage, method string) error {
 // result was an error.
 func (s *session) call(ctx context.Context, tool string, args map[string]any) (callResult, error) {
 	// §9.1, held here rather than by each step: every tool call passes
-	// this guard, so no step can write on the primary calendar but the
-	// one status event the owner allowed.
+	// these guards, so no step can write on the primary calendar but the
+	// one status event the owner allowed, or reach a person the run was
+	// not armed to reach.
+	// The primary guard goes last: letting the status event through
+	// writes its record, which must mean the call goes out.
+	if err := reach.tool(tool, args); err != nil {
+		return callResult{}, err
+	}
 	if err := primaryCal.tool(tool, args); err != nil {
 		return callResult{}, err
 	}

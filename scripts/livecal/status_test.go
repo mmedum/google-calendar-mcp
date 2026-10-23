@@ -5,6 +5,10 @@ package main
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -16,8 +20,11 @@ import (
 
 const self = "person@example.test"
 
-func guard() *primaryGuard {
-	g := &primaryGuard{}
+// guard is a primary guard that writes its record into a directory of
+// the test's own.
+func guard(t *testing.T) *primaryGuard {
+	t.Helper()
+	g := &primaryGuard{dir: t.TempDir()}
 	g.setSelf(self)
 	return g
 }
@@ -25,7 +32,7 @@ func guard() *primaryGuard {
 // Every write naming the primary calendar is refused, however it names
 // it, except the one status event; a second one is refused too.
 func TestTheGuardLetsOneStatusEventOntoThePrimaryCalendar(t *testing.T) {
-	g := guard()
+	g := guard(t)
 	for _, c := range []struct {
 		name string
 		tool string
@@ -70,7 +77,7 @@ func TestTheGuardLetsOneStatusEventOntoThePrimaryCalendar(t *testing.T) {
 // the delete of the event it made reaches the primary calendar, and a
 // move is held to its destination as well as its source.
 func TestTheGuardHoldsTheDriversOwnCalls(t *testing.T) {
-	g := guard()
+	g := guard(t)
 	if err := g.tool("create_event", statusArgs("primary")); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +124,7 @@ func TestTheCleanupWarnsOnlyWhenTheEventMayExist(t *testing.T) {
 			text: "[ambiguous_outcome] the request failed. It used the id AAAAstatus2 on calendar primary"},
 			"AAAAstatus2", false},
 	} {
-		g := guard()
+		g := guard(t)
 		args := statusArgs("primary")
 		if err := g.tool("create_event", args); err != nil {
 			t.Fatal(err)
@@ -137,6 +144,14 @@ func TestTheCleanupWarnsOnlyWhenTheEventMayExist(t *testing.T) {
 		if c.warns && !strings.Contains(b.String(), `"Livecal status probe" starting `+args["start"].(string)) {
 			t.Errorf("%s: the warning does not say exactly what to delete:\n%s", c.name, b.String())
 		}
+		// The record stays, and is named, exactly while the event may exist.
+		_, err := os.Stat(g.recordPath())
+		if kept := err == nil; kept != c.warns {
+			t.Errorf("%s: record kept %v, want %v", c.name, kept, c.warns)
+		}
+		if named := strings.Contains(b.String(), g.recordPath()); named != c.warns {
+			t.Errorf("%s: record named %v, want %v:\n%s", c.name, named, c.warns, b.String())
+		}
 	}
 }
 
@@ -144,7 +159,7 @@ func TestTheCleanupWarnsOnlyWhenTheEventMayExist(t *testing.T) {
 // stopped again before its cleanup, and says nothing of the status event
 // when there is none.
 func TestAnInterruptSaysWhatToDelete(t *testing.T) {
-	g := guard()
+	g := guard(t)
 	var before strings.Builder
 	g.interrupted(redact.New(&before))
 	if strings.Contains(before.String(), "by hand") {
@@ -159,6 +174,9 @@ func TestAnInterruptSaysWhatToDelete(t *testing.T) {
 	if !strings.Contains(after.String(), `delete "Livecal status probe" starting `+args["start"].(string)+
 		" on your primary calendar by hand") {
 		t.Fatalf("the interrupt does not say exactly what to delete:\n%s", after.String())
+	}
+	if !strings.Contains(after.String(), "Its record is "+g.recordPath()) {
+		t.Fatalf("the interrupt does not name the record:\n%s", after.String())
 	}
 }
 
@@ -179,4 +197,131 @@ func TestAnInterruptedRunCallsNothingMore(t *testing.T) {
 func withArg(args map[string]any, k string, v any) map[string]any {
 	args[k] = v
 	return args
+}
+
+// The status event is recorded, owner only and named for the run, before
+// the create goes out, and the record gains the id once it is known.
+func TestTheStatusEventIsRecordedBeforeItIsAskedFor(t *testing.T) {
+	g := guard(t)
+	path := g.recordPath()
+	if want := filepath.Join(g.dir, "livecal-status-event-"+runSuffix+".txt"); path != want {
+		t.Fatalf("record at %s, want %s", path, want)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("a record exists before the status event was asked for: %v", err)
+	}
+	args := statusArgs("primary")
+	if err := g.tool("create_event", args); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("the create went out with no record: %v", err)
+	}
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("record mode %o, want 600", fi.Mode().Perm())
+	}
+	before := readFile(t, path)
+	for _, want := range []string{"title: Livecal status probe\n", "start: " + args["start"].(string) + "\n",
+		"id: not known yet\n"} {
+		if !strings.Contains(before, want) {
+			t.Fatalf("the record lacks %q:\n%s", want, before)
+		}
+	}
+	g.answered(callResult{text: "Created the event.\nid: AAAAstatus1\n"})
+	if after := readFile(t, path); !strings.Contains(after, "id: AAAAstatus1\n") {
+		t.Fatalf("the record does not carry the id once it is known:\n%s", after)
+	}
+}
+
+// A status event whose record cannot be written is not asked for, and
+// leaves nothing for the cleanup to look for.
+func TestAStatusEventWithNoRecordIsNotAskedFor(t *testing.T) {
+	g := guard(t)
+	g.dir = filepath.Join(g.dir, "missing")
+	if err := g.tool("create_event", statusArgs("primary")); err == nil {
+		t.Fatal("the status event went out with no record")
+	}
+	if g.pending() {
+		t.Fatal("a status event that was never asked for is waiting to be deleted")
+	}
+	if err := g.tool("create_event", statusArgs("primary")); err == nil {
+		t.Fatal("a second try went out")
+	}
+}
+
+// The cleanup deletes the status event and reads it back. The record is
+// removed only when the read finds it gone; otherwise the warning names
+// the record and the record stays.
+func TestTheCleanupReadsTheStatusEventBackGone(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		del, read int
+		status    string
+		gone      bool
+	}{
+		{"deleted and not found", http.StatusNoContent, http.StatusNotFound, "", true},
+		{"already gone and read cancelled", http.StatusGone, http.StatusOK, "cancelled", true},
+		{"deleted but still there", http.StatusNoContent, http.StatusOK, "confirmed", false},
+		{"the delete failed", http.StatusInternalServerError, http.StatusOK, "confirmed", false},
+		{"the read failed", http.StatusNoContent, http.StatusInternalServerError, "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			g := guard(t)
+			defer swapPrimary(g)()
+			if err := g.tool("create_event", statusArgs("primary")); err != nil {
+				t.Fatal(err)
+			}
+			g.answered(callResult{text: "id: AAAAstatus1\n"})
+			var deleted bool
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/calendars/primary/events/AAAAstatus1" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+					w.WriteHeader(http.StatusTeapot)
+					return
+				}
+				switch r.Method {
+				case http.MethodDelete:
+					deleted = true
+					w.WriteHeader(c.del)
+				case http.MethodGet:
+					if !deleted {
+						t.Error("read back before the delete")
+					}
+					w.WriteHeader(c.read)
+					_, _ = w.Write([]byte(`{"status":"` + c.status + `"}`))
+				}
+			}))
+			defer srv.Close()
+			var b strings.Builder
+			g.cleanUp(&liveAPI{hc: srv.Client(), base: srv.URL}, redact.New(&b))
+			_, err := os.Stat(g.recordPath())
+			if kept := err == nil; kept == c.gone {
+				t.Fatalf("record kept %v with the event gone %v:\n%s", kept, c.gone, b.String())
+			}
+			if c.gone != strings.Contains(b.String(), "read back gone") {
+				t.Fatalf("reported gone %v, want %v:\n%s", !c.gone, c.gone, b.String())
+			}
+			if !c.gone && !strings.Contains(b.String(), g.recordPath()) {
+				t.Fatalf("a failed cleanup does not name the record:\n%s", b.String())
+			}
+		})
+	}
+}
+
+// swapPrimary makes g the guard the driver's REST calls pass, and
+// returns what restores the one before.
+func swapPrimary(g *primaryGuard) func() {
+	was := primaryCal
+	primaryCal = g
+	return func() { primaryCal = was }
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

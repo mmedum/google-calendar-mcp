@@ -93,6 +93,9 @@ const apiBase = "https://www.googleapis.com/calendar/v3"
 type liveAPI struct {
 	hc *http.Client
 	ts oauth2.TokenSource
+	// base is the API root every path is joined to: apiBase, or a test's
+	// fake.
+	base string
 	// recordedScopes is what the profile stored at login. Spike G does
 	// not use it: see liveScopes.
 	recordedScopes []string
@@ -133,7 +136,7 @@ func newAPI(ctx context.Context, profile string) (*liveAPI, error) {
 	ts := auth.TokenSource(ctx, oc, refresh, 60*time.Second)
 	hc := oauth2.NewClient(ctx, ts)
 	hc.Timeout = 60 * time.Second
-	return &liveAPI{hc: hc, ts: ts, recordedScopes: uc.Scopes}, nil
+	return &liveAPI{hc: hc, ts: ts, base: apiBase, recordedScopes: uc.Scopes}, nil
 }
 
 func (a *liveAPI) do(ctx context.Context, method, path string, body, out any) error {
@@ -149,8 +152,11 @@ func (a *liveAPI) doWithMatch(ctx context.Context, method, path, ifMatch string,
 }
 
 func (a *liveAPI) status(ctx context.Context, method, path, ifMatch string, body, out any) (int, error) {
-	// Every REST call passes the same §9.1 guard the tool calls do.
+	// Every REST call passes the same §9.1 guards the tool calls do.
 	if err := primaryCal.rest(method, path); err != nil {
+		return 0, err
+	}
+	if err := reach.rest(method, path, body); err != nil {
 		return 0, err
 	}
 	var r io.Reader
@@ -161,7 +167,7 @@ func (a *liveAPI) status(ctx context.Context, method, path, ifMatch string, body
 		}
 		r = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, apiBase+path, r)
+	req, err := http.NewRequestWithContext(ctx, method, a.base+path, r)
 	if err != nil {
 		return 0, err
 	}
@@ -192,13 +198,19 @@ func (a *liveAPI) status(ctx context.Context, method, path, ifMatch string, body
 	return resp.StatusCode, nil
 }
 
+// scratchMarker is written into the description of every scratch
+// calendar this driver creates. A calendar is adopted only when it
+// carries it and the signed-in account owns it, so a calendar somebody
+// else made is never emptied, whatever its title.
+const scratchMarker = "[livecal-scratch-calendar]"
+
 func (a *liveAPI) createScratchCalendar(ctx context.Context, title string) (string, error) {
 	var out struct {
 		ID string `json:"id"`
 	}
 	err := a.do(ctx, http.MethodPost, "/calendars", map[string]any{
 		"summary":     title,
-		"description": "Created by the google-calendar-mcp live driver. Safe to delete.",
+		"description": "Created by the google-calendar-mcp live driver. Safe to delete. " + scratchMarker,
 		"timeZone":    scratchZone,
 	}, &out)
 	if err != nil {
@@ -210,8 +222,10 @@ func (a *liveAPI) createScratchCalendar(ctx context.Context, title string) (stri
 	return out.ID, nil
 }
 
-// ensureScratchCalendar adopts the driver's own scratch calendar if one
-// is already there, and creates one otherwise.
+// ensureScratchCalendar adopts a scratch calendar an earlier run of this
+// driver left, and creates one otherwise. kept counts the events an
+// adopted calendar still holds because they have guests besides this
+// account.
 //
 // Creating one per run is what phase 1 did, and it is what spent this
 // account's calendar quota: the limit counts calendars CREATED and
@@ -220,35 +234,53 @@ func (a *liveAPI) createScratchCalendar(ctx context.Context, title string) (stri
 // costs the quota nothing.
 //
 // The lookup reads the account's calendar list, which is the one place
-// this driver looks past what it wrote. It matches its own title and
-// returns an id; nothing from the list is printed, and §9.1's rule about
-// the transcript is enforced separately, on what steps may show.
-func (a *liveAPI) ensureScratchCalendar(ctx context.Context, title string) (id string, created bool, err error) {
-	found, err := a.findScratchCalendar(ctx, title)
+// this driver looks past what it wrote. Nothing from the list is
+// printed, and §9.1's rule about the transcript is enforced separately,
+// on what steps may show.
+func (a *liveAPI) ensureScratchCalendar(ctx context.Context, title, self string) (id string, created bool, kept int, err error) {
+	found, err := a.findScratchCalendar(ctx, title, self)
 	if err != nil {
-		return "", false, err
+		return "", false, 0, err
 	}
 	if found != "" {
-		// Somebody else's run left it, so it may still hold their
-		// events, and the seed ids are fixed: a duplicate id is a 409.
-		if err := a.clearEvents(ctx, found); err != nil {
-			return "", false, fmt.Errorf("adopting the scratch calendar: %w", err)
+		// An earlier run left it, so it may still hold that run's events.
+		kept, err := a.clearEvents(ctx, found, self)
+		if err != nil {
+			return "", false, 0, fmt.Errorf("adopting the scratch calendar: %w", err)
 		}
-		return found, false, nil
+		return found, false, kept, nil
 	}
 	id, err = a.createScratchCalendar(ctx, title)
-	return id, true, err
+	return id, true, 0, err
 }
 
-// findScratchCalendar returns the id of a calendar this driver made, or
-// an empty string.
-func (a *liveAPI) findScratchCalendar(ctx context.Context, title string) (string, error) {
+// calendarEntry is the part of a calendar-list entry that decides
+// adoption.
+type calendarEntry struct {
+	ID          string `json:"id"`
+	Summary     string `json:"summary"`
+	Description string `json:"description"`
+	AccessRole  string `json:"accessRole"`
+	DataOwner   string `json:"dataOwner"`
+}
+
+// driversOwn reports whether e is a scratch calendar this driver made
+// for this account: its title, the driver's marker in its description,
+// and the signed-in account as both an owner and its data owner. A
+// title alone proves nothing, and the owner role alone can be granted
+// by somebody else. Any field missing fails closed, which costs a
+// calendar from the quota and never somebody else's events.
+func (e calendarEntry) driversOwn(title, self string) bool {
+	return e.Summary == title && strings.Contains(e.Description, scratchMarker) &&
+		e.AccessRole == "owner" && self != "" && strings.EqualFold(e.DataOwner, self)
+}
+
+// findScratchCalendar returns the id of a calendar this driver made for
+// this account, or an empty string.
+func (a *liveAPI) findScratchCalendar(ctx context.Context, title, self string) (string, error) {
 	var out struct {
-		Items []struct {
-			ID      string `json:"id"`
-			Summary string `json:"summary"`
-		} `json:"items"`
-		NextPageToken string `json:"nextPageToken"`
+		Items         []calendarEntry `json:"items"`
+		NextPageToken string          `json:"nextPageToken"`
 	}
 	path := "/users/me/calendarList?maxResults=250&showHidden=true"
 	for {
@@ -257,21 +289,29 @@ func (a *liveAPI) findScratchCalendar(ctx context.Context, title string) (string
 			return "", err
 		}
 		for _, it := range out.Items {
-			if it.Summary == title {
+			if it.driversOwn(title, self) {
 				return it.ID, nil
 			}
 		}
 		if out.NextPageToken == "" {
 			return "", nil
 		}
-		path = "/users/me/calendarList?maxResults=250&showHidden=true&pageToken=" + out.NextPageToken
+		path = "/users/me/calendarList?maxResults=250&showHidden=true&pageToken=" +
+			url.QueryEscape(out.NextPageToken)
 	}
 }
 
-// clearEvents empties a calendar this driver owns, so an adopted one
-// seeds as cleanly as a fresh one. calendars.clear is not usable here:
-// it only works on the primary calendar, which this driver never writes.
-func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
+// clearEvents empties a scratch calendar this driver made, so an adopted
+// one seeds as cleanly as a fresh one, and returns how many events it
+// left. calendars.clear is not usable here: it only works on the primary
+// calendar, which this driver never writes.
+//
+// An event with a guest besides this account is left where it is,
+// unless -sweep-spikes asked for it. Only an armed run puts one there,
+// as spikes A and B do on purpose, and removing it either mails the
+// guest or, with sendUpdates=none, leaves the meeting on their calendar
+// (§18 row 43). A default run mails nobody, so it does neither.
+func (a *liveAPI) clearEvents(ctx context.Context, cal, self string) (kept int, err error) {
 	// Bounded, because the exit condition depends on Google agreeing
 	// that what was deleted is gone. A driver that spins forever on a
 	// calendar it cannot empty is worse than one that says so.
@@ -279,7 +319,6 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 		var out struct {
 			Items []struct {
 				ID        string `json:"id"`
-				Summary   string `json:"summary"`
 				Attendees []struct {
 					Email string `json:"email"`
 				} `json:"attendees"`
@@ -287,29 +326,26 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 		}
 		if err := a.do(ctx, http.MethodGet,
 			"/calendars/"+cal+"/events?maxResults=250&showDeleted=false", nil, &out); err != nil {
-			return err
+			return 0, err
 		}
 		deleted := 0
+		kept = 0
 		for _, it := range out.Items {
-			// Spike A and B events are evidence a person reads hours or
-			// days later, in their own inbox and calendar. The next run
-			// used to delete them, which destroyed the thing the spike
-			// existed to produce — silently, between a run and the
-			// reading of its result.
-			if !clearSpikeEvents &&
-				(strings.HasPrefix(it.Summary, spikeATitle) || strings.HasPrefix(it.Summary, spikeBTitle)) {
-				continue
+			others := false
+			for _, at := range it.Attendees {
+				if !strings.EqualFold(at.Email, self) {
+					others = true
+				}
 			}
-			// An event with guests is canceled WITH notification, and
-			// this is the one place in the driver where none is wrong.
-			//
-			// Deleting with sendUpdates=none does not remove the event
-			// from the guests' calendars — it leaves a meeting there
-			// that the organizer believes is canceled (§18 row 43).
-			// This driver did exactly that for a day, littering two real
-			// calendars with probe events nobody could get rid of.
+			// With guests, the event is canceled WITH notification: a
+			// delete with sendUpdates=none takes it off this calendar
+			// and leaves it on theirs.
 			updates := "none"
-			if len(it.Attendees) > 0 {
+			if others {
+				if !clearSpikeEvents {
+					kept++
+					continue
+				}
 				updates = "all"
 			}
 			// A 410 means it is already gone, which is the state wanted.
@@ -317,16 +353,16 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal string) error {
 				"/calendars/"+cal+"/events/"+it.ID+"?sendUpdates="+updates, nil, nil); derr != nil &&
 				!strings.Contains(derr.Error(), "returned 410") &&
 				!strings.Contains(derr.Error(), "returned 404") {
-				return derr
+				return 0, derr
 			}
 			deleted++
 		}
 		// Nothing left that this run may remove.
 		if deleted == 0 {
-			return nil
+			return kept, nil
 		}
 	}
-	return fmt.Errorf("the scratch calendar still lists events after 20 passes; empty it by hand")
+	return 0, fmt.Errorf("the scratch calendar still lists events after 20 passes; empty it by hand")
 }
 
 // insertEvent posts one event and returns Google's answer.
