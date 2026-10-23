@@ -177,6 +177,45 @@ func TestShareCalendarStopsAtTheOrganization(t *testing.T) {
 	}
 }
 
+// Lowering the role of a rule the calendar already has widens nothing,
+// so share_calendar makes it whoever the rule reaches, with no flag and
+// no confirm. Raising the same rule is still refused.
+func TestShareCalendarLowersAWiderRule(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		rule gcal.AclRule
+		who  string
+	}{
+		{"a person outside", gcal.AclRule{ID: "user:somebody@elsewhere.test", Role: gcal.RoleWriter,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "somebody@elsewhere.test"}}, "somebody@elsewhere.test"},
+		{"the public", gcal.AclRule{ID: "default", Role: gcal.RoleWriter,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}}, "anyone"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"], c.rule)
+			got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "team@group.calendar.example.test", Who: c.who, Role: "reader", Notify: "none",
+			})
+			if err != nil {
+				t.Fatalf("lowering: %v", err)
+			}
+			if w := fake.Wrote(); len(w) != 1 || w[0].Method != "acl.patch" {
+				t.Fatalf("got writes %+v, want one acl.patch", w)
+			}
+			if !strings.Contains(got.Text(), "from writer to reader") {
+				t.Fatalf("the result does not say what the access changed from:\n%s", got.Text())
+			}
+			_, err = svc.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "team@group.calendar.example.test", Who: c.who, Role: "writer", Notify: "none",
+			})
+			if cls := classOf(t, err); cls != gapi.ClassBlocked {
+				t.Fatalf("raising it again: got [%s] %v, want [blocked]", cls, err)
+			}
+		})
+	}
+}
+
 // A personal account has no organization, so share_calendar takes
 // nobody there, and the address is refused as outside even in the
 // account's own domain.
@@ -255,6 +294,14 @@ func TestPublishCalendarOpensADomainAndTakesNoPerson(t *testing.T) {
 	})
 	if cls := classOf(t, err); cls != gapi.ClassInvalid || !strings.Contains(err.Error(), "share_calendar") {
 		t.Fatalf("got [%s] %v, want [invalid] naming share_calendar", cls, err)
+	}
+
+	_, err = svc.PublishCalendar(context.Background(), service.PublishOptions{
+		Calendar: "team@group.calendar.example.test", Who: "example.test", Role: "owner",
+		Notify: "none", Confirm: true,
+	})
+	if cls := classOf(t, err); cls != gapi.ClassInvalid || !strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Fatalf("a domain made owner: got [%s] %v, want [invalid]", cls, err)
 	}
 }
 

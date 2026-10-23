@@ -211,7 +211,8 @@ none.
   account's own, and a personal Google account has no organization, so
   every address is outside it. Publishing to "anyone" or a whole domain is
   `publish_calendar`, and sharing outside or making an owner is
-  `widen_calendar_access`. Removing a public rule afterward stops new
+  `widen_calendar_access`; `share_calendar` still lowers the access of
+  anybody the calendar is already shared with. Removing a public rule afterward stops new
   readers and takes nothing back from whoever already looked. Removing
   access notifies nobody, because Google offers no way to ask for it:
   they are not told, they find the calendar gone.
@@ -232,7 +233,8 @@ Your MCP client approves each call; the server does not ask you itself.
 claude.ai and Codex prompt for the tools marked destructive,
 `cancel_event`, `create_event_declining_all`, `publish_calendar`,
 `widen_calendar_access`, `delete_calendar` and `clear_calendar`, and VS
-Code prompts for every tool that writes. In Claude Code, `delete_calendar`, `clear_calendar` and
+Code prompts for every tool not marked read-only, which is every tool
+that writes. In Claude Code, `delete_calendar`, `clear_calendar` and
 `publish_calendar` ask on every call whatever your rules say: the first
 two delete a whole calendar's events, which Calendar cannot bring back,
 and the third opens a calendar to the internet or a domain, which

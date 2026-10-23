@@ -1200,10 +1200,12 @@ identical.
     `GCAL_ENABLE_DESTRUCTIVE=true`, need `confirm: true` on the call
     (a dry run needs none), and are annotated destructive.
   - `share_calendar` refuses a wider share with `[blocked]`, naming the
-    tool that takes it and its flag, before it asks anything else of the
-    call. A changed role on an existing public, domain or outside rule
-    goes through the same tools, and `unshare_calendar` removes any rule.
-    Each wider tool refuses what another takes with `[invalid]`.
+    tool that takes it and its flag, before it asks for `notify`. It
+    lowers the role of a rule the calendar already has whoever the rule
+    reaches, since that widens nothing; raising a wider rule goes through
+    the wider tools, and `unshare_calendar` removes any rule. Each wider
+    tool refuses what another takes with `[invalid]`, and
+    `publish_calendar` never grants owner.
 - **Inside the organization** is the account's own domain, read from
   the primary calendar's id. A personal Google account has no
   organization, so every address is outside it; so is every address when
@@ -1561,8 +1563,8 @@ What stays is what holds on every client:
 `GCAL_REQUIRE_PROMPT`, which refused the asking writes on a client that
 could not ask, went with the question. A configuration that still turns
 it on is refused at start: ignored, it would allow what its owner set it
-to stop. Leave `GCAL_ENABLE_DESTRUCTIVE` off for a client that runs with
-nobody watching.
+to stop. Leave `GCAL_ENABLE_DESTRUCTIVE` and `GCAL_ENABLE_DECLINE_ALL`
+off for a client that runs with nobody watching.
 
 Held by tests: every client in the tools tests declares form
 elicitation and fails the test on any question, and the live driver
@@ -3008,6 +3010,38 @@ gives a misbehaving client nothing it lacked: such a client answers the
 server's question itself, and can accept with nobody present (§18
 row 80).
 
+**Phase 9's review** (2026-10-23). Fixed from it:
+
+13. **`publish_calendar` took owner.** A domain or the public made an
+    owner was a share no tool checked. It is refused `[invalid]` now.
+14. **Lowering a wider rule needed the destructive flag.** Reducing
+    exposure needed the tool that widens it, with a confirm text about
+    widening. `share_calendar` now lowers any rule the calendar has.
+15. **The refusal of a missing `auto_decline` offered `all`,** which
+    `create_event` then refused. It names the tool instead.
+16. **A second parser for the decline types** in
+    `CreateDecliningEvent`; it uses `plan.Declines` now. Stale comments
+    on `DeclinesMore` and `SharingRead` said the server asks and counted
+    three sharing tools.
+17. **The schema diff could not see a resource declared broken:** a
+    removed resource's key carries a prefix no entry names.
+
+Written down, not changed:
+
+- `update_event` making a decline-all event cover more goes through
+  without asking, on a tool registered by default (§17 item 6). Refusing
+  it before probe Q would be the probe's answer guessed; the maintainer
+  chose to probe first.
+- `create_event_declining_all` takes no `notify`, while hard rule 6
+  requires one for a write that reaches another person. A status event
+  has no guests, so `sendUpdates` reaches nobody; the decline goes to
+  other events' organizers by Google's own doing, and no parameter of
+  this insert governs it. `create_event` with `auto_decline` `new` was
+  the same before.
+- `CLAUDE.md` hard rule 10 names only the two deletes as behind
+  `GCAL_ENABLE_DESTRUCTIVE`; the two wider shares are too now. That file
+  is the maintainer's to change.
+
 ## 17. Open decisions
 
 1. **Incremental sync.** `syncToken` is designed for a client with a
@@ -3191,7 +3225,10 @@ row 80).
    unless a tool of its own makes it. Three writes here may widen, and
    whether they do is Google's behavior, not yet seen (§15, probes Q to
    S). Until a probe answers, each goes through as it did, saying what
-   the documentation says, and nothing asks.
+   the documentation says, and nothing asks. That is a gap while it
+   lasts: `update_event` is registered by default, so a client that
+   always allows it lets a decline-all event grow unseen, where
+   `create_event` refuses to make one.
    - `update_event` that makes an out-of-office or focus-time event
      declining all cover more time, and a `this_and_following` split of
      such a series (§18 row 102). If Google declines in the new time,

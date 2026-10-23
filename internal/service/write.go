@@ -451,9 +451,7 @@ type DecliningOptions struct {
 // with auto_decline all, which create_event itself refuses. Registered
 // only with GCAL_ENABLE_DECLINE_ALL.
 func (s *Service) CreateDecliningEvent(ctx context.Context, o DecliningOptions) (render.WriteReport, error) {
-	switch strings.ToLower(strings.TrimSpace(o.EventType)) {
-	case strings.ToLower(gcal.EventTypeOutOfOffice), strings.ToLower(gcal.EventTypeFocusTime):
-	default:
+	if !plan.Declines(o.EventType) {
 		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
 			"event_type is required here: outOfOffice or focusTime, the two status events that decline. Make "+
 				"anything else with create_event")

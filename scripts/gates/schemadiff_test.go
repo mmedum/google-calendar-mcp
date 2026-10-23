@@ -258,16 +258,17 @@ func TestBooleanSchemas(t *testing.T) {
 // names its tool in backticks: named elsewhere, or only under a release
 // already made, it is not declared.
 func TestUndeclaredBreaks(t *testing.T) {
-	breaking := []string{"share_calendar: input field allow_public removed", "old_tool"}
-	released := "\n## [3.1.0] - 2026-10-09\n\n- **Breaking:** `share_calendar` and `old_tool`.\n"
+	breaking := []string{"share_calendar: input field allow_public removed", "old_tool",
+		resourceKey("gcal://calendars/{+calendar_id}")}
+	released := "\n## [3.1.0] - 2026-10-09\n\n- **Breaking:** `share_calendar`, `old_tool` and `gcal://calendars/{+calendar_id}`.\n"
 	for _, c := range []struct {
 		name, changelog string
 		want            []string
 	}{
-		{"both declared", "## [Unreleased]\n\n- **Breaking:** `share_calendar` loses `allow_public`; `old_tool` is gone.\n" +
-			released, nil},
-		{"one not named", "## [Unreleased]\n\n- **Breaking:** `share_calendar` loses `allow_public`.\n" + released,
-			[]string{"old_tool"}},
+		{"every one declared", "## [Unreleased]\n\n- **Breaking:** `share_calendar` loses `allow_public`; `old_tool` " +
+			"and `gcal://calendars/{+calendar_id}` are gone.\n" + released, nil},
+		{"two not named", "## [Unreleased]\n\n- **Breaking:** `share_calendar` loses `allow_public`.\n" + released,
+			[]string{"old_tool", resourceKey("gcal://calendars/{+calendar_id}")}},
 		{"named outside a Breaking entry", "## [Unreleased]\n\n- `share_calendar` and `old_tool` changed.\n" + released,
 			breaking},
 		{"declared only in a release made", "## [Unreleased]\n" + released, breaking},

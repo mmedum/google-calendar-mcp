@@ -213,6 +213,57 @@ func TestAWideShareIsOutsideOrAnOwner(t *testing.T) {
 	}
 }
 
+// Lowering the role of a rule the calendar already has narrows it,
+// whoever the rule reaches; raising it, keeping it, or a rule it does not
+// have does not.
+func TestNarrowsOnlyLowersAnExistingRule(t *testing.T) {
+	existing := []model.Sharing{
+		{RuleID: "user:somebody@elsewhere.test", ScopeType: gcal.ScopeTypeUser, Value: "somebody@elsewhere.test",
+			Role: gcal.RoleWriter},
+		{RuleID: "default", ScopeType: gcal.ScopeTypeDefault, Role: gcal.RoleReader},
+	}
+	outside, err := plan.ParseAudience("somebody@elsewhere.test", "", existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := plan.ParseAudience("anyone", "", existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stranger, err := plan.ParseAudience("stranger@elsewhere.test", "", existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		a    plan.Audience
+		role string
+		want bool
+	}{
+		{"writer to reader, outside", outside, gcal.RoleReader, true},
+		{"reader to free/busy, public", public, gcal.RoleFreeBusyReader, true},
+		{"writer to owner", outside, gcal.RoleOwner, false},
+		{"reader kept", public, gcal.RoleReader, false},
+		{"reader to writer, public", public, gcal.RoleWriter, false},
+		{"no rule yet", stranger, gcal.RoleFreeBusyReader, false},
+	} {
+		if got := plan.Narrows(existing, c.a, c.role); got != c.want {
+			t.Errorf("%s: Narrows = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// publish_calendar never makes a domain or the public an owner.
+func TestAPublicRuleIsNeverOwner(t *testing.T) {
+	if err := plan.PublicRole(gcal.RoleWriter); err != nil {
+		t.Errorf("writer: %v", err)
+	}
+	if err := plan.PublicRole(gcal.RoleOwner); !errors.Is(err, plan.ErrInvalid) ||
+		!strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Errorf("owner: %v, want [invalid] naming widen_calendar_access", err)
+	}
+}
+
 // A wider share needs confirm, a witness the caller meant it.
 func TestAWideShareNeedsConfirm(t *testing.T) {
 	if err := plan.ConfirmWidening(true, "x"); err != nil {

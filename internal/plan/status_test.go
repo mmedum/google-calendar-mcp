@@ -130,6 +130,10 @@ func TestAStatusEventGoogleWouldRefuseIsRefused(t *testing.T) {
 			plan.ErrInvalid, "always public"},
 		{"no auto_decline", with(away, func(s *plan.Status) { s.AutoDecline = "" }), nil,
 			plan.ErrInvalid, "auto_decline is required for an out-of-office event, and there is no default"},
+		// all is refused on create_event, so the refusal offers the tool
+		// that makes it rather than the word.
+		{"no auto_decline, naming the tool for all", with(away, func(s *plan.Status) { s.AutoDecline = "" }), nil,
+			plan.ErrInvalid, "accepted as well is create_event_declining_all"},
 		{"an auto_decline that is not one", with(away, func(s *plan.Status) { s.AutoDecline = "some" }), nil,
 			plan.ErrInvalid, "Pass none, new or all"},
 		{"a message that goes nowhere", with(away, func(s *plan.Status) { s.DeclineMessage = "Away" }), nil,

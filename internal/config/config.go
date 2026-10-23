@@ -221,7 +221,8 @@ func (s *Settings) Build() (Config, error) {
 	if on, perr := parseBool("GCAL_REQUIRE_PROMPT", s.RequirePrompt); on || perr != nil {
 		errs = append(errs, fmt.Errorf("%w: GCAL_REQUIRE_PROMPT was removed: the server no longer asks the "+
 			"person, and the client's own approval decides each call. Unset it, and leave "+
-			"GCAL_ENABLE_DESTRUCTIVE off for a client that runs with nobody watching", ErrInvalid))
+			"GCAL_ENABLE_DESTRUCTIVE and GCAL_ENABLE_DECLINE_ALL off for a client that runs with nobody watching",
+			ErrInvalid))
 	}
 
 	if c.MaxEvents, err = parseCount("max-events", s.MaxEvents, DefaultMaxEvents, MaxMaxEvents); err != nil {

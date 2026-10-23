@@ -50,7 +50,7 @@ const (
 	WideSharing
 	// SharingRead reads who can see a calendar. It changes nothing, so
 	// its annotations say read-only — but GCAL_SHARING=off removes it
-	// with the other two, because a deployment that has turned sharing
+	// with the sharing writes, because a deployment that has turned sharing
 	// off has turned off the surface, not merely the writes.
 	//
 	// Read-only mode drops it as well. §8 registers the nine read tools

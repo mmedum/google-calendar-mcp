@@ -105,7 +105,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"already has a rule for it — pass `scope_type` to be sure, because a group address and a person's " +
 			"look identical. " +
 			"`role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. The " +
-			"result explains the one it set. " +
+			"result explains the one it set. Lowering the role of a rule the calendar already has is made " +
+			"here whoever the rule reaches, since it widens nothing. " +
 			"An address is inside your organization when its domain is your account's own; a personal Google " +
 			"account has no organization, so every address is outside it. The wider shares are refused here, " +
 			"each naming its own tool: publish_calendar for \"anyone\" or a whole domain, and " +
@@ -132,7 +133,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"such as example.com for everybody in it, now and later. " +
 			"Removing the rule later with unshare_calendar stops new readers and takes nothing back from " +
 			"whoever already looked, so this is publishing rather than sharing. " +
-			"`role` is what they may do; freeBusyReader shows only when you are busy. " +
+			"`role` is what they may do: freeBusyReader, which shows only when you are busy, reader, " +
+			"writerWithoutPrivateAccess or writer; never owner. " +
 			"It needs `confirm: true` on the call, and the server it runs in has to have been started with the " +
 			"destructive tools enabled. To share with named people inside your organization use " +
 			"share_calendar, and outside it or as an owner, widen_calendar_access. " +

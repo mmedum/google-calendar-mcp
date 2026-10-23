@@ -29,8 +29,9 @@ client passes command, args and env to a stdio server, and nothing else.
 server's question: the server asks the person nothing, and your client's
 own approval decides each call. A configuration that still turns it on
 is refused at start, since ignoring it would quietly allow what it was
-set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` off for a
-client that runs with nobody watching.
+set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` and
+`GCAL_ENABLE_DECLINE_ALL` off for a client that runs with nobody
+watching.
 
 `check_availability` is the exception to `GCAL_MAX_CALENDARS`: it asks
 about at most 100 calendars per call, because free/busy answers for 50

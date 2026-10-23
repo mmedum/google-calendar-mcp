@@ -158,18 +158,21 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
-	// Which tool the share belongs to is said before anything else is
-	// asked of the call, so a caller is not walked through fixing a role
-	// or a notify for a share this tool will refuse anyway.
-	if err := plan.OrdinaryAudience(audience, s.outside(ctx, audience)); err != nil {
-		return render.SharingReport{}, classifyPlan(err)
-	}
 	role, err := plan.ParseRole(o.Role)
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
-	if err := plan.OrdinaryRole(role); err != nil {
-		return render.SharingReport{}, classifyPlan(err)
+	// Lowering the role of a rule the calendar already has widens
+	// nothing, whatever the rule reaches, so it is made here. Anything
+	// else past the organization or at owner is refused, naming the tool
+	// that takes it, before notify is asked of the call.
+	if !plan.Narrows(before, audience, role) {
+		if err := plan.OrdinaryAudience(audience, s.outside(ctx, audience)); err != nil {
+			return render.SharingReport{}, classifyPlan(err)
+		}
+		if err := plan.OrdinaryRole(role); err != nil {
+			return render.SharingReport{}, classifyPlan(err)
+		}
 	}
 	notify, err := plan.ShareNotify(o.Notify)
 	if err != nil {
@@ -203,6 +206,9 @@ func (s *Service) PublishCalendar(ctx context.Context, o PublishOptions) (render
 	}
 	role, err := plan.ParseRole(o.Role)
 	if err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	if err := plan.PublicRole(role); err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
 	notify, err := plan.ShareNotify(o.Notify)

@@ -47,8 +47,15 @@ type Status struct {
 }
 
 // DecliningTool is the tool that makes an event declining every meeting
-// it overlaps, and its flag.
+// it overlaps.
 const DecliningTool = "create_event_declining_all"
+
+// Declines reports whether an event type is one that declines meetings:
+// out of office or focus time, by the caller's word in any case.
+func Declines(eventType string) bool {
+	t := statusTypes[strings.ToLower(strings.TrimSpace(eventType))]
+	return t == gcal.EventTypeOutOfOffice || t == gcal.EventTypeFocusTime
+}
 
 // statusTypes are the types create_event makes, by the caller's word in
 // any case. Default is an ordinary event.
@@ -226,8 +233,9 @@ func statusPatch(before gcal.Event, p gcal.EventPatch) error {
 // focus-time event declining every meeting it overlaps over time it did
 // not before: moved, made longer, repeated more, or newly set to decline
 // all. Google may decline the meetings in that time, the accepted ones
-// too, so the person is asked (§9a). A write that only shrinks the time
-// asks nothing. A change this cannot show to shrink counts as more.
+// too, and the result says so. Whether such a write is refused waits on
+// the live probe of §18 row 102. A write that only shrinks the time
+// counts as no more. A change this cannot show to shrink counts as more.
 func DeclinesMore(before, after gcal.Event) bool {
 	switch {
 	case !declinesAll(after):
@@ -352,10 +360,12 @@ func (s Status) away(e *gcal.Event, kind, what string) error {
 			"not to %s", ErrInvalid, what)
 	}
 	if strings.TrimSpace(s.AutoDecline) == "" {
+		// all is not offered: here it is refused, and naming it would
+		// send a caller to a second refusal.
 		return fmt.Errorf("%w: auto_decline is required for %s, and there is no default. none declines "+
-			"nothing; new declines invitations that arrive for this time while it stands; all also declines "+
-			"the meetings you already accepted. Each organizer sees the decline",
-			ErrInvalid, what)
+			"nothing; new declines invitations that arrive for this time while it stands, and each organizer "+
+			"sees the decline. Declining the meetings you already accepted as well is %s",
+			ErrInvalid, what, DecliningTool)
 	}
 	mode, ok := model.AutoDeclineWords.Wire(strings.TrimSpace(s.AutoDecline))
 	if !ok {

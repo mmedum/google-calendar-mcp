@@ -14,17 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Breaking:** `delete_calendar` and `clear_calendar` carry Claude Code's `requiresUserInteraction` for every client, so Claude Code prompts on every call whatever your rules say, and refuses them where it cannot prompt, as with `-p`. 3.1.0 told you to put both on the allow list; that no longer skips the prompt.
 
 - **Breaking:** `create_event` refuses `auto_decline: all`, `[blocked]`, naming `create_event_declining_all`. `none` and `new` are unchanged.
-- **Breaking:** `share_calendar` takes only named people and groups inside your organization, below owner. An address is inside when its domain is your account's own, and a personal Google account has no organization, so every address is outside it. The public, a whole domain, an address outside and the owner role are refused, `[blocked]`, naming the tool that takes them. Its `allow_public` input is gone.
+- **Breaking:** `share_calendar` takes only named people and groups inside your organization, below owner. An address is inside when its domain is your account's own, and a personal Google account has no organization, so every address is outside it. The public, a whole domain, an address outside and the owner role are refused, `[blocked]`, naming the tool that takes them, except that lowering the role of a rule the calendar already has is made whoever it reaches. Its `allow_public` input is gone.
 
 ### Added
 
-- `publish_calendar` publishes a calendar to "anyone" or opens it to everybody in a domain, or changes the access such a rule gives. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, needs `confirm: true` on the call, and Claude Code prompts on every call to it.
+- `publish_calendar` publishes a calendar to "anyone" or opens it to everybody in a domain, or changes the access such a rule gives, never as owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, needs `confirm: true` on the call, and Claude Code prompts on every call to it.
 - `widen_calendar_access` shares a calendar with a person or a group outside your organization, or makes somebody an owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, and needs `confirm: true` on the call.
 - `create_event_declining_all` makes an out-of-office or focus-time event on your primary calendar that declines every meeting it overlaps, the ones you already accepted included. It is registered only with the new `GCAL_ENABLE_DECLINE_ALL=true`, off by default.
 
 ### Removed
 
-- **Breaking:** `GCAL_REQUIRE_PROMPT` and `-require-prompt`. Set to anything but off, the server now refuses to start, since ignoring it would allow what it was set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` off for a client that runs with nobody watching.
+- **Breaking:** `GCAL_REQUIRE_PROMPT` and `-require-prompt`. Set to anything but off, the server now refuses to start, since ignoring it would allow what it was set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` and `GCAL_ENABLE_DECLINE_ALL` off for a client that runs with nobody watching.
 
 ## [3.1.0] - 2026-10-09
 

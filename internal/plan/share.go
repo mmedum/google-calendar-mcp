@@ -232,6 +232,28 @@ func OrdinaryRole(role string) error {
 		gatedTool(WidenTool))
 }
 
+// Narrows reports whether a share only lowers the role of a rule the
+// calendar already has. That takes nothing new past where the rule
+// already reaches, so share_calendar makes it whatever the rule's reach:
+// lowering exposure needs neither the destructive flag nor confirm.
+func Narrows(existing []model.Sharing, a Audience, role string) bool {
+	rule, had := FindRule(existing, a)
+	return had && role != rule.Role && gcal.AtLeast(rule.Role, role)
+}
+
+// PublicRole refuses owner on a public or a domain rule. Everybody in a
+// domain, or the internet, able to change who else can see the calendar
+// and to remove its owner is not a share this server makes; an owner is a
+// named person, through widen_calendar_access.
+func PublicRole(role string) error {
+	if role != gcal.RoleOwner {
+		return nil
+	}
+	return fmt.Errorf("%w: owner access lets whoever holds it change who else can see the calendar and remove "+
+		"you, and publish_calendar does not give it to a domain or to anyone. Pass freeBusyReader, reader, "+
+		"writerWithoutPrivateAccess or writer; an owner is one named person, through %s", ErrInvalid, WidenTool)
+}
+
 // ParsePublic reads publish_calendar's `who`: "anyone" for the public,
 // or a domain for everybody in it. A domain needs no scope_type here,
 // because nothing else this tool takes looks like one.

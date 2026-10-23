@@ -44,7 +44,11 @@ const instructions = "Google Calendar tools. This server answers *when*: calenda
 	"search found nothing, not that nothing exists — fall back to list_events when you need certainty. " +
 	"Never answer \"are they free\" from a list of events: events you cannot see the details of are still busy, " +
 	"and an event marked free is not. That is what check_availability is for, and it reports a calendar it could " +
-	"not read as unknown rather than as free."
+	"not read as unknown rather than as free. " +
+	"share_calendar shares with people and groups inside your organization. Publishing a calendar, sharing it " +
+	"outside the organization or with a new owner, and an out-of-office or focus-time event that declines every " +
+	"meeting it overlaps are tools of their own, present only when the person running this server turned them on; " +
+	"a refusal names the tool."
 
 // Deps are what the server needs.
 type Deps struct {

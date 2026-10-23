@@ -116,6 +116,9 @@ func undeclaredBreaks(breaking []string, changelog string) []string {
 	var out []string
 	for _, b := range breaking {
 		subject, _, _ := strings.Cut(b, ": ")
+		// A resource removed is keyed "resource <uri>"; an entry names
+		// the URI.
+		subject = strings.TrimPrefix(subject, resourcePrefix)
 		if !named[subject] {
 			out = append(out, b)
 		}
