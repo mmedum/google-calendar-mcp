@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **Breaking:** `create_event` refuses `auto_decline: all`, `[blocked]`, naming `create_event_declining_all`. `none` and `new` are unchanged.
 - **Breaking:** `share_calendar` takes only named people and groups inside your organization, below owner. An address is inside when its domain is your account's own, and a personal Google account has no organization, so every address is outside it. The public, a whole domain, an address outside and the owner role are refused, `[blocked]`, naming the tool that takes them, except that keeping or lowering the role of a rule the calendar already has is made whoever it reaches. Its `allow_public` input is gone.
+- `share_calendar` says what a group rule reaches, in its description and in every group share's result: everyone in the group, including people added later, and a member outside the organization too if the organization's sharing policy lets them in.
 
 ### Added
 

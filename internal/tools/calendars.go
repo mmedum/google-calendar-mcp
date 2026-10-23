@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/mmedum/google-calendar-mcp/v4/internal/plan"
 	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
 )
 
@@ -107,7 +108,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"access they have, below owner. " +
 			"`who` is an email address or a group address. It is read as one person unless this calendar " +
 			"already has a rule for it — pass `scope_type` to be sure, because a group address and a person's " +
-			"look identical. " +
+			"look identical. " + plan.GroupReach + " " +
 			"`role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. The " +
 			"result explains the one it set. Keeping or lowering the role of a rule the calendar already has " +
 			"is made here whoever the rule reaches, since it widens nothing. " +

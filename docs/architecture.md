@@ -285,7 +285,7 @@ preamble says to expect.
 document** (`www.googleapis.com/discovery/v1/apis/calendar/v3/rest`,
 revision 20260826, fetched 2026-09-15 and refetched unchanged
 2026-09-16), the Calendar guides, and the public MCP calendar servers
-named in §1. §18 is the evidence log, 107 rows. More than a third of them
+named in §1. §18 is the evidence log, 108 rows. More than a third of them
 refute an assumption this design started out holding; phase 3 added four
 before it wrote any code, one of which removed a parameter rather than
 adding one; and one reversed the single most consequential decision in
@@ -1216,6 +1216,19 @@ identical.
     the wider tools, and `unshare_calendar` removes any rule. Each wider
     tool refuses what another takes with `[invalid]`, and
     `publish_calendar` never grants owner.
+- **A group reaches its members, later ones included** (decided
+  2026-10-23, §18 row 108). A group whose address is inside the
+  organization is `share_calendar`'s, as the standard's "named people
+  and groups inside the organization" puts it, but its members need not
+  be. Google's help says access follows membership both ways, later
+  members included, and that an outside member gets in unless the
+  administrator prohibits external sharing. This server does not read a
+  group's members or settings before it shares, so the description and
+  every group share's result say what the rule reaches: everyone in the
+  group, including people added later; a member outside the
+  organization too, if the organization's sharing policy lets them in
+  (`plan.GroupReach`). Whether this server's scopes can see that a group
+  admits outside members is §17 item 7, probe T.
 - **Inside the organization** is the account's own domain, read from
   the primary calendar's id. A personal Google account has no
   organization, so every address is outside it; so is every address when
@@ -2073,6 +2086,18 @@ states its question and its verdict separately.
   event from a calendar shared with nobody into one shared more widely
   and read it as the wider reader, to settle §17 item 6's third
   refusal and what "wider" compares. **Not run.**
+- **Probe T — can this server see that a group admits outside
+  members?** The scopes it requests are Calendar's alone, so the Groups
+  Settings, Directory and Cloud Identity APIs, which hold a group's
+  policy, are out of reach. The candidate read is `freebusy.query`'s
+  group expansion, which lists member calendar ids (§18 row 87): with a
+  scratch group holding one member outside the organization, does the
+  expansion name that member, and one added after the share? Also
+  whether the organization's external sharing level caps what that
+  member sees of a calendar shared with the group, which the help
+  pages do not say. Like the group probe, it runs outside the driver
+  and prints counts only. It decides §17 item 7, and needs a group and
+  an outside account, so the owner's approval first. **Not run.**
 
 ## 16. Delivery phases
 
@@ -2926,7 +2951,7 @@ title that is not the one this account reads,
 `widen_calendar_access` to the probe address and back, a domain dry run,
 and one public free/busy rule removed by the next step), both decline-all
 refusals on the scratch calendar, and a run with no question put; then
-probes Q to S, each needing the owner's approval for what it touches.
+probes Q to T, each needing the owner's approval for what it touches.
 
 ### 16a. Found by review, and fixed
 
@@ -3307,6 +3332,15 @@ Written down, not changed:
    - `move_event` into a calendar shared more widely than the one it
      leaves: refused when the destination's readable rules are wider,
      and the result says when they cannot be read.
+7. **A group that admits outside members** (opened 2026-10-23). A group
+   whose address is inside the organization is `share_calendar`'s, and
+   the result says a member outside the organization gets in if the
+   organization's sharing policy lets them (§7.6). If anything this
+   server's scopes read shows that a group admits outside members,
+   such a group is refused `[blocked]` by `share_calendar` and routed to
+   `widen_calendar_access`. Probe T asks whether anything does. Until
+   then the note is the whole of it, and a group read as one person,
+   with no `scope_type`, carries no note either.
 
 ## 18. Evidence log: conventions checked, changed, or rejected
 
@@ -3430,6 +3464,7 @@ what §15 exists to settle, and they are marked.
 | 105 | Claude Code's `requiresUserInteraction` belongs on every destructive tool, or only for a client the server cannot ask | Tier 2, from the family standard's §3, 2026-10-23: Claude Code's documentation (the mark is for "tools whose permission prompt is itself the point"; from v2.1.199 it prompts on every call in every interactive mode, and denies the call where no prompt can be drawn); no other client reads it | **Refined.** It goes where the prompt is the point and the call is never made many times in a row: an unrecoverable delete of a whole container, a permanent delete past a trash, and a public or domain-wide share. Here that is `delete_calendar` and `clear_calendar`, for every client: the first removes a calendar and every event on it, the second every event on the primary calendar, and Calendar keeps neither (§9). And `publish_calendar`, the public or domain-wide share (row 106); `widen_calendar_access` is not marked, since a share outside can be one of many in a row. `cancel_event` stays unmarked: Google keeps a canceled event, and canceling is done many times in a row (§9a) |
 | 106 | A public, domain-wide, outside or owner share may be an argument of the ordinary share, as `allow_public: true` and `role: owner` were | Tier 2, from the family standard's §3, 2026-10-23: claude.ai, Codex, VS Code and Copilot remember "always allow" per tool, never per argument value, and Claude Code matches an MCP argument only in a command-line deny rule; first-party servers with no sharing tool (Notion, Slack, Canva, Figma, Asana, Airtable), Box's sharing tools off until an admin enables them | **Refuted.** An always-allowed `share_calendar` carried every wider share unseen, and `allow_public` was a refusal the model lifted itself. Sharing is three tools now: `share_calendar` inside the organization below owner, and `publish_calendar` and `widen_calendar_access` behind the destructive flag with `confirm` (§7.6). Inside is the account's own domain; a personal account has none, so every address is outside it |
 | 107 | `auto_decline: all` may be a value of `create_event`'s argument, guarded by a question or by typing it | Tier 2, from the family standard's §3, 2026-10-23 ("Every risky variant is its own tool, never an argument, and a coarse registration flag decides whether that tool exists"); Calendar discovery revision 20261005, `autoDeclineMode` `declineAllConflictingInvitations`, "all conflicting meeting invitations that conflict with the event are declined" | **Refuted.** An always-allowed `create_event` declined every accepted meeting in the window unseen, each organizer told, and the only guard beyond typing `all` was the question. `create_event` refuses it now, before it checks the calendar, and `create_event_declining_all` makes it behind `GCAL_ENABLE_DECLINE_ALL`, a flag of its own so that turning it on arms nothing else (§7.4, §9). A change that widens such an event, and a split of one, are row 102's |
+| 108 | A group whose address is inside the organization reaches only people inside it | Google's help pages, read 2026-10-23, prose rather than evidence (CLAUDE.md rule 13), which probe T is to settle: "If external sharing is prohibited, only group members who are in your organization can access the group's shared content" and "If you remove members from a group, they lose access to content shared with the group" (support.google.com/a/users/answer/167101); "New group members get email notifications about the calendars they can access" (knowledge.workspace.google.com/admin/calendar/create-and-share-a-group-calendar); "Group owners can add members outside of your organization to their groups" (knowledge.workspace.google.com/admin/groups/set-organization-wide-policies-for-using-groups); an address in the organization's own domain can still be an external member (support.google.com/groups/answer/10394258) | **Refuted on Google's word, unproven live.** Access follows membership, later members included, and an outside member gets in unless the administrator prohibits external sharing. Whether the external sharing level caps such a member is not said. `share_calendar` keeps groups and says what a group rule reaches (§7.6); probe T asks whether this server can see an outside member (§17 item 7) |
 
 ### Deviations from the shared Go MCP server standard
 

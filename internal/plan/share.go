@@ -180,6 +180,13 @@ func gatedTool(name string) string {
 // no organization.
 var consumerDomains = map[string]bool{"gmail.com": true, "googlemail.com": true}
 
+// GroupReach is what a group rule reaches, said on every group share and
+// in share_calendar's description. Google's own help says access follows
+// membership, later members included, and that a member outside the
+// organization gets in unless its sharing policy forbids it (§7.6).
+const GroupReach = "A group rule reaches everyone in the group, including people added later; a member " +
+	"outside the organization too, if the organization's sharing policy lets them in."
+
 // Outside reports whether a person's or a group's address is outside the
 // organization of account, the signed-in account's own address. The
 // organization is taken as the account's domain. A personal account has

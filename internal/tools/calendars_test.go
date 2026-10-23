@@ -139,7 +139,8 @@ func TestTheCalendarToolsTeachTheirOwnTraps(t *testing.T) {
 		}
 	}
 	share := got["share_calendar"].Description
-	for _, want := range []string{"notify", "publish_calendar", "widen_calendar_access", "scope_type", "dry_run"} {
+	for _, want := range []string{"notify", "publish_calendar", "widen_calendar_access", "scope_type", "dry_run",
+		"including people added later"} {
 		if !strings.Contains(share, want) {
 			t.Fatalf("share_calendar does not explain %q:\n%s", want, share)
 		}

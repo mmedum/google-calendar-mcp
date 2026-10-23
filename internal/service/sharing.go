@@ -378,6 +378,11 @@ func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.
 		CalendarID: cal.ID, Title: cal.Title, Before: before,
 		Notify: plan.ShareReport(plan.ShareGranted, notify, audience), Notes: notes,
 	}
+	if audience.Scope.Type == gcal.ScopeTypeGroup {
+		// This server does not read a group's members or settings, so
+		// the rule's reach is said rather than counted (§7.6, §17 item 7).
+		report.Notes = append(report.Notes, plan.GroupReach)
+	}
 	if audience.Source != plan.SourceGiven && audience.Source != plan.SourcePublic {
 		report.Notes = append(report.Notes, "Read as "+gcal.ScopeMeans(audience.Scope.Type)+
 			" — the scope type was "+string(audience.Source)+

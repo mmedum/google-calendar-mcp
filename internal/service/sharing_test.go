@@ -149,6 +149,40 @@ func TestShareCalendarRefusesExternalOnly(t *testing.T) {
 	}
 }
 
+// A group rule reaches whoever is in the group, now and later, outside
+// members included where the organization lets them in, and this server
+// does not read the membership. The result says so on every group share,
+// a dry run included.
+func TestAGroupShareSaysWhoItReaches(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		svc, _ := calendarSeed(t)
+		got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+			Calendar: "team@group.calendar.example.test", Who: "planners@example.test", ScopeType: "group",
+			Role: "reader", Notify: "none", DryRun: dryRun,
+		})
+		if err != nil {
+			t.Fatalf("dry run %v: %v", dryRun, err)
+		}
+		const want = "A group rule reaches everyone in the group, including people added later; a member " +
+			"outside the organization too, if the organization's sharing policy lets them in."
+		if !strings.Contains(got.Text(), want) {
+			t.Fatalf("dry run %v: the result does not say what a group rule reaches:\n%s", dryRun, got.Text())
+		}
+	}
+	// A person's share does not carry it.
+	svc, _ := calendarSeed(t)
+	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+		Calendar: "team@group.calendar.example.test", Who: "colleague@example.test", ScopeType: "user",
+		Role: "reader", Notify: "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.Text(), "A group rule reaches") {
+		t.Fatalf("a person's share carries the group note:\n%s", got.Text())
+	}
+}
+
 // share_calendar takes named people and groups inside the organization,
 // below owner (§7.6). Everything wider is refused before anything is
 // written, naming the tool that takes it, and an audience before the
