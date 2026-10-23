@@ -75,9 +75,16 @@ What it does to the account, so nothing is a surprise:
   `create_calendar` and remove it through `delete_calendar`, which costs
   one creation per run and is the only way to drive those two tools at
   all. The driver starts the server with `GCAL_ENABLE_DESTRUCTIVE=true`
-  for them; every step that could reach a destructive tool names a
-  calendar the driver created, and a step whose calendar was never
-  created is skipped rather than called.
+  for them and for the two wider shares; every step that could reach one
+  names a calendar the driver created, and a step whose calendar was
+  never created is skipped rather than called. That calendar is
+  published to anyone, free/busy only, for one step, and the next
+  removes the rule. It holds only events the driver invented.
+- The driver also sets `GCAL_ENABLE_DECLINE_ALL=true`, and calls
+  `create_event_declining_all` only on its scratch calendar, where it is
+  refused; the guard below keeps it off the primary calendar.
+- The driver declares form elicitation, and a step during which the
+  server asks the person fails: the server asks nobody.
 - **Nothing reaches another person unless you ask for it.** Every event
   the driver writes has no guests but the account itself, and the one
   address it shares a calendar with is in `example.test`, which cannot

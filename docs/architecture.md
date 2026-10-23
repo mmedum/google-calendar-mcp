@@ -3,8 +3,12 @@
 **Status: v3.1.0 (2026-10-09), released and verified from outside:** checksums,
 the cosign signature and the provenance attestation, each also against a tampered
 copy, the version in the binary, the registry publish, and the README's
-`go install` resolving `@latest` to v3.1.0. Still unproven: the `cancel_event`
-question against a real guest, which is tested offline only.
+`go install` resolving `@latest` to v3.1.0.
+
+**4.0.0 is built and unreleased (2026-10-23), and unproven live:** the
+server asks nobody, sharing is three tools by reach, and declining every
+meeting is a tool of its own (§16, phase 9). Three refusals wait on
+probes (§17 item 6).
 
 **Phase 8, released as 3.1.0, ran live on 2026-10-09 five times:** once per
 status type, once more after the fixes those three led to, and once with a
@@ -27,9 +31,10 @@ and committed. Phase 5 is the release those four had nowhere to ship in:
 `.goreleaser.yaml`, `.github/workflows/release.yml`, the `release` gate
 that holds one against the other, and `gates release-notes`. Phase 6 is
 `list_changes` and §17.1, the last open decision, now closed. The surface
-is **twenty-one tools and three resources**; `make check`
-is green across **twenty-two** targets; the live driver's last run was 131
-steps against a real account, none failing and seven undetermined.
+is **twenty-four tools and three resources**, twenty-one in 3.1.0;
+`make check` is green across **twenty-two** targets; the live driver's
+last run, on 3.1.0, was 131 steps against a real account, none failing
+and seven undetermined.
 
 **v1.0.0 ran, and was verified from outside rather than trusted.**
 `sha256sum -c` on the archives and the bundle, `cosign verify-blob`
@@ -2037,6 +2042,22 @@ states its question and its verdict separately.
   its members: not unknown, marked as a group, 13 members, one request,
   and its busy time merged (§18 row 87). A group past 50 calendars is
   still unexercised (row 100).
+- **Probe Q — does a status event declining all decline again when it
+  grows?** Move or lengthen an out-of-office event that declines all,
+  and split a series of one, over a meeting another organizer sent and
+  the account accepted, then read the meeting's response. It decides
+  §17 item 6's first refusal (§18 row 102). It needs another
+  organizer's meeting on the primary calendar and a status event that
+  declines it, which §9.1's one exception does not allow, so it needs
+  the owner's approval first. **Not run.**
+- **Probe R — who sees a public event's details?** On a calendar shared
+  free/busy only, make an event `visibility: public` and read the
+  calendar as a free/busy reader. If the details show, §17 item 6's
+  second refusal is made. **Not run.**
+- **Probe S — what a move into a wider calendar exposes.** Move an
+  event from a calendar shared with nobody into one shared more widely
+  and read it as the wider reader, to settle §17 item 6's third
+  refusal and what "wider" compares. **Not run.**
 
 ## 16. Delivery phases
 
@@ -2860,6 +2881,37 @@ working location (row 99); and a stop part way through, which no run has
 made since the driver's fix. Rooms, a split of a status series and a move
 of one that declines all stay unproven: the driver can make none of them.
 
+**Phase 9 — the client decides (4.0.0). Built 2026-10-23, unreleased,
+not yet run live.** The family standard's §3 was rewritten on
+2026-10-22, and the maintainer approved this port on 2026-10-23. Four
+commits:
+
+- The server asks nobody (§9a). The question, its signed state, its
+  middleware and `GCAL_REQUIRE_PROMPT` are gone; the setting turned on
+  refuses to start. `delete_calendar` and `clear_calendar` carry the
+  mark for every client. The tools tests and the live driver declare
+  elicitation and fail on any question, and a test holds that no tool
+  changes the operator's settings.
+- Sharing is three tools by reach (§7.6): `share_calendar` inside the
+  organization below owner, and `publish_calendar`, marked, and
+  `widen_calendar_access` behind the destructive flag with `confirm`.
+  `allow_public` is gone.
+- `auto_decline: all` is `create_event_declining_all`, behind
+  `GCAL_ENABLE_DECLINE_ALL` (§7.4).
+- The module path is `/v4`.
+
+The schema diff accepts a break that a **Breaking:** entry under
+[Unreleased] names; the staleness gate holds the README's Claude Code
+permission rules to the published tools and lets the docs name a
+removed setting. Three refusals wait on probes Q to S (§17 item 6).
+
+**Owed before release:** a live run, its transcript read, driving the
+new sharing steps on the probe calendar (the refusals,
+`widen_calendar_access` to the probe address and back, a domain dry run,
+and one public free/busy rule removed by the next step), both decline-all
+refusals on the scratch calendar, and a run with no question put; then
+probes Q to S, each needing the owner's approval for what it touches.
+
 ### 16a. Found by review, and fixed
 
 Five defects the phase 1 review turned up in code phases 0 and 1 had
@@ -3134,6 +3186,25 @@ row 80).
    rather than inventing a number, and no spike is run to find it — one
    would mean putting several hundred invented addresses on a real
    event. **Decided.**
+6. **Three refusals that wait on a probe** (decided 2026-10-23). The
+   family standard's §3 refuses a write that widens who is reached
+   unless a tool of its own makes it. Three writes here may widen, and
+   whether they do is Google's behavior, not yet seen (§15, probes Q to
+   S). Until a probe answers, each goes through as it did, saying what
+   the documentation says, and nothing asks.
+   - `update_event` that makes an out-of-office or focus-time event
+     declining all cover more time, and a `this_and_following` split of
+     such a series (§18 row 102). If Google declines in the new time,
+     both are refused `[blocked]`, naming `create_event_declining_all`.
+     If it does not, they stay ordinary.
+   - `visibility: public` on `create_event` and `update_event`. Google's
+     help says a public event's details show to everybody who can see
+     the calendar, free/busy readers included. If a probe confirms it,
+     `public` is refused on a calendar whose rules include a public or
+     domain rule, which an owned calendar's rules show.
+   - `move_event` into a calendar shared more widely than the one it
+     leaves: refused when the destination's readable rules are wider,
+     and the result says when they cannot be read.
 
 ## 18. Evidence log: conventions checked, changed, or rejected
 
