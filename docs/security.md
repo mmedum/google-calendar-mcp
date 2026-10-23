@@ -47,7 +47,10 @@ by construction rather than by your vigilance.
   the protocol, and `forbidigo` enforces it outside `main`.
 - **Destructive tools are unregistered** unless
   `GCAL_ENABLE_DESTRUCTIVE=true`, and each still needs `confirm` on the
-  call. Tool annotations are a hint a client may ignore — a host in an
+  call. So are the two that widen who can see a calendar: publishing it
+  to the internet or a domain, and sharing it outside the organization or
+  with a new owner. `share_calendar`, registered by default, takes only
+  named people and groups inside the organization. Tool annotations are a hint a client may ignore — a host in an
   auto-approve mode runs an annotated tool without asking anybody — so
   the real gate is that the tool is not registered at all.
 - **Read-only mode requests read-only scopes**, so a write is refused by
@@ -55,9 +58,9 @@ by construction rather than by your vigilance.
 - **It asks the person nothing.** Your client approves each call. What
   holds on every client is in the server: the registration flags,
   `confirm` on the deletes, the required `notify` and `scope`, the etag a
-  write is made under, and `dry_run`. `delete_calendar` and
-  `clear_calendar` carry Claude Code's `requiresUserInteraction`, which
-  makes Claude Code prompt on every call; no other client reads it, so it
+  write is made under, and `dry_run`. `delete_calendar`,
+  `clear_calendar` and `publish_calendar` carry Claude Code's
+  `requiresUserInteraction`, which makes Claude Code prompt on every call; no other client reads it, so it
   is never the control.
 - **No tool changes the server's own settings.** The flags, the
   environment and the profile are the operator's, set outside the

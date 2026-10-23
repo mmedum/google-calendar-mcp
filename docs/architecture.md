@@ -280,7 +280,7 @@ preamble says to expect.
 document** (`www.googleapis.com/discovery/v1/apis/calendar/v3/rest`,
 revision 20260826, fetched 2026-09-15 and refetched unchanged
 2026-09-16), the Calendar guides, and the public MCP calendar servers
-named in §1. §18 is the evidence log, 105 rows. More than a third of them
+named in §1. §18 is the evidence log, 106 rows. More than a third of them
 refute an assumption this design started out holding; phase 3 added four
 before it wrote any code, one of which removed a parameter rather than
 adding one; and one reversed the single most consequential decision in
@@ -1168,9 +1168,36 @@ passing on a sentence about data ownership (§18 row 55).
 
 ### 7.6 Sharing
 
-`list_sharing`, `share_calendar`, `unshare_calendar` over the ACL
-resource, following the sibling Drive server's sharing rules because the
-hazard is identical.
+`list_sharing`, `share_calendar`, `publish_calendar`,
+`widen_calendar_access` and `unshare_calendar` over the ACL resource,
+following the sibling Drive server's sharing rules because the hazard is
+identical.
+
+- **One act, three tools, by how far it reaches** (decided 2026-10-23,
+  §18 row 106). A client remembers an approval per tool, never per
+  argument, so a wider share carried as an argument rode along unseen
+  once `share_calendar` was always allowed.
+  - `share_calendar` takes named people and groups inside the
+    organization, below owner. It is registered with sharing on.
+  - `publish_calendar` takes "anyone" or a domain, with no `scope_type`:
+    a domain is the only thing it takes without an @. It carries the mark
+    (§9a).
+  - `widen_calendar_access` takes a person or a group outside the
+    organization, at any role, and an owner anywhere.
+  - The two wider tools register only with sharing on and
+    `GCAL_ENABLE_DESTRUCTIVE=true`, need `confirm: true` on the call
+    (a dry run needs none), and are annotated destructive.
+  - `share_calendar` refuses a wider share with `[blocked]`, naming the
+    tool that takes it and its flag, before it asks anything else of the
+    call. A changed role on an existing public, domain or outside rule
+    goes through the same tools, and `unshare_calendar` removes any rule.
+    Each wider tool refuses what another takes with `[invalid]`.
+- **Inside the organization** is the account's own domain, read from
+  the primary calendar's id. A personal Google account has no
+  organization, so every address is outside it; so is every address when
+  the account cannot be read, and a secondary domain of the same
+  organization. Each errs toward one refusal too many, never one share
+  too many, as the sibling Drive server does.
 
 - **Exposure is shown before and after.** A share result says who could
   see this calendar before and who can now.
@@ -1194,18 +1221,20 @@ hazard is identical.
   shape, so an existing rule is Google's own answer to a question the
   server would otherwise guess at. When it does guess, the result says
   it guessed.
-- **A public calendar needs an explicit flag.** `scope.type: default`
-  means "anyone", and it is the one ACL value that cannot be undone from
-  the other side. It requires `allow_public: true` on the call.
+- **A public calendar is its own tool.** `scope.type: default` means
+  "anyone", and it is the one ACL value that cannot be undone from the
+  other side. Until 3.1.0 it was `share_calendar` with
+  `allow_public: true`, an argument the model wrote; it is
+  `publish_calendar` now.
 - **Roles are explained, not echoed.** `writerWithoutPrivateAccess` and
   `freeBusyReader` are not self-explanatory; the renderer says what each
   can actually see.
-- **`GCAL_SHARING=off` removes the three tools**, as `GDRIVE_SHARING=off`
+- **`GCAL_SHARING=off` removes all five tools**, as `GDRIVE_SHARING=off`
   does in the sibling.
 
 ## 8. Tool surface
 
-Twenty-one tools. Read-only mode registers the first nine and requests
+Twenty-three tools. Read-only mode registers the first nine and requests
 only the read scopes (§10).
 
 | Tool | API methods | Notes |
@@ -1227,7 +1256,9 @@ only the read scopes (§10).
 | `create_calendar` | `calendars.insert` | |
 | `manage_calendar` | `calendars.patch`, `calendarList.insert/patch/delete` | three axes (§7.5) |
 | `list_sharing` | `acl.list` | |
-| `share_calendar` | `acl.insert`, `acl.patch` | `notify` required; public needs a flag |
+| `share_calendar` | `acl.insert`, `acl.patch` | people and groups inside the organization, below owner; `notify` required |
+| `publish_calendar` | `acl.insert`, `acl.patch` | **gated**, needs `confirm`; the public or a domain; marked (§9a) |
+| `widen_calendar_access` | `acl.insert`, `acl.patch` | **gated**, needs `confirm`; outside the organization, or an owner |
 | `unshare_calendar` | `acl.delete` | |
 | `delete_calendar` | `calendars.delete` | **gated**, needs `confirm` |
 | `clear_calendar` | `calendars.clear` | **gated**, needs `confirm` |
@@ -1418,7 +1449,9 @@ fails if any forbidden value appears in a log at any level.
 
 **Destructive tools are unregistered** unless
 `GCAL_ENABLE_DESTRUCTIVE=true`, and each still needs `confirm: true` on
-the call. The two behind it are `delete_calendar` and `clear_calendar`.
+the call. Behind it are `delete_calendar` and `clear_calendar`, and the
+two shares that widen access past the organization, `publish_calendar`
+and `widen_calendar_access` (§7.6), which also need sharing on.
 `clear_calendar` deserves a note: it deletes every event on the user's
 **primary** calendar and cannot be undone. It is the single most
 destructive call this API offers.
@@ -1460,33 +1493,40 @@ family standard's §3 (§14, §18 row 104):
 
 What stays is what holds on every client:
 
-1. **Registration.** `delete_calendar` and `clear_calendar` exist only
-   with `GCAL_ENABLE_DESTRUCTIVE=true` (§9), and the sharing tools only
-   with `GCAL_SHARING` on. A client that runs with nobody watching gets
-   none of what the operator left off.
-2. **`confirm: true`** on both deletes. It is a witness that the caller
-   meant this delete, never approval: the model writes it.
+1. **Registration.** `delete_calendar`, `clear_calendar`,
+   `publish_calendar` and `widen_calendar_access` exist only with
+   `GCAL_ENABLE_DESTRUCTIVE=true` (§9), and the sharing tools only with
+   `GCAL_SHARING` on. A client that runs with nobody watching gets none
+   of what the operator left off.
+2. **`confirm: true`** on the deletes and the two wider shares. It is a
+   witness that the caller meant this write, never approval: the model
+   writes it.
 3. **Guards and witnesses.** `notify` and `scope` are required (§4.2,
    §4.3); `notify: none` is refused with a guest outside the
    organization; every write is a patch under the etag of its read
    (§4.4); the primary calendar cannot be deleted and only it can be
-   cleared; a public share needs `allow_public: true` (§7.6).
+   cleared; `share_calendar` stops at the organization (§7.6).
 4. **`dry_run`** on every write.
 5. **Annotations.** `readOnlyHint` is on the read tools and
    `list_sharing` alone, so VS Code, which prompts on every tool without
    it, prompts on every write. `destructiveHint` is true on
-   `cancel_event`, `delete_calendar` and `clear_calendar`, so a client
+   `cancel_event`, the two wider shares and the two deletes, so a client
    that prompts by it, as claude.ai and Codex do, prompts for them.
-6. **The mark.** `delete_calendar` and `clear_calendar` carry Claude
-   Code's `anthropic/requiresUserInteraction` for every client: each
-   removes a whole calendar's events, which Calendar cannot bring back,
-   and neither is done many times in a row (§18 row 105). Claude Code
+6. **The mark.** `delete_calendar`, `clear_calendar` and
+   `publish_calendar` carry Claude Code's
+   `anthropic/requiresUserInteraction` for every client. The first two
+   remove a whole calendar's events, which Calendar cannot bring back,
+   and the third opens a calendar to the internet or a domain, which
+   removing the rule cannot take back; none is done many times in a row
+   (§18 row 105). `widen_calendar_access` is not marked: a share outside
+   can be one of many in a row, and the mark there would bring back a
+   prompt nobody reads. Claude Code
    then prompts on every call whatever the operator's rules say, and
    refuses the call where no prompt can be drawn (`-p`, dontAsk). No
    other client reads it, so the flag stays the control. Until 3.1.0 the
    mark was dropped for a client that declared elicitation, so the
    person answered the server's question instead. `add` refuses the mark
-   on any tool that is not Destructive. For every other tool the
+   on any tool that is neither Destructive nor WideSharing. For every other tool the
    operator decides in Claude Code with `permissions.allow` and `ask`;
    the README gives `ask` rules for the writes that share, cancel, move
    or delete, and the staleness gate holds each name there to the
@@ -1505,7 +1545,8 @@ nobody watching.
 Held by tests: every client in the tools tests declares form
 elicitation and fails the test on any question, and the live driver
 declares it too and fails the step a question arrives in. The marked set
-is derived from `tools/list` and held to the two deletes. A test calls
+is derived from `tools/list` and held to the two deletes and
+`publish_calendar`. A test calls
 every registered tool and holds that none changes the environment or the
 profile directory, the operator's settings (the standard's §3: the model
 never widens its own reach).
@@ -1718,6 +1759,11 @@ Not to be reopened without a reason written into §18.
     `GCAL_REQUIRE_PROMPT` is refused at start. `delete_calendar` and
     `clear_calendar` carry `requiresUserInteraction` for every client
     (§9a, decided 2026-10-23).
+12. Sharing is three tools by reach: `share_calendar` inside the
+    organization below owner; `publish_calendar`, marked, for the public
+    or a domain; `widen_calendar_access` for outside and owners. The two
+    wider ones need the destructive flag and `confirm` (§7.6, decided
+    2026-10-23).
 
 ## 15. What must be verified live
 
@@ -3185,7 +3231,8 @@ what §15 exists to settle, and they are marked.
 | 102 | A change to an out-of-office or focus-time event that declines all declines nothing new, so only a create asks | Calendar discovery revision 20261005, read 2026-10-09: `autoDeclineMode` `declineAllConflictingInvitations`, "meaning that all conflicting meeting invitations that conflict with the event are declined", with nothing on when; `Event.start` "For a recurring event, this is the start time of the first instance". The status-events and recurring-events guides, read 2026-10-09, say nothing about an update to either | **Not settled; treated as refuted until a probe.** A move, a later end or more occurrences put meetings inside the event that were outside it, and the reference does not say they are spared. `update_event` says in its result, a dry run included, that Google may decline the meetings in time such a change adds, at any scope; a change that only shrinks the time says nothing of it (§7.4). From 3.0.0 to 3.1.0 it asked the person first. On 2026-10-23 the maintainer decided that a probe settles whether such a change is refused: refused `[blocked]` if Google declines in the new time, let through if it does not (§9a). The time is read from the rule, so a canceled occurrence of a series counts as covered: whether a change to the whole series brings one back is not probed either. One occurrence is judged by the details it carries when read on its own, which Google is believed to copy from its series; one read without them counts as declining nothing. No tool changes `auto_decline` on an existing event, so a switch to `all` has no path yet; the check counts one as more. **Not yet probed live, tier 3**, and the driver cannot: its one status event declines nothing, and the probe needs another organizer's meeting on the primary calendar |
 | 103 | A 412 under the etag of this server's own read means somebody else changed the event, so it is `[stale]` | **Live, 2026-10-09**, three passes of the driver: in passes 2 and 3, `move_event back` — the driver's own event, with no guests, moved straight back from the calendar the step before had moved it to, with no `etag` from the caller — read the event and was refused with 412 under that read's etag. Pass 1 moved it back. Nothing else wrote to either scratch calendar | **Refuted: Google changes a just-moved event by itself, moments after the move.** What it changes is not known. An event write made without the caller's `etag` — update, the split's truncate, cancel, move and respond — now reads the event again after a 412, plans the write again and makes it once more, if the new plan makes the same changes, reaches the same guests and asks the person the same question. The result says so. Otherwise, and after a second 412, it is `[stale]`. A caller's `etag` stays strict, because it names the version they decided on. The calendar and sharing writes keep the plain rule: no such change has been seen there. The fake changes an event once after a read, on request. **Seen live on 2026-10-09:** the second try landed (step `move_event back`). Two runs followed the fix, and Google changed the event in one of them. The driver's move back says which try it took |
 | 104 | A server should confirm a write with the person itself, through MCP form elicitation, before the writes that cannot be taken back | Tier 2, from the family standard's §3 and its evidence, every quote re-read at its source on 2026-10-23: the MCP specification, `server/tools` at 2025-06-18, 2025-11-25 and 2026-07-28 (clients "SHOULD … prompt for user confirmation on sensitive operations") and `client/elicitation` (no consent rule); the 110 most used MCP servers, among them github/github-mcp-server (`delete_repository` asks, with no switch to skip it), awslabs/mcp (the Redshift server asks before every statement it cannot read as a read) and microsoft/mcp (about 145 destructive or secret commands ask); Claude Code's documentation of the `Elicitation` hook ("no dialog") and open reports of the question not drawn, hung or cut to three lines; a Codex change that accepts a form with no fields under full access | **Refuted.** The specification gives per-call approval to the client and never makes elicitation consent. 83 of the 91 servers with risky writes ask nothing; the 8 that ask pick their own scope. A client may answer, decline, hang or cut the question with nobody looking, and no client's permission rules match it. So the server asks nobody; registration, `confirm`, the guards, the witnesses and `dry_run` stay (§9a). Rows 78 to 81 and 83 describe the question this replaces |
-| 105 | Claude Code's `requiresUserInteraction` belongs on every destructive tool, or only for a client the server cannot ask | Tier 2, from the family standard's §3, 2026-10-23: Claude Code's documentation (the mark is for "tools whose permission prompt is itself the point"; from v2.1.199 it prompts on every call in every interactive mode, and denies the call where no prompt can be drawn); no other client reads it | **Refined.** It goes where the prompt is the point and the call is never made many times in a row: an unrecoverable delete of a whole container, a permanent delete past a trash, and a public or domain-wide share. Here that is `delete_calendar` and `clear_calendar`, for every client: the first removes a calendar and every event on it, the second every event on the primary calendar, and Calendar keeps neither (§9). `cancel_event` stays unmarked: Google keeps a canceled event, and canceling is done many times in a row (§9a) |
+| 105 | Claude Code's `requiresUserInteraction` belongs on every destructive tool, or only for a client the server cannot ask | Tier 2, from the family standard's §3, 2026-10-23: Claude Code's documentation (the mark is for "tools whose permission prompt is itself the point"; from v2.1.199 it prompts on every call in every interactive mode, and denies the call where no prompt can be drawn); no other client reads it | **Refined.** It goes where the prompt is the point and the call is never made many times in a row: an unrecoverable delete of a whole container, a permanent delete past a trash, and a public or domain-wide share. Here that is `delete_calendar` and `clear_calendar`, for every client: the first removes a calendar and every event on it, the second every event on the primary calendar, and Calendar keeps neither (§9). And `publish_calendar`, the public or domain-wide share (row 106); `widen_calendar_access` is not marked, since a share outside can be one of many in a row. `cancel_event` stays unmarked: Google keeps a canceled event, and canceling is done many times in a row (§9a) |
+| 106 | A public, domain-wide, outside or owner share may be an argument of the ordinary share, as `allow_public: true` and `role: owner` were | Tier 2, from the family standard's §3, 2026-10-23: claude.ai, Codex, VS Code and Copilot remember "always allow" per tool, never per argument value, and Claude Code matches an MCP argument only in a command-line deny rule; first-party servers with no sharing tool (Notion, Slack, Canva, Figma, Asana, Airtable), Box's sharing tools off until an admin enables them | **Refuted.** An always-allowed `share_calendar` carried every wider share unseen, and `allow_public` was a refusal the model lifted itself. Sharing is three tools now: `share_calendar` inside the organization below owner, and `publish_calendar` and `widen_calendar_access` behind the destructive flag with `confirm` (§7.6). Inside is the account's own domain; a personal account has none, so every address is outside it |
 
 ### Deviations from the shared Go MCP server standard
 

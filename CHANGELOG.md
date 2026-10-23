@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Breaking:** The server no longer asks you before a write. It asked before `delete_calendar`, `clear_calendar`, a `share_calendar` that published a calendar, opened it to a domain or made an owner, a `cancel_event` that emailed a guest, and a status event that declined every meeting it overlapped. Your client's own approval now decides each call: claude.ai and Codex prompt for the tools marked destructive, VS Code for every tool that writes, and in Claude Code you list the calls to approve under `permissions.ask`, as the README shows. What held before still holds: the destructive flag, `confirm: true` on the deletes, the required `notify` and `scope`, the etag a write is made under, and `dry_run`.
 - **Breaking:** `delete_calendar` and `clear_calendar` carry Claude Code's `requiresUserInteraction` for every client, so Claude Code prompts on every call whatever your rules say, and refuses them where it cannot prompt, as with `-p`. 3.1.0 told you to put both on the allow list; that no longer skips the prompt.
 
+- **Breaking:** `share_calendar` takes only named people and groups inside your organization, below owner. An address is inside when its domain is your account's own, and a personal Google account has no organization, so every address is outside it. The public, a whole domain, an address outside and the owner role are refused, `[blocked]`, naming the tool that takes them. Its `allow_public` input is gone.
+
+### Added
+
+- `publish_calendar` publishes a calendar to "anyone" or opens it to everybody in a domain, or changes the access such a rule gives. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, needs `confirm: true` on the call, and Claude Code prompts on every call to it.
+- `widen_calendar_access` shares a calendar with a person or a group outside your organization, or makes somebody an owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, and needs `confirm: true` on the call.
+
 ### Removed
 
 - **Breaking:** `GCAL_REQUIRE_PROMPT` and `-require-prompt`. Set to anything but off, the server now refuses to start, since ignoring it would allow what it was set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` off for a client that runs with nobody watching.

@@ -253,3 +253,29 @@ func TestBooleanSchemas(t *testing.T) {
 		}
 	}
 }
+
+// A break passes only when a **Breaking:** entry under [Unreleased]
+// names its tool in backticks: named elsewhere, or only under a release
+// already made, it is not declared.
+func TestUndeclaredBreaks(t *testing.T) {
+	breaking := []string{"share_calendar: input field allow_public removed", "old_tool"}
+	released := "\n## [3.1.0] - 2026-10-09\n\n- **Breaking:** `share_calendar` and `old_tool`.\n"
+	for _, c := range []struct {
+		name, changelog string
+		want            []string
+	}{
+		{"both declared", "## [Unreleased]\n\n- **Breaking:** `share_calendar` loses `allow_public`; `old_tool` is gone.\n" +
+			released, nil},
+		{"one not named", "## [Unreleased]\n\n- **Breaking:** `share_calendar` loses `allow_public`.\n" + released,
+			[]string{"old_tool"}},
+		{"named outside a Breaking entry", "## [Unreleased]\n\n- `share_calendar` and `old_tool` changed.\n" + released,
+			breaking},
+		{"declared only in a release made", "## [Unreleased]\n" + released, breaking},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := undeclaredBreaks(breaking, "# Changelog\n\n"+c.changelog); !slices.Equal(got, c.want) {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}

@@ -89,10 +89,11 @@ type Config struct {
 	LogFormat         LogFormat
 	ReadOnly          bool
 	EnableDestructive bool
-	// Sharing registers the three ACL tools. On by default; GCAL_SHARING=off
+	// Sharing registers the ACL tools. On by default; GCAL_SHARING=off
 	// removes them, as GDRIVE_SHARING=off does in the sibling Drive
 	// server. Sharing a calendar is the outward-facing half of this
-	// server and some deployments want it gone entirely.
+	// server and some deployments want it gone entirely. The two that
+	// widen access past the organization also need EnableDestructive.
 	Sharing          bool
 	MaxEvents        int
 	MaxCalendars     int
@@ -141,8 +142,8 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
 	def(&s.ReadOnly, "read-only", "READONLY", "false", "register only read tools and request read-only scopes")
-	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar and clear_calendar; each still needs confirm on the call")
-	def(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools: on, off")
+	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call")
+	def(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools, the wider ones with -enable-destructive: on, off")
 	def(&s.MaxEvents, "max-events", "MAX_EVENTS", strconv.Itoa(DefaultMaxEvents), "default event budget for a read")
 	def(&s.MaxCalendars, "max-calendars", "MAX_CALENDARS", strconv.Itoa(DefaultMaxCalendars), "how many calendars one call may fan out across")
 	def(&s.Concurrency, "concurrency", "CONCURRENCY", strconv.Itoa(DefaultConcurrency), "requests in flight during a fan-out")

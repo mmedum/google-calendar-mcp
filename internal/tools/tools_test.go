@@ -97,13 +97,17 @@ var writeTools = []string{
 // calendar and managing it register wherever a write does.
 var calendarTools = []string{"create_calendar", "manage_calendar"}
 
-// sharingTools is what GCAL_SHARING=off removes, the read among them
-// (§7.6).
+// sharingTools are the sharing tools registered by default, the read
+// among them (§7.6).
 var sharingTools = []string{"list_sharing", "share_calendar", "unshare_calendar"}
 
+// wideSharingTools widen access past the ordinary share. They need
+// GCAL_SHARING on and GCAL_ENABLE_DESTRUCTIVE set (§7.6).
+var wideSharingTools = []string{"publish_calendar", "widen_calendar_access"}
+
 // gatedTools need GCAL_ENABLE_DESTRUCTIVE to register at all, and
-// confirm:true on the call besides (§9).
-var gatedTools = []string{"delete_calendar", "clear_calendar"}
+// confirm:true on the call besides (§9, §7.6).
+var gatedTools = append([]string{"delete_calendar", "clear_calendar"}, wideSharingTools...)
 
 func TestTheDefaultSurfaceIsEverythingButTheGatedTools(t *testing.T) {
 	got := names(listTools(t, baseConfig()))
@@ -261,8 +265,14 @@ func TestEveryWriteToolDocumentsNotifyAndDryRun(t *testing.T) {
 // tools overlap, each description names the other and says when to
 // choose it.
 func TestOverlappingToolsPointAtEachOther(t *testing.T) {
-	got := names(listTools(t, baseConfig()))
+	got := names(listTools(t, tools.FullSurface(baseConfig())))
 	pairs := [][2]string{
+		{"share_calendar", "publish_calendar"},
+		{"share_calendar", "widen_calendar_access"},
+		{"publish_calendar", "share_calendar"},
+		{"publish_calendar", "widen_calendar_access"},
+		{"widen_calendar_access", "share_calendar"},
+		{"widen_calendar_access", "publish_calendar"},
 		{"list_events", "search_events"},
 		{"search_events", "list_events"},
 		{"list_calendars", "get_calendar"},
@@ -430,6 +440,12 @@ func TestGatesAreServerSide(t *testing.T) {
 		{tools.Sharing, false, false, false, false},
 		{tools.Sharing, true, false, true, false},
 
+		// A wider share needs both flags, and read-only wins over both.
+		{tools.WideSharing, false, false, true, false},
+		{tools.WideSharing, false, true, false, false},
+		{tools.WideSharing, false, true, true, true},
+		{tools.WideSharing, true, true, true, false},
+
 		{tools.Destructive, false, false, true, false},
 		{tools.Destructive, false, true, true, true},
 		// Read-only wins over the destructive flag, in both orders.
@@ -460,11 +476,18 @@ func TestAnnotationsMatchTheKind(t *testing.T) {
 		t.Fatal("a destructive tool claims to be read-only")
 	}
 
-	// Sharing is the only Kind whose effect leaves the account, and the
+	// Sharing is the only act whose effect leaves the account, and the
 	// open-world hint is the point of the distinction.
 	sharing := tools.AnnotationsFor(tools.Sharing)
 	if sharing.OpenWorldHint == nil || !*sharing.OpenWorldHint {
 		t.Fatal("sharing is not annotated open-world; its effect leaves this account")
+	}
+	// A wider share is destructive as well: what the public or somebody
+	// outside has read is not taken back by removing the rule, and
+	// claude.ai and Codex prompt by this hint.
+	wide := tools.AnnotationsFor(tools.WideSharing)
+	if wide.OpenWorldHint == nil || !*wide.OpenWorldHint || wide.DestructiveHint == nil || !*wide.DestructiveHint {
+		t.Fatalf("a wider share is not annotated open-world and destructive: %+v", wide)
 	}
 	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.Destructive} {
 		a := tools.AnnotationsFor(k)
@@ -484,7 +507,8 @@ func TestAnnotationsMatchTheKind(t *testing.T) {
 
 func TestFullSurfaceOpensEveryGate(t *testing.T) {
 	cfg := tools.FullSurface(config.Config{ReadOnly: true, EnableDestructive: false, Sharing: false})
-	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.Sharing, tools.Destructive} {
+	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.Sharing, tools.WideSharing,
+		tools.Destructive} {
 		if !tools.Allowed(k, cfg) {
 			t.Fatalf("FullSurface does not register kind %d, so the schema dump would miss it", k)
 		}

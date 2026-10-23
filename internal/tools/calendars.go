@@ -99,20 +99,75 @@ func registerCalendars(s *mcp.Server, d Deps) {
 
 	add(s, d, Def[shareCalendarIn, service.SharingResult]{
 		Name: "share_calendar",
-		Description: "Give somebody access to a calendar, or change the access they already have. " +
-			"`who` is an email address, a group address, a domain, or \"anyone\" for the public internet. " +
-			"An address is read as one person unless this calendar already has a rule for it — pass " +
-			"`scope_type` to be sure, because a group address and a person's look identical. " +
-			"`role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or " +
-			"owner. The result explains the one it set. " +
-			"Sharing with \"anyone\" publishes the calendar to the whole internet and needs " +
-			"`allow_public: true`: removing the rule later stops new readers and takes nothing back from " +
-			"whoever already looked. " + shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
+		Description: "Give a person or a group inside your organization access to a calendar, or change the " +
+			"access they have, below owner. " +
+			"`who` is an email address or a group address. It is read as one person unless this calendar " +
+			"already has a rule for it — pass `scope_type` to be sure, because a group address and a person's " +
+			"look identical. " +
+			"`role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. The " +
+			"result explains the one it set. " +
+			"An address is inside your organization when its domain is your account's own; a personal Google " +
+			"account has no organization, so every address is outside it. The wider shares are refused here, " +
+			"each naming its own tool: publish_calendar for \"anyone\" or a whole domain, and " +
+			"widen_calendar_access for somebody outside your organization or an owner. Both exist only when " +
+			"the server was started with the destructive tools enabled. " +
+			shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
 		Kind: Sharing,
 		Handle: func(ctx context.Context, in shareCalendarIn) (service.SharingResult, error) {
 			out, err := d.Service.ShareCalendar(ctx, service.ShareOptions{
 				Calendar: in.Calendar, Who: in.Who, ScopeType: in.ScopeType, Role: in.Role,
-				Notify: in.Notify, AllowPublic: in.AllowPublic, DryRun: in.DryRun,
+				Notify: in.Notify, DryRun: in.DryRun,
+			})
+			if err != nil {
+				return service.SharingResult{}, err
+			}
+			return service.NewSharingResult(out), nil
+		},
+	})
+
+	add(s, d, Def[publishCalendarIn, service.SharingResult]{
+		Name: "publish_calendar",
+		Description: "Publish a calendar to the whole internet, or open it to everybody in a domain, or change " +
+			"the access such a rule gives. `who` is \"anyone\" for the public, signed in or not, or a domain " +
+			"such as example.com for everybody in it, now and later. " +
+			"Removing the rule later with unshare_calendar stops new readers and takes nothing back from " +
+			"whoever already looked, so this is publishing rather than sharing. " +
+			"`role` is what they may do; freeBusyReader shows only when you are busy. " +
+			"It needs `confirm: true` on the call, and the server it runs in has to have been started with the " +
+			"destructive tools enabled. To share with named people inside your organization use " +
+			"share_calendar, and outside it or as an owner, widen_calendar_access. " +
+			shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
+		Kind:            WideSharing,
+		PromptEveryCall: true,
+		Handle: func(ctx context.Context, in publishCalendarIn) (service.SharingResult, error) {
+			out, err := d.Service.PublishCalendar(ctx, service.PublishOptions{
+				Calendar: in.Calendar, Who: in.Who, Role: in.Role, Notify: in.Notify,
+				Confirm: in.Confirm, DryRun: in.DryRun,
+			})
+			if err != nil {
+				return service.SharingResult{}, err
+			}
+			return service.NewSharingResult(out), nil
+		},
+	})
+
+	add(s, d, Def[widenCalendarIn, service.SharingResult]{
+		Name: "widen_calendar_access",
+		Description: "Share a calendar with a person or a group outside your organization, or make somebody " +
+			"an owner, or change the access such a rule gives. " +
+			"`who` is an email address or a group address; pass `scope_type` to be sure which. An address is " +
+			"outside your organization unless its domain is your account's own, and every address is outside " +
+			"a personal Google account. `role` is freeBusyReader, reader, writerWithoutPrivateAccess, writer " +
+			"or owner. Owner access includes changing who else can see the calendar, and removing you. " +
+			"It needs `confirm: true` on the call, and the server it runs in has to have been started with the " +
+			"destructive tools enabled. Inside your organization and below owner, use share_calendar; for " +
+			"\"anyone\" or a whole domain, publish_calendar. " +
+			shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
+		Kind: WideSharing,
+		Handle: func(ctx context.Context, in widenCalendarIn) (service.SharingResult, error) {
+			out, err := d.Service.WidenCalendarAccess(ctx, service.WidenOptions{
+				Calendar: in.Calendar, Who: in.Who, ScopeType: in.ScopeType, Role: in.Role,
+				Notify: in.Notify, Confirm: in.Confirm, DryRun: in.DryRun,
 			})
 			if err != nil {
 				return service.SharingResult{}, err
@@ -223,13 +278,33 @@ type listSharingIn struct {
 }
 
 type shareCalendarIn struct {
-	Calendar    string `json:"calendar" jsonschema:"The calendar to share. You must own it."`
-	Who         string `json:"who" jsonschema:"An email address, a group address, a domain, or \"anyone\" for the public internet. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
-	ScopeType   string `json:"scope_type,omitempty" jsonschema:"user, group, domain or default. Optional: an address is read as one person unless a rule for it already exists."`
-	Role        string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Required."`
-	Notify      string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
-	AllowPublic bool   `json:"allow_public,omitempty" jsonschema:"Required to share with \"anyone\", which publishes the calendar to the whole internet."`
-	DryRun      bool   `json:"dry_run,omitempty" jsonschema:"Report what access would change and who would be emailed, without writing."`
+	Calendar  string `json:"calendar" jsonschema:"The calendar to share. You must own it."`
+	Who       string `json:"who" jsonschema:"An email address or a group address inside your organization. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
+	ScopeType string `json:"scope_type,omitempty" jsonschema:"user or group. Optional: an address is read as one person unless a rule for it already exists."`
+	Role      string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. Required."`
+	Notify    string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
+	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"Report what access would change and who would be emailed, without writing."`
+}
+
+type publishCalendarIn struct {
+	Calendar string `json:"calendar" jsonschema:"The calendar to publish. You must own it."`
+	Who      string `json:"who" jsonschema:"\"anyone\" for the public internet, or a domain such as example.com for everybody in it. Required."`
+	Role     string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. Required."`
+	Notify   string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
+	// Not required in the schema, as on the deletes: the refusal says
+	// what the call would open, which a schema error would not.
+	Confirm bool `json:"confirm,omitempty" jsonschema:"Must be true. Without it the call is refused."`
+	DryRun  bool `json:"dry_run,omitempty" jsonschema:"Report who would gain access, without writing. Needs no confirm."`
+}
+
+type widenCalendarIn struct {
+	Calendar  string `json:"calendar" jsonschema:"The calendar to share. You must own it."`
+	Who       string `json:"who" jsonschema:"An email address or a group address, outside your organization or to be an owner. An address may be a mailbox such as \"Sample Person\" <person@example.com>; only the address is used. Required."`
+	ScopeType string `json:"scope_type,omitempty" jsonschema:"user or group. Optional: an address is read as one person unless a rule for it already exists."`
+	Role      string `json:"role" jsonschema:"What they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Required."`
+	Notify    string `json:"notify,omitempty" jsonschema:"Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email."`
+	Confirm   bool   `json:"confirm,omitempty" jsonschema:"Must be true. Without it the call is refused."`
+	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"Report who would gain access, without writing. Needs no confirm."`
 }
 
 type unshareCalendarIn struct {

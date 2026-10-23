@@ -39,9 +39,15 @@ const (
 	IdempotentWrite
 	// Sharing changes who can see a calendar. It is its own Kind rather
 	// than a Write because GCAL_SHARING=off removes exactly these, and
-	// because widening access is the one act here whose blast radius
-	// leaves the account.
+	// because sharing is the one act here whose blast radius leaves the
+	// account.
 	Sharing
+	// WideSharing widens who can see a calendar past the ordinary share:
+	// the public, a whole domain, somebody outside the organization, or a
+	// new owner (§7.6). It registers only when sharing is on and the
+	// destructive flag is set, because widening access is never there by
+	// default, and its annotation says destructive.
+	WideSharing
 	// SharingRead reads who can see a calendar. It changes nothing, so
 	// its annotations say read-only — but GCAL_SHARING=off removes it
 	// with the other two, because a deployment that has turned sharing
@@ -102,10 +108,11 @@ type Def[In any, Out service.Rendered] struct {
 	Kind        Kind
 	// PromptEveryCall marks a write whose prompt is itself the point: a
 	// delete of a whole calendar or of everything on one, which Calendar
-	// cannot bring back (§9a). The tool carries Claude Code's
-	// requiresUserInteraction, so Claude Code prompts on every call
-	// whatever the operator's rules say. Only a Destructive tool may set
-	// it, and add refuses it on any other.
+	// cannot bring back, or a public or domain-wide share (§9a). The tool
+	// carries Claude Code's requiresUserInteraction, so Claude Code
+	// prompts on every call whatever the operator's rules say. Only a
+	// Destructive or WideSharing tool may set it, and add refuses it on
+	// any other.
 	PromptEveryCall bool
 	Handle          func(ctx contextContext, in In) (Out, error)
 }
@@ -130,8 +137,8 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 	if def.PromptEveryCall {
 		// A mark no other client reads, so never a control: the control
 		// is that the tool is unregistered unless the flag is set (§9a).
-		if def.Kind != Destructive {
-			panic("tools: " + def.Name + " prompts on every call and is not Destructive")
+		if def.Kind != Destructive && def.Kind != WideSharing {
+			panic("tools: " + def.Name + " prompts on every call and is neither Destructive nor WideSharing")
 		}
 		tool.Meta = mcp.Meta{promptKey: true}
 	}
@@ -174,6 +181,8 @@ func allowed(k Kind, cfg config.Config) bool {
 		return cfg.EnableDestructive && !cfg.ReadOnly
 	case Sharing, SharingRead:
 		return cfg.Sharing && !cfg.ReadOnly
+	case WideSharing:
+		return cfg.Sharing && cfg.EnableDestructive && !cfg.ReadOnly
 	default:
 		return !cfg.ReadOnly
 	}
@@ -191,9 +200,14 @@ func annotationsFor(k Kind) *mcp.ToolAnnotations {
 	case Destructive:
 		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: no}
 	case Sharing:
-		// OpenWorldHint is true here and nowhere else: sharing is the one
-		// act whose effect leaves this account.
+		// OpenWorldHint is true on the two sharing kinds and nowhere
+		// else: sharing is the one act whose effect leaves this account.
 		return &mcp.ToolAnnotations{DestructiveHint: no, OpenWorldHint: yes}
+	case WideSharing:
+		// Destructive, so a client that prompts by the hint, as claude.ai
+		// and Codex do, prompts for it: what the public or an outsider
+		// has read is not taken back by removing the rule.
+		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: yes}
 	default:
 		return &mcp.ToolAnnotations{DestructiveHint: no, OpenWorldHint: no}
 	}

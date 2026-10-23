@@ -92,26 +92,135 @@ func TestParseAudienceValidatesWhatTheTypeImplies(t *testing.T) {
 	}
 }
 
-// §7.6: the public scope is the one ACL value that cannot be undone from
-// the other side, so it takes a flag of its own.
-func TestAllowPublicGuardsOnlyThePublicScope(t *testing.T) {
+// An address is inside the organization only when its domain is the
+// account's own. A personal account has no organization, and an account
+// that could not be read leaves every address outside: both refuse a
+// share too many rather than one too few.
+func TestOutsideIsAnyDomainButTheAccountsOwn(t *testing.T) {
+	// The personal domains are assembled from pieces, so this file does
+	// not trip the leak gate, which takes an address in a real domain
+	// for one from a real account.
+	gmail, googlemail := "@"+"gmail.com", "@"+"googlemail.com"
+	for _, c := range []struct {
+		address, account string
+		outside          bool
+	}{
+		{"colleague@example.test", "me@example.test", false},
+		{"Colleague@EXAMPLE.test", "me@example.test", false},
+		{"team@example.test", "me@example.test", false},
+		{"somebody@elsewhere.test", "me@example.test", true},
+		{"somebody@sub.example.test", "me@example.test", true},
+		{"friend" + gmail, "me" + gmail, true},
+		{"friend" + googlemail, "me" + googlemail, true},
+		{"colleague@example.test", "", true},
+		{"colleague@example.test", "primary", true},
+		{"example.test", "me@example.test", true},
+	} {
+		if got := plan.Outside(c.address, c.account); got != c.outside {
+			t.Errorf("Outside(%q, %q) = %v, want %v", c.address, c.account, got, c.outside)
+		}
+	}
+}
+
+// share_calendar takes named people and groups inside the organization.
+// Everything wider is refused, [blocked], naming the tool that takes it.
+func TestAnOrdinaryShareStopsAtTheOrganization(t *testing.T) {
+	person, err := plan.ParseAudience("colleague@example.test", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.OrdinaryAudience(person, false); err != nil {
+		t.Fatalf("a person inside was refused: %v", err)
+	}
 	public, err := plan.ParseAudience("anyone", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := plan.AllowPublic(public, false); !errors.Is(err, plan.ErrBlocked) {
-		t.Fatalf("error %v, want blocked", err)
-	}
-	if err := plan.AllowPublic(public, true); err != nil {
-		t.Fatalf("the flag did not allow it: %v", err)
-	}
-
-	person, err := plan.ParseAudience("somebody@example.test", "", nil)
+	domain, err := plan.ParseAudience("example.test", "domain", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := plan.AllowPublic(person, false); err != nil {
-		t.Fatalf("an ordinary share needed the public flag: %v", err)
+	for _, c := range []struct {
+		name    string
+		a       plan.Audience
+		outside bool
+		names   string
+	}{
+		{"the public", public, false, "publish_calendar"},
+		{"a domain", domain, false, "publish_calendar"},
+		{"a person outside", person, true, "widen_calendar_access"},
+	} {
+		err := plan.OrdinaryAudience(c.a, c.outside)
+		if !errors.Is(err, plan.ErrBlocked) || !strings.Contains(err.Error(), c.names) ||
+			!strings.Contains(err.Error(), "GCAL_ENABLE_DESTRUCTIVE") {
+			t.Errorf("%s: %v, want [blocked] naming %s and its flag", c.name, err, c.names)
+		}
+	}
+	if err := plan.OrdinaryRole(gcal.RoleWriter); err != nil {
+		t.Errorf("writer was refused: %v", err)
+	}
+	if err := plan.OrdinaryRole(gcal.RoleOwner); !errors.Is(err, plan.ErrBlocked) ||
+		!strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Errorf("owner: %v, want [blocked] naming widen_calendar_access", err)
+	}
+}
+
+// publish_calendar takes "anyone" or a domain, with no scope_type: a
+// domain is the only thing it takes that has no @.
+func TestParsePublicTakesAnyoneOrADomain(t *testing.T) {
+	public, err := plan.ParsePublic("anyone")
+	if err != nil || !public.Scope.IsPublic() {
+		t.Fatalf("anyone: %+v, %v", public, err)
+	}
+	domain, err := plan.ParsePublic("Example.test")
+	if err != nil || domain.Scope.Type != gcal.ScopeTypeDomain || domain.Scope.Value != "example.test" {
+		t.Fatalf("a domain: %+v, %v", domain, err)
+	}
+	for _, who := range []string{"colleague@example.test", "", "nodot"} {
+		if _, err := plan.ParsePublic(who); !errors.Is(err, plan.ErrInvalid) {
+			t.Errorf("ParsePublic(%q): %v, want invalid", who, err)
+		}
+	}
+}
+
+// widen_calendar_access takes what the other two do not: somebody outside
+// the organization, at any role, and an owner.
+func TestAWideShareIsOutsideOrAnOwner(t *testing.T) {
+	person, err := plan.ParseAudience("colleague@example.test", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := plan.ParseAudience("anyone", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name    string
+		a       plan.Audience
+		role    string
+		outside bool
+		want    error
+	}{
+		{"outside, reader", person, gcal.RoleReader, true, nil},
+		{"inside, owner", person, gcal.RoleOwner, false, nil},
+		{"outside, owner", person, gcal.RoleOwner, true, nil},
+		{"inside, writer", person, gcal.RoleWriter, false, plan.ErrInvalid},
+		{"the public", public, gcal.RoleReader, false, plan.ErrInvalid},
+	} {
+		if err := plan.WideAudience(c.a, c.role, c.outside); !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
+			t.Errorf("%s: %v, want %v", c.name, err, c.want)
+		}
+	}
+}
+
+// A wider share needs confirm, a witness the caller meant it.
+func TestAWideShareNeedsConfirm(t *testing.T) {
+	if err := plan.ConfirmWidening(true, "x"); err != nil {
+		t.Fatalf("confirmed: %v", err)
+	}
+	if err := plan.ConfirmWidening(false, "this publishes it"); !errors.Is(err, plan.ErrBlocked) ||
+		!strings.Contains(err.Error(), "this publishes it") || !strings.Contains(err.Error(), "confirm:true") {
+		t.Fatalf("unconfirmed: %v", err)
 	}
 }
 

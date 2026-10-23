@@ -224,12 +224,72 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
-			// §4.3 at the ACL: no notify, no write. Refused before a
-			// request is built, so nothing reaches Google.
-			name: "share_calendar needs notify",
+			// §7.6: share_calendar takes people and groups inside the
+			// organization. The public is publish_calendar's. This refusal
+			// is what stands between a model and publishing a calendar on
+			// a tool somebody always allowed, so it is driven live.
+			name: "share_calendar refuses public",
 			tool: "share_calendar",
 			argsFn: args(map[string]any{
-				"who": probeGuest, "role": "reader",
+				"who": "anyone", "role": "reader", "notify": "none",
+			}),
+			skip: c.needProbe,
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "THE CALENDAR WAS PUBLISHED by share_calendar"
+				}
+				if !strings.Contains(r.text, "[blocked]") || !strings.Contains(r.text, "publish_calendar") {
+					return fail, "the refusal is not [blocked] naming publish_calendar: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked], naming publish_calendar"
+			},
+		},
+		{
+			// The probe address is in a domain that cannot be the
+			// account's, so it is outside the organization, which is
+			// widen_calendar_access's.
+			name: "share_calendar refuses outside",
+			tool: "share_calendar",
+			argsFn: args(map[string]any{
+				"who": probeGuest, "role": "reader", "notify": "none",
+			}),
+			skip: c.needProbe,
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "share_calendar shared outside the organization"
+				}
+				if !strings.Contains(r.text, "[blocked]") || !strings.Contains(r.text, "widen_calendar_access") {
+					return fail, "the refusal is not [blocked] naming widen_calendar_access: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked], naming widen_calendar_access"
+			},
+		},
+		{
+			// A wider share needs confirm, as a delete does. Refused
+			// before a request is built.
+			name: "widen_calendar_access needs confirm",
+			tool: "widen_calendar_access",
+			argsFn: args(map[string]any{
+				"who": probeGuest, "role": "reader", "notify": "none",
+			}),
+			skip: c.needProbe,
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "a calendar was shared outside without confirm"
+				}
+				if !strings.Contains(r.text, "[blocked]") || !strings.Contains(r.text, "confirm:true") {
+					return fail, "the refusal does not ask for confirm: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked], asking for confirm"
+			},
+		},
+		{
+			// §4.3 at the ACL: no notify, no write. Refused before a
+			// request is built, so nothing reaches Google.
+			name: "widen_calendar_access needs notify",
+			tool: "widen_calendar_access",
+			argsFn: args(map[string]any{
+				"who": probeGuest, "role": "reader", "confirm": true,
 			}),
 			skip: c.needProbe,
 			check: func(r callResult) (verdict, string) {
@@ -245,10 +305,10 @@ func calendarSteps(c *calendarState) []step {
 		{
 			// external_only has nothing to mean on a sharing change, and
 			// rounding it either way would email the wrong set of people.
-			name: "share_calendar refuses external_only",
-			tool: "share_calendar",
+			name: "widen_calendar_access refuses external_only",
+			tool: "widen_calendar_access",
 			argsFn: args(map[string]any{
-				"who": probeGuest, "role": "reader", "notify": "external_only",
+				"who": probeGuest, "role": "reader", "notify": "external_only", "confirm": true,
 			}),
 			skip: c.needProbe,
 			check: func(r callResult) (verdict, string) {
@@ -262,33 +322,13 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
-			// §7.6: the public scope needs the flag. This refusal is the
-			// only thing standing between a model and publishing
-			// somebody's calendar to the internet, so it is driven live.
-			name: "share_calendar refuses public",
-			tool: "share_calendar",
-			argsFn: args(map[string]any{
-				"who": "anyone", "role": "reader", "notify": "none",
-			}),
-			skip: c.needProbe,
-			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "THE CALENDAR WAS PUBLISHED: the public scope was accepted without allow_public"
-				}
-				if !strings.Contains(r.text, "[blocked]") {
-					return fail, "the refusal is not classified blocked: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [blocked], naming allow_public"
-			},
-		},
-		{
-			// The one sharing write that reaches Google. notify:none and
-			// a domain that cannot resolve, so no mail can be sent and
+			// The one person-scoped share that reaches Google. notify:none
+			// and a domain that cannot resolve, so no mail can be sent and
 			// none can arrive.
-			name: "share_calendar",
-			tool: "share_calendar",
+			name: "widen_calendar_access",
+			tool: "widen_calendar_access",
 			argsFn: args(map[string]any{
-				"who": probeGuest, "role": "reader", "notify": "none",
+				"who": probeGuest, "role": "reader", "notify": "none", "confirm": true,
 			}),
 			skip: c.needProbe,
 			check: func(r callResult) (verdict, string) {
@@ -302,19 +342,22 @@ func calendarSteps(c *calendarState) []step {
 				if !strings.Contains(r.text, "reader") {
 					return fail, "the new rule is not in the exposure afterward"
 				}
+				if !strings.Contains(r.text, "outside your organization") {
+					return fail, "the result does not say the share reaches outside the organization"
+				}
 				if !strings.Contains(r.text, "not a promise of silence") {
 					return fail, "notify:none was reported as silence (§4.3.3)"
 				}
-				return pass, "shared as reader, with exposure before and after"
+				return pass, "shared outside as reader, with exposure before and after"
 			},
 		},
 		{
 			// A second share for the same audience is a role change, and
 			// it must be a patch rather than a second rule.
-			name: "share_calendar changes a role",
-			tool: "share_calendar",
+			name: "widen_calendar_access changes a role",
+			tool: "widen_calendar_access",
 			argsFn: args(map[string]any{
-				"who": probeGuest, "role": "writer", "notify": "none",
+				"who": probeGuest, "role": "writer", "notify": "none", "confirm": true,
 			}),
 			skip: c.needProbe,
 			check: func(r callResult) (verdict, string) {
@@ -355,6 +398,78 @@ func calendarSteps(c *calendarState) []step {
 					return fail, "the rule is still in the exposure after being removed"
 				}
 				return pass, "the rule is gone, and the result says nobody was told"
+			},
+		},
+		{
+			name: "publish_calendar needs confirm",
+			tool: "publish_calendar",
+			argsFn: args(map[string]any{
+				"who": "anyone", "role": "freeBusyReader", "notify": "none",
+			}),
+			skip: c.needProbe,
+			check: func(r callResult) (verdict, string) {
+				if !r.isError {
+					return fail, "THE CALENDAR WAS PUBLISHED without confirm"
+				}
+				if !strings.Contains(r.text, "[blocked]") || !strings.Contains(r.text, "confirm:true") {
+					return fail, "the refusal does not ask for confirm: " + truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked], asking for confirm"
+			},
+		},
+		{
+			// A domain rule is shown, not made: the probe domain cannot
+			// be anybody's, and what Google does with one is not this
+			// step's question.
+			name: "publish_calendar to a domain, dry run",
+			tool: "publish_calendar",
+			argsFn: args(map[string]any{
+				"who": "example.test", "role": "freeBusyReader", "notify": "none", "dry_run": true,
+			}),
+			skip: c.needProbe,
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "DRY RUN") || !strings.Contains(r.text, "everybody in example.test") {
+					return fail, "the dry run does not say it is one, or whom the domain rule reaches"
+				}
+				return pass, "the domain rule is shown and nothing is written"
+			},
+		},
+		{
+			// The one public rule this driver makes: free/busy only, on
+			// the probe calendar, which holds only invented events, and
+			// removed by the next step.
+			name: "publish_calendar",
+			tool: "publish_calendar",
+			argsFn: args(map[string]any{
+				"who": "anyone", "role": "freeBusyReader", "notify": "none", "confirm": true,
+			}),
+			skip: c.needProbe,
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "returned an error: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "PUBLIC") || !strings.Contains(r.text, "takes nothing back") {
+					return fail, "the result does not say the calendar is public and what that cannot undo"
+				}
+				return pass, "published free/busy only, saying what removing it cannot undo"
+			},
+		},
+		{
+			name:   "unshare_calendar the public rule",
+			tool:   "unshare_calendar",
+			argsFn: args(map[string]any{"who": "anyone"}),
+			skip:   c.needProbe,
+			check: func(r callResult) (verdict, string) {
+				if r.isError {
+					return fail, "THE PROBE CALENDAR MAY STILL BE PUBLIC: " + truncate(r.text, 300)
+				}
+				if !strings.Contains(r.text, "made the calendar public") {
+					return fail, "the result does not say this was the rule that made it public"
+				}
+				return pass, "the public rule is gone"
 			},
 		},
 		{

@@ -64,7 +64,7 @@ func TestNoToolWritesTheServersOwnSettings(t *testing.T) {
 		}
 	}
 	// A floor, so a surface that registered nothing is not a pass.
-	if len(listed) < 21 {
+	if len(listed) < 23 {
 		t.Fatalf("called %d tools; the full surface has more", len(listed))
 	}
 

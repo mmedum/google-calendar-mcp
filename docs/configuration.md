@@ -15,8 +15,8 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_LOG_LEVEL` | `-log-level` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr. |
 | `GCAL_LOG_FORMAT` | `-log-format` | `text` | `text` or `json`. |
 | `GCAL_READONLY` | `-read-only` | `false` | Register only read tools, and request only read scopes so the API itself refuses a write. |
-| `GCAL_ENABLE_DESTRUCTIVE` | `-enable-destructive` | `false` | Register `delete_calendar` and `clear_calendar`. Each still needs `confirm` on the call. |
-| `GCAL_SHARING` | `-sharing` | `on` | `on` or `off`. Off removes the calendar sharing tools entirely. |
+| `GCAL_ENABLE_DESTRUCTIVE` | `-enable-destructive` | `false` | Register `delete_calendar` and `clear_calendar`, and with sharing on `publish_calendar` and `widen_calendar_access`. Each still needs `confirm` on the call. |
+| `GCAL_SHARING` | `-sharing` | `on` | `on` or `off`. Off removes the calendar sharing tools entirely, the wider ones included. |
 | `GCAL_MAX_EVENTS` | `-max-events` | `250` | Default event budget for one read. The result says when it truncated. |
 | `GCAL_MAX_CALENDARS` | `-max-calendars` | `25` | How many calendars one call may fan out across, for the reads that cost one request per calendar: `list_events` and `search_events`. Maximum 50. |
 | `GCAL_CONCURRENCY` | `-concurrency` | `4` | Requests in flight during a fan-out. |

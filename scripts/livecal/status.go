@@ -69,7 +69,8 @@ var calendarArgs = map[string][]string{
 	"create_event": {"calendar"}, "update_event": {"calendar"}, "cancel_event": {"calendar"},
 	"move_event": {"calendar", "to_calendar"}, "respond_to_event": {"calendar"},
 	"create_calendar": nil, "manage_calendar": {"calendar"}, "share_calendar": {"calendar"},
-	"unshare_calendar": {"calendar"}, "delete_calendar": {"calendar"}, "clear_calendar": {"calendar"},
+	"unshare_calendar": {"calendar"}, "publish_calendar": {"calendar"}, "widen_calendar_access": {"calendar"},
+	"delete_calendar": {"calendar"}, "clear_calendar": {"calendar"},
 }
 
 // setSelf records the account's address, once it has been read.

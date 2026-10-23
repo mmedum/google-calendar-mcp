@@ -141,7 +141,7 @@ var permissionRuleRe = regexp.MustCompile(`mcp__google-calendar__([a-z0-9_]+)`)
 // snake_case word in the prose. It is a verb_noun shape.
 func looksLikeToolName(s string) bool {
 	verbs := []string{"list_", "get_", "search_", "create_", "update_", "cancel_", "move_",
-		"respond_", "manage_", "share_", "unshare_", "delete_", "clear_", "check_"}
+		"respond_", "manage_", "share_", "unshare_", "publish_", "widen_", "delete_", "clear_", "check_"}
 	for _, v := range verbs {
 		if strings.HasPrefix(s, v) {
 			return true

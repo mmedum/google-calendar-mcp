@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -79,9 +80,13 @@ func schemaDiff(bin string) error {
 			"record it in that release's commit with `make schema-baseline VERSION=%s`",
 			base.version, changelogPath, want, want))
 	}
-	if len(breaking) > 0 {
-		problems = append(problems, fmt.Sprintf("the tool surface breaks a caller of %s: %d change(s) above",
-			base.version, len(breaking)))
+	if undeclared := undeclaredBreaks(breaking, changelog); len(undeclared) > 0 {
+		problems = append(problems, fmt.Sprintf("the tool surface breaks a caller of %s: %d change(s) above that "+
+			"[Unreleased] does not declare. A release that makes one names its tool, in backticks, in a "+
+			"**Breaking:** entry under [Unreleased], and is a new major version (`make schema-baseline` refuses "+
+			"it otherwise): %s", base.version, len(undeclared), strings.Join(undeclared, "; ")))
+	} else if len(breaking) > 0 {
+		fmt.Printf("  %d breaking change(s), each declared under **Breaking:** in [Unreleased]\n", len(breaking))
 	}
 	if len(problems) == 0 && want != "" && sectionFor(changelog, "Unreleased") == "" && !sameSurface(data, out) {
 		problems = append(problems, fmt.Sprintf("nothing is under [Unreleased], so this build is %s, "+
@@ -93,6 +98,33 @@ func schemaDiff(bin string) error {
 	}
 	return nil
 }
+
+// undeclaredBreaks is each breaking change whose tool, or resource, no
+// **Breaking:** entry under [Unreleased] names in backticks. A break is
+// "name: what" for a field, or the bare name of a tool or resource
+// removed.
+func undeclaredBreaks(breaking []string, changelog string) []string {
+	named := map[string]bool{}
+	for _, line := range strings.Split(sectionFor(changelog, "Unreleased"), "\n") {
+		if !strings.Contains(line, "**Breaking:**") {
+			continue
+		}
+		for _, m := range codeSpanRe.FindAllStringSubmatch(line, -1) {
+			named[m[1]] = true
+		}
+	}
+	var out []string
+	for _, b := range breaking {
+		subject, _, _ := strings.Cut(b, ": ")
+		if !named[subject] {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// codeSpanRe is one code span in a CHANGELOG line.
+var codeSpanRe = regexp.MustCompile("`([^`]+)`")
 
 // surface is one schema dump, read for the diff.
 type surface struct {

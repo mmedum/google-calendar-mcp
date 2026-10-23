@@ -115,8 +115,10 @@ Every setting is in `docs/configuration.md`.
 | `create_calendar` | Create a calendar of your own. |
 | `manage_calendar` | Rename or re-zone a calendar, set your own color and name for it, or add and remove it from your list. |
 | `list_sharing` | Who can see a calendar, and what each of them can see. |
-| `share_calendar` | Give somebody access, or change the access they have. |
+| `share_calendar` | Give a person or a group inside your organization access below owner, or change the access they have. |
 | `unshare_calendar` | Take somebody's access away. |
+| `publish_calendar` | Publish a calendar to the internet, or open it to a whole domain. Gated. |
+| `widen_calendar_access` | Share with somebody outside your organization, or make somebody an owner. Gated. |
 | `delete_calendar` | Delete a calendar and every event on it. Gated. |
 | `clear_calendar` | Delete every event on your primary calendar. Gated. |
 
@@ -190,24 +192,30 @@ none.
 ## Safety
 
 - The two tools that remove something Calendar cannot bring back —
-  `delete_calendar` and `clear_calendar` — are not registered at all
-  unless `GCAL_ENABLE_DESTRUCTIVE=true`, and each still needs
-  `confirm: true` on the call. `cancel_event` is deliberately not behind
+  `delete_calendar` and `clear_calendar` — and the two that widen who can
+  see a calendar — `publish_calendar` and `widen_calendar_access` — are
+  not registered at all unless `GCAL_ENABLE_DESTRUCTIVE=true`, and each
+  still needs `confirm: true` on the call. `cancel_event` is deliberately not behind
   that flag: canceling a meeting is what a calendar is for, Google keeps
   the record, and a gate everybody turns on protects nobody.
   `docs/architecture.md` §9 argues it. What guards it instead is the
   required `scope` and the required `notify`.
 - A cancellation with `notify: none` removes the meeting from your
   calendar and leaves it on your guests'. The result says so every time.
-- Sharing is the one act here whose effect leaves your account, so
-  `share_calendar` requires `notify` like every other write — and here
+- Sharing is the one act here whose effect leaves your account, so every
+  sharing tool requires `notify` like every other write — and here
   Google's own default is to email, the opposite of its default on an
-  event. Sharing with "anyone" publishes the calendar to the whole
-  internet and needs `allow_public: true`; removing the rule afterward
-  stops new readers and takes nothing back from whoever already looked.
-  Removing access notifies nobody, because Google offers no way to ask
-  for it: they are not told, they find the calendar gone.
-- `GCAL_SHARING=off` removes the three sharing tools entirely.
+  event. `share_calendar` takes named people and groups inside your
+  organization, below owner: an address is inside when its domain is your
+  account's own, and a personal Google account has no organization, so
+  every address is outside it. Publishing to "anyone" or a whole domain is
+  `publish_calendar`, and sharing outside or making an owner is
+  `widen_calendar_access`. Removing a public rule afterward stops new
+  readers and takes nothing back from whoever already looked. Removing
+  access notifies nobody, because Google offers no way to ask for it:
+  they are not told, they find the calendar gone.
+- `GCAL_SHARING=off` removes the sharing tools entirely, the wider ones
+  included.
 - Logs carry the method, tool, outcome, duration and a truncated calendar
   id. Never an email address, event title, description, location or
   search term. A debug log is safe to paste into a bug report by
@@ -215,11 +223,14 @@ none.
 
 Your MCP client approves each call; the server does not ask you itself.
 claude.ai and Codex prompt for the tools marked destructive,
-`cancel_event`, `delete_calendar` and `clear_calendar`, and VS Code
-prompts for every tool that writes. In Claude Code, `delete_calendar` and
-`clear_calendar` ask on every call whatever your rules say, since each
-deletes a whole calendar's events and Calendar cannot bring them back;
-where Claude Code cannot ask, as with `-p`, it refuses them. For the
+`cancel_event`, `publish_calendar`, `widen_calendar_access`,
+`delete_calendar` and `clear_calendar`, and VS Code prompts for every
+tool that writes. In Claude Code, `delete_calendar`, `clear_calendar` and
+`publish_calendar` ask on every call whatever your rules say: the first
+two delete a whole calendar's events, which Calendar cannot bring back,
+and the third opens a calendar to the internet or a domain, which
+removing the rule cannot take back. Where Claude Code cannot ask, as
+with `-p`, it refuses them. For the
 rest, list the calls you want to approve one by one under
 `permissions.ask` in your settings, with the name you gave the server in
 place of `google-calendar`. For example, the writes that share, cancel,
@@ -230,6 +241,7 @@ move or delete:
   "permissions": {
     "ask": [
       "mcp__google-calendar__share_calendar", "mcp__google-calendar__unshare_calendar",
+      "mcp__google-calendar__publish_calendar", "mcp__google-calendar__widen_calendar_access",
       "mcp__google-calendar__cancel_event", "mcp__google-calendar__move_event",
       "mcp__google-calendar__delete_calendar", "mcp__google-calendar__clear_calendar"
     ]
