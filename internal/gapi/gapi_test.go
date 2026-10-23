@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
 )
 
 func client(base string) *gapi.Client {

@@ -2,12 +2,13 @@ package config_test
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"log/slog"
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
 )
 
 func build(t *testing.T, env map[string]string, args ...string) (config.Config, error) {
@@ -31,6 +32,9 @@ func TestDefaults(t *testing.T) {
 	}
 	if c.ReadOnly || c.EnableDestructive {
 		t.Fatal("read-only and destructive must both default off")
+	}
+	if c.EnableDeclineAll {
+		t.Fatal("declining every meeting must default off; the operator turns it on")
 	}
 	if !c.Sharing {
 		t.Fatal("sharing must default on; GCAL_SHARING=off is the opt-out")
@@ -178,5 +182,31 @@ func TestEveryFlagNamesItsEnvVar(t *testing.T) {
 	})
 	if n < 12 {
 		t.Fatalf("only %d flags defined; the gate needs a floor so an empty read is not mistaken for a pass", n)
+	}
+}
+
+// GCAL_REQUIRE_PROMPT went with the server's question (§9a). Turned on,
+// it meant writes nobody could be asked about to be refused, so a
+// configuration that still turns it on is refused rather than quietly
+// allowed; off or unset, it is ignored.
+func TestTheRemovedRequirePromptIsRefused(t *testing.T) {
+	for v, refused := range map[string]bool{
+		"true": true, "1": true, "on": true, "always": true,
+		"": false, "false": false, "0": false, "off": false,
+	} {
+		_, err := build(t, map[string]string{"GCAL_REQUIRE_PROMPT": v})
+		if got := err != nil; got != refused {
+			t.Errorf("GCAL_REQUIRE_PROMPT=%q: err = %v, want refused %v", v, err, refused)
+			continue
+		}
+		if refused && (!errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), "GCAL_REQUIRE_PROMPT was removed")) {
+			t.Errorf("GCAL_REQUIRE_PROMPT=%q: the refusal does not say the setting was removed: %v", v, err)
+		}
+	}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(&bytes.Buffer{})
+	config.Define(fs, func(string) string { return "" })
+	if err := fs.Parse([]string{"-require-prompt"}); err == nil {
+		t.Error("the removed -require-prompt flag was accepted")
 	}
 }

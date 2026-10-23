@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
 )
 
 // A step whose call the interrupt cut short is not run rather than
@@ -19,7 +19,7 @@ func TestAStepCutShortByTheInterruptIsNotRun(t *testing.T) {
 	defer cancel()
 	s := &session{
 		stdin: discard{}, out: bufio.NewScanner(interrupted{cancel}),
-		stderr: &strings.Builder{}, nextID: 1, person: &person{},
+		stderr: &strings.Builder{}, nextID: 1,
 	}
 	var printed strings.Builder
 	r := &results{out: redact.New(&printed), invented: map[string]bool{}}

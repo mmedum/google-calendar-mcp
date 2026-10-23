@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** the module path is `github.com/mmedum/google-calendar-mcp/v4`; install with `go install github.com/mmedum/google-calendar-mcp/v4/cmd/google-calendar-mcp@latest`.
+- **Breaking:** The server no longer asks you before a write. It asked before `delete_calendar`, `clear_calendar`, a `share_calendar` that published a calendar, opened it to a domain or made an owner, a `cancel_event` that emailed a guest, and a status event that declined every meeting it overlapped. Your client's own approval now decides each call: claude.ai and Codex prompt for the tools marked destructive, VS Code for every tool that writes, and in Claude Code you list the calls to approve under `permissions.ask`, as the README shows. What held before still holds: the destructive flag, `confirm: true` on the deletes, the required `notify` and `scope`, the etag a write is made under, and `dry_run`.
+- **Breaking:** `delete_calendar` and `clear_calendar` carry Claude Code's `requiresUserInteraction` for every client, so Claude Code prompts on every call whatever your rules say, and refuses them where it cannot prompt, as with `-p`. 3.1.0 told you to put both on the allow list; that no longer skips the prompt.
+- **Breaking:** `create_event` refuses `auto_decline: all`, `[blocked]`, naming `create_event_declining_all`. `none` and `new` are unchanged.
+- **Breaking:** `share_calendar` takes only named people and groups inside your organization, below owner. An address is inside when its domain is your account's own, and a personal Google account has no organization, so every address is outside it. The public, a whole domain, an address outside and the owner role are refused, `[blocked]`, naming the tool that takes them, except that keeping or lowering the role of a rule the calendar already has is made whoever it reaches. Its `allow_public` input is gone.
+- `share_calendar` says what a group rule reaches, in its description and in every group share's result: everyone in the group, including people added later, and a member outside the organization too if the organization's sharing policy lets them in.
+
+### Added
+
+- `publish_calendar` publishes a calendar to "anyone" or opens it to everybody in a domain, or changes the access such a rule gives, never as owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, needs `confirm: true` and the calendar's title as read on the call, and Claude Code prompts on every call to it.
+- `widen_calendar_access` shares a calendar with a person or a group outside your organization, or makes somebody an owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, and needs `confirm: true` and the calendar's title as read on the call.
+- `create_event_declining_all` makes an out-of-office or focus-time event on your primary calendar that declines every meeting it overlaps, the ones you already accepted included. It is registered only with the new `GCAL_ENABLE_DECLINE_ALL=true`, off by default.
+
+### Removed
+
+- **Breaking:** `GCAL_REQUIRE_PROMPT` and `-require-prompt`. Set to anything but off, the server now refuses to start, since ignoring it would allow what it was set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` and `GCAL_ENABLE_DECLINE_ALL` off for a client that runs with nobody watching.
+
+### Security
+
+- Built with Go 1.27.3, which fixes GO-2026-6809 in `crypto/x509`, which `govulncheck` found reachable: intermediate certificates known to be compromised are no longer trusted.
+
 ## [3.1.0] - 2026-10-09
 
 ### Added
@@ -991,7 +1016,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v4.0.0...HEAD
+[4.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v2.0.0...v3.0.0

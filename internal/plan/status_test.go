@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/plan"
 )
 
 // statusDraft is a timed draft on the primary calendar carrying s.
@@ -36,7 +36,8 @@ func TestAStatusEventIsBuiltAsGoogleRequires(t *testing.T) {
 		{"focus time", plan.Status{Type: "focusTime", AutoDecline: "none", ChatStatus: "do_not_disturb"},
 			gcal.EventTypeFocusTime, `{"autoDeclineMode":"declineNone","chatStatus":"doNotDisturb"}`,
 			gcal.TransparencyOpaque, ""},
-		{"any case", plan.Status{Type: "OUTOFOFFICE", AutoDecline: "all"},
+		{"any case, from the tool that may decline all", plan.Status{Type: "OUTOFOFFICE", AutoDecline: "all",
+			DeclineAll: true},
 			gcal.EventTypeOutOfOffice, `{"autoDeclineMode":"declineAllConflictingInvitations"}`,
 			gcal.TransparencyOpaque, ""},
 		{"home", plan.Status{Type: "workingLocation", WorkingLocation: "home"},
@@ -129,10 +130,18 @@ func TestAStatusEventGoogleWouldRefuseIsRefused(t *testing.T) {
 			plan.ErrInvalid, "always public"},
 		{"no auto_decline", with(away, func(s *plan.Status) { s.AutoDecline = "" }), nil,
 			plan.ErrInvalid, "auto_decline is required for an out-of-office event, and there is no default"},
+		// all is refused on create_event, so every refusal about the
+		// word offers the tool that makes it, and the flag that tool
+		// needs, rather than the word.
+		{"no auto_decline, naming the tool for all", with(away, func(s *plan.Status) { s.AutoDecline = "" }), nil,
+			plan.ErrInvalid, "accepted as well is create_event_declining_all, which is registered only when the " +
+				"server runs with GCAL_ENABLE_DECLINE_ALL=true"},
 		{"an auto_decline that is not one", with(away, func(s *plan.Status) { s.AutoDecline = "some" }), nil,
-			plan.ErrInvalid, "Pass none, new or all"},
+			plan.ErrInvalid, `"some" is not an auto_decline. Pass none or new. Declining the meetings you ` +
+				"already accepted as well is create_event_declining_all, which is registered only"},
 		{"a message that goes nowhere", with(away, func(s *plan.Status) { s.DeclineMessage = "Away" }), nil,
-			plan.ErrInvalid, "auto_decline none declines nothing"},
+			plan.ErrInvalid, "auto_decline none declines nothing. Leave it out, or pass new. Declining the " +
+				"meetings you already accepted as well is create_event_declining_all"},
 		{"chat on out of office", with(away, func(s *plan.Status) { s.ChatStatus = "available" }), nil,
 			plan.ErrInvalid, "chat_status belongs to focus time"},
 		{"a chat status that is not one", plan.Status{Type: "focusTime", AutoDecline: "none", ChatStatus: "busy"},

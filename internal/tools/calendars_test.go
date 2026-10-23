@@ -2,23 +2,27 @@ package tools_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/tools"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/tools"
 )
 
 // §7.6: GCAL_SHARING=off removes the sharing surface — the read among
 // them, because a deployment that turned sharing off turned off the
-// surface and not merely the writes.
-func TestSharingOffRemovesAllThreeSharingTools(t *testing.T) {
-	cfg := baseConfig()
+// surface and not merely the writes, and the wider shares even with the
+// destructive flag set.
+func TestSharingOffRemovesEverySharingTool(t *testing.T) {
+	cfg := tools.FullSurface(baseConfig())
 	cfg.Sharing = false
 	got := names(listTools(t, cfg))
 
-	for _, name := range sharingTools {
+	for _, name := range append(append([]string{}, sharingTools...), wideSharingTools...) {
 		if _, ok := got[name]; ok {
 			t.Fatalf("GCAL_SHARING=off still registered %q", name)
 		}
@@ -53,11 +57,39 @@ func TestTheGatedToolsNeedTheFlag(t *testing.T) {
 		if tool.Annotations.DestructiveHint == nil || !*tool.Annotations.DestructiveHint {
 			t.Fatalf("%q is not annotated destructive", name)
 		}
-		if tool.Meta["anthropic/requiresUserInteraction"] != true {
-			t.Fatalf("%q does not ask a client to check with a person", name)
-		}
 		if !strings.Contains(tool.Description, "confirm") {
 			t.Fatalf("%q does not say it needs confirm on the call:\n%s", name, tool.Description)
+		}
+	}
+}
+
+// The mark goes only where §3 puts it (§9a): the delete of a whole
+// calendar, and of every event on the primary one, neither of which
+// Calendar can bring back, and a public or domain-wide share. Claude
+// Code then prompts on every such call, and every client is listed it.
+func TestWhichToolsPromptEveryCall(t *testing.T) {
+	var got []string
+	for _, tool := range listTools(t, tools.FullSurface(baseConfig())) {
+		if tool.Meta["anthropic/requiresUserInteraction"] == true {
+			got = append(got, tool.Name)
+		}
+	}
+	slices.Sort(got)
+	if want := []string{"clear_calendar", "delete_calendar", "publish_calendar"}; !slices.Equal(got, want) {
+		t.Errorf("tools carrying requiresUserInteraction = %v, want %v", got, want)
+	}
+}
+
+// The wider shares require the calendar's title in the schema, so every
+// call to one carries the name of the calendar it opens, and a client
+// that asks before the call shows it.
+func TestAWideShareRequiresTheCalendarTitle(t *testing.T) {
+	got := names(listTools(t, tools.FullSurface(baseConfig())))
+	for _, name := range wideSharingTools {
+		in, _ := got[name].InputSchema.(map[string]any)
+		required, _ := in["required"].([]any)
+		if !slices.Contains(required, any("calendar_title")) {
+			t.Errorf("%s requires %v, want calendar_title among them", name, required)
 		}
 	}
 }
@@ -78,7 +110,7 @@ func TestListSharingIsAnnotatedReadOnly(t *testing.T) {
 // annotation is the only place a client learns that before calling.
 func TestTheSharingWritesClaimAnOpenWorld(t *testing.T) {
 	got := names(listTools(t, tools.FullSurface(baseConfig())))
-	for _, name := range []string{"share_calendar", "unshare_calendar"} {
+	for _, name := range []string{"share_calendar", "unshare_calendar", "publish_calendar", "widen_calendar_access"} {
 		a := got[name].Annotations
 		if a.OpenWorldHint == nil || !*a.OpenWorldHint {
 			t.Fatalf("%q changes who outside this account can see a calendar and does not say so", name)
@@ -107,7 +139,8 @@ func TestTheCalendarToolsTeachTheirOwnTraps(t *testing.T) {
 		}
 	}
 	share := got["share_calendar"].Description
-	for _, want := range []string{"notify", "allow_public", "scope_type", "dry_run"} {
+	for _, want := range []string{"notify", "publish_calendar", "widen_calendar_access", "scope_type", "dry_run",
+		"including people added later"} {
 		if !strings.Contains(share, want) {
 			t.Fatalf("share_calendar does not explain %q:\n%s", want, share)
 		}
@@ -122,11 +155,31 @@ func TestTheCalendarToolsTeachTheirOwnTraps(t *testing.T) {
 	}
 }
 
+// signedIn is a calendar set whose primary calendar has the account's
+// address for its id, as Google's does, so a share can tell an address
+// inside the organization from one outside it. Seed's is the literal
+// "primary", which leaves every address outside.
+func signedIn() *caltest.Server {
+	const tz = "Europe/Copenhagen"
+	fake := caltest.New()
+	fake.AddCalendar("owner@example.test", "Sample Primary", tz, gcal.RoleOwner, true)
+	fake.AddCalendar("team@group.calendar.example.test", "Sample Team", "America/Chicago", gcal.RoleWriter, false)
+	fake.ACL["owner@example.test"] = []gcal.AclRule{
+		{ID: "user:owner@example.test", Role: gcal.RoleOwner,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "owner@example.test"}},
+		{ID: "user:colleague@example.test", Role: gcal.RoleReader,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "colleague@example.test"}},
+	}
+	fake.Settings = []gcal.Setting{{ID: gcal.SettingTimezone, Value: tz}}
+	return fake
+}
+
 // End to end through the protocol: the gated tools refuse without
-// confirm, and the refusal arrives as a classified tool result rather
-// than a protocol error.
+// confirm, each share is taken by the tool its reach belongs to, and a
+// refusal arrives as a classified tool result rather than a protocol
+// error.
 func TestTheCalendarToolsAnswerThroughTheProtocol(t *testing.T) {
-	cs, cleanup := session(t, tools.FullSurface(baseConfig()))
+	cs, cleanup := sessionWith(t, tools.FullSurface(baseConfig()), signedIn())
 	defer cleanup()
 	ctx := context.Background()
 
@@ -149,7 +202,22 @@ func TestTheCalendarToolsAnswerThroughTheProtocol(t *testing.T) {
 		}, want: "[invalid]", isError: true},
 		{name: "share_calendar", args: map[string]any{
 			"calendar": "primary", "who": "anyone", "role": "reader", "notify": "none",
+		}, want: "publish_calendar", isError: true},
+		{name: "share_calendar", args: map[string]any{
+			"calendar": "primary", "who": "somebody@elsewhere.test", "role": "reader", "notify": "none",
+		}, want: "widen_calendar_access", isError: true},
+		{name: "publish_calendar", args: map[string]any{
+			"calendar": "primary", "calendar_title": "Sample Primary", "who": "anyone", "role": "freeBusyReader",
+			"notify": "none",
 		}, want: "[blocked]", isError: true},
+		{name: "publish_calendar", args: map[string]any{
+			"calendar": "primary", "calendar_title": "Sample Primary", "who": "anyone", "role": "freeBusyReader",
+			"notify": "none", "dry_run": true,
+		}, want: "PUBLIC"},
+		{name: "widen_calendar_access", args: map[string]any{
+			"calendar": "primary", "calendar_title": "Sample Primary", "who": "somebody@elsewhere.test",
+			"role": "reader", "notify": "none", "dry_run": true,
+		}, want: "outside your organization"},
 		{name: "unshare_calendar", args: map[string]any{
 			"calendar": "primary", "who": "colleague@example.test", "dry_run": true,
 		}, want: "no notification"},

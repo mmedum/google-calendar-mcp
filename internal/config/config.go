@@ -89,15 +89,18 @@ type Config struct {
 	LogFormat         LogFormat
 	ReadOnly          bool
 	EnableDestructive bool
-	// Sharing registers the three ACL tools. On by default; GCAL_SHARING=off
+	// Sharing registers the ACL tools. On by default; GCAL_SHARING=off
 	// removes them, as GDRIVE_SHARING=off does in the sibling Drive
 	// server. Sharing a calendar is the outward-facing half of this
-	// server and some deployments want it gone entirely.
+	// server and some deployments want it gone entirely. The two that
+	// widen access past the organization also need EnableDestructive.
 	Sharing bool
-	// RequirePrompt refuses the writes that ask the person when the
-	// client cannot ask, rather than letting the call's own arguments
-	// stand in for the person.
-	RequirePrompt    bool
+	// EnableDeclineAll registers create_event_declining_all: an
+	// out-of-office or focus-time event that declines every meeting it
+	// overlaps, the accepted ones too. Its own flag rather than the
+	// destructive one, because a flag people set to get out-of-office
+	// would otherwise arm clear_calendar too (§9).
+	EnableDeclineAll bool
 	MaxEvents        int
 	MaxCalendars     int
 	Concurrency      int
@@ -115,13 +118,16 @@ type Settings struct {
 	ReadOnly          string
 	EnableDestructive string
 	Sharing           string
-	RequirePrompt     string
-	MaxEvents         string
-	MaxCalendars      string
-	Concurrency       string
-	HTTPTimeout       string
-	WriteTimeout      string
-	ClientSecretPath  string
+	EnableDeclineAll  string
+	// RequirePrompt is the removed GCAL_REQUIRE_PROMPT, read only to
+	// refuse it turned on.
+	RequirePrompt    string
+	MaxEvents        string
+	MaxCalendars     string
+	Concurrency      string
+	HTTPTimeout      string
+	WriteTimeout     string
+	ClientSecretPath string
 }
 
 // Define registers one flag per setting on fs. Each flag defaults to the
@@ -143,17 +149,25 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
 	def(&s.ReadOnly, "read-only", "READONLY", "false", "register only read tools and request read-only scopes")
-	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar and clear_calendar; each still needs confirm on the call")
-	def(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools: on, off")
-	def(&s.RequirePrompt, "require-prompt", "REQUIRE_PROMPT", "false",
-		"refuse the writes that ask the person when the client cannot ask them")
+	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call")
+	def(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools, the wider ones with -enable-destructive: on, off")
+	def(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", "false", "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps")
 	def(&s.MaxEvents, "max-events", "MAX_EVENTS", strconv.Itoa(DefaultMaxEvents), "default event budget for a read")
 	def(&s.MaxCalendars, "max-calendars", "MAX_CALENDARS", strconv.Itoa(DefaultMaxCalendars), "how many calendars one call may fan out across")
 	def(&s.Concurrency, "concurrency", "CONCURRENCY", strconv.Itoa(DefaultConcurrency), "requests in flight during a fan-out")
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-attempt timeout for a read")
 	def(&s.WriteTimeout, "write-timeout", "WRITE_TIMEOUT", "120s", "timeout for a write")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
+	removed(&s.RequirePrompt, env, "REQUIRE_PROMPT")
 	return s
+}
+
+// removed reads a setting a release took away, with no flag: it is read
+// only so Build can refuse it turned on. The staleness gate reads these
+// calls, so the documentation may name a removed setting to say it is
+// gone.
+func removed(p *string, env func(string) string, key string) {
+	*p = env(EnvPrefix + key)
 }
 
 var (
@@ -197,8 +211,18 @@ func (s *Settings) Build() (Config, error) {
 	if c.Sharing, err = parseOnOff("sharing", s.Sharing); err != nil {
 		errs = append(errs, err)
 	}
-	if c.RequirePrompt, err = parseBool("require-prompt", s.RequirePrompt); err != nil {
+	if c.EnableDeclineAll, err = parseBool("enable-decline-all", s.EnableDeclineAll); err != nil {
 		errs = append(errs, err)
+	}
+	// GCAL_REQUIRE_PROMPT refused the writes that asked the person when
+	// the client could not ask. The question is gone (§9a), and ignored,
+	// the setting would quietly allow what its owner set it to stop, so
+	// anything but off is refused, a value it never took included.
+	if on, perr := parseBool("GCAL_REQUIRE_PROMPT", s.RequirePrompt); on || perr != nil {
+		errs = append(errs, fmt.Errorf("%w: GCAL_REQUIRE_PROMPT was removed: the server no longer asks the "+
+			"person, and the client's own approval decides each call. Unset it, and leave "+
+			"GCAL_ENABLE_DESTRUCTIVE and GCAL_ENABLE_DECLINE_ALL off for a client that runs with nobody watching",
+			ErrInvalid))
 	}
 
 	if c.MaxEvents, err = parseCount("max-events", s.MaxEvents, DefaultMaxEvents, MaxMaxEvents); err != nil {

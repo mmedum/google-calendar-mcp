@@ -9,13 +9,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/server"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/tools"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/server"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/tools"
 )
 
 func listTools(t *testing.T, cfg config.Config) []*mcp.Tool {
@@ -38,7 +38,7 @@ func listTools(t *testing.T, cfg config.Config) []*mcp.Tool {
 	}
 	t.Cleanup(func() { _ = ss.Wait() })
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := newClient(t)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +50,20 @@ func listTools(t *testing.T, cfg config.Config) []*mcp.Tool {
 		t.Fatal(err)
 	}
 	return res.Tools
+}
+
+// newClient is the test client: one that can ask the person, through
+// form elicitation, as a client with somebody at it can. The server asks
+// nobody (§9a), so every tool is called through such a client and a
+// question from any of them fails the test that made the call.
+func newClient(t *testing.T) *mcp.Client {
+	t.Helper()
+	return mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, &mcp.ClientOptions{
+		ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			t.Errorf("the server asked the person: %q", req.Params.Message)
+			return &mcp.ElicitResult{Action: "decline"}, nil
+		},
+	})
 }
 
 func baseConfig() config.Config {
@@ -83,13 +97,21 @@ var writeTools = []string{
 // calendar and managing it register wherever a write does.
 var calendarTools = []string{"create_calendar", "manage_calendar"}
 
-// sharingTools is what GCAL_SHARING=off removes, the read among them
-// (§7.6).
+// sharingTools are the sharing tools registered by default, the read
+// among them (§7.6).
 var sharingTools = []string{"list_sharing", "share_calendar", "unshare_calendar"}
 
+// wideSharingTools widen access past the ordinary share. They need
+// GCAL_SHARING on and GCAL_ENABLE_DESTRUCTIVE set (§7.6).
+var wideSharingTools = []string{"publish_calendar", "widen_calendar_access"}
+
+// decliningTools need GCAL_ENABLE_DECLINE_ALL, a flag of their own
+// (§7.4).
+var decliningTools = []string{"create_event_declining_all"}
+
 // gatedTools need GCAL_ENABLE_DESTRUCTIVE to register at all, and
-// confirm:true on the call besides (§9).
-var gatedTools = []string{"delete_calendar", "clear_calendar"}
+// confirm:true on the call besides (§9, §7.6).
+var gatedTools = append([]string{"delete_calendar", "clear_calendar"}, wideSharingTools...)
 
 func TestTheDefaultSurfaceIsEverythingButTheGatedTools(t *testing.T) {
 	got := names(listTools(t, baseConfig()))
@@ -247,8 +269,16 @@ func TestEveryWriteToolDocumentsNotifyAndDryRun(t *testing.T) {
 // tools overlap, each description names the other and says when to
 // choose it.
 func TestOverlappingToolsPointAtEachOther(t *testing.T) {
-	got := names(listTools(t, baseConfig()))
+	got := names(listTools(t, tools.FullSurface(baseConfig())))
 	pairs := [][2]string{
+		{"create_event", "create_event_declining_all"},
+		{"create_event_declining_all", "create_event"},
+		{"share_calendar", "publish_calendar"},
+		{"share_calendar", "widen_calendar_access"},
+		{"publish_calendar", "share_calendar"},
+		{"publish_calendar", "widen_calendar_access"},
+		{"widen_calendar_access", "share_calendar"},
+		{"widen_calendar_access", "publish_calendar"},
 		{"list_events", "search_events"},
 		{"search_events", "list_events"},
 		{"list_calendars", "get_calendar"},
@@ -317,7 +347,7 @@ func TestToolsCallSucceedsAgainstTheFake(t *testing.T) {
 	}
 	defer func() { _ = ss.Wait() }()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := newClient(t)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -368,7 +398,7 @@ func TestAnErrorComesBackAsAToolResult(t *testing.T) {
 	}
 	defer func() { _ = ss.Wait() }()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := newClient(t)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -416,6 +446,12 @@ func TestGatesAreServerSide(t *testing.T) {
 		{tools.Sharing, false, false, false, false},
 		{tools.Sharing, true, false, true, false},
 
+		// A wider share needs both flags, and read-only wins over both.
+		{tools.WideSharing, false, false, true, false},
+		{tools.WideSharing, false, true, false, false},
+		{tools.WideSharing, false, true, true, true},
+		{tools.WideSharing, true, true, true, false},
+
 		{tools.Destructive, false, false, true, false},
 		{tools.Destructive, false, true, true, true},
 		// Read-only wins over the destructive flag, in both orders.
@@ -428,6 +464,38 @@ func TestGatesAreServerSide(t *testing.T) {
 		if got := tools.Allowed(c.kind, cfg); got != c.want {
 			t.Fatalf("Allowed(kind=%d, readOnly=%v destructive=%v sharing=%v) = %v, want %v",
 				c.kind, c.readOnly, c.destructive, c.sharing, got, c.want)
+		}
+	}
+}
+
+// The decline-all tool has a flag of its own: the destructive flag does
+// not register it, and its flag registers nothing else (§7.4). Read-only
+// wins over it.
+func TestDecliningAllNeedsItsOwnFlag(t *testing.T) {
+	for _, c := range []struct {
+		cfg  config.Config
+		want bool
+	}{
+		{config.Config{}, false},
+		{config.Config{EnableDestructive: true, Sharing: true}, false},
+		{config.Config{EnableDeclineAll: true}, true},
+		{config.Config{EnableDeclineAll: true, ReadOnly: true}, false},
+	} {
+		if got := tools.Allowed(tools.DecliningAll, c.cfg); got != c.want {
+			t.Errorf("Allowed(DecliningAll, %+v) = %v, want %v", c.cfg, got, c.want)
+		}
+	}
+	cfg := baseConfig()
+	cfg.EnableDeclineAll = true
+	got := names(listTools(t, cfg))
+	for _, name := range decliningTools {
+		if _, ok := got[name]; !ok {
+			t.Errorf("%s did not register with GCAL_ENABLE_DECLINE_ALL", name)
+		}
+	}
+	for _, name := range gatedTools {
+		if _, ok := got[name]; ok {
+			t.Errorf("GCAL_ENABLE_DECLINE_ALL registered %s", name)
 		}
 	}
 }
@@ -446,13 +514,26 @@ func TestAnnotationsMatchTheKind(t *testing.T) {
 		t.Fatal("a destructive tool claims to be read-only")
 	}
 
-	// Sharing is the only Kind whose effect leaves the account, and the
+	// Sharing is the only act whose effect leaves the account, and the
 	// open-world hint is the point of the distinction.
 	sharing := tools.AnnotationsFor(tools.Sharing)
 	if sharing.OpenWorldHint == nil || !*sharing.OpenWorldHint {
 		t.Fatal("sharing is not annotated open-world; its effect leaves this account")
 	}
-	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.Destructive} {
+	// A wider share is destructive as well: what the public or somebody
+	// outside has read is not taken back by removing the rule, and
+	// claude.ai and Codex prompt by this hint.
+	wide := tools.AnnotationsFor(tools.WideSharing)
+	if wide.OpenWorldHint == nil || !*wide.OpenWorldHint || wide.DestructiveHint == nil || !*wide.DestructiveHint {
+		t.Fatalf("a wider share is not annotated open-world and destructive: %+v", wide)
+	}
+	// Declining every meeting it overlaps is not taken back by deleting
+	// the event, so the hint says destructive.
+	declining := tools.AnnotationsFor(tools.DecliningAll)
+	if declining.DestructiveHint == nil || !*declining.DestructiveHint || declining.ReadOnlyHint {
+		t.Fatalf("an event that declines every meeting is not annotated destructive: %+v", declining)
+	}
+	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.DecliningAll, tools.Destructive} {
 		a := tools.AnnotationsFor(k)
 		if a.OpenWorldHint == nil || *a.OpenWorldHint {
 			t.Fatalf("kind %d claims an open world; only sharing reaches outside the account", k)
@@ -470,7 +551,7 @@ func TestAnnotationsMatchTheKind(t *testing.T) {
 
 func TestFullSurfaceOpensEveryGate(t *testing.T) {
 	cfg := tools.FullSurface(config.Config{ReadOnly: true, EnableDestructive: false, Sharing: false})
-	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.Sharing, tools.Destructive} {
+	for k := tools.Kind(0); k < tools.KindCount; k++ {
 		if !tools.Allowed(k, cfg) {
 			t.Fatalf("FullSurface does not register kind %d, so the schema dump would miss it", k)
 		}
@@ -678,7 +759,7 @@ func sessionWith(t *testing.T, cfg config.Config, fake *caltest.Server) (*mcp.Cl
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := newClient(t)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -882,5 +963,39 @@ func TestAnEmptyReminderListMeansNoneThroughTheProtocol(t *testing.T) {
 	}
 	if got := fake.Events["primary"][out.Event.ID].Reminders; got == nil || got.UseDefault || len(got.Overrides) != 0 {
 		t.Fatalf("Google was sent %+v", got)
+	}
+}
+
+// Through the protocol, create_event refuses auto_decline all and names
+// the tool that makes it, which takes the same event.
+func TestDecliningEveryMeetingIsItsOwnToolThroughTheProtocol(t *testing.T) {
+	cs, cleanup := session(t, tools.FullSurface(baseConfig()))
+	defer cleanup()
+	ctx := context.Background()
+	away := map[string]any{
+		"title": "Away", "event_type": "outOfOffice",
+		"start": "2026-04-01T09:00:00+02:00", "end": "2026-04-01T17:00:00+02:00",
+	}
+
+	args := map[string]any{"auto_decline": "all"}
+	for k, v := range away {
+		args[k] = v
+	}
+	refused, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "create_event", Arguments: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := text(t, refused); !refused.IsError || !strings.Contains(got, "[blocked]") ||
+		!strings.Contains(got, "create_event_declining_all") {
+		t.Fatalf("create_event with auto_decline all was not refused naming the tool:\n%s", got)
+	}
+
+	away["dry_run"] = true
+	made, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "create_event_declining_all", Arguments: away})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := text(t, made); made.IsError || !strings.Contains(got, "including the ones you already accepted") {
+		t.Fatalf("create_event_declining_all did not say what it declines:\n%s", got)
 	}
 }

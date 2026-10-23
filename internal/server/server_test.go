@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/server"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/server"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
 )
 
 func deps(t *testing.T) server.Deps {
@@ -102,6 +102,15 @@ func TestInstructionsNameTheTraps(t *testing.T) {
 		if !strings.Contains(strings.ToLower(instructionsOf(t, d)), want) {
 			t.Fatalf("the server instructions do not mention %q", want)
 		}
+	}
+}
+
+// share_calendar lowers any rule a calendar has, the public one
+// included, so the instructions must not leave a model believing that
+// needs a tool the operator left off.
+func TestInstructionsSayShareCalendarLowersAnyRule(t *testing.T) {
+	if got := instructionsOf(t, deps(t)); !strings.Contains(got, "lowers the access of any rule") {
+		t.Fatalf("the server instructions do not say share_calendar lowers any rule:\n%s", got)
 	}
 }
 

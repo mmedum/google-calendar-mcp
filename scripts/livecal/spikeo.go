@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
 )
 
 // spikeO — what does a read by updatedMin give back (§18 row 91)?

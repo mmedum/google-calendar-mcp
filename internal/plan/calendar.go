@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
 )
 
 // The calendar half of the plan package: what a calendar write changes,
@@ -279,13 +279,14 @@ func yesNo(v bool) string {
 	return "no"
 }
 
-// Confirm holds the destructive tools to their explicit confirmation
-// (§9). The flag that registers them is a deployment decision; this is
-// the call's own, and both have to be made.
+// Confirm holds the destructive tools and the two wider shares to their
+// explicit confirmation (§9). The flag that registers them is a
+// deployment decision; this is the call's own, and both have to be
+// made. It is a witness that the caller meant this write, never
+// approval: the model writes it.
 func Confirm(ok bool, what string) error {
 	if ok {
 		return nil
 	}
-	return fmt.Errorf("%w: %s, and Calendar cannot undo it. Pass confirm:true on this call if that is "+
-		"what you mean", ErrBlocked, what)
+	return fmt.Errorf("%w: %s. Pass confirm:true on this call if that is what you mean", ErrBlocked, what)
 }

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
 )
 
 // The write steps (§16, phase 2). This is the phase §16 says needs the
@@ -73,11 +73,38 @@ type writeState struct {
 	// guest is a REAL person's address, from GCAL_LIVE_GUEST_INTERNAL,
 	// and it is empty unless -spike-notify armed the run. The steps that
 	// use it are the only ones here that put an event in somebody else's
-	// calendar, so they check both before doing anything.
+	// calendar, so they are skipped, never called, without it.
 	guest string
+	// guestEvent and quietEvent are the events those steps made, so each
+	// step after them names its own event and never another step's.
+	guestEvent, quietEvent string
 	// api reads what no tool shows, for the steps that must check a
 	// field the server does not model.
 	api *liveAPI
+}
+
+// needGuest is the skip of every step that mails a real person: an
+// unarmed run never calls one.
+func (w *writeState) needGuest() string {
+	if w.guest == "" {
+		return "not armed: this step mails a real person, so it needs -spike-notify, -spike-invitees and " +
+			envGuestInternal
+	}
+	return ""
+}
+
+// needGuestEvent is needGuest for a step that changes the event the
+// first of them made.
+func (w *writeState) needGuestEvent(id func() string) func() string {
+	return func() string {
+		if why := w.needGuest(); why != "" {
+			return why
+		}
+		if id() == "" {
+			return "no guest event to change"
+		}
+		return ""
+	}
 }
 
 // seedRSVP puts an event on the scratch calendar with this account as a
@@ -1143,15 +1170,12 @@ func writeSteps(scratch string, w *writeState) []step {
 					"guests": []string{w.guest}, "notify": "all",
 				})
 			},
+			skip: w.needGuest,
 			check: func(r callResult) (verdict, string) {
-				if w.guest == "" {
-					return undetermined, "no guest configured; this step mails a real person and needs " +
-						envGuestInternal + " with -spike-notify"
-				}
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				w.created = field(r.text, "id: ")
+				w.guestEvent = field(r.text, "id: ")
 				if !strings.Contains(r.text, "1 guest") {
 					return fail, "the result does not report who it reaches"
 				}
@@ -1167,14 +1191,12 @@ func writeSteps(scratch string, w *writeState) []step {
 			tool: "update_event",
 			argsFn: func() map[string]any {
 				return on(map[string]any{
-					"event_id": w.created, "start": "2026-04-20T11:00:00+02:00",
+					"event_id": w.guestEvent, "start": "2026-04-20T11:00:00+02:00",
 					"end": "2026-04-20T11:30:00+02:00", "notify": "all",
 				})
 			},
+			skip: w.needGuestEvent(func() string { return w.guestEvent }),
 			check: func(r callResult) (verdict, string) {
-				if w.guest == "" || w.created == "" {
-					return undetermined, "no guest event to update"
-				}
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
@@ -1188,12 +1210,10 @@ func writeSteps(scratch string, w *writeState) []step {
 			name: "cancel_event notifying",
 			tool: "cancel_event",
 			argsFn: func() map[string]any {
-				return on(map[string]any{"event_id": w.created, "notify": "all"})
+				return on(map[string]any{"event_id": w.guestEvent, "notify": "all"})
 			},
+			skip: w.needGuestEvent(func() string { return w.guestEvent }),
 			check: func(r callResult) (verdict, string) {
-				if w.guest == "" || w.created == "" {
-					return undetermined, "no guest event to cancel"
-				}
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
@@ -1218,14 +1238,12 @@ func writeSteps(scratch string, w *writeState) []step {
 					"guests": []string{w.guest}, "notify": "all",
 				})
 			},
+			skip: w.needGuest,
 			check: func(r callResult) (verdict, string) {
-				if w.guest == "" {
-					return undetermined, "no guest configured"
-				}
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				w.splitFrom = field(r.text, "id: ")
+				w.quietEvent = field(r.text, "id: ")
 				return pass, "created, and the guest was invited so they have it to keep"
 			},
 		},
@@ -1233,12 +1251,10 @@ func writeSteps(scratch string, w *writeState) []step {
 			name: "cancel_event quietly (§18 row 43)",
 			tool: "cancel_event",
 			argsFn: func() map[string]any {
-				return on(map[string]any{"event_id": w.splitFrom, "notify": "none"})
+				return on(map[string]any{"event_id": w.quietEvent, "notify": "none"})
 			},
+			skip: w.needGuestEvent(func() string { return w.quietEvent }),
 			check: func(r callResult) (verdict, string) {
-				if w.guest == "" || w.splitFrom == "" {
-					return undetermined, "no guest event to cancel quietly"
-				}
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
@@ -1282,13 +1298,17 @@ func writeSteps(scratch string, w *writeState) []step {
 // undetermined and everything else goes on. The quota this spends is the
 // one §18 row 36 is about, and a run that cannot have a second calendar
 // is still worth reading.
-func destinationCalendar(ctx context.Context, api *liveAPI) (id string, created bool, note string) {
-	id, created, err := api.ensureScratchCalendar(ctx, destTitle)
+func destinationCalendar(ctx context.Context, api *liveAPI, self string) (id string, created bool, note string) {
+	id, created, kept, err := api.ensureScratchCalendar(ctx, destTitle, self)
 	if err != nil {
 		return "", false, fmt.Sprintf("move_event has no destination calendar: %s", err.Error())
 	}
 	if created {
 		return id, true, "destination calendar created; it costs one of the creation quota, once"
+	}
+	if kept > 0 {
+		return id, false, fmt.Sprintf("destination calendar adopted; no calendar quota spent; %d event(s) "+
+			"with other guests left on it", kept)
 	}
 	return id, false, "destination calendar adopted; no calendar quota spent"
 }

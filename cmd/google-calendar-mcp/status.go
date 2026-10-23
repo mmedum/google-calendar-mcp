@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/userconfig"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/version"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/version"
 )
 
 // cmdStatus prints what this profile is configured with. It touches no
@@ -53,6 +53,7 @@ func cmdStatus(args []string, stdout io.Writer, env func(string) string) error {
 	_, _ = fmt.Fprintf(stdout, "\nread-only:     %t\n", cfg.ReadOnly)
 	_, _ = fmt.Fprintf(stdout, "sharing tools: %t\n", cfg.Sharing)
 	_, _ = fmt.Fprintf(stdout, "destructive:   %t\n", cfg.EnableDestructive)
+	_, _ = fmt.Fprintf(stdout, "decline all:   %t\n", cfg.EnableDeclineAll)
 	_, _ = fmt.Fprintf(stdout, "event budget:  %d\n", cfg.MaxEvents)
 	_, _ = fmt.Fprintf(stdout, "max calendars: %d\n", cfg.MaxCalendars)
 

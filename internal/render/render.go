@@ -19,10 +19,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
 )
 
 // Schedule is everything a read of events produced.

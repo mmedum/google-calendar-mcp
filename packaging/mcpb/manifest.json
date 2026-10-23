@@ -69,7 +69,7 @@
     "sharing": {
       "type": "string",
       "title": "Sharing tools",
-      "description": "\"on\" or \"off\". Off removes the three calendar sharing tools, the read among them.",
+      "description": "\"on\" or \"off\". Off removes the calendar sharing tools, the read among them.",
       "default": "on",
       "required": false
     }

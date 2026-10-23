@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/fileperm"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
 )
 
 // The one write this driver makes on the account's primary calendar.
@@ -24,6 +27,11 @@ import (
 // server's tools and its own REST calls. Every write naming the primary
 // calendar is refused except that one create and the delete of the id it
 // made.
+//
+// The event is recorded in a file before it is asked for, so a run that
+// dies before its cleanup still says what to delete. The file is owner
+// only, named for the run, and removed only once the event reads back
+// gone.
 
 // statusTitle is the invented title of the one status event.
 const statusTitle = "Livecal status probe"
@@ -52,6 +60,11 @@ type primaryGuard struct {
 	refused bool
 	// made is the status event's id, the only one the cleanup may delete.
 	made string
+	// dir is where the record is written: the system's temporary
+	// directory, unless a test names another.
+	dir string
+	// record is the record's path, once it is written.
+	record string
 }
 
 // readTools change nothing. §9.1's print rule decides what of theirs may
@@ -66,10 +79,11 @@ var readTools = map[string]bool{
 // not listed here is refused, so a tool added later is held until
 // somebody says where it writes.
 var calendarArgs = map[string][]string{
-	"create_event": {"calendar"}, "update_event": {"calendar"}, "cancel_event": {"calendar"},
+	"create_event": {"calendar"}, "create_event_declining_all": {"calendar"}, "update_event": {"calendar"}, "cancel_event": {"calendar"},
 	"move_event": {"calendar", "to_calendar"}, "respond_to_event": {"calendar"},
 	"create_calendar": nil, "manage_calendar": {"calendar"}, "share_calendar": {"calendar"},
-	"unshare_calendar": {"calendar"}, "delete_calendar": {"calendar"}, "clear_calendar": {"calendar"},
+	"unshare_calendar": {"calendar"}, "publish_calendar": {"calendar"}, "widen_calendar_access": {"calendar"},
+	"delete_calendar": {"calendar"}, "clear_calendar": {"calendar"},
 }
 
 // setSelf records the account's address, once it has been read.
@@ -122,6 +136,12 @@ func (g *primaryGuard) tool(name string, args map[string]any) error {
 	if name == "create_event" && !g.asked && theStatusEvent(args) {
 		g.asked = true
 		g.start, _ = args["start"].(string)
+		// Recorded before it is asked for. A record that cannot be
+		// written keeps the event from being made at all.
+		if err := g.writeRecord(); err != nil {
+			g.refused = true
+			return fmt.Errorf("the status event was not asked for: its record could not be written first: %w", err)
+		}
 		return nil
 	}
 	return fmt.Errorf("%s on the primary calendar was not called: the driver writes nothing there but "+
@@ -200,8 +220,11 @@ func (g *primaryGuard) answered(r callResult) string {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if id != "" {
+	if id != "" && g.made == "" {
 		g.made = id
+		// The record already names the title and the start, so an id that
+		// cannot be added to it still leaves it saying what to delete.
+		_ = g.updateRecord()
 	}
 	// A refusal made nothing. An ambiguous outcome may have made the
 	// event, so it is still looked for.
@@ -234,6 +257,7 @@ func (g *primaryGuard) interrupted(out *redact.Printer) {
 	out.Printf("\ninterrupted: no further steps run, and the cleanup still does. Stop it again to exit at once.\n")
 	if g.pending() {
 		out.Printf("If you do, delete %s by hand.\n", g.byHand())
+		out.Printf("Its record is %s.\n", g.recordPath())
 	}
 }
 
@@ -244,28 +268,137 @@ func (g *primaryGuard) madeID() string {
 	return g.made
 }
 
-// cleanUp deletes the status event by its id. It is deferred before the
-// steps run, so it runs however the run ends. Its output names no title
-// or calendar: the primary calendar's title is the person's.
+// cleanUp deletes the status event by its id and reads it back gone. It
+// is deferred before the steps run, so it runs however the run ends. Its
+// output names no title or calendar: the primary calendar's title is the
+// person's. The record is removed only once the event is gone; while the
+// event may still be there, the record stays and its path is printed.
 func (g *primaryGuard) cleanUp(api *liveAPI, out *redact.Printer) {
 	if !g.pending() {
+		// Nothing was made, so the record has nothing to say.
+		g.dropRecord(out)
 		return
 	}
 	id := g.madeID()
 	if id == "" {
 		out.Printf("\nWARNING: the status event on the primary calendar may have been made, and its id is not known.\n")
 		out.Printf("Look for %s and delete it by hand.\n", g.byHand())
+		out.Printf("Its record is %s; delete that too once the event is gone.\n", g.recordPath())
 		return
 	}
-	err := api.do(context.Background(), http.MethodDelete,
-		"/calendars/primary/events/"+id+"?sendUpdates=none", nil, nil)
-	if err != nil && !strings.Contains(err.Error(), "returned 410") && !strings.Contains(err.Error(), "returned 404") {
-		out.Printf("\nWARNING: could not delete the status event %s from the primary calendar: %v\n",
+	if err := deleteStatusEvent(context.Background(), api, id); err != nil {
+		out.Printf("\nWARNING: the status event %s may still be on the primary calendar: %v\n",
 			redact.ID(id), redact.String(err.Error()))
 		out.Printf("Delete %s by hand; this driver must leave nothing behind.\n", g.byHand())
+		out.Printf("Its id and start are in %s; delete that too once the event is gone.\n", g.recordPath())
 		return
 	}
-	out.Printf("\nthe status event on the primary calendar was deleted by its id\n")
+	out.Printf("\nthe status event on the primary calendar was deleted by its id and read back gone\n")
+	g.dropRecord(out)
+}
+
+// deleteStatusEvent deletes the status event and reads it back. It is
+// gone when the read answers 404 or 410, or shows it cancelled; a delete
+// whose read still finds the event is a failure, whatever the delete
+// answered.
+func deleteStatusEvent(ctx context.Context, api *liveAPI, id string) error {
+	path := "/calendars/primary/events/" + id
+	if err := api.do(ctx, http.MethodDelete, path+"?sendUpdates=none", nil, nil); err != nil && !gone(err) {
+		return fmt.Errorf("the delete failed: %w", err)
+	}
+	var ev struct {
+		Status string `json:"status"`
+	}
+	err := api.do(ctx, http.MethodGet, path, nil, &ev)
+	switch {
+	case err != nil && gone(err):
+		return nil
+	case err != nil:
+		return fmt.Errorf("the read after the delete failed: %w", err)
+	case ev.Status == "cancelled":
+		return nil
+	}
+	return fmt.Errorf("it still reads back, with status %q, after the delete", ev.Status)
+}
+
+// gone reports whether a REST error says the event is not there.
+func gone(err error) bool {
+	return strings.Contains(err.Error(), "returned 404") || strings.Contains(err.Error(), "returned 410")
+}
+
+// recordPath is where the record is written: named for the run, so two
+// runs never share one.
+func (g *primaryGuard) recordPath() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.pathLocked()
+}
+
+func (g *primaryGuard) pathLocked() string {
+	dir := g.dir
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "livecal-status-event-"+runSuffix+".txt")
+}
+
+// writeRecord creates the record, owner only. It refuses a path that is
+// already there, so a file left in a shared directory is never written
+// through. The caller holds mu.
+func (g *primaryGuard) writeRecord() error {
+	path := g.pathLocked()
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	g.record = path
+	if err := g.fillRecord(f); err != nil {
+		return err
+	}
+	return fileperm.RestrictToOwner(path)
+}
+
+// updateRecord rewrites the record once the id is known. The caller
+// holds mu.
+func (g *primaryGuard) updateRecord() error {
+	if g.record == "" {
+		return nil
+	}
+	f, err := os.OpenFile(g.record, os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	return g.fillRecord(f)
+}
+
+// fillRecord writes what a person needs to delete the event, and closes
+// f. The caller holds mu.
+func (g *primaryGuard) fillRecord(f *os.File) error {
+	id := g.made
+	if id == "" {
+		id = "not known yet"
+	}
+	_, err := fmt.Fprintf(f, "The google-calendar-mcp live driver asked for one status event on the primary "+
+		"calendar.\nIf this file is still here, the run did not delete it: delete it by hand, then this file.\n\n"+
+		"title: %s\nstart: %s\nid: %s\n", statusTitle, g.start, id)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
+// dropRecord removes the record, and says so if it cannot.
+func (g *primaryGuard) dropRecord(out *redact.Printer) {
+	g.mu.Lock()
+	path := g.record
+	g.record = ""
+	g.mu.Unlock()
+	if path == "" {
+		return
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		out.Printf("could not remove %s, which is no longer needed: %v\n", path, redact.String(err.Error()))
+	}
 }
 
 // statusStart is when the status event starts: about a year ahead, at
@@ -280,14 +413,19 @@ func statusStart() time.Time {
 	return time.Date(d.Year(), d.Month(), d.Day(), 10, 0, 0, 0, loc)
 }
 
+// statusBase is a status event of kind on cal, at this run's hour.
+func statusBase(cal, kind string) map[string]any {
+	start := statusStart()
+	return map[string]any{
+		"calendar": cal, "title": statusTitle, "event_type": kind,
+		"start": start.Format(time.RFC3339), "end": start.Add(time.Hour).Format(time.RFC3339),
+	}
+}
+
 // statusArgs is the create_event call for this run's status event, on
 // cal. Nothing it carries declines anything.
 func statusArgs(cal string) map[string]any {
-	start := statusStart()
-	args := map[string]any{
-		"calendar": cal, "title": statusTitle, "event_type": statusKind,
-		"start": start.Format(time.RFC3339), "end": start.Add(time.Hour).Format(time.RFC3339),
-	}
+	args := statusBase(cal, statusKind)
 	switch statusKind {
 	case "workingLocation":
 		args["working_location"], args["working_location_label"] = "custom", "Livecal probe place"
@@ -316,7 +454,46 @@ func statusTag() string {
 // sentences: a result names the calendar, and the primary calendar's
 // title is the person's own, which no redactor can recognize.
 func statusSteps(scratch string) []step {
+	// declining is an out-of-office event on the scratch calendar that
+	// would decline every meeting it overlaps. Both steps that send it
+	// are refused before a request: a secondary calendar holds no status
+	// event, and the guard keeps either off the primary one.
+	declining := func(extra map[string]any) map[string]any {
+		args := statusBase(scratch, "outOfOffice")
+		for k, v := range extra {
+			args[k] = v
+		}
+		return args
+	}
 	return []step{
+		{
+			// §7.4: create_event refuses auto_decline all wherever it is
+			// aimed, naming the tool that makes one.
+			name: "create_event refuses declining all",
+			tool: "create_event",
+			args: declining(map[string]any{"auto_decline": "all"}),
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[blocked]") ||
+					!strings.Contains(r.text, "create_event_declining_all") {
+					return fail, "auto_decline all was not refused naming create_event_declining_all: " +
+						truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked], naming create_event_declining_all"
+			},
+		},
+		{
+			name: "create_event_declining_all on a secondary",
+			tool: "create_event_declining_all",
+			args: declining(nil),
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[unsupported]") ||
+					!strings.Contains(r.text, "primary calendar") {
+					return fail, "a declining event on a secondary calendar was not refused as unsupported: " +
+						truncate(r.text, 200)
+				}
+				return pass, "refused before a request, naming the primary calendar"
+			},
+		},
 		{
 			name: "status event on a secondary",
 			tool: "create_event",
