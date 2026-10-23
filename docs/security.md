@@ -49,8 +49,9 @@ by construction rather than by your vigilance.
   `GCAL_ENABLE_DESTRUCTIVE=true`, and each still needs `confirm` on the
   call. So are the two that widen who can see a calendar: publishing it
   to the internet or a domain, and sharing it outside the organization or
-  with a new owner. `share_calendar`, registered by default, takes only
-  named people and groups inside the organization. An event that
+  with a new owner. `share_calendar`, registered by default, gives access
+  only to named people and groups inside the organization, and otherwise
+  only lowers access already given. An event that
   declines every meeting it overlaps has a flag of its own,
   `GCAL_ENABLE_DECLINE_ALL`, and `create_event` refuses one. Tool annotations are a hint a client may ignore — a host in an
   auto-approve mode runs an annotated tool without asking anybody — so
