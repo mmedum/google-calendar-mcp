@@ -94,7 +94,13 @@ type Config struct {
 	// server. Sharing a calendar is the outward-facing half of this
 	// server and some deployments want it gone entirely. The two that
 	// widen access past the organization also need EnableDestructive.
-	Sharing          bool
+	Sharing bool
+	// EnableDeclineAll registers create_event_declining_all: an
+	// out-of-office or focus-time event that declines every meeting it
+	// overlaps, the accepted ones too. Its own flag rather than the
+	// destructive one, because a flag people set to get out-of-office
+	// would otherwise arm clear_calendar too (§9).
+	EnableDeclineAll bool
 	MaxEvents        int
 	MaxCalendars     int
 	Concurrency      int
@@ -112,6 +118,7 @@ type Settings struct {
 	ReadOnly          string
 	EnableDestructive string
 	Sharing           string
+	EnableDeclineAll  string
 	// RequirePrompt is the removed GCAL_REQUIRE_PROMPT, read only to
 	// refuse it turned on.
 	RequirePrompt    string
@@ -144,6 +151,7 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.ReadOnly, "read-only", "READONLY", "false", "register only read tools and request read-only scopes")
 	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call")
 	def(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools, the wider ones with -enable-destructive: on, off")
+	def(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", "false", "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps")
 	def(&s.MaxEvents, "max-events", "MAX_EVENTS", strconv.Itoa(DefaultMaxEvents), "default event budget for a read")
 	def(&s.MaxCalendars, "max-calendars", "MAX_CALENDARS", strconv.Itoa(DefaultMaxCalendars), "how many calendars one call may fan out across")
 	def(&s.Concurrency, "concurrency", "CONCURRENCY", strconv.Itoa(DefaultConcurrency), "requests in flight during a fan-out")
@@ -201,6 +209,9 @@ func (s *Settings) Build() (Config, error) {
 	// spells it GDRIVE_SHARING=off and a user moving between the two
 	// should not have to learn a second spelling.
 	if c.Sharing, err = parseOnOff("sharing", s.Sharing); err != nil {
+		errs = append(errs, err)
+	}
+	if c.EnableDeclineAll, err = parseBool("enable-decline-all", s.EnableDeclineAll); err != nil {
 		errs = append(errs, err)
 	}
 	// GCAL_REQUIRE_PROMPT refused the writes that asked the person when

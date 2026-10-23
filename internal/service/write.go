@@ -424,6 +424,46 @@ type CreateOptions struct {
 	WorkingLocationLabel string
 	Notify               string
 	DryRun               bool
+
+	// declineAll lets auto_decline all through. Only
+	// CreateDecliningEvent sets it (§7.4).
+	declineAll bool
+}
+
+// DecliningOptions is what create_event_declining_all takes: an
+// out-of-office or focus-time event that declines every meeting it
+// overlaps. A status event takes no guests, so there is no notify.
+type DecliningOptions struct {
+	Calendar       string
+	Title          string
+	Start          string
+	End            string
+	TimeZone       string
+	Description    string
+	Recurrence     []string
+	EventType      string
+	DeclineMessage string
+	ChatStatus     string
+	DryRun         bool
+}
+
+// CreateDecliningEvent is create_event_declining_all (§7.4): create_event
+// with auto_decline all, which create_event itself refuses. Registered
+// only with GCAL_ENABLE_DECLINE_ALL.
+func (s *Service) CreateDecliningEvent(ctx context.Context, o DecliningOptions) (render.WriteReport, error) {
+	switch strings.ToLower(strings.TrimSpace(o.EventType)) {
+	case strings.ToLower(gcal.EventTypeOutOfOffice), strings.ToLower(gcal.EventTypeFocusTime):
+	default:
+		return render.WriteReport{}, gapi.Errf(gapi.ClassInvalid,
+			"event_type is required here: outOfOffice or focusTime, the two status events that decline. Make "+
+				"anything else with create_event")
+	}
+	return s.CreateEvent(ctx, CreateOptions{
+		Calendar: o.Calendar, Title: o.Title, Start: o.Start, End: o.End, TimeZone: o.TimeZone,
+		Description: o.Description, Recurrence: o.Recurrence, EventType: o.EventType,
+		AutoDecline: autoDeclineAll, DeclineMessage: o.DeclineMessage, ChatStatus: o.ChatStatus,
+		DryRun: o.DryRun, declineAll: true,
+	})
 }
 
 // CreateEvent inserts an event with a client-generated id (§2.11).
@@ -488,7 +528,7 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	draft.Status = &plan.Status{
 		Type: o.EventType, AutoDecline: o.AutoDecline, DeclineMessage: o.DeclineMessage,
 		ChatStatus: o.ChatStatus, WorkingLocation: o.WorkingLocation, Label: o.WorkingLocationLabel,
-		OnPrimary: env.cal.Primary,
+		OnPrimary: env.cal.Primary, DeclineAll: o.declineAll,
 	}
 
 	id, err := newEventID()

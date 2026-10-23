@@ -105,6 +105,10 @@ var sharingTools = []string{"list_sharing", "share_calendar", "unshare_calendar"
 // GCAL_SHARING on and GCAL_ENABLE_DESTRUCTIVE set (§7.6).
 var wideSharingTools = []string{"publish_calendar", "widen_calendar_access"}
 
+// decliningTools need GCAL_ENABLE_DECLINE_ALL, a flag of their own
+// (§7.4).
+var decliningTools = []string{"create_event_declining_all"}
+
 // gatedTools need GCAL_ENABLE_DESTRUCTIVE to register at all, and
 // confirm:true on the call besides (§9, §7.6).
 var gatedTools = append([]string{"delete_calendar", "clear_calendar"}, wideSharingTools...)
@@ -267,6 +271,8 @@ func TestEveryWriteToolDocumentsNotifyAndDryRun(t *testing.T) {
 func TestOverlappingToolsPointAtEachOther(t *testing.T) {
 	got := names(listTools(t, tools.FullSurface(baseConfig())))
 	pairs := [][2]string{
+		{"create_event", "create_event_declining_all"},
+		{"create_event_declining_all", "create_event"},
 		{"share_calendar", "publish_calendar"},
 		{"share_calendar", "widen_calendar_access"},
 		{"publish_calendar", "share_calendar"},
@@ -462,6 +468,38 @@ func TestGatesAreServerSide(t *testing.T) {
 	}
 }
 
+// The decline-all tool has a flag of its own: the destructive flag does
+// not register it, and its flag registers nothing else (§7.4). Read-only
+// wins over it.
+func TestDecliningAllNeedsItsOwnFlag(t *testing.T) {
+	for _, c := range []struct {
+		cfg  config.Config
+		want bool
+	}{
+		{config.Config{}, false},
+		{config.Config{EnableDestructive: true, Sharing: true}, false},
+		{config.Config{EnableDeclineAll: true}, true},
+		{config.Config{EnableDeclineAll: true, ReadOnly: true}, false},
+	} {
+		if got := tools.Allowed(tools.DecliningAll, c.cfg); got != c.want {
+			t.Errorf("Allowed(DecliningAll, %+v) = %v, want %v", c.cfg, got, c.want)
+		}
+	}
+	cfg := baseConfig()
+	cfg.EnableDeclineAll = true
+	got := names(listTools(t, cfg))
+	for _, name := range decliningTools {
+		if _, ok := got[name]; !ok {
+			t.Errorf("%s did not register with GCAL_ENABLE_DECLINE_ALL", name)
+		}
+	}
+	for _, name := range gatedTools {
+		if _, ok := got[name]; ok {
+			t.Errorf("GCAL_ENABLE_DECLINE_ALL registered %s", name)
+		}
+	}
+}
+
 func TestAnnotationsMatchTheKind(t *testing.T) {
 	read := tools.AnnotationsFor(tools.Read)
 	if !read.ReadOnlyHint || !read.IdempotentHint {
@@ -489,7 +527,13 @@ func TestAnnotationsMatchTheKind(t *testing.T) {
 	if wide.OpenWorldHint == nil || !*wide.OpenWorldHint || wide.DestructiveHint == nil || !*wide.DestructiveHint {
 		t.Fatalf("a wider share is not annotated open-world and destructive: %+v", wide)
 	}
-	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.Destructive} {
+	// Declining every meeting it overlaps is not taken back by deleting
+	// the event, so the hint says destructive.
+	declining := tools.AnnotationsFor(tools.DecliningAll)
+	if declining.DestructiveHint == nil || !*declining.DestructiveHint || declining.ReadOnlyHint {
+		t.Fatalf("an event that declines every meeting is not annotated destructive: %+v", declining)
+	}
+	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.DecliningAll, tools.Destructive} {
 		a := tools.AnnotationsFor(k)
 		if a.OpenWorldHint == nil || *a.OpenWorldHint {
 			t.Fatalf("kind %d claims an open world; only sharing reaches outside the account", k)
@@ -508,7 +552,7 @@ func TestAnnotationsMatchTheKind(t *testing.T) {
 func TestFullSurfaceOpensEveryGate(t *testing.T) {
 	cfg := tools.FullSurface(config.Config{ReadOnly: true, EnableDestructive: false, Sharing: false})
 	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.Sharing, tools.WideSharing,
-		tools.Destructive} {
+		tools.DecliningAll, tools.Destructive} {
 		if !tools.Allowed(k, cfg) {
 			t.Fatalf("FullSurface does not register kind %d, so the schema dump would miss it", k)
 		}
@@ -920,5 +964,39 @@ func TestAnEmptyReminderListMeansNoneThroughTheProtocol(t *testing.T) {
 	}
 	if got := fake.Events["primary"][out.Event.ID].Reminders; got == nil || got.UseDefault || len(got.Overrides) != 0 {
 		t.Fatalf("Google was sent %+v", got)
+	}
+}
+
+// Through the protocol, create_event refuses auto_decline all and names
+// the tool that makes it, which takes the same event.
+func TestDecliningEveryMeetingIsItsOwnToolThroughTheProtocol(t *testing.T) {
+	cs, cleanup := session(t, tools.FullSurface(baseConfig()))
+	defer cleanup()
+	ctx := context.Background()
+	away := map[string]any{
+		"title": "Away", "event_type": "outOfOffice",
+		"start": "2026-04-01T09:00:00+02:00", "end": "2026-04-01T17:00:00+02:00",
+	}
+
+	args := map[string]any{"auto_decline": "all"}
+	for k, v := range away {
+		args[k] = v
+	}
+	refused, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "create_event", Arguments: args})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := text(t, refused); !refused.IsError || !strings.Contains(got, "[blocked]") ||
+		!strings.Contains(got, "create_event_declining_all") {
+		t.Fatalf("create_event with auto_decline all was not refused naming the tool:\n%s", got)
+	}
+
+	away["dry_run"] = true
+	made, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "create_event_declining_all", Arguments: away})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := text(t, made); made.IsError || !strings.Contains(got, "including the ones you already accepted") {
+		t.Fatalf("create_event_declining_all did not say what it declines:\n%s", got)
 	}
 }

@@ -2486,13 +2486,43 @@ func TestAStatusEventWithGuestsIsRefusedForThem(t *testing.T) {
 	}
 }
 
-// Declining every overlapping meeting is said in the result: a dry run
-// says it and writes nothing, and the call is one insert.
-func TestDecliningEveryMeetingIsSaid(t *testing.T) {
+// create_event refuses auto_decline all, naming the tool that makes one,
+// on any calendar and before anything is written: an always-allowed
+// create_event would otherwise decline every accepted meeting in the
+// window unseen (§7.4).
+func TestCreateEventRefusesDecliningEveryMeeting(t *testing.T) {
+	for _, c := range []struct{ name, calendar, eventType, word string }{
+		{"out of office", "primary", "outOfOffice", "all"},
+		{"focus time", "primary", "focusTime", "all"},
+		{"with spaces around it", "primary", "outOfOffice", " all "},
+		{"on a secondary calendar", "team@group.calendar.example.test", "outOfOffice", "all"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := writeSeed(t)
+			o := awayOptions(c.word)
+			o.Calendar, o.EventType = c.calendar, c.eventType
+			_, err := svc.CreateEvent(context.Background(), o)
+			if got := classOf(t, err); got != gapi.ClassBlocked || !strings.Contains(err.Error(), "create_event_declining_all") ||
+				!strings.Contains(err.Error(), "GCAL_ENABLE_DECLINE_ALL") {
+				t.Fatalf("got [%s] %v, want [blocked] naming create_event_declining_all and its flag", got, err)
+			}
+			if w := fake.Wrote(); len(w) != 0 {
+				t.Fatalf("got writes %+v, want none", w)
+			}
+		})
+	}
+}
+
+// create_event_declining_all makes the event create_event refuses, and
+// says what it declines: a dry run writes nothing, and the call is one
+// insert declining every conflicting invitation.
+func TestCreateDecliningEventDeclinesEveryMeetingAndSaysSo(t *testing.T) {
 	svc, fake := writeSeed(t)
-	dry := awayOptions("all")
-	dry.DryRun = true
-	out, err := svc.CreateEvent(context.Background(), dry)
+	o := service.DecliningOptions{
+		Calendar: "primary", Title: "Away", EventType: "outOfOffice",
+		Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T17:00:00+02:00", DryRun: true,
+	}
+	out, err := svc.CreateDecliningEvent(context.Background(), o)
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
@@ -2500,11 +2530,39 @@ func TestDecliningEveryMeetingIsSaid(t *testing.T) {
 		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
 	}
 
-	if _, err := svc.CreateEvent(context.Background(), awayOptions("all")); err != nil {
-		t.Fatalf("CreateEvent: %v", err)
+	o.DryRun = false
+	if _, err := svc.CreateDecliningEvent(context.Background(), o); err != nil {
+		t.Fatalf("CreateDecliningEvent: %v", err)
 	}
-	if w := fake.Wrote(); len(w) != 1 || w[0].Method != "insert" {
+	w := fake.Wrote()
+	if len(w) != 1 || w[0].Method != "insert" {
 		t.Fatalf("got writes %+v, want one insert", w)
+	}
+	var made *gcal.Event
+	for _, e := range fake.Events["me@example.test"] {
+		if e.Summary == "Away" {
+			made = e
+		}
+	}
+	if made == nil || !strings.Contains(string(made.OutOfOfficeProperties), gcal.AutoDeclineAll) {
+		t.Fatalf("the event made does not decline every conflicting invitation: %+v", made)
+	}
+}
+
+// It makes only the two status events that decline.
+func TestCreateDecliningEventTakesOnlyTheStatusEventsThatDecline(t *testing.T) {
+	for _, eventType := range []string{"", "workingLocation", "default"} {
+		svc, fake := writeSeed(t)
+		_, err := svc.CreateDecliningEvent(context.Background(), service.DecliningOptions{
+			Calendar: "primary", Title: "Away", EventType: eventType,
+			Start: "2026-04-01T09:00:00+02:00", End: "2026-04-01T17:00:00+02:00",
+		})
+		if got := classOf(t, err); got != gapi.ClassInvalid {
+			t.Errorf("event_type %q: got [%s] %v, want [invalid]", eventType, got, err)
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("event_type %q: got writes %+v, want none", eventType, w)
+		}
 	}
 }
 

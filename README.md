@@ -108,6 +108,7 @@ Every setting is in `docs/configuration.md`.
 | `check_availability` | When people are busy and when they are free, from Google's free/busy service rather than from a list of events. Takes an optional working-hours mask. |
 | `get_settings` | The account's time zone, week start and color palette. |
 | `create_event` | Create an event, one-off or repeating, with guests, optional guests, rooms, your reminders, its visibility, what guests may do, and a Google Meet link if you ask for one. Or a status event on your primary calendar: out of office, focus time or a working location. |
+| `create_event_declining_all` | An out-of-office or focus-time event that declines every meeting it overlaps, the accepted ones too. Behind its own flag. |
 | `update_event` | Change an event, including your reminders, its visibility and what guests may do, or add a Google Meet link. Only the fields you pass are touched. |
 | `cancel_event` | Cancel an event, or one occurrence of a repeating one. |
 | `move_event` | Move an event to another calendar, which changes who organizes it. |
@@ -216,6 +217,12 @@ none.
   they are not told, they find the calendar gone.
 - `GCAL_SHARING=off` removes the sharing tools entirely, the wider ones
   included.
+- An out-of-office or focus-time event that declines every meeting it
+  overlaps, the ones you already accepted included, tells each organizer
+  and is not taken back by deleting the event. `create_event` refuses
+  `auto_decline: all`; `create_event_declining_all` makes it, and is
+  registered only with `GCAL_ENABLE_DECLINE_ALL=true`, a flag of its own
+  so that turning it on arms nothing else.
 - Logs carry the method, tool, outcome, duration and a truncated calendar
   id. Never an email address, event title, description, location or
   search term. A debug log is safe to paste into a bug report by
@@ -223,9 +230,9 @@ none.
 
 Your MCP client approves each call; the server does not ask you itself.
 claude.ai and Codex prompt for the tools marked destructive,
-`cancel_event`, `publish_calendar`, `widen_calendar_access`,
-`delete_calendar` and `clear_calendar`, and VS Code prompts for every
-tool that writes. In Claude Code, `delete_calendar`, `clear_calendar` and
+`cancel_event`, `create_event_declining_all`, `publish_calendar`,
+`widen_calendar_access`, `delete_calendar` and `clear_calendar`, and VS
+Code prompts for every tool that writes. In Claude Code, `delete_calendar`, `clear_calendar` and
 `publish_calendar` ask on every call whatever your rules say: the first
 two delete a whole calendar's events, which Calendar cannot bring back,
 and the third opens a calendar to the internet or a domain, which
@@ -234,7 +241,7 @@ with `-p`, it refuses them. For the
 rest, list the calls you want to approve one by one under
 `permissions.ask` in your settings, with the name you gave the server in
 place of `google-calendar`. For example, the writes that share, cancel,
-move or delete:
+move, decline or delete:
 
 ```json
 {
@@ -243,6 +250,7 @@ move or delete:
       "mcp__google-calendar__share_calendar", "mcp__google-calendar__unshare_calendar",
       "mcp__google-calendar__publish_calendar", "mcp__google-calendar__widen_calendar_access",
       "mcp__google-calendar__cancel_event", "mcp__google-calendar__move_event",
+      "mcp__google-calendar__create_event_declining_all",
       "mcp__google-calendar__delete_calendar", "mcp__google-calendar__clear_calendar"
     ]
   }

@@ -23,7 +23,7 @@ var argumentFor = map[string]any{
 	"title": "Settings probe", "start": "2026-04-01T09:00:00+02:00", "end": "2026-04-01T10:00:00+02:00",
 	"from": "2026-03-16", "to": "2026-03-17", "query": "sync", "who": "colleague@example.test",
 	"role": "reader", "notify": "none", "response": "accepted",
-	"to_calendar": "team@group.calendar.example.test", "confirm": true,
+	"to_calendar": "team@group.calendar.example.test", "confirm": true, "event_type": "outOfOffice",
 }
 
 // §3: the model never widens its own reach. Only the operator turns a
@@ -64,7 +64,7 @@ func TestNoToolWritesTheServersOwnSettings(t *testing.T) {
 		}
 	}
 	// A floor, so a surface that registered nothing is not a pass.
-	if len(listed) < 23 {
+	if len(listed) < 24 {
 		t.Fatalf("called %d tools; the full surface has more", len(listed))
 	}
 

@@ -40,7 +40,15 @@ type Status struct {
 	// OnPrimary is whether the event goes on the account's primary
 	// calendar, the only one that can hold a status event.
 	OnPrimary bool
+	// DeclineAll is set by create_event_declining_all, the one tool that
+	// may make an event declining every meeting it overlaps. Anywhere
+	// else auto_decline all is refused (§7.4).
+	DeclineAll bool
 }
+
+// DecliningTool is the tool that makes an event declining every meeting
+// it overlaps, and its flag.
+const DecliningTool = "create_event_declining_all"
 
 // statusTypes are the types create_event makes, by the caller's word in
 // any case. Default is an ordinary event.
@@ -87,6 +95,11 @@ func (s Status) apply(e *gcal.Event, d Draft) error {
 		return nil
 	}
 	what := statusNames[kind]
+	// Said before the calendar is checked, so the refusal that names the
+	// tool is the one met wherever the call was aimed.
+	if err := s.declinesAllHere(kind, what); err != nil {
+		return err
+	}
 	// "Secondary calendars can't have status events."
 	if !s.OnPrimary {
 		return fmt.Errorf("%w: %s can only go on your primary calendar; Google does not allow one on any "+
@@ -106,6 +119,25 @@ func (s Status) apply(e *gcal.Event, d Draft) error {
 		return s.working(e)
 	}
 	return s.away(e, kind, what)
+}
+
+// declinesAllHere refuses auto_decline all on an out-of-office or focus
+// time event made by any tool but create_event_declining_all. A client
+// remembers an approval per tool, never per argument, so an always
+// allowed create_event would otherwise decline every accepted meeting in
+// the window unseen, with each organizer told. A word that is not an
+// auto_decline is left for away to refuse.
+func (s Status) declinesAllHere(kind, what string) error {
+	if s.DeclineAll || (kind != gcal.EventTypeOutOfOffice && kind != gcal.EventTypeFocusTime) {
+		return nil
+	}
+	if mode, _ := model.AutoDeclineWords.Wire(strings.TrimSpace(s.AutoDecline)); mode != gcal.AutoDeclineAll {
+		return nil
+	}
+	return fmt.Errorf("%w: auto_decline all makes %s decline every meeting it overlaps, the ones you already "+
+		"accepted included, and each organizer sees the decline. create_event takes none or new. all is %s, "+
+		"which is registered only when the server runs with GCAL_ENABLE_DECLINE_ALL=true; that is for the "+
+		"person running it to decide", ErrBlocked, what, DecliningTool)
 }
 
 // statusGuests refuses guests, rooms and a Meet link on a status event of

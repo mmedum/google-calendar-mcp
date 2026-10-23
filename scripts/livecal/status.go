@@ -66,7 +66,7 @@ var readTools = map[string]bool{
 // not listed here is refused, so a tool added later is held until
 // somebody says where it writes.
 var calendarArgs = map[string][]string{
-	"create_event": {"calendar"}, "update_event": {"calendar"}, "cancel_event": {"calendar"},
+	"create_event": {"calendar"}, "create_event_declining_all": {"calendar"}, "update_event": {"calendar"}, "cancel_event": {"calendar"},
 	"move_event": {"calendar", "to_calendar"}, "respond_to_event": {"calendar"},
 	"create_calendar": nil, "manage_calendar": {"calendar"}, "share_calendar": {"calendar"},
 	"unshare_calendar": {"calendar"}, "publish_calendar": {"calendar"}, "widen_calendar_access": {"calendar"},
@@ -317,7 +317,50 @@ func statusTag() string {
 // sentences: a result names the calendar, and the primary calendar's
 // title is the person's own, which no redactor can recognize.
 func statusSteps(scratch string) []step {
+	// declining is an out-of-office event on the scratch calendar that
+	// would decline every meeting it overlaps. Both steps that send it
+	// are refused before a request: a secondary calendar holds no status
+	// event, and the guard keeps either off the primary one.
+	declining := func(extra map[string]any) map[string]any {
+		start := statusStart()
+		args := map[string]any{
+			"calendar": scratch, "title": statusTitle, "event_type": "outOfOffice",
+			"start": start.Format(time.RFC3339), "end": start.Add(time.Hour).Format(time.RFC3339),
+		}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return args
+	}
 	return []step{
+		{
+			// §7.4: create_event refuses auto_decline all wherever it is
+			// aimed, naming the tool that makes one.
+			name: "create_event refuses declining all",
+			tool: "create_event",
+			args: declining(map[string]any{"auto_decline": "all"}),
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[blocked]") ||
+					!strings.Contains(r.text, "create_event_declining_all") {
+					return fail, "auto_decline all was not refused naming create_event_declining_all: " +
+						truncate(r.text, 200)
+				}
+				return pass, "refused with [blocked], naming create_event_declining_all"
+			},
+		},
+		{
+			name: "create_event_declining_all on a secondary",
+			tool: "create_event_declining_all",
+			args: declining(nil),
+			check: func(r callResult) (verdict, string) {
+				if !r.isError || !strings.Contains(r.text, "[unsupported]") ||
+					!strings.Contains(r.text, "primary calendar") {
+					return fail, "a declining event on a secondary calendar was not refused as unsupported: " +
+						truncate(r.text, 200)
+				}
+				return pass, "refused before a request, naming the primary calendar"
+			},
+		},
 		{
 			name: "status event on a secondary",
 			tool: "create_event",

@@ -106,7 +106,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, env func(stri
 	})
 
 	logger.Info("serving", "version", version.String(), "profile", cfg.Profile,
-		"read_only", cfg.ReadOnly, "sharing", cfg.Sharing, "destructive", cfg.EnableDestructive)
+		"read_only", cfg.ReadOnly, "sharing", cfg.Sharing, "destructive", cfg.EnableDestructive,
+		"decline_all", cfg.EnableDeclineAll)
 
 	// The transport is built from the streams passed in, not from
 	// os.Stdin and os.Stdout directly. This function already took them

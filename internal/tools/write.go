@@ -42,9 +42,11 @@ const visibilityHelp = "`visibility` is default, public or private: private show
 
 const statusHelp = "`event_type` makes a status event, which only your primary calendar can hold: outOfOffice, " +
 	"focusTime or workingLocation. Out of office and focus time are timed, never all day, and always show you " +
-	"busy. `auto_decline` is REQUIRED for them, with no default: none declines nothing, new declines " +
-	"invitations that arrive for that time, and all also declines the meetings you already accepted. Google " +
-	"shows each organizer the decline, with `decline_message` if you give one. Focus time takes `chat_status`: available or do_not_disturb. A working location takes " +
+	"busy. `auto_decline` is REQUIRED for them, with no default: none declines nothing, and new declines " +
+	"invitations that arrive for that time. Google shows each organizer the decline, with `decline_message` " +
+	"if you give one. all, which also declines the meetings you already accepted, is refused here: it is " +
+	"create_event_declining_all, registered only when the server runs with GCAL_ENABLE_DECLINE_ALL=true. " +
+	"Focus time takes `chat_status`: available or do_not_disturb. A working location takes " +
 	"`working_location` (home, office or custom) and `working_location_label` for the office or place; it is " +
 	"timed or exactly one whole day, always public, and shows you free. A status event takes no guests, rooms " +
 	"or Meet link."
@@ -86,6 +88,33 @@ func registerWrite(s *mcp.Server, d Deps) {
 				EventType: in.EventType, AutoDecline: in.AutoDecline, DeclineMessage: in.DeclineMessage,
 				ChatStatus: in.ChatStatus, WorkingLocation: in.WorkingLocation,
 				WorkingLocationLabel: in.WorkingLocationLabel, Notify: in.Notify, DryRun: in.DryRun,
+			})
+			if err != nil {
+				return service.WriteResult{}, err
+			}
+			return service.NewWriteResult(out), nil
+		},
+	})
+
+	add(s, d, Def[decliningEventIn, service.WriteResult]{
+		Name: "create_event_declining_all",
+		Description: "Create an out-of-office or focus-time event on your primary calendar that declines every " +
+			"meeting it overlaps: the ones you already accepted, and every invitation that arrives for that " +
+			"time while it stands. Google shows each organizer the decline, with `decline_message` if you give " +
+			"one, and deleting the event later does not take a decline back. This is create_event's " +
+			"auto_decline all, which create_event refuses; it exists only when the server was started with " +
+			"GCAL_ENABLE_DECLINE_ALL=true. To decline only the invitations that arrive later, use create_event " +
+			"with auto_decline new. " +
+			"`event_type` is outOfOffice or focusTime. `start` and `end` are RFC3339 timestamps, never dates: " +
+			"neither can be all day. Focus time takes `chat_status`: available or do_not_disturb. " +
+			"`recurrence` takes RFC 5545 lines, and the event declines on every occurrence. It takes no guests, " +
+			"so nobody is invited and there is no `notify`. " + dryRunHelp,
+		Kind: DecliningAll,
+		Handle: func(ctx context.Context, in decliningEventIn) (service.WriteResult, error) {
+			out, err := d.Service.CreateDecliningEvent(ctx, service.DecliningOptions{
+				Calendar: in.Calendar, Title: in.Title, Start: in.Start, End: in.End, TimeZone: in.TimeZone,
+				Description: in.Description, Recurrence: in.Recurrence, EventType: in.EventType,
+				DeclineMessage: in.DeclineMessage, ChatStatus: in.ChatStatus, DryRun: in.DryRun,
 			})
 			if err != nil {
 				return service.WriteResult{}, err
@@ -243,13 +272,27 @@ type createEventIn struct {
 	// The status event inputs (§7.4). Each value is spelled as a read
 	// reports it.
 	EventType            string `json:"event_type,omitempty" jsonschema:"Make a status event on your primary calendar: outOfOffice, focusTime or workingLocation. Leave it out for an ordinary event."`
-	AutoDecline          string `json:"auto_decline,omitempty" jsonschema:"Required for outOfOffice and focusTime, with no default: none, new (invitations that arrive for that time) or all (also the meetings you already accepted)."`
+	AutoDecline          string `json:"auto_decline,omitempty" jsonschema:"Required for outOfOffice and focusTime, with no default: none, or new (invitations that arrive for that time). all is refused here; it is create_event_declining_all."`
 	DeclineMessage       string `json:"decline_message,omitempty" jsonschema:"The message each organizer gets with a decline. outOfOffice and focusTime only, and not with auto_decline none."`
 	ChatStatus           string `json:"chat_status,omitempty" jsonschema:"focusTime only: available or do_not_disturb, what Google Chat shows during it."`
 	WorkingLocation      string `json:"working_location,omitempty" jsonschema:"Required for workingLocation: home, office or custom."`
 	WorkingLocationLabel string `json:"working_location_label,omitempty" jsonschema:"The office's name, or the place for custom, as Calendar shows it. Not with home."`
 	Notify               string `json:"notify,omitempty" jsonschema:"Who Google is asked to email: none, external_only or all. Required when the event has guests."`
 	DryRun               bool   `json:"dry_run,omitempty" jsonschema:"Report what would be created and who would be emailed, without writing."`
+}
+
+type decliningEventIn struct {
+	Calendar       string   `json:"calendar,omitempty" jsonschema:"Your primary calendar, which is the default; no other calendar can hold a status event."`
+	Title          string   `json:"title" jsonschema:"What the event is called. Required."`
+	Start          string   `json:"start" jsonschema:"Start, an RFC3339 timestamp. Required."`
+	End            string   `json:"end" jsonschema:"End, an RFC3339 timestamp. Required."`
+	TimeZone       string   `json:"time_zone,omitempty" jsonschema:"IANA zone the times are written in, such as Europe/Copenhagen. Defaults to the calendar's own."`
+	Description    string   `json:"description,omitempty" jsonschema:"Longer text on the event."`
+	Recurrence     []string `json:"recurrence,omitempty" jsonschema:"RFC 5545 lines, such as RRULE:FREQ=WEEKLY;BYDAY=FR;COUNT=4."`
+	EventType      string   `json:"event_type" jsonschema:"outOfOffice or focusTime. Required."`
+	DeclineMessage string   `json:"decline_message,omitempty" jsonschema:"The message each organizer gets with a decline."`
+	ChatStatus     string   `json:"chat_status,omitempty" jsonschema:"focusTime only: available or do_not_disturb, what Google Chat shows during it."`
+	DryRun         bool     `json:"dry_run,omitempty" jsonschema:"Report what would be created and what it declines, without writing."`
 }
 
 type updateEventIn struct {

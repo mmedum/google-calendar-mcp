@@ -71,6 +71,13 @@ const (
 	// a client deciding whether to confirm with a person deserves the
 	// truthful hint, and "this may destroy something" is the truth.
 	Canceling
+	// DecliningAll makes an out-of-office or focus-time event that
+	// declines every meeting it overlaps, the accepted ones too, with
+	// each organizer told (§7.4). It registers only with
+	// GCAL_ENABLE_DECLINE_ALL, a flag of its own: a flag people set to get
+	// out-of-office must not arm clear_calendar as well, which is §9's
+	// argument for leaving cancel_event ungated.
+	DecliningAll
 	// Destructive removes something Calendar cannot bring back. Not
 	// registered at all unless the destructive flag is set, and still
 	// needs confirm on the call. The two are delete_calendar and
@@ -168,6 +175,7 @@ func FullSurface(cfg config.Config) config.Config {
 	cfg.ReadOnly = false
 	cfg.EnableDestructive = true
 	cfg.Sharing = true
+	cfg.EnableDeclineAll = true
 	return cfg
 }
 
@@ -183,6 +191,8 @@ func allowed(k Kind, cfg config.Config) bool {
 		return cfg.Sharing && !cfg.ReadOnly
 	case WideSharing:
 		return cfg.Sharing && cfg.EnableDestructive && !cfg.ReadOnly
+	case DecliningAll:
+		return cfg.EnableDeclineAll && !cfg.ReadOnly
 	default:
 		return !cfg.ReadOnly
 	}
@@ -197,6 +207,10 @@ func annotationsFor(k Kind) *mcp.ToolAnnotations {
 		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: no, OpenWorldHint: no}
 	case Canceling:
 		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: yes, OpenWorldHint: no}
+	case DecliningAll:
+		// Destructive: a decline reaches every overlapping meeting's
+		// organizer and is not taken back by deleting the event.
+		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: no}
 	case Destructive:
 		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: no}
 	case Sharing:

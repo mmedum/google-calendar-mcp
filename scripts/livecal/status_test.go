@@ -41,6 +41,7 @@ func TestTheGuardLetsOneStatusEventOntoThePrimaryCalendar(t *testing.T) {
 		{"the status event with a guest", "create_event", withArg(statusArgs("primary"), "guests", []string{"a@example.test"})},
 		{"the status event declining", "create_event", withArg(statusArgs("primary"), "auto_decline", "all")},
 		{"the status event as a dry run", "create_event", withArg(statusArgs("primary"), "dry_run", true)},
+		{"an event declining every meeting", "create_event_declining_all", statusArgs("primary")},
 	} {
 		if err := g.tool(c.tool, c.args); err == nil {
 			t.Errorf("%s: went out", c.name)

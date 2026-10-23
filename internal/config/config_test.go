@@ -33,6 +33,9 @@ func TestDefaults(t *testing.T) {
 	if c.ReadOnly || c.EnableDestructive {
 		t.Fatal("read-only and destructive must both default off")
 	}
+	if c.EnableDeclineAll {
+		t.Fatal("declining every meeting must default off; the operator turns it on")
+	}
 	if !c.Sharing {
 		t.Fatal("sharing must default on; GCAL_SHARING=off is the opt-out")
 	}
