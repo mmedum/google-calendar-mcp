@@ -19,3 +19,6 @@ func AnnotationsFor(k Kind) *mcp.ToolAnnotations { return annotationsFor(k) }
 
 // Fail exposes fail.
 func Fail(err error) error { return fail(err) }
+
+// KindCount exposes kindCount.
+const KindCount = kindCount

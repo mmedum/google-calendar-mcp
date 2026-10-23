@@ -14,7 +14,7 @@ import (
 // tool the destructive flag registers (§9a). One that asks for it on any
 // other kind fails when the server starts, not when a person first meets
 // a prompt on every call.
-func TestOnlyADestructiveToolMayPromptEveryCall(t *testing.T) {
+func TestOnlyAFlaggedToolMayPromptEveryCall(t *testing.T) {
 	defer func() {
 		if recover() == nil {
 			t.Error("a Write tool that prompts on every call was registered")

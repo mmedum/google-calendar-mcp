@@ -15,7 +15,6 @@ package tools
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -84,20 +83,19 @@ const (
 	// clear_calendar; cancel_event is Canceling above, and §9 argues
 	// the difference.
 	Destructive
+
+	// kindCount follows the last kind, so a test can range over them all.
+	kindCount
 )
 
 // Deps are what the tools need.
 type Deps struct {
 	Service *service.Service
 	Config  config.Config
-	Logger  *slog.Logger
 }
 
 // Register adds every tool the configuration allows.
 func Register(s *mcp.Server, d Deps) {
-	if d.Logger == nil {
-		d.Logger = slog.New(slog.DiscardHandler)
-	}
 	registerRead(s, d)
 	registerWrite(s, d)
 	registerCalendars(s, d)
@@ -207,11 +205,10 @@ func annotationsFor(k Kind) *mcp.ToolAnnotations {
 		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: no, OpenWorldHint: no}
 	case Canceling:
 		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: yes, OpenWorldHint: no}
-	case DecliningAll:
-		// Destructive: a decline reaches every overlapping meeting's
-		// organizer and is not taken back by deleting the event.
-		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: no}
-	case Destructive:
+	case DecliningAll, Destructive:
+		// A decline-all event is destructive too: the decline reaches
+		// every overlapping meeting's organizer and is not taken back by
+		// deleting the event.
 		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: no}
 	case Sharing:
 		// OpenWorldHint is true on the two sharing kinds and nowhere

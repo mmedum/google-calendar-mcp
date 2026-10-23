@@ -23,6 +23,10 @@ const shareNotifyHelp = "`notify` is REQUIRED and has no default: `all` asks Goo
 	"sharing change and is refused: Google's switch is on or off, with no internal/external split. Whatever " +
 	"you pass, the result says what was ASKED FOR; the API reports nothing about what arrived."
 
+const wideShareHelp = "`calendar_title` is the calendar's title as list_calendars shows it, so the call names " +
+	"the calendar it opens; a title that is not this calendar's is refused [stale]. It needs `confirm: true` on " +
+	"the call, and the server it runs in has to have been started with the destructive tools enabled."
+
 const exposureHelp = "The result lists who could see the calendar before and who can see it now, because " +
 	"\"shared with somebody\" is not an answer to \"who can see this\"."
 
@@ -135,10 +139,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"whoever already looked, so this is publishing rather than sharing. " +
 			"`role` is what they may do: freeBusyReader, which shows only when you are busy, reader, " +
 			"writerWithoutPrivateAccess or writer; never owner. " +
-			"`calendar_title` is the calendar's title as list_calendars shows it, so the call names the " +
-			"calendar it opens; a title that is not this calendar's is refused [stale]. " +
-			"It needs `confirm: true` on the call, and the server it runs in has to have been started with the " +
-			"destructive tools enabled. To share with named people inside your organization use " +
+			wideShareHelp + " To share with named people inside your organization use " +
 			"share_calendar, and outside it or as an owner, widen_calendar_access. " +
 			shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
 		Kind:            WideSharing,
@@ -163,10 +164,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"outside your organization unless its domain is your account's own, and every address is outside " +
 			"a personal Google account. `role` is freeBusyReader, reader, writerWithoutPrivateAccess, writer " +
 			"or owner. Owner access includes changing who else can see the calendar, and removing you. " +
-			"`calendar_title` is the calendar's title as list_calendars shows it, so the call names the " +
-			"calendar it opens; a title that is not this calendar's is refused [stale]. " +
-			"It needs `confirm: true` on the call, and the server it runs in has to have been started with the " +
-			"destructive tools enabled. Inside your organization and below owner, use share_calendar; for " +
+			wideShareHelp + " Inside your organization and below owner, use share_calendar; for " +
 			"\"anyone\" or a whole domain, publish_calendar. " +
 			shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
 		Kind: WideSharing,

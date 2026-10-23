@@ -281,14 +281,19 @@ func statusStart() time.Time {
 	return time.Date(d.Year(), d.Month(), d.Day(), 10, 0, 0, 0, loc)
 }
 
+// statusBase is a status event of kind on cal, at this run's hour.
+func statusBase(cal, kind string) map[string]any {
+	start := statusStart()
+	return map[string]any{
+		"calendar": cal, "title": statusTitle, "event_type": kind,
+		"start": start.Format(time.RFC3339), "end": start.Add(time.Hour).Format(time.RFC3339),
+	}
+}
+
 // statusArgs is the create_event call for this run's status event, on
 // cal. Nothing it carries declines anything.
 func statusArgs(cal string) map[string]any {
-	start := statusStart()
-	args := map[string]any{
-		"calendar": cal, "title": statusTitle, "event_type": statusKind,
-		"start": start.Format(time.RFC3339), "end": start.Add(time.Hour).Format(time.RFC3339),
-	}
+	args := statusBase(cal, statusKind)
 	switch statusKind {
 	case "workingLocation":
 		args["working_location"], args["working_location_label"] = "custom", "Livecal probe place"
@@ -322,11 +327,7 @@ func statusSteps(scratch string) []step {
 	// are refused before a request: a secondary calendar holds no status
 	// event, and the guard keeps either off the primary one.
 	declining := func(extra map[string]any) map[string]any {
-		start := statusStart()
-		args := map[string]any{
-			"calendar": scratch, "title": statusTitle, "event_type": "outOfOffice",
-			"start": start.Format(time.RFC3339), "end": start.Add(time.Hour).Format(time.RFC3339),
-		}
+		args := statusBase(scratch, "outOfOffice")
 		for k, v := range extra {
 			args[k] = v
 		}

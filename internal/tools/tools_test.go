@@ -551,8 +551,7 @@ func TestAnnotationsMatchTheKind(t *testing.T) {
 
 func TestFullSurfaceOpensEveryGate(t *testing.T) {
 	cfg := tools.FullSurface(config.Config{ReadOnly: true, EnableDestructive: false, Sharing: false})
-	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.Sharing, tools.WideSharing,
-		tools.DecliningAll, tools.Destructive} {
+	for k := tools.Kind(0); k < tools.KindCount; k++ {
 		if !tools.Allowed(k, cfg) {
 			t.Fatalf("FullSurface does not register kind %d, so the schema dump would miss it", k)
 		}

@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -351,6 +352,47 @@ func TestAWideShareNamesTheCalendarItOpens(t *testing.T) {
 			}
 			if w := fake.Wrote(); len(w) != wantWrites {
 				t.Fatalf("got writes %+v, want %d", w, wantWrites)
+			}
+		})
+	}
+}
+
+// A sharing call spends no request it does not need. "primary" resolves
+// from the calendar list the account's own address is read from, rather
+// than a second read of the same fact, and a wider share refused on its
+// arguments reads no rules.
+func TestASharingCallSpendsOnlyTheRequestsItNeeds(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  func(*service.Service) error
+		want []string
+	}{
+		{"share_calendar on primary", func(s *service.Service) error {
+			_, err := s.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "primary", Who: "colleague@example.test", Role: "reader", Notify: "none", DryRun: true,
+			})
+			return err
+		}, []string{"GET /users/me/calendarList", "GET /calendars/me@example.test/acl"}},
+		{"publish_calendar without confirm", func(s *service.Service) error {
+			_, err := s.PublishCalendar(context.Background(), service.PublishOptions{
+				Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "anyone",
+				Role: "reader", Notify: "none",
+			})
+			return err
+		}, []string{"GET /users/me/calendarList"}},
+		{"widen_calendar_access with another title", func(s *service.Service) error {
+			_, err := s.WidenCalendarAccess(context.Background(), service.WidenOptions{
+				Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Primary",
+				Who: "somebody@elsewhere.test", Role: "reader", Notify: "none", Confirm: true,
+			})
+			return err
+		}, []string{"GET /users/me/calendarList"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			_ = c.run(svc)
+			if got := fake.Served(); !slices.Equal(got, c.want) {
+				t.Fatalf("served %v, want %v", got, c.want)
 			}
 		})
 	}

@@ -719,8 +719,8 @@ func (s *Service) DeleteCalendar(ctx context.Context, o DestructiveOptions) (ren
 	// had to be confirmed first would show nothing a caller can use.
 	if !o.DryRun {
 		if err := plan.Confirm(o.Confirm,
-			fmt.Sprintf("this deletes the calendar %q and every event on it, for everybody it is shared with",
-				cal.Title)); err != nil {
+			fmt.Sprintf("this deletes the calendar %q and every event on it, for everybody it is shared with, "+
+				"and Calendar cannot undo it", cal.Title)); err != nil {
 			return render.CalendarReport{}, classifyPlan(err)
 		}
 	}
@@ -764,7 +764,8 @@ func (s *Service) ClearCalendar(ctx context.Context, o DestructiveOptions) (rend
 	}
 	if !o.DryRun {
 		if err := plan.Confirm(o.Confirm,
-			"this deletes EVERY event on your primary calendar, past and future, invitations included"); err != nil {
+			"this deletes EVERY event on your primary calendar, past and future, invitations included, and "+
+				"Calendar cannot undo it"); err != nil {
 			return render.CalendarReport{}, classifyPlan(err)
 		}
 	}

@@ -264,17 +264,6 @@ func TestAPublicRuleIsNeverOwner(t *testing.T) {
 	}
 }
 
-// A wider share needs confirm, a witness the caller meant it.
-func TestAWideShareNeedsConfirm(t *testing.T) {
-	if err := plan.ConfirmWidening(true, "x"); err != nil {
-		t.Fatalf("confirmed: %v", err)
-	}
-	if err := plan.ConfirmWidening(false, "this publishes it"); !errors.Is(err, plan.ErrBlocked) ||
-		!strings.Contains(err.Error(), "this publishes it") || !strings.Contains(err.Error(), "confirm:true") {
-		t.Fatalf("unconfirmed: %v", err)
-	}
-}
-
 func TestParseRoleTakesBothSpellings(t *testing.T) {
 	for in, want := range map[string]string{
 		"reader":                     gcal.RoleReader,

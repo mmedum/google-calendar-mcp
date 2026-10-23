@@ -71,7 +71,7 @@ func New(d Deps) *mcp.Server {
 	if d.Logger != nil {
 		s.AddReceivingMiddleware(logCalls(d.Logger))
 	}
-	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config, Logger: d.Logger})
+	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config})
 	return s
 }
 

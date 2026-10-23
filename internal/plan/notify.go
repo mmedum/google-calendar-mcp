@@ -209,7 +209,7 @@ func Notification(v string, r Reach) (Decision, error) {
 				" warned about. Such a guest may have no Google Calendar for the event to appear in, so email is"+
 				" the only way they can learn of it — the event would exist with them attached and they could not"+
 				" find it. Pass notify:external_only to reach exactly them, or notify:all",
-			ErrBlocked, r.External, r.Guests, IsAre(r.External))
+			ErrBlocked, r.External, r.Guests, isAre(r.External))
 	}
 	return Decision{Notify: choice, Asked: true, Reach: r}, nil
 }
@@ -297,8 +297,8 @@ func People(n int) string {
 	return "guests"
 }
 
-// IsAre is "is" or "are". Exported for the same reason as People.
-func IsAre(n int) string {
+// isAre is "is" or "are".
+func isAre(n int) string {
 	if n == 1 {
 		return "is"
 	}

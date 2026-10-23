@@ -13,9 +13,9 @@ import (
 )
 
 // The sharing tools (§7.6): list_sharing, share_calendar,
-// unshare_calendar.
+// publish_calendar, widen_calendar_access and unshare_calendar.
 //
-// Every one of them reads the rules first, and the read is not
+// Every one of them reads the rules before it writes, and the read is not
 // incidental: §7.6 requires a share to show who could see the calendar
 // before and who can see it now, and "shared with somebody" is not an
 // answer to "who can see this". The same read decides the scope type of
@@ -185,7 +185,7 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 type PublishOptions struct {
 	Calendar string
 	// CalendarTitle is the calendar's title as the caller read it
-	// (heldTitle).
+	// (openWide).
 	CalendarTitle string
 	// Who is "anyone", or a domain.
 	Who     string
@@ -199,11 +199,8 @@ type PublishOptions struct {
 // domain, or changes the access such a rule gives (§7.6). Registered only
 // with the destructive flag, and it needs confirm.
 func (s *Service) PublishCalendar(ctx context.Context, o PublishOptions) (render.SharingReport, error) {
-	ctx, cal, before, err := s.openSharing(ctx, o.Calendar)
+	ctx, cal, err := s.openWide(ctx, o.Calendar, o.CalendarTitle)
 	if err != nil {
-		return render.SharingReport{}, err
-	}
-	if err := heldTitle(cal, o.CalendarTitle); err != nil {
 		return render.SharingReport{}, err
 	}
 	audience, err := plan.ParsePublic(o.Who)
@@ -223,22 +220,20 @@ func (s *Service) PublishCalendar(ctx context.Context, o PublishOptions) (render
 	}
 	// A dry run writes nothing, so it needs no confirm, as a delete's
 	// does not.
-	if !o.DryRun {
-		what := fmt.Sprintf("this opens %q to everybody in %s", cal.Title, audience.Scope.Value)
-		if audience.Scope.IsPublic() {
-			what = fmt.Sprintf("this publishes %q to anybody at all, signed in or not, and removing the rule "+
-				"later takes nothing back from whoever already looked", cal.Title)
-		}
-		if err := plan.ConfirmWidening(o.Confirm, what); err != nil {
-			return render.SharingReport{}, classifyPlan(err)
-		}
+	what := fmt.Sprintf("this opens %q to %s", cal.Title, plan.Describe(audience))
+	if audience.Scope.IsPublic() {
+		what += ", and removing the rule later takes nothing back from whoever already looked"
 	}
-	var notes []string
-	if audience.Scope.Type == gcal.ScopeTypeDomain {
-		notes = append(notes, "This rule opens the calendar to everybody in "+audience.Scope.Value+
-			", now and whoever joins it later.")
+	if err := plan.Confirm(o.Confirm || o.DryRun, what); err != nil {
+		return render.SharingReport{}, classifyPlan(err)
 	}
-	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, notes)
+	// Read only now: nothing above needs the rules, and a refusal there
+	// spends no request on them.
+	before, err := s.sharingRules(ctx, cal.ID)
+	if err != nil {
+		return render.SharingReport{}, err
+	}
+	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, nil)
 }
 
 // WidenOptions is what widen_calendar_access takes.
@@ -257,11 +252,12 @@ type WidenOptions struct {
 // the organization, or makes somebody an owner (§7.6). Registered only
 // with the destructive flag, and it needs confirm.
 func (s *Service) WidenCalendarAccess(ctx context.Context, o WidenOptions) (render.SharingReport, error) {
-	ctx, cal, before, err := s.openSharing(ctx, o.Calendar)
+	ctx, cal, err := s.openWide(ctx, o.Calendar, o.CalendarTitle)
 	if err != nil {
 		return render.SharingReport{}, err
 	}
-	if err := heldTitle(cal, o.CalendarTitle); err != nil {
+	before, err := s.sharingRules(ctx, cal.ID)
+	if err != nil {
 		return render.SharingReport{}, err
 	}
 	audience, err := plan.ParseAudience(o.Who, o.ScopeType, before)
@@ -280,36 +276,51 @@ func (s *Service) WidenCalendarAccess(ctx context.Context, o WidenOptions) (rend
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
+	what := fmt.Sprintf("this makes %s an owner of %q", plan.Describe(audience), cal.Title)
+	if outside {
+		what = fmt.Sprintf("this gives %s %s access to %q, outside your organization", plan.Describe(audience),
+			role, cal.Title)
+	}
+	if err := plan.Confirm(o.Confirm || o.DryRun, what); err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
 	var notes []string
 	if outside {
 		// Tense-neutral, because a dry run prints it too.
 		notes = append(notes, plan.Describe(audience)+" is outside your organization as far as this server "+
 			"can tell, so this rule reaches past it.")
 	}
-	if !o.DryRun {
-		what := fmt.Sprintf("this gives %s %s access to %q, outside your organization", plan.Describe(audience),
-			role, cal.Title)
-		if !outside {
-			what = fmt.Sprintf("this makes %s an owner of %q", plan.Describe(audience), cal.Title)
-		}
-		if err := plan.ConfirmWidening(o.Confirm, what); err != nil {
-			return render.SharingReport{}, classifyPlan(err)
-		}
-	}
 	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, notes)
 }
 
-// openSharing opens a calendar for a sharing change and reads its rules.
+// ownCalendar opens a calendar for a sharing change.
 //
 // Changing who can see a calendar is the owner's to do, and Google
 // refuses anybody else. Refused here when the role is known, so the
-// caller gets the sentence rather than a 403.
-func (s *Service) openSharing(ctx context.Context, ref string) (context.Context, model.Calendar, []model.Sharing, error) {
-	ctx, cal, err := s.openCalendar(ctx, ref)
+// caller gets the sentence rather than a 403. The account's own address
+// is read first, as prepare does: it fills the calendar-list cache, so
+// resolving "primary" and asking who is outside cost one request, not
+// two.
+func (s *Service) ownCalendar(ctx context.Context, ref string) (context.Context, model.Calendar, error) {
+	if err := s.ready(); err != nil {
+		return ctx, model.Calendar{}, err
+	}
+	ctx = gapi.WithCounter(ctx)
+	s.primaryID(ctx)
+	cal, err := s.ResolveCalendar(ctx, ref)
 	if err != nil {
-		return ctx, model.Calendar{}, nil, err
+		return ctx, model.Calendar{}, err
 	}
 	if err := needRole(cal, gcal.RoleOwner, "changing who a calendar is shared with"); err != nil {
+		return ctx, model.Calendar{}, err
+	}
+	return ctx, cal, nil
+}
+
+// openSharing is ownCalendar with the calendar's rules.
+func (s *Service) openSharing(ctx context.Context, ref string) (context.Context, model.Calendar, []model.Sharing, error) {
+	ctx, cal, err := s.ownCalendar(ctx, ref)
+	if err != nil {
 		return ctx, model.Calendar{}, nil, err
 	}
 	before, err := s.sharingRules(ctx, cal.ID)
@@ -319,26 +330,28 @@ func (s *Service) openSharing(ctx context.Context, ref string) (context.Context,
 	return ctx, cal, before, nil
 }
 
-// heldTitle refuses a wider share whose calendar_title is not the title
-// of the calendar the call reached. The title is the name the person
-// knows the calendar by, and carrying it in the call is what lets a
-// client that asks before the call show which calendar it opens; an id
-// or a fragment of a title shows nothing a person recognizes. Compared
-// exactly, past spaces at either end, and checked before anything else,
-// a dry run included, so a refusal that names the calendar never
-// supplies the witness.
-func heldTitle(cal model.Calendar, given string) error {
-	given = strings.TrimSpace(given)
-	if given == "" {
-		return gapi.Errf(gapi.ClassInvalid, "calendar_title is required: the title list_calendars shows for "+
-			"this calendar, so the call names the calendar it opens; nothing was sent")
+// openWide is ownCalendar for the two wider shares, with the calendar's
+// title held to the one the caller gave. The title is the name a person
+// knows the calendar by, so a client that asks before the call shows
+// which calendar it opens, where an id or a fragment of a title would
+// not (§7.6). It is checked before any other argument, so no refusal
+// supplies it.
+func (s *Service) openWide(ctx context.Context, ref, title string) (context.Context, model.Calendar, error) {
+	ctx, cal, err := s.ownCalendar(ctx, ref)
+	if err != nil {
+		return ctx, model.Calendar{}, err
 	}
-	if given != strings.TrimSpace(cal.Title) {
-		return gapi.Errf(gapi.ClassStale, "calendar_title %q is not the title of calendar %s; "+
-			"nothing was sent. Read list_calendars again and pass the title it shows, after checking it is the "+
-			"calendar to open", given, cal.ID)
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ctx, model.Calendar{}, gapi.Errf(gapi.ClassInvalid, "calendar_title is required: the title "+
+			"list_calendars shows for this calendar, so the call names the calendar it opens; nothing was sent")
 	}
-	return nil
+	if title != strings.TrimSpace(cal.Title) {
+		return ctx, model.Calendar{}, gapi.Errf(gapi.ClassStale, "calendar_title %q is not the title of "+
+			"calendar %s; nothing was sent. Read list_calendars again and pass the title it shows, after "+
+			"checking it is the calendar to open", title, cal.ID)
+	}
+	return ctx, cal, nil
 }
 
 // outside reports whether an audience's address is outside the
@@ -368,6 +381,10 @@ func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.
 		report.Notes = append(report.Notes, "Read as "+gcal.ScopeMeans(audience.Scope.Type)+
 			" — the scope type was "+string(audience.Source)+
 			". Pass scope_type if that is not what you meant; a group address and a person's look the same.")
+	}
+	if audience.Scope.Type == gcal.ScopeTypeDomain {
+		report.Notes = append(report.Notes, "This rule opens the calendar to everybody in "+audience.Scope.Value+
+			", now and whoever joins it later.")
 	}
 	if audience.Scope.IsPublic() {
 		// Tense-neutral, because this same note prints under a dry run.
@@ -476,14 +493,7 @@ type UnshareOptions struct {
 // Nobody is told; they find it gone. The result says that rather than
 // leaving a caller to assume a mail went out.
 func (s *Service) UnshareCalendar(ctx context.Context, o UnshareOptions) (render.SharingReport, error) {
-	ctx, cal, err := s.openCalendar(ctx, o.Calendar)
-	if err != nil {
-		return render.SharingReport{}, err
-	}
-	if err := needRole(cal, gcal.RoleOwner, "changing who a calendar is shared with"); err != nil {
-		return render.SharingReport{}, err
-	}
-	before, err := s.sharingRules(ctx, cal.ID)
+	ctx, cal, before, err := s.openSharing(ctx, o.Calendar)
 	if err != nil {
 		return render.SharingReport{}, err
 	}

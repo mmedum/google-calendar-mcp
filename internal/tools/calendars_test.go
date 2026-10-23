@@ -66,10 +66,8 @@ func TestTheGatedToolsNeedTheFlag(t *testing.T) {
 // The mark goes only where §3 puts it (§9a): the delete of a whole
 // calendar, and of every event on the primary one, neither of which
 // Calendar can bring back, and a public or domain-wide share. Claude
-// Code then prompts on every such call. It is listed to every client:
-// each one here declares elicitation, and the mark used to be dropped
-// for such a client.
-func TestOnlyTheWholeCalendarDeletesPromptEveryCall(t *testing.T) {
+// Code then prompts on every such call, and every client is listed it.
+func TestWhichToolsPromptEveryCall(t *testing.T) {
 	var got []string
 	for _, tool := range listTools(t, tools.FullSurface(baseConfig())) {
 		if tool.Meta["anthropic/requiresUserInteraction"] == true {

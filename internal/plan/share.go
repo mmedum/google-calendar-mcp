@@ -168,13 +168,6 @@ func looksLikeDomain(v string) bool {
 // destructive flag, rather than a value an always-allowed share carries
 // unseen.
 
-// The tools a refusal names.
-const (
-	PublishTool = "publish_calendar"
-	WidenTool   = "widen_calendar_access"
-	ShareTool   = "share_calendar"
-)
-
 // gatedTool names a wider tool and the flag it needs, which is the
 // operator's to set, never the caller's.
 func gatedTool(name string) string {
@@ -207,16 +200,16 @@ func OrdinaryAudience(a Audience, outside bool) error {
 		return fmt.Errorf("%w: share_calendar shares with named people and groups inside your organization. "+
 			"Sharing with anyone publishes the calendar to the whole internet, signed in or not, and "+
 			"removing the rule later takes nothing back from whoever already looked. That is %s. To take a "+
-			"public rule away, use unshare_calendar", ErrBlocked, gatedTool(PublishTool))
+			"public rule away, use unshare_calendar", ErrBlocked, gatedTool("publish_calendar"))
 	case a.Scope.Type == gcal.ScopeTypeDomain:
 		return fmt.Errorf("%w: share_calendar shares with named people and groups inside your organization. "+
 			"A domain rule opens the calendar to everybody in %s, which is %s. To take a domain rule away, "+
-			"use unshare_calendar", ErrBlocked, a.Scope.Value, gatedTool(PublishTool))
+			"use unshare_calendar", ErrBlocked, a.Scope.Value, gatedTool("publish_calendar"))
 	case outside:
 		return fmt.Errorf("%w: %s is outside your organization as far as this server can tell: an address "+
 			"is inside only when its domain is your account's own, and a personal Google account has no "+
 			"organization. share_calendar shares inside it; sharing outside is %s", ErrBlocked,
-			Describe(a), gatedTool(WidenTool))
+			Describe(a), gatedTool("widen_calendar_access"))
 	}
 	return nil
 }
@@ -229,7 +222,7 @@ func OrdinaryRole(role string) error {
 	}
 	return fmt.Errorf("%w: owner access includes changing who else can see the calendar, and removing you. "+
 		"share_calendar grants access below owner; making somebody an owner is %s", ErrBlocked,
-		gatedTool(WidenTool))
+		gatedTool("widen_calendar_access"))
 }
 
 // Narrows reports whether a share only lowers the role of a rule the
@@ -251,7 +244,8 @@ func PublicRole(role string) error {
 	}
 	return fmt.Errorf("%w: owner access lets whoever holds it change who else can see the calendar and remove "+
 		"you, and publish_calendar does not give it to a domain or to anyone. Pass freeBusyReader, reader, "+
-		"writerWithoutPrivateAccess or writer; an owner is one named person, through %s", ErrInvalid, WidenTool)
+		"writerWithoutPrivateAccess or writer; an owner is one named person, through widen_calendar_access",
+		ErrInvalid)
 }
 
 // ParsePublic reads publish_calendar's `who`: "anyone" for the public,
@@ -270,8 +264,8 @@ func ParsePublic(who string) (Audience, error) {
 			"such as example.com for everybody in it", ErrInvalid)
 	}
 	return Audience{}, fmt.Errorf("%w: publish_calendar takes \"anyone\" or a domain, such as example.com. "+
-		"A person or a group is %s inside your organization below owner, and %s otherwise", ErrInvalid,
-		ShareTool, WidenTool)
+		"A person or a group is share_calendar inside your organization below owner, and "+
+		"widen_calendar_access otherwise", ErrInvalid)
 }
 
 // WideAudience refuses, in widen_calendar_access, what one of the other
@@ -282,23 +276,13 @@ func WideAudience(a Audience, role string, outside bool) error {
 	switch {
 	case a.Scope.IsPublic() || a.Scope.Type == gcal.ScopeTypeDomain:
 		return fmt.Errorf("%w: widen_calendar_access shares with a person or a group. The public and a whole "+
-			"domain are %s's", ErrInvalid, PublishTool)
+			"domain are publish_calendar's", ErrInvalid)
 	case !outside && role != gcal.RoleOwner:
-		return fmt.Errorf("%w: %s is inside your organization and %s is below owner, which is %s's to share. "+
-			"widen_calendar_access is for somebody outside your organization, or for an owner",
-			ErrInvalid, Describe(a), role, ShareTool)
+		return fmt.Errorf("%w: %s is inside your organization and %s is below owner, which is "+
+			"share_calendar's to share. widen_calendar_access is for somebody outside your organization, or "+
+			"for an owner", ErrInvalid, Describe(a), role)
 	}
 	return nil
-}
-
-// ConfirmWidening refuses a wider share without confirm:true. Like a
-// delete's, it is a witness that the caller meant this share, never
-// approval: the model writes it.
-func ConfirmWidening(ok bool, what string) error {
-	if ok {
-		return nil
-	}
-	return fmt.Errorf("%w: %s. Pass confirm:true on this call if that is what you mean", ErrBlocked, what)
 }
 
 // ParseRole reads the access level a share grants.
