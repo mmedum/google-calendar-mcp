@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
 )
 
 // The one write this driver makes on the account's primary calendar.

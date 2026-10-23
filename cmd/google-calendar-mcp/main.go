@@ -24,10 +24,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/server"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/version"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/server"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/version"
 )
 
 func main() {

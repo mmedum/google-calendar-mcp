@@ -6,8 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
 )
 
 // The mark makes Claude Code prompt on every call, so it goes only on a

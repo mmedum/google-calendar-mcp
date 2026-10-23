@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
 )
 
 // Status asks for a status event (§7.4): out of office, focus time or a

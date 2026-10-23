@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/model"
 )
 
 // The sharing half of the plan package (§7.6).

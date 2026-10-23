@@ -8,9 +8,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/tools"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v4/internal/tools"
 )
 
 // §7.6: GCAL_SHARING=off removes the sharing surface — the read among

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Breaking:** the module path is `github.com/mmedum/google-calendar-mcp/v4`; install with `go install github.com/mmedum/google-calendar-mcp/v4/cmd/google-calendar-mcp@latest`.
 - **Breaking:** The server no longer asks you before a write. It asked before `delete_calendar`, `clear_calendar`, a `share_calendar` that published a calendar, opened it to a domain or made an owner, a `cancel_event` that emailed a guest, and a status event that declined every meeting it overlapped. Your client's own approval now decides each call: claude.ai and Codex prompt for the tools marked destructive, VS Code for every tool that writes, and in Claude Code you list the calls to approve under `permissions.ask`, as the README shows. What held before still holds: the destructive flag, `confirm: true` on the deletes, the required `notify` and `scope`, the etag a write is made under, and `dry_run`.
 - **Breaking:** `delete_calendar` and `clear_calendar` carry Claude Code's `requiresUserInteraction` for every client, so Claude Code prompts on every call whatever your rules say, and refuses them where it cannot prompt, as with `-p`. 3.1.0 told you to put both on the allow list; that no longer skips the prompt.
 
