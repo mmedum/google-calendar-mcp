@@ -258,20 +258,6 @@ func (d Decision) SendUpdatesFor() string {
 	return d.Notify.SendUpdates()
 }
 
-// Emails reports whether this decision asks Google to email at least
-// one guest.
-func (d Decision) Emails() bool {
-	switch {
-	case !d.Asked:
-		return false
-	case d.Notify == NotifyAll:
-		return d.Reach.Guests > 0
-	case d.Notify == NotifyExternalOnly:
-		return d.Reach.External > 0
-	}
-	return false
-}
-
 // Report is what a result says about notification (§4.9).
 //
 // It says what the server ASKED FOR. It never says what arrived: `none`

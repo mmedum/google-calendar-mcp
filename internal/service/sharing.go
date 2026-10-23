@@ -266,8 +266,9 @@ func (s *Service) WidenCalendarAccess(ctx context.Context, o WidenOptions) (rend
 	}
 	var notes []string
 	if outside {
+		// Tense-neutral, because a dry run prints it too.
 		notes = append(notes, plan.Describe(audience)+" is outside your organization as far as this server "+
-			"can tell, so the calendar now reaches past it.")
+			"can tell, so this rule reaches past it.")
 	}
 	if !o.DryRun {
 		what := fmt.Sprintf("this gives %s %s access to %q, outside your organization", plan.Describe(audience),
