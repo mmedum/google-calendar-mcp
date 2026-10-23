@@ -115,6 +115,10 @@ func TestOutsideIsAnyDomainButTheAccountsOwn(t *testing.T) {
 		{"colleague@example.test", "", true},
 		{"colleague@example.test", "primary", true},
 		{"example.test", "me@example.test", true},
+		// Unicode case folding maps this to the account's domain, while
+		// Google is sent the address as given.
+		{"somebody@\u0130nside.test", "me@inside.test", true},
+		{"j\u00f6rg@inside.test", "me@inside.test", false},
 	} {
 		if got := plan.Outside(c.address, c.account); got != c.outside {
 			t.Errorf("Outside(%q, %q) = %v, want %v", c.address, c.account, got, c.outside)

@@ -3073,6 +3073,14 @@ A second review, of the code written after the first, fixed:
     rule,** so a model could send a person to the destructive flag to
     make a public calendar free/busy only.
 
+The security review found nothing at confidence 8 or above. Fixed from
+it, as hardening:
+
+26. **A domain past ASCII could read as the account's own.** Go's case
+    folding maps `İ` to `i`, so `İnside.test` matched `inside.test`
+    while Google was sent the address unchanged. `plan.Outside` takes
+    such a domain as outside.
+
 Written down, not changed:
 
 - `update_event` making a decline-all event cover more goes through
@@ -3091,6 +3099,13 @@ Written down, not changed:
   result shows the rule before and after. The maintainer may prefer
   the outside note `widen_calendar_access` adds, or `notify: none`
   forced there.
+- A personal account on a provider other than Gmail counts as an
+  organization. A Google account made on an existing address elsewhere
+  has that provider's domain, so `share_calendar` takes every address
+  there as inside. That is narrower than 3.1.0, where `share_calendar`
+  took anybody, but §7.6 promises more. Closing it is a decision: an
+  operator setting naming the organization's domains, or Google's own
+  evidence of a Workspace account, which needs a scope.
 
 ## 17. Open decisions
 

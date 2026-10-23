@@ -3,6 +3,7 @@ package plan
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v4/internal/model"
@@ -184,11 +185,24 @@ var consumerDomains = map[string]bool{"gmail.com": true, "googlemail.com": true}
 // organization is taken as the account's domain. A personal account has
 // none, so every address is outside it, and so is every address when
 // the account is unknown. A secondary domain of the same organization
-// counts as outside too: each errs toward one refusal too many, never one
-// share too many.
+// counts as outside too, and so does a domain with a character past
+// ASCII, which Unicode case folding can make equal to the account's
+// while Google is sent it unchanged: each errs toward one refusal too
+// many, never one share too many.
 func Outside(address, account string) bool {
 	theirs, mine := domainOf(address), domainOf(account)
-	return theirs == "" || mine == "" || consumerDomains[mine] || theirs != mine
+	return theirs == "" || mine == "" || consumerDomains[mine] || theirs != mine ||
+		!ascii(address[strings.LastIndex(address, "@")+1:])
+}
+
+// ascii reports whether s holds only ASCII characters.
+func ascii(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // OrdinaryAudience refuses, in share_calendar, an audience past named
