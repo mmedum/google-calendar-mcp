@@ -1,14 +1,52 @@
 # Architecture — google-calendar-mcp
 
-**Status: v3.1.0 (2026-10-09), released and verified from outside:** checksums,
+**Status: 4.0.0 (2026-10-23), built with Go 1.27.3:** the server asks
+nobody, and the client approves each call (§9a). Sharing is three tools
+by reach: `share_calendar` inside the organization below owner, and
+`publish_calendar` and `widen_calendar_access` behind the destructive
+flag with `confirm` and the calendar's title (§7.6). Declining every
+meeting is `create_event_declining_all`, behind `GCAL_ENABLE_DECLINE_ALL`
+(§7.4). The module path is `/v4`. Go 1.27.3 fixes GO-2026-6809 in
+`crypto/x509`, which `govulncheck` found reachable under 1.27.2. It ran
+live on 2026-10-23: 138 steps, none failed, nine undetermined (the
+attachment and real-guest steps and spikes A and B, none of them armed),
+and no question put to the person. The discovery document was refetched
+the same day at revision 20261021: no method or field moved.
+Verification from outside is owed after the tag (`docs/release.md`).
+
+**What 4.0.0 does not close.** Each item waits on a probe that needs the
+owner's approval for what it touches (§15, probes Q to T):
+
+- **`update_event` can still widen or split a decline-all status event
+  without anything asking.** Moving an out-of-office or focus-time
+  event that declines every meeting it overlaps, making it longer or
+  making it repeat more, or splitting such a series with
+  `this_and_following`, goes through on a tool registered by default,
+  while `create_event` refuses to make one. The result says Google may
+  decline in the new time. Probe Q decides whether it is refused
+  `[blocked]` (§17 item 6, decision 4; §18 row 102).
+- **`visibility: public`** on `create_event` and `update_event` is not
+  refused, though Google's help says a public event's details show to
+  everybody who can see the calendar, free/busy readers included.
+  Probe R (§17 item 6).
+- **`move_event` into a calendar shared more widely** than the one it
+  leaves is not refused. Probe S (§17 item 6).
+- **A group inside the organization that admits outside members** is
+  shared by `share_calendar` with no flag; the result says who a group
+  rule reaches. Probe T asks whether this server can see it (§17
+  item 7).
+
+Also owed: an inside `share_calendar` share driven live, which needs a
+real address inside an organization, and phase 8's list below. And
+`make leaks-history` fails on two shapes that are not deployer data: the
+tagger's address on the seven annotated tags, and GitHub's support
+address in Dependabot's sign-off. Teaching the gate either is an argued
+exemption (§9.1), so it is the maintainer's.
+
+**v3.1.0 (2026-10-09) was released and verified from outside:** checksums,
 the cosign signature and the provenance attestation, each also against a tampered
 copy, the version in the binary, the registry publish, and the README's
 `go install` resolving `@latest` to v3.1.0.
-
-**4.0.0 is built and unreleased (2026-10-23), and unproven live:** the
-server asks nobody, sharing is three tools by reach, and declining every
-meeting is a tool of its own (§16, phase 9). Three refusals wait on
-probes (§17 item 6).
 
 **Phase 8, released as 3.1.0, ran live on 2026-10-09 five times:** once per
 status type, once more after the fixes those three led to, and once with a
@@ -34,8 +72,8 @@ that holds one against the other, and `gates release-notes`. Phase 6 is
 `list_changes` and §17.1, the last open decision, now closed. The surface
 is **twenty-four tools and three resources**, twenty-one in 3.1.0;
 `make check` is green across **twenty-two** targets; the live driver's
-last run, on 3.1.0, was 131 steps against a real account, none failing
-and seven undetermined.
+last run, on 4.0.0, was 138 steps against a real account, none failing
+and nine undetermined.
 
 **v1.0.0 ran, and was verified from outside rather than trusted.**
 `sha256sum -c` on the archives and the bundle, `cosign verify-blob`
@@ -2954,8 +2992,8 @@ working location (row 99); and a stop part way through, which no run has
 made since the driver's fix. Rooms, a split of a status series and a move
 of one that declines all stay unproven: the driver can make none of them.
 
-**Phase 9 — the client decides (4.0.0). Built 2026-10-23, unreleased,
-not yet run live.** The family standard's §3 was rewritten on
+**Phase 9 — the client decides (4.0.0). Built 2026-10-23, run live and
+cut as 4.0.0 the same day.** The family standard's §3 was rewritten on
 2026-10-22, and the maintainer approved this port on 2026-10-23. Four
 commits:
 
@@ -2978,13 +3016,22 @@ The schema diff accepts a break that a **Breaking:** entry under
 permission rules to the published tools and lets the docs name a
 removed setting. Three refusals wait on probes Q to S (§17 item 6).
 
-**Owed before release:** a live run, its transcript read, driving the
-new sharing steps on the probe calendar (the refusals, one of them a
-title that is not the one this account reads,
-`widen_calendar_access` to the probe address and back, a domain dry run,
-and one public free/busy rule removed by the next step), both decline-all
-refusals on the scratch calendar, and a run with no question put; then
-probes Q to T, each needing the owner's approval for what it touches.
+**Run live on 2026-10-23, the transcript read: 138 steps, none failed,
+nine undetermined, no question put.** It drove the new sharing steps on
+the probe calendar: both `share_calendar` refusals, the `[stale]`
+refusal of a title that is not the one this account reads,
+`widen_calendar_access` to the probe address, a role change and the
+rule's removal, a domain dry run, and one public free/busy rule removed
+by the next step. Both decline-all refusals met on the scratch calendar. The run
+before it failed three steps: Google answered the move back with a rate
+limit, and the two cancel steps then found the event still moved away.
+
+**Owed after release:** probes Q to T, each needing the owner's approval
+for what it touches. Until they run, `update_event` can still widen or
+split a decline-all status event with nothing asking (§17 item 6).
+
+Built with Go 1.27.3 for the release: CI's `govulncheck` found
+GO-2026-6809 in `crypto/x509` reachable under 1.27.2.
 
 ### 16a. Found by review, and fixed
 
