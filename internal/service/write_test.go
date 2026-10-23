@@ -72,15 +72,6 @@ func writeSeed(t *testing.T) (*service.Service, *caltest.Server) {
 	return newService(t, fake), fake
 }
 
-// accepting is a person who confirms every question, for tests of what a
-// write does once it is confirmed.
-type accepting struct{}
-
-func (accepting) Ask(context.Context, render.Question) error { return nil }
-
-// accepted is a context whose asking writes are confirmed.
-func accepted() context.Context { return service.WithAsker(context.Background(), accepting{}) }
-
 func classOf(t *testing.T, err error) gapi.Class {
 	t.Helper()
 	if err == nil {
@@ -719,7 +710,7 @@ func TestAWriteToAReadOnlyCalendarIsForbidden(t *testing.T) {
 // §7.4: two API shapes behind one verb, and the result names which.
 func TestCancelingAWholeEventDeletesIt(t *testing.T) {
 	svc, fake := writeSeed(t)
-	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
+	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001",
 	})
 	if err != nil {
@@ -736,7 +727,7 @@ func TestCancelingAWholeEventDeletesIt(t *testing.T) {
 
 func TestCancelingOneOccurrenceIsAStatusPatch(t *testing.T) {
 	svc, fake := writeSeed(t)
-	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
+	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evseries001_20260324T130000Z", Scope: "instance",
 	})
 	if err != nil {
@@ -759,7 +750,7 @@ func TestCancelingOneOccurrenceIsAStatusPatch(t *testing.T) {
 // result says so, because that is the sentence a caller most needs.
 func TestCancelingQuietlySaysTheGuestsStillHaveIt(t *testing.T) {
 	svc, _ := writeSeed(t)
-	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
+	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evguests001", Notify: "all",
 	})
 	if err != nil {
@@ -772,7 +763,7 @@ func TestCancelingQuietlySaysTheGuestsStillHaveIt(t *testing.T) {
 	svc2, _ := writeSeed(t)
 	// Every guest inside the domain, so `none` is allowed and the
 	// warning is the protection instead.
-	quiet, err := svc2.CancelEvent(accepted(), service.CancelOptions{
+	quiet, err := svc2.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evinvite001", Notify: "none",
 	})
 	if err != nil {
@@ -790,7 +781,7 @@ func TestCancelingSomethingAlreadyCanceledIsAConflict(t *testing.T) {
 	gone.Status = gcal.StatusCanceled
 	fake.AddEvent("me@example.test", gone)
 
-	_, err := svc.CancelEvent(accepted(), service.CancelOptions{
+	_, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evgone00001",
 	})
 	if got := classOf(t, err); got != gapi.ClassConflict {
@@ -802,7 +793,7 @@ func TestCancelingSomethingAlreadyCanceledIsAConflict(t *testing.T) {
 // again, so the pattern collapses to truncating the original.
 func TestCancelingThisAndFollowingIsOneCall(t *testing.T) {
 	svc, fake := writeSeed(t)
-	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
+	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evseries001_20260331T120000Z", Scope: "this_and_following",
 	})
 	if err != nil {
@@ -974,7 +965,7 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 			return err
 		}, "list, settings, read, patch"},
 		{"cancel", 4, func(s *service.Service) error {
-			_, err := s.CancelEvent(accepted(), service.CancelOptions{
+			_, err := s.CancelEvent(context.Background(), service.CancelOptions{
 				Calendar: "primary", EventID: "evsolo00001",
 			})
 			return err
@@ -1271,7 +1262,7 @@ func TestTheReportedRequestCountIsTheTruth(t *testing.T) {
 			return o.Requests, err
 		}},
 		{"cancel", func(s *service.Service) (int, error) {
-			o, err := s.CancelEvent(accepted(), service.CancelOptions{
+			o, err := s.CancelEvent(context.Background(), service.CancelOptions{
 				Calendar: "primary", EventID: "evsolo00001",
 			})
 			return o.Requests, err
@@ -1412,7 +1403,7 @@ func TestCancelThisAndFollowingOnAnAllDaySeries(t *testing.T) {
 	occ.OriginalStartTime = &gcal.EventDateTime{Date: "2026-03-24"}
 	fake.AddEvent("me@example.test", occ)
 
-	out, err := svc.CancelEvent(accepted(), service.CancelOptions{
+	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evallday002", OriginalStart: "2026-03-24",
 		Scope: "this_and_following",
 	})
@@ -1506,7 +1497,7 @@ func TestADryRunProjectsTheChange(t *testing.T) {
 		t.Fatalf("the before side was projected too: %+v", out.Before)
 	}
 
-	c, err := svc.CancelEvent(accepted(), service.CancelOptions{
+	c, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001", DryRun: true,
 	})
 	if err != nil {
@@ -1523,7 +1514,7 @@ func TestADryRunProjectsTheChange(t *testing.T) {
 func TestAConcurrentEditOnADeleteIsStaleNotGone(t *testing.T) {
 	svc, fake := writeSeed(t)
 	fake.Fail["DELETE /calendars/me@example.test/events/evsolo00001"] = 412
-	_, err := svc.CancelEvent(accepted(), service.CancelOptions{
+	_, err := svc.CancelEvent(context.Background(), service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001",
 	})
 	if got := classOf(t, err); got != gapi.ClassStale {
@@ -1665,48 +1656,45 @@ func TestAnEtagFromTheCallerIsNotReadAgainAfterA412(t *testing.T) {
 }
 
 // Every write to an existing event, made without an etag, is made once
-// more after a fresh read when Google refuses the first try with 412,
-// and a question put to the person is not put again.
+// more after a fresh read when Google refuses the first try with 412.
 func TestEveryEventWriteIsMadeAfterOneFreshRead(t *testing.T) {
 	const cal = "me@example.test"
 	for _, c := range []struct {
 		name, changed, method string
 		write                 func(context.Context, *service.Service) (render.WriteReport, error)
-		asks                  int
 	}{
 		{"update", "evsolo00001", "patch", func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
 			return s.UpdateEvent(ctx, service.UpdateOptions{Calendar: "primary", EventID: "evsolo00001",
 				Location: ptr("Room 2")})
-		}, 0},
+		}},
 		{"a split", "evseries001", "patch", func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
 			return s.UpdateEvent(ctx, service.UpdateOptions{Calendar: "primary", EventID: "evseries001",
 				OriginalStart: "2026-03-31T14:00:00+02:00", Scope: "this_and_following", Title: ptr("Renamed")})
-		}, 0},
+		}},
 		{"cancel, telling the guests", "evguests001", "delete",
 			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
 				return s.CancelEvent(ctx, service.CancelOptions{Calendar: "primary", EventID: "evguests001",
 					Notify: "all"})
-			}, 1},
+			}},
 		{"cancel one occurrence", "evseries001_20260324T130000Z", "patch",
 			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
 				return s.CancelEvent(ctx, service.CancelOptions{Calendar: "primary",
 					EventID: "evseries001_20260324T130000Z", Scope: "instance"})
-			}, 0},
+			}},
 		{"cancel this and following", "evseries001", "patch",
 			func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
 				return s.CancelEvent(ctx, service.CancelOptions{Calendar: "primary", EventID: "evseries001",
 					OriginalStart: "2026-03-31T14:00:00+02:00", Scope: "this_and_following"})
-			}, 0},
+			}},
 		{"respond", "evinvite001", "patch", func(ctx context.Context, s *service.Service) (render.WriteReport, error) {
 			return s.RespondToEvent(ctx, service.RespondOptions{Calendar: "primary", EventID: "evinvite001",
 				Response: "accepted", Notify: "all"})
-		}, 0},
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			svc, fake := writeSeed(t)
 			fake.ChangeAfterRead(cal, c.changed, nil)
-			var asked []render.Question
-			out, err := c.write(service.WithAsker(context.Background(), counting{&asked}), svc)
+			out, err := c.write(context.Background(), svc)
 			if err != nil {
 				t.Fatalf("%s: %v", c.name, err)
 			}
@@ -1723,17 +1711,14 @@ func TestEveryEventWriteIsMadeAfterOneFreshRead(t *testing.T) {
 			if !strings.Contains(out.Text(), "the write was made against the fresh copy") {
 				t.Fatalf("the result does not say the write was made on its second try:\n%s", out.Text())
 			}
-			if len(asked) != c.asks {
-				t.Fatalf("the person was asked %d times, want %d", len(asked), c.asks)
-			}
 		})
 	}
 }
 
 // A second try is made only when its fresh read leaves the write as it
-// was: the same changes, the same people reached, the same question.
-// Otherwise the caller's notify and the person's answer were given for
-// something else, and the write is [stale].
+// was: the same changes and the same people reached. Otherwise the
+// caller's notify was given for something else, and the write is
+// [stale].
 func TestASecondTryThatWouldDoSomethingElseIsStale(t *testing.T) {
 	for _, c := range []struct {
 		name, event, method string
@@ -1764,7 +1749,7 @@ func TestASecondTryThatWouldDoSomethingElseIsStale(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			svc, fake := writeSeed(t)
 			fake.ChangeAfterRead("me@example.test", c.event, c.edit)
-			_, err := c.write(accepted(), svc)
+			_, err := c.write(context.Background(), svc)
 			if got := classOf(t, err); got != gapi.ClassStale ||
 				!strings.Contains(err.Error(), "so nothing was written") {
 				t.Fatalf("got [%s] %v, want [stale] saying nothing was written", got, err)
@@ -2058,7 +2043,7 @@ func TestTheCrowdWarningCountsWhatGoogleCounts(t *testing.T) {
 // is overwritten is gone.
 func TestEveryForcedWriteSaysSo(t *testing.T) {
 	svc, _ := writeSeed(t)
-	ctx := accepted()
+	ctx := context.Background()
 
 	canceled, err := svc.CancelEvent(ctx, service.CancelOptions{
 		Calendar: "primary", EventID: "evsolo00001", Force: true, DryRun: true,
@@ -2501,19 +2486,10 @@ func TestAStatusEventWithGuestsIsRefusedForThem(t *testing.T) {
 	}
 }
 
-// Declining every overlapping meeting is put to the person: without a
-// way to ask, nothing is written, and once confirmed it is one insert.
-// A dry run shows it and asks nothing.
-func TestDecliningEveryMeetingIsPutToThePerson(t *testing.T) {
+// Declining every overlapping meeting is said in the result: a dry run
+// says it and writes nothing, and the call is one insert.
+func TestDecliningEveryMeetingIsSaid(t *testing.T) {
 	svc, fake := writeSeed(t)
-	_, err := svc.CreateEvent(context.Background(), awayOptions("all"))
-	if got := classOf(t, err); got != gapi.ClassBlocked {
-		t.Fatalf("got [%s] %v, want [blocked] with no way to ask", got, err)
-	}
-	if len(fake.Wrote()) != 0 {
-		t.Fatal("a decline nobody confirmed was written")
-	}
-
 	dry := awayOptions("all")
 	dry.DryRun = true
 	out, err := svc.CreateEvent(context.Background(), dry)
@@ -2524,20 +2500,12 @@ func TestDecliningEveryMeetingIsPutToThePerson(t *testing.T) {
 		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
 	}
 
-	if _, err := svc.CreateEvent(accepted(), awayOptions("all")); err != nil {
+	if _, err := svc.CreateEvent(context.Background(), awayOptions("all")); err != nil {
 		t.Fatalf("CreateEvent: %v", err)
 	}
 	if w := fake.Wrote(); len(w) != 1 || w[0].Method != "insert" {
 		t.Fatalf("got writes %+v, want one insert", w)
 	}
-}
-
-// counting is a person who confirms every question and keeps them.
-type counting struct{ asked *[]render.Question }
-
-func (c counting) Ask(_ context.Context, q render.Question) error {
-	*c.asked = append(*c.asked, q)
-	return nil
 }
 
 // statusSeries puts a weekly status series of four Tuesdays from 17 March
@@ -2579,51 +2547,42 @@ func statusSeries(t *testing.T, fake *caltest.Server, id, eventType string, bloc
 }
 
 // A split of an out-of-office series that declines every meeting makes
-// a new series that declines them too, so it is put to the person before
-// the truncate, as create_event's is. A dry run says it and asks nothing.
-func TestASplitThatDeclinesEveryMeetingIsPutToThePerson(t *testing.T) {
+// a new series that declines them too, and the result says so. A dry
+// run says it and writes nothing.
+func TestASplitThatDeclinesEveryMeetingSaysSo(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ := statusSeries(t, fake, "evaway00001", gcal.EventTypeOutOfOffice,
 		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll}, false)
 	o := service.UpdateOptions{
 		Calendar: "primary", EventID: occ, Scope: "this_and_following", End: "2026-03-31T19:00:00+02:00",
 	}
+	const declines = "Google declines every meeting this overlaps, including the ones you already accepted"
 
-	_, err := svc.UpdateEvent(context.Background(), o)
-	if got := classOf(t, err); got != gapi.ClassBlocked {
-		t.Fatalf("got [%s] %v, want [blocked] with no way to ask", got, err)
-	}
-	if w := fake.Wrote(); len(w) != 0 {
-		t.Fatalf("a decline nobody confirmed was written: %+v", w)
-	}
-
-	var asked []render.Question
-	ctx := service.WithAsker(context.Background(), counting{&asked})
 	dry := o
 	dry.DryRun = true
-	out, err := svc.UpdateEvent(ctx, dry)
+	out, err := svc.UpdateEvent(context.Background(), dry)
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
-	if !strings.Contains(out.Text(), "Google declines every meeting this overlaps, including the ones you already "+
-		"accepted") || len(asked) != 0 || len(fake.Wrote()) != 0 {
-		t.Fatalf("the dry run asked %d times, wrote %d times, or did not say what it declines:\n%s",
-			len(asked), len(fake.Wrote()), out.Text())
+	if !strings.Contains(out.Text(), declines) || len(fake.Wrote()) != 0 {
+		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
 	}
 
-	if _, err := svc.UpdateEvent(ctx, o); err != nil {
+	out, err = svc.UpdateEvent(context.Background(), o)
+	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
 	}
-	if len(asked) != 1 || !strings.HasPrefix(asked[0].Text, "update_event: split the out-of-office event `Status`") {
-		t.Fatalf("asked %d times: %+v", len(asked), asked)
+	if !strings.Contains(out.Text(), declines) {
+		t.Errorf("the result does not say what the new series declines:\n%s", out.Text())
 	}
 	if w := fake.Wrote(); len(w) != 2 || w[0].Method != "patch" || w[1].Method != "insert" {
 		t.Fatalf("got writes %+v, want a truncate and an insert", w)
 	}
 }
 
-// A split that declines less asks nothing: only all is put to the person.
-func TestASplitThatDeclinesOnlyNewInvitationsAsksNothing(t *testing.T) {
+// A split that declines only new invitations says that, and nothing about
+// the meetings already accepted.
+func TestASplitThatDeclinesOnlyNewInvitationsSaysSo(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ := statusSeries(t, fake, "evaway00002", gcal.EventTypeOutOfOffice,
 		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineNew}, false)
@@ -2789,98 +2748,78 @@ func declining(t *testing.T, fake *caltest.Server, id, eventType, rule string) s
 const weeklyFour = "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"
 
 // A change that leaves an out-of-office event declining every meeting
-// over time it did not cover is put to the person before the patch, as a
-// create is. A dry run says it and asks nothing.
-func TestACoverThatGrowsIsPutToThePerson(t *testing.T) {
+// over time it did not cover says Google may decline the meetings in
+// that time. A dry run says it and writes nothing.
+func TestACoverThatGrowsIsSaid(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ := declining(t, fake, "evaway00005", gcal.EventTypeOutOfOffice, weeklyFour)
 	o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: "instance", End: "2026-03-31T19:00:00+02:00"}
 
-	_, err := svc.UpdateEvent(context.Background(), o)
-	if got := classOf(t, err); got != gapi.ClassBlocked {
-		t.Fatalf("got [%s] %v, want [blocked] with no way to ask", got, err)
-	}
-	if w := fake.Wrote(); len(w) != 0 {
-		t.Fatalf("a decline nobody confirmed was written: %+v", w)
-	}
-
-	var asked []render.Question
-	ctx := service.WithAsker(context.Background(), counting{&asked})
 	dry := o
 	dry.DryRun = true
-	out, err := svc.UpdateEvent(ctx, dry)
+	out, err := svc.UpdateEvent(context.Background(), dry)
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
-	if !strings.Contains(out.Text(), "This change covers time the event did not, and the event declines every "+
-		"meeting it overlaps.") || len(asked) != 0 || len(fake.Wrote()) != 0 {
-		t.Fatalf("the dry run asked %d times, wrote %d times, or did not say what it declines:\n%s",
-			len(asked), len(fake.Wrote()), out.Text())
+	if !strings.Contains(out.Text(), coversMore) || len(fake.Wrote()) != 0 {
+		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
 	}
 
-	if _, err := svc.UpdateEvent(ctx, o); err != nil {
+	out, err = svc.UpdateEvent(context.Background(), o)
+	if err != nil {
 		t.Fatalf("UpdateEvent: %v", err)
 	}
-	want := "update_event: change the out-of-office event `Status` on your primary calendar `Sample Primary`, so " +
-		"it covers time it did not and declines every meeting it overlaps?\n\n" +
-		"It was 2026-03-31 09:00-17:00 Europe/Copenhagen.\n\n" +
-		"It would be 2026-03-31 09:00-19:00 Europe/Copenhagen.\n\n" +
-		"That includes meetings you already accepted.\n\n"
-	if len(asked) != 1 || !strings.HasPrefix(asked[0].Text, want) {
-		t.Fatalf("asked %d times, want once:\n%+v", len(asked), asked)
+	if !strings.Contains(out.Text(), coversMore) {
+		t.Errorf("the result does not say the event covers more:\n%s", out.Text())
 	}
 	if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" || w[0].EventID != occ {
 		t.Fatalf("got writes %+v, want one patch of the occurrence", w)
 	}
 }
 
-// Every way a change can make such an event cover more asks: moved, made
-// longer, repeated more, or made to repeat at all.
-func TestEveryCoverThatGrowsAsks(t *testing.T) {
+// coversMore is what a result says of a change that makes an event that
+// declines every meeting cover more time.
+const coversMore = "This change covers time the event did not, and the event declines every meeting it overlaps."
+
+// Every way a change can make such an event cover more is said: moved,
+// made longer, repeated more, or made to repeat at all.
+func TestEveryCoverThatGrowsIsSaid(t *testing.T) {
 	for _, tc := range []struct {
 		name, eventType, rule, scope string
 		change                       func(*service.UpdateOptions)
-		// shows is what the question says, where it says more than
-		// that it changes the event.
-		shows string
 	}{
 		{"an earlier start on the series", gcal.EventTypeOutOfOffice, weeklyFour, "series",
-			func(o *service.UpdateOptions) { o.Start = "2026-03-17T08:00:00+01:00" }, ""},
+			func(o *service.UpdateOptions) { o.Start = "2026-03-17T08:00:00+01:00" }},
 		{"an earlier start on one occurrence", gcal.EventTypeOutOfOffice, weeklyFour, "instance",
-			func(o *service.UpdateOptions) { o.Start = "2026-03-31T08:00:00+02:00" }, ""},
+			func(o *service.UpdateOptions) { o.Start = "2026-03-31T08:00:00+02:00" }},
 		{"one occurrence, a week before the series began", gcal.EventTypeOutOfOffice, weeklyFour, "series",
 			func(o *service.UpdateOptions) {
 				o.Start, o.End = "2026-03-10T09:00:00+01:00", "2026-03-10T17:00:00+01:00"
 				o.Recurrence = &[]string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=1"}
-			}, ""},
+			}},
 		{"the same length later in the day", gcal.EventTypeOutOfOffice, weeklyFour, "instance",
 			func(o *service.UpdateOptions) {
 				o.Start, o.End = "2026-03-31T10:00:00+02:00", "2026-03-31T18:00:00+02:00"
-			}, ""},
+			}},
 		{"more occurrences", gcal.EventTypeOutOfOffice, weeklyFour, "series",
-			func(o *service.UpdateOptions) { o.Recurrence = &[]string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=8"} },
-			"\n\nThe series started 2026-03-17 09:00-17:00 Europe/Copenhagen, repeating every week on Tuesday, 4 " +
-				"times.\n\nThe series would start 2026-03-17 09:00-17:00 Europe/Copenhagen.\n\nIt repeats every week " +
-				"on Tuesday, 8 times, and declines on every occurrence.\n\n"},
+			func(o *service.UpdateOptions) { o.Recurrence = &[]string{"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=8"} }},
 		{"a series twenty years long made endless", gcal.EventTypeOutOfOffice,
 			"RRULE:FREQ=DAILY;UNTIL=20460317T235959Z", "series",
-			func(o *service.UpdateOptions) { o.Recurrence = &[]string{"RRULE:FREQ=DAILY"} }, ""},
+			func(o *service.UpdateOptions) { o.Recurrence = &[]string{"RRULE:FREQ=DAILY"} }},
 		{"focus time made longer", gcal.EventTypeFocusTime, weeklyFour, "instance",
-			func(o *service.UpdateOptions) { o.End = "2026-03-31T18:00:00+02:00" },
-			"update_event: change the focus time `Status`"},
+			func(o *service.UpdateOptions) { o.End = "2026-03-31T18:00:00+02:00" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, fake := writeSeed(t)
 			occ := declining(t, fake, "evaway00006", tc.eventType, tc.rule)
-			var asked []render.Question
 			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
 			tc.change(&o)
-			if _, err := svc.UpdateEvent(service.WithAsker(context.Background(), counting{&asked}), o); err != nil {
+			out, err := svc.UpdateEvent(context.Background(), o)
+			if err != nil {
 				t.Fatalf("UpdateEvent: %v", err)
 			}
-			if len(asked) != 1 || !strings.HasPrefix(asked[0].Text, "update_event: change ") ||
-				!strings.Contains(asked[0].Text, tc.shows) {
-				t.Fatalf("asked %d times, want once, showing %q: %+v", len(asked), tc.shows, asked)
+			if !strings.Contains(out.Text(), coversMore) {
+				t.Fatalf("the result does not say the event covers more:\n%s", out.Text())
 			}
 		})
 	}
@@ -2891,22 +2830,21 @@ func TestEveryCoverThatGrowsAsks(t *testing.T) {
 	one.EventType, one.Transparency = gcal.EventTypeOutOfOffice, gcal.TransparencyOpaque
 	one.OutOfOfficeProperties = gcal.Raw(gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll})
 	fake.AddEvent("me@example.test", one)
-	var asked []render.Question
-	if _, err := svc.UpdateEvent(service.WithAsker(context.Background(), counting{&asked}), service.UpdateOptions{
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: one.ID, Recurrence: &[]string{"RRULE:FREQ=WEEKLY;COUNT=2"},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("made to repeat: %v", err)
 	}
-	if len(asked) != 1 || !strings.Contains(asked[0].Text, "\n\nIt was 2026-03-31 09:00-17:00 Europe/Copenhagen."+
-		"\n\nThe series would start 2026-03-31 09:00-17:00 Europe/Copenhagen.\n\nIt repeats ") {
-		t.Fatalf("made to repeat: asked %d times, want once: %+v", len(asked), asked)
+	if !strings.Contains(out.Text(), coversMore) {
+		t.Fatalf("made to repeat: the result does not say the event covers more:\n%s", out.Text())
 	}
 }
 
-// A change that only shrinks the time such an event covers asks nothing,
-// and neither does one to an event that declines less, or to a canceled
-// occurrence, or one that leaves the time alone.
-func TestACoverThatOnlyShrinksAsksNothing(t *testing.T) {
+// A change that only shrinks the time such an event covers says nothing
+// of new declines, and neither does one to an event that declines less,
+// or to a canceled occurrence, or one that leaves the time alone.
+func TestACoverThatOnlyShrinksSaysNothingOfDeclines(t *testing.T) {
 	for _, tc := range []struct {
 		name, rule, scope string
 		change            func(*service.UpdateOptions)
@@ -2942,14 +2880,14 @@ func TestACoverThatOnlyShrinksAsksNothing(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(fake, occ)
 			}
-			var asked []render.Question
 			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
 			tc.change(&o)
-			if _, err := svc.UpdateEvent(service.WithAsker(context.Background(), counting{&asked}), o); err != nil {
+			out, err := svc.UpdateEvent(context.Background(), o)
+			if err != nil {
 				t.Fatalf("UpdateEvent: %v", err)
 			}
-			if len(asked) != 0 {
-				t.Fatalf("asked %d times, want none: %+v", len(asked), asked)
+			if strings.Contains(out.Text(), coversMore) {
+				t.Fatalf("the result says the event covers more:\n%s", out.Text())
 			}
 			if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" {
 				t.Fatalf("got writes %+v, want one patch", w)

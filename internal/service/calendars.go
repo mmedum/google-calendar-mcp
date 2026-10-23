@@ -730,9 +730,6 @@ func (s *Service) DeleteCalendar(ctx context.Context, o DestructiveOptions) (ren
 		"Everything on it goes with it, for everybody it was shared with, and Calendar cannot bring it back. "+
 			"To keep the calendar and remove only its events, use clear_calendar.")
 	if !o.DryRun {
-		if err := ask(ctx, render.AskDeleteCalendar(cal.ID, cal.Title)); err != nil {
-			return render.CalendarReport{}, err
-		}
 		etag, err := s.calendarETag(ctx, cal)
 		if err != nil {
 			return render.CalendarReport{}, err
@@ -777,9 +774,6 @@ func (s *Service) ClearCalendar(ctx context.Context, o DestructiveOptions) (rend
 		"Every event on this calendar is deleted: past, future, and every meeting you organize. Guests are "+
 			"not notified by this call. Calendar cannot bring any of it back.")
 	if !o.DryRun {
-		if err := ask(ctx, render.AskClearCalendar(cal.ID, cal.Title)); err != nil {
-			return render.CalendarReport{}, err
-		}
 		etag, err := s.calendarETag(ctx, cal)
 		if err != nil {
 			return render.CalendarReport{}, err

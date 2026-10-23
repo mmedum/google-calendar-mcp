@@ -38,7 +38,7 @@ func listTools(t *testing.T, cfg config.Config) []*mcp.Tool {
 	}
 	t.Cleanup(func() { _ = ss.Wait() })
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := newClient(t)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +50,20 @@ func listTools(t *testing.T, cfg config.Config) []*mcp.Tool {
 		t.Fatal(err)
 	}
 	return res.Tools
+}
+
+// newClient is the test client: one that can ask the person, through
+// form elicitation, as a client with somebody at it can. The server asks
+// nobody (§9a), so every tool is called through such a client and a
+// question from any of them fails the test that made the call.
+func newClient(t *testing.T) *mcp.Client {
+	t.Helper()
+	return mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, &mcp.ClientOptions{
+		ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			t.Errorf("the server asked the person: %q", req.Params.Message)
+			return &mcp.ElicitResult{Action: "decline"}, nil
+		},
+	})
 }
 
 func baseConfig() config.Config {
@@ -317,7 +331,7 @@ func TestToolsCallSucceedsAgainstTheFake(t *testing.T) {
 	}
 	defer func() { _ = ss.Wait() }()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := newClient(t)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -368,7 +382,7 @@ func TestAnErrorComesBackAsAToolResult(t *testing.T) {
 	}
 	defer func() { _ = ss.Wait() }()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := newClient(t)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -678,7 +692,7 @@ func sessionWith(t *testing.T, cfg config.Config, fake *caltest.Server) (*mcp.Cl
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	client := newClient(t)
 	cs, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatal(err)

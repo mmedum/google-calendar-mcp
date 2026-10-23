@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -59,6 +60,24 @@ func TestTheGatedToolsNeedTheFlag(t *testing.T) {
 		if !strings.Contains(tool.Description, "confirm") {
 			t.Fatalf("%q does not say it needs confirm on the call:\n%s", name, tool.Description)
 		}
+	}
+}
+
+// The mark goes only where §3 puts it (§9a): the delete of a whole
+// calendar, and of every event on the primary one, neither of which
+// Calendar can bring back. Claude Code then prompts on every such call.
+// It is listed to every client: each one here declares elicitation, and
+// the mark used to be dropped for such a client.
+func TestOnlyTheWholeCalendarDeletesPromptEveryCall(t *testing.T) {
+	var got []string
+	for _, tool := range listTools(t, tools.FullSurface(baseConfig())) {
+		if tool.Meta["anthropic/requiresUserInteraction"] == true {
+			got = append(got, tool.Name)
+		}
+	}
+	slices.Sort(got)
+	if want := []string{"clear_calendar", "delete_calendar"}; !slices.Equal(got, want) {
+		t.Errorf("tools carrying requiresUserInteraction = %v, want %v", got, want)
 	}
 }
 

@@ -212,8 +212,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	out.Printf("filled with %d invented events; the occurrence on %s was canceled\n\n",
 		len(seedEvents()), canceled)
 
-	asked := &person{out: out}
-	sess, err := startServer(ctx, bin, profile, asked)
+	sess, err := startServer(ctx, bin, profile)
 	if err != nil {
 		out.Printf("could not start the server: %v\n", err)
 		return 2
@@ -331,7 +330,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}
 	}
 
-	out.Printf("\n%d question(s) put to the person, %d declined\n", asked.asked, asked.declined)
+	out.Printf("\n%d question(s) put to the person; the server asks nobody (§9a)\n", sess.asked)
 	out.Printf("\n%d steps, %d failed, %d undetermined\n", r.total, r.failed, r.undetermined)
 	if ctx.Err() != nil {
 		out.Printf("\nThe run was interrupted, so this count is not a result.\n")
@@ -471,10 +470,8 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 		}
 	}
 	args := st.reads()
-	before := s.person.asked
-	s.person.next = st.answer
+	before := s.asked
 	res, err := s.callFor(ctx, st, st.arguments())
-	s.person.next = ""
 	if err != nil && ctx.Err() != nil {
 		// Cut short by the interrupt rather than failed by the server:
 		// what it would have answered is not known.
@@ -488,8 +485,8 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 		return
 	}
 	verdict, note := st.check(res)
-	if st.answer != "" && s.person.asked == before {
-		verdict, note = fail, "the server did not ask the person, and this step answers "+st.answer
+	if s.asked != before {
+		verdict, note = fail, "the server asked the person, and it asks nobody (§9a); the question was declined"
 	}
 	switch verdict {
 	case pass:
@@ -543,9 +540,6 @@ type step struct {
 	// chain rather than the first.
 	skip  func() string
 	check func(callResult) (verdict, string)
-	// answer is what the person answers the server's question on this
-	// step, which must then be asked; empty accepts any question.
-	answer string
 }
 
 // reads is what the §9.1 print decision is made from: the calendars

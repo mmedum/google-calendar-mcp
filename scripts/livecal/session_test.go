@@ -19,7 +19,7 @@ func TestAStepCutShortByTheInterruptIsNotRun(t *testing.T) {
 	defer cancel()
 	s := &session{
 		stdin: discard{}, out: bufio.NewScanner(interrupted{cancel}),
-		stderr: &strings.Builder{}, nextID: 1, person: &person{},
+		stderr: &strings.Builder{}, nextID: 1,
 	}
 	var printed strings.Builder
 	r := &results{out: redact.New(&printed), invented: map[string]bool{}}

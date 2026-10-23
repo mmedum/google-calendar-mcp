@@ -109,7 +109,6 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"`allow_public: true`: removing the rule later stops new readers and takes nothing back from " +
 			"whoever already looked. " + shareNotifyHelp + " " + exposureHelp + " " + dryRunHelp,
 		Kind: Sharing,
-		Asks: "before a share that publishes the calendar, opens it to a whole domain, or makes somebody an owner",
 		Handle: func(ctx context.Context, in shareCalendarIn) (service.SharingResult, error) {
 			out, err := d.Service.ShareCalendar(ctx, service.ShareOptions{
 				Calendar: in.Calendar, Who: in.Who, ScopeType: in.ScopeType, Role: in.Role,
@@ -152,8 +151,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"Only a calendar you own, and never your own primary calendar — Google has no way to delete " +
 			"that one. To empty a calendar and keep it, use clear_calendar; to remove it from your list " +
 			"without deleting it, use manage_calendar with unsubscribe. " + dryRunHelp,
-		Kind: Destructive,
-		Asks: "before the write",
+		Kind:            Destructive,
+		PromptEveryCall: true,
 		Handle: func(ctx context.Context, in destructiveIn) (service.CalendarWriteResult, error) {
 			out, err := d.Service.DeleteCalendar(ctx, service.DestructiveOptions{
 				Calendar: in.Calendar, Confirm: in.Confirm, DryRun: in.DryRun,
@@ -174,8 +173,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"destructive tools enabled. " +
 			"It works only on the primary calendar, which is what Google documents it for; another calendar " +
 			"is refused, and delete_calendar removes one of those whole. " + dryRunHelp,
-		Kind: Destructive,
-		Asks: "before the write",
+		Kind:            Destructive,
+		PromptEveryCall: true,
 		Handle: func(ctx context.Context, in destructiveIn) (service.CalendarWriteResult, error) {
 			out, err := d.Service.ClearCalendar(ctx, service.DestructiveOptions{
 				Calendar: in.Calendar, Confirm: in.Confirm, DryRun: in.DryRun,

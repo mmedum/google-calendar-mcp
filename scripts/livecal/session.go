@@ -13,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
 )
 
 // session drives the built binary over stdio, the way a client does.
@@ -29,40 +27,9 @@ type session struct {
 	stderr *strings.Builder
 	mu     sync.Mutex
 	nextID int
-	// person answers the questions the server puts to the person.
-	person *person
-}
-
-// person is who the server asks before a write it cannot take back
-// (§9a). It prints every question into the transcript and accepts,
-// unless a step has queued another answer.
-type person struct {
-	out *redact.Printer
-	// next is the answer to the next question, accept when empty; that
-	// question spends it.
-	next     string
-	asked    int
-	declined int
-}
-
-func (p *person) answer(message string) string {
-	p.asked++
-	a := p.next
-	p.next = ""
-	if a == "" {
-		a = "accept"
-	}
-	if a != "accept" {
-		p.declined++
-	}
-	p.out.Printf("      the server asked the person:\n")
-	for _, line := range strings.Split(strings.TrimSpace(message), "\n") {
-		if line != "" {
-			p.out.Printf("        %s\n", line)
-		}
-	}
-	p.out.Printf("      the person answered: %s\n", a)
-	return a
+	// asked counts the questions the server put to the person. The
+	// server asks nobody (§9a), so every one fails the step it came in.
+	asked int
 }
 
 type callResult struct {
@@ -70,7 +37,7 @@ type callResult struct {
 	isError bool
 }
 
-func startServer(ctx context.Context, bin, profile string, p *person) (*session, error) {
+func startServer(ctx context.Context, bin, profile string) (*session, error) {
 	// Not tied to ctx, and in a process group of its own: an interrupt
 	// stops the driver's steps, and the server must outlive it, so the
 	// call in flight completes and close ends the server after the
@@ -107,12 +74,13 @@ func startServer(ctx context.Context, bin, profile string, p *person) (*session,
 
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
-	s := &session{cmd: cmd, stdin: stdin, out: sc, stderr: stderr, nextID: 1, person: p}
+	s := &session{cmd: cmd, stdin: stdin, out: sc, stderr: stderr, nextID: 1}
 
-	// The driver declares form elicitation, so the server asks it before
-	// each write that asks the person, the way a client with a person at
-	// it would be asked. On 2025-06-18 the server asks inside the call,
-	// with elicitation/create.
+	// The driver declares form elicitation, as a client with a person at
+	// it does, so a question the server put would reach it. The server
+	// asks nobody (§9a), and a question is declined and fails its step.
+	// On 2025-06-18 a server asks inside the call, with
+	// elicitation/create.
 	if _, err := s.request(ctx, "initialize", map[string]any{
 		"protocolVersion": "2025-06-18",
 		"capabilities":    map[string]any{"elicitation": map[string]any{"form": map[string]any{}}},
@@ -170,9 +138,6 @@ func (s *session) request(ctx context.Context, method string, params any) (json.
 		var frame struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
-			Params struct {
-				Message string `json:"message"`
-			} `json:"params"`
 			Result json.RawMessage `json:"result"`
 			Error  *struct {
 				Message string `json:"message"`
@@ -186,7 +151,7 @@ func (s *session) request(ctx context.Context, method string, params any) (json.
 		}
 		if frame.Method != "" && len(frame.ID) > 0 {
 			// The server's own request, made while this call waits on it.
-			if err := s.answer(frame.ID, frame.Method, frame.Params.Message); err != nil {
+			if err := s.answer(frame.ID, frame.Method); err != nil {
 				return nil, fmt.Errorf("answer %s: %w", frame.Method, err)
 			}
 			continue
@@ -206,21 +171,16 @@ func (s *session) request(ctx context.Context, method string, params any) (json.
 }
 
 // answer replies to one request the server sent: ping with an empty
-// result, elicitation/create through the person, anything else with
-// method-not-found.
-func (s *session) answer(id json.RawMessage, method, message string) error {
+// result, elicitation/create with a decline that is counted, anything
+// else with method-not-found.
+func (s *session) answer(id json.RawMessage, method string) error {
 	frame := map[string]any{"jsonrpc": "2.0", "id": id}
-	switch {
-	case method == "ping":
+	switch method {
+	case "ping":
 		frame["result"] = map[string]any{}
-	case method == "elicitation/create" && s.person != nil:
-		result := map[string]any{"action": s.person.answer(message)}
-		if result["action"] == "accept" {
-			// The question's form has no fields (§9a): the accept is the
-			// answer.
-			result["content"] = map[string]any{}
-		}
-		frame["result"] = result
+	case "elicitation/create":
+		s.asked++
+		frame["result"] = map[string]any{"action": "decline"}
 	default:
 		frame["error"] = map[string]any{"code": -32601, "message": "this client does not take " + method}
 	}

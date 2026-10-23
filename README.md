@@ -208,20 +208,34 @@ none.
   Removing access notifies nobody, because Google offers no way to ask
   for it: they are not told, they find the calendar gone.
 - `GCAL_SHARING=off` removes the three sharing tools entirely.
-- When your client supports MCP elicitation, the server asks you itself
-  before it deletes or clears a calendar, publishes one, opens one to a
-  whole domain, makes somebody an owner, cancels an event in a way that
-  emails its guests, or makes an out-of-office or focus-time event that
-  declines every meeting it overlaps, the new series of a split included,
-  or moves one, makes it longer or makes it repeat more.
-  Only your Accept lets the write go ahead;
-  anything else is `[blocked]`. A client that cannot ask gets no
-  question, unless `GCAL_REQUIRE_PROMPT=true`, which refuses those
-  writes instead.
 - Logs carry the method, tool, outcome, duration and a truncated calendar
   id. Never an email address, event title, description, location or
   search term. A debug log is safe to paste into a bug report by
   construction.
+
+Your MCP client approves each call; the server does not ask you itself.
+claude.ai and Codex prompt for the tools marked destructive,
+`cancel_event`, `delete_calendar` and `clear_calendar`, and VS Code
+prompts for every tool that writes. In Claude Code, `delete_calendar` and
+`clear_calendar` ask on every call whatever your rules say, since each
+deletes a whole calendar's events and Calendar cannot bring them back;
+where Claude Code cannot ask, as with `-p`, it refuses them. For the
+rest, list the calls you want to approve one by one under
+`permissions.ask` in your settings, with the name you gave the server in
+place of `google-calendar`. For example, the writes that share, cancel,
+move or delete:
+
+```json
+{
+  "permissions": {
+    "ask": [
+      "mcp__google-calendar__share_calendar", "mcp__google-calendar__unshare_calendar",
+      "mcp__google-calendar__cancel_event", "mcp__google-calendar__move_event",
+      "mcp__google-calendar__delete_calendar", "mcp__google-calendar__clear_calendar"
+    ]
+  }
+}
+```
 
 ## Development
 

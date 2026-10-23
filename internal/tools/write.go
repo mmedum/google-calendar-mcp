@@ -73,7 +73,6 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"notify required too. A room cannot be optional. " + addressHelp + " " +
 			remindersHelp + " " + visibilityHelp + " " + statusHelp + " " + notifyHelp + " " + dryRunHelp,
 		Kind: Write,
-		Asks: "before it makes an out-of-office or focus-time event with auto_decline all",
 		Handle: func(ctx context.Context, in createEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CreateEvent(ctx, service.CreateOptions{
 				Calendar: in.Calendar, Title: in.Title, Start: in.Start, End: in.End,
@@ -123,8 +122,6 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"series starts a new series that declines them too. " +
 			"Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
 		Kind: IdempotentWrite,
-		Asks: "before an out-of-office or focus-time event that declines every meeting it overlaps is moved, made " +
-			"longer, repeated more or split with this_and_following",
 		Handle: func(ctx context.Context, in updateEventIn) (service.WriteResult, error) {
 			out, err := d.Service.UpdateEvent(ctx, service.UpdateOptions{
 				Calendar: in.Calendar, EventID: in.EventID, OriginalStart: in.OriginalStart,
@@ -157,7 +154,6 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"Read that rule twice here: canceling with no notification removes the meeting from YOUR " +
 			"calendar and leaves it on your guests'. They will still turn up. " + etagHelp + " " + dryRunHelp,
 		Kind: Canceling,
-		Asks: "before a cancellation that emails a guest",
 		Handle: func(ctx context.Context, in cancelEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CancelEvent(ctx, service.CancelOptions{
 				Calendar: in.Calendar, EventID: in.EventID, OriginalStart: in.OriginalStart,
@@ -247,7 +243,7 @@ type createEventIn struct {
 	// The status event inputs (§7.4). Each value is spelled as a read
 	// reports it.
 	EventType            string `json:"event_type,omitempty" jsonschema:"Make a status event on your primary calendar: outOfOffice, focusTime or workingLocation. Leave it out for an ordinary event."`
-	AutoDecline          string `json:"auto_decline,omitempty" jsonschema:"Required for outOfOffice and focusTime, with no default: none, new (invitations that arrive for that time) or all (also the meetings you already accepted, which asks the person first)."`
+	AutoDecline          string `json:"auto_decline,omitempty" jsonschema:"Required for outOfOffice and focusTime, with no default: none, new (invitations that arrive for that time) or all (also the meetings you already accepted)."`
 	DeclineMessage       string `json:"decline_message,omitempty" jsonschema:"The message each organizer gets with a decline. outOfOffice and focusTime only, and not with auto_decline none."`
 	ChatStatus           string `json:"chat_status,omitempty" jsonschema:"focusTime only: available or do_not_disturb, what Google Chat shows during it."`
 	WorkingLocation      string `json:"working_location,omitempty" jsonschema:"Required for workingLocation: home, office or custom."`

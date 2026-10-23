@@ -17,13 +17,19 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_READONLY` | `-read-only` | `false` | Register only read tools, and request only read scopes so the API itself refuses a write. |
 | `GCAL_ENABLE_DESTRUCTIVE` | `-enable-destructive` | `false` | Register `delete_calendar` and `clear_calendar`. Each still needs `confirm` on the call. |
 | `GCAL_SHARING` | `-sharing` | `on` | `on` or `off`. Off removes the calendar sharing tools entirely. |
-| `GCAL_REQUIRE_PROMPT` | `-require-prompt` | `false` | Refuse the writes that ask the person when the client cannot ask them, instead of letting the call's own arguments stand in. |
 | `GCAL_MAX_EVENTS` | `-max-events` | `250` | Default event budget for one read. The result says when it truncated. |
 | `GCAL_MAX_CALENDARS` | `-max-calendars` | `25` | How many calendars one call may fan out across, for the reads that cost one request per calendar: `list_events` and `search_events`. Maximum 50. |
 | `GCAL_CONCURRENCY` | `-concurrency` | `4` | Requests in flight during a fan-out. |
 | `GCAL_HTTP_TIMEOUT` | `-http-timeout` | `60s` | Per-attempt timeout for a read. |
 | `GCAL_WRITE_TIMEOUT` | `-write-timeout` | `120s` | Timeout for a write. |
 | `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. |
+
+`GCAL_REQUIRE_PROMPT` and `-require-prompt` were removed with the
+server's question: the server asks the person nothing, and your client's
+own approval decides each call. A configuration that still turns it on
+is refused at start, since ignoring it would quietly allow what it was
+set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` off for a
+client that runs with nobody watching.
 
 `check_availability` is the exception to `GCAL_MAX_CALENDARS`: it asks
 about at most 100 calendars per call, because free/busy answers for 50

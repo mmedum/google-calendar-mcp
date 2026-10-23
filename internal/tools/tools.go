@@ -78,9 +78,6 @@ type Deps struct {
 	Service *service.Service
 	Config  config.Config
 	Logger  *slog.Logger
-
-	// asking is this server's way to the person, made by Register.
-	asking *asking
 }
 
 // Register adds every tool the configuration allows.
@@ -88,8 +85,6 @@ func Register(s *mcp.Server, d Deps) {
 	if d.Logger == nil {
 		d.Logger = slog.New(slog.DiscardHandler)
 	}
-	d.asking = newAsking(d.Logger)
-	s.AddReceivingMiddleware(askFailures(d.asking), interactionHint(d.asking))
 	registerRead(s, d)
 	registerWrite(s, d)
 	registerCalendars(s, d)
@@ -105,13 +100,18 @@ type Def[In any, Out service.Rendered] struct {
 	Name        string
 	Description string
 	Kind        Kind
-	// Asks, when set, puts the write to the person through the client
-	// before it is made, when the service reaches its question (§9a). It
-	// says when, as the description's closing sentence reads it: "before
-	// the write", or the writes that ask.
-	Asks   string
-	Handle func(ctx contextContext, in In) (Out, error)
+	// PromptEveryCall marks a write whose prompt is itself the point: a
+	// delete of a whole calendar or of everything on one, which Calendar
+	// cannot bring back (§9a). The tool carries Claude Code's
+	// requiresUserInteraction, so Claude Code prompts on every call
+	// whatever the operator's rules say. Only a Destructive tool may set
+	// it, and add refuses it on any other.
+	PromptEveryCall bool
+	Handle          func(ctx contextContext, in In) (Out, error)
 }
+
+// promptKey is the _meta key Claude Code prompts on every call for.
+const promptKey = "anthropic/requiresUserInteraction"
 
 // contextContext is context.Context; aliased so the import list above
 // stays short in a file that otherwise needs no context.
@@ -127,42 +127,19 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 		Description: def.Description,
 		Annotations: annotationsFor(def.Kind),
 	}
-	if def.Kind == Destructive {
-		// A signal a client MAY act on, never a control. The standard is
-		// explicit: a host in auto-approve runs an annotated tool without
-		// prompting, so the real gate is that this tool is unregistered
-		// unless the flag is set.
-		tool.Meta = mcp.Meta{interactionKey: true}
-	}
-	if def.Asks != "" {
-		d.asking.markAsks(def.Name)
-		tool.Description += asksNote(def.Asks)
-		// Every destructive tool that asks, asks before every write, so
-		// the server's question can stand in for the mark.
-		if def.Kind == Destructive {
-			d.asking.markAlways(def.Name)
+	if def.PromptEveryCall {
+		// A mark no other client reads, so never a control: the control
+		// is that the tool is unregistered unless the flag is set (§9a).
+		if def.Kind != Destructive {
+			panic("tools: " + def.Name + " prompts on every call and is not Destructive")
 		}
+		tool.Meta = mcp.Meta{promptKey: true}
 	}
-	mcp.AddTool(s, tool, func(ctx contextContext, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
+	mcp.AddTool(s, tool, func(ctx contextContext, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		var zero Out
-		var p *person
-		if def.Asks != "" {
-			var err error
-			if ctx, p, err = d.asking.begin(ctx, req, def.Name, in, d.Config.RequirePrompt); err != nil {
-				return nil, zero, fail(err)
-			}
-		}
 		out, err := def.Handle(ctx, in)
-		if p != nil && p.asked != nil {
-			// The service stopped before its write; the question goes out.
-			setStage(ctx, stageWaiting)
-			return p.inputRequest(), zero, nil
-		}
 		if err != nil {
 			return nil, zero, fail(err)
-		}
-		if stageOf(ctx) == stageWriting {
-			setStage(ctx, stageWritten)
 		}
 		// Content is set here, always. Left unset, the SDK fills it with
 		// the JSON of the output — the same bytes twice, and the one
@@ -223,14 +200,6 @@ func annotationsFor(k Kind) *mcp.ToolAnnotations {
 }
 
 func ptr[T any](v T) *T { return &v }
-
-// asksNote closes the description of every tool that asks the person,
-// saying when it asks: a tool that asks only before some of its writes
-// says which, so a model does not expect a question on the others.
-func asksNote(when string) string {
-	return " When the client can, the server also asks the person " + when + "; a call they do not " +
-		"confirm is [blocked], and is not made again unless they ask."
-}
 
 // fail turns an error into the tool result the standard specifies:
 // "[class] actionable message", never a protocol error.

@@ -280,7 +280,7 @@ preamble says to expect.
 document** (`www.googleapis.com/discovery/v1/apis/calendar/v3/rest`,
 revision 20260826, fetched 2026-09-15 and refetched unchanged
 2026-09-16), the Calendar guides, and the public MCP calendar servers
-named in §1. §18 is the evidence log, 103 rows. More than a third of them
+named in §1. §18 is the evidence log, 105 rows. More than a third of them
 refute an assumption this design started out holding; phase 3 added four
 before it wrote any code, one of which removed a parameter rather than
 adding one; and one reversed the single most consequential decision in
@@ -670,8 +670,8 @@ written.
   only that the event changed in the moment between this server's read
   and its write, and Google makes such changes itself moments after a
   move (§18 row 103). The write is then read again, planned again, and
-  made once more if the new plan writes the same changes, reaches the
-  same guests and asks the person the same question; otherwise it is
+  made once more if the new plan writes the same changes and reaches the
+  same guests; otherwise it is
   `[stale]`. A second 412 is `[stale]`, and a caller's own `etag` is
   held as before. The calendar and sharing writes keep the plain rule.
 - **`If-Match: *` is available and is not the default.** It exists for
@@ -1077,7 +1077,7 @@ server holds each before a request (§18 row 99):
   `auto_decline` is required for them, with no default, by §4.3's
   reasoning: a decline reaches another person. `none` declines nothing,
   `new` the invitations that arrive while the event stands, and `all` the
-  meetings already accepted too. `all` asks the person (§9a).
+  meetings already accepted too, and the result says so.
   `decline_message` goes with a decline and is refused with `none`. Focus
   time takes `chat_status`, `available` or `do_not_disturb`.
 - A working location is timed or one whole day, public and transparent.
@@ -1099,21 +1099,20 @@ server holds each before a request (§18 row 99):
   its truncate leaves the series cut short. A rule the event already
   broke when it was read is left to Google.
 - A `this_and_following` split of an out-of-office or focus-time series
-  that declines all starts a new series that declines all, and asks the
-  person first, as `create_event` does (§9a). Whether Google declines
-  again for a series it already declined for is not probed, so the new
-  series is treated as new.
+  that declines all starts a new series that declines all, and the
+  result says so. Whether Google declines again for a series it already
+  declined for is not probed, so the new series is treated as new.
 - A change that makes an out-of-office or focus-time event that declines
-  all cover time it did not asks the person first too, at any scope:
-  moved, made longer, repeated more or made to repeat. Whether Google
-  declines the meetings already in the new time is not probed, so they
-  are treated as declined (§18 row 102). A change that only shrinks the
-  time asks nothing, and neither does one that leaves the time alone.
-  The server expands the occurrences before and after from the rule and
-  asks unless each one after lies inside one before. A series longer
-  than it expands is compared on its first occurrences only when its rule
-  is unchanged. A change it cannot show to shrink, such as one to a rule
-  it does not expand, asks.
+  all cover time it did not says that Google may decline the meetings in
+  that time, at any scope: moved, made longer, repeated more or made to
+  repeat. Whether Google declines the meetings already in the new time
+  is not probed, so they are treated as declined (§18 row 102). A change
+  that only shrinks the time says nothing of it, and neither does one
+  that leaves the time alone. The server expands the occurrences before
+  and after from the rule and says it unless each one after lies inside
+  one before. A series longer than it expands is compared on its first
+  occurrences only when its rule is unchanged. A change it cannot show to
+  shrink, such as one to a rule it does not expand, counts as more.
 
 The three details blocks stay raw JSON on the event, as `conferenceData`
 does, so a read and a split copy carry a detail Google adds later. Every
@@ -1438,106 +1437,78 @@ canceling a series can never be a slip of the wrist, and §4.3's required
 **Read-only mode** (`GCAL_READONLY=true`) registers only the nine read
 tools and requests only the read scopes.
 
-### 9a. A write that cannot be taken back is confirmed by the person
+### 9a. Per-call approval is the client's
 
-`confirm: true` and `allow_public: true` are arguments the model writes,
-and a persuaded model writes them too. So when the client can ask, the
-server asks the person itself, through MCP form elicitation, before six
-writes:
+The server asks the person nothing. From 3.0.0 to 3.1.0 it put a form
+with no fields to the person, through MCP form elicitation, before six
+writes: `delete_calendar`, `clear_calendar`, a share that published a
+calendar, opened it to a domain or made an owner, a cancellation that
+emailed a guest, and a status event that declined every meeting it
+overlapped. The maintainer removed it on 2026-10-23, following the
+family standard's §3 (§14, §18 row 104):
 
-- `delete_calendar` and `clear_calendar`, always;
-- `share_calendar` when the rule publishes the calendar, opens it to a
-  whole domain, or makes somebody an owner;
-- `cancel_event` when it emails at least one guest: `notify` is `all`
-  with a guest, or `external_only` with a guest outside the organizer's
-  domain. The email cannot be recalled. A cancel nobody is emailed about
-  is frequent and private, and asks nothing, which keeps §9's argument
-  for leaving the tool ungated;
-- `create_event` when it makes an out-of-office or focus-time event with
-  `auto_decline: all`. Google declines every meeting it overlaps, the
-  accepted ones too, and each organizer sees the decline, which cannot be
-  recalled. `none` and `new` ask nothing: one declines nothing, and the
-  other only invitations that arrive while the event stands (§7.4).
-- `update_event` when it makes such an event that declines all cover
-  time it did not: moved, made longer or repeated more, at any scope.
-  Google may decline the meetings in the new time, the accepted ones too.
-  A change that only shrinks the time asks nothing (§7.4). A
-  `this_and_following` split of such a series always asks: the new series
-  is a new event that declines all, so it is asked about exactly as a
-  create is, before the truncate.
+- The specification puts consent to each tool call on the host. It lets
+  a server ask through elicitation but never makes the answer consent:
+  the client gathers it "from the user or other sources".
+- Most widely used servers confirm nothing themselves, and those that do
+  pick their own scope, from one tool to every write.
+- Clients answer the question with nobody there (a Claude Code
+  `Elicitation` hook, Codex with full access), do not draw it (Claude
+  Code's VS Code extension), or leave it hanging, and no client's allow
+  and ask rules match it (§18 rows 80 and 104).
+- A question on every call is answered without reading.
 
-1. **A second gate, not a replacement.** The arguments stay and are
-   checked first. A call a guard refuses asks nothing. The question comes
-   after every read and every other guard, just before the write, so it
-   shows what the write would do.
-2. **Accepting is the confirmation.** The form has no fields (§18 row
-   79). Anything but `accept` — decline, cancel, an error, an answer
-   after its question expired — is `[blocked]`, refused before the retry
-   reads anything, and nothing is written. The refusal says the call was
-   "not confirmed by the person" and names the client's answer. It never
-   says the person declined: a client can answer with nobody present
-   (§18 row 80). So an unattended client that declares elicitation cannot
-   make these writes. That is the change 3.0.0 marks as breaking.
-3. **No question possible.** A client that declares no form elicitation
-   gets no question, and the arguments are the guard, as before.
-   `GCAL_REQUIRE_PROMPT=true` refuses those writes as `[blocked]`
-   instead. Only such a client sees Claude Code's
-   `requiresUserInteraction` mark on `delete_calendar` and
-   `clear_calendar`: `tools/list` drops it when the request declares form
-   elicitation, so the person answers once, to the question that says
-   what the write destroys. `destructiveHint` stays as the client's
-   allow-listable prompt.
-4. **A dry run never asks**, and needs no `confirm` either. Before this
-   phase `delete_calendar` and `clear_calendar` checked `confirm` ahead of
-   `dry_run`, so a preview had to be confirmed first.
-5. **What the question says.** The tool, the target and the consequence,
-   in the server's words: a calendar by its title; a share by who it
-   reaches and the role; a cancellation by the event's title, the
-   calendar, when it starts with its zone, the scope, and how many guests
-   are emailed and how many of them are outside the organization; a
-   status event by its kind, title and calendar, when it starts, whether
-   it repeats, and the decline message the organizers get, and a change
-   to one also by when it was and how it repeated. Text
-   from Calendar or from the call stands in a code span, on one line,
-   made inert as in the sibling servers: invisible characters
-   removed, every quote and backtick lookalike made a plain single quote,
-   every link shape broken wherever it starts and in any script, cut at
-   120 characters, and said in words when nothing is left to show. A
-   blank line between lines keeps them apart where a client draws
-   Markdown (§18 row 81). Nothing is phrased as an instruction from the
-   calendar.
-6. **One handler on every protocol.** The handler returns the question as
-   an input request, the multi-round-trip pattern of 2026-07-28. Before
-   that revision the SDK asks with `elicitation/create` and calls the
-   handler again within the same request (§18 row 78). A client failure
-   there is a JSON-RPC error inside the SDK, and middleware turns it into
-   `[blocked]`.
-7. **The answer is bound to its question.** `requestState` is signed with
-   HMAC-SHA256 under a key drawn per process. It carries the tool, a hash
-   of the arguments, a hash of what the question binds — its text and the
-   ids the write addresses — a nonce and an expiry. A retry is refused
-   when its state is forged, for another call, expired or already used,
-   and answers on a call with no state are refused. The retry reads
-   again; if the question it would ask differs from the one answered, it
-   is refused, and the next call asks again.
-8. **The expiry applies where the state travels.** From 2026-07-28 the
-   client carries `requestState` between the rounds, and it expires 5
-   minutes out. Before, it never leaves the process, and a slow accept
-   counts.
-9. **A failure after the answer is never "nothing written".** From the
-   start of a round that carries an accept, a call that fails without a
-   result is `[ambiguous_outcome]`: verdict `written` when the handler
-   returned from its write, `unknown` otherwise. A failure while the
-   question is still out is `[blocked]`.
-10. **Asking costs the reads again.** The retry repeats every read before
-    the write; the result's request count says so.
-11. **Logs** say `person_asked` and `person_answered` with the tool and
-    the client's action, never the question.
-12. **Held in one place.** A tool asks by `Asks` on its definition, which
-    `add` turns into the per-call asker. The service asks at its write,
-    and a write reached with no way to ask is refused. A test finds every
-    tool that takes `confirm` from the published schemas and holds each:
-    declined, nothing written; accepted, one write.
+What stays is what holds on every client:
+
+1. **Registration.** `delete_calendar` and `clear_calendar` exist only
+   with `GCAL_ENABLE_DESTRUCTIVE=true` (§9), and the sharing tools only
+   with `GCAL_SHARING` on. A client that runs with nobody watching gets
+   none of what the operator left off.
+2. **`confirm: true`** on both deletes. It is a witness that the caller
+   meant this delete, never approval: the model writes it.
+3. **Guards and witnesses.** `notify` and `scope` are required (§4.2,
+   §4.3); `notify: none` is refused with a guest outside the
+   organization; every write is a patch under the etag of its read
+   (§4.4); the primary calendar cannot be deleted and only it can be
+   cleared; a public share needs `allow_public: true` (§7.6).
+4. **`dry_run`** on every write.
+5. **Annotations.** `readOnlyHint` is on the read tools and
+   `list_sharing` alone, so VS Code, which prompts on every tool without
+   it, prompts on every write. `destructiveHint` is true on
+   `cancel_event`, `delete_calendar` and `clear_calendar`, so a client
+   that prompts by it, as claude.ai and Codex do, prompts for them.
+6. **The mark.** `delete_calendar` and `clear_calendar` carry Claude
+   Code's `anthropic/requiresUserInteraction` for every client: each
+   removes a whole calendar's events, which Calendar cannot bring back,
+   and neither is done many times in a row (§18 row 105). Claude Code
+   then prompts on every call whatever the operator's rules say, and
+   refuses the call where no prompt can be drawn (`-p`, dontAsk). No
+   other client reads it, so the flag stays the control. Until 3.1.0 the
+   mark was dropped for a client that declared elicitation, so the
+   person answered the server's question instead. `add` refuses the mark
+   on any tool that is not Destructive. For every other tool the
+   operator decides in Claude Code with `permissions.allow` and `ask`;
+   the README gives `ask` rules for the writes that share, cancel, move
+   or delete, and the staleness gate holds each name there to the
+   published tools.
+7. **What a client's prompt shows.** A client's prompt shows the call's
+   arguments. Where the question showed what the arguments did not, the
+   result still says it: a dry run, the notes on a status event that
+   declines every meeting, and who is emailed.
+
+`GCAL_REQUIRE_PROMPT`, which refused the asking writes on a client that
+could not ask, went with the question. A configuration that still turns
+it on is refused at start: ignored, it would allow what its owner set it
+to stop. Leave `GCAL_ENABLE_DESTRUCTIVE` off for a client that runs with
+nobody watching.
+
+Held by tests: every client in the tools tests declares form
+elicitation and fails the test on any question, and the live driver
+declares it too and fails the step a question arrives in. The marked set
+is derived from `tools/list` and held to the two deletes. A test calls
+every registered tool and holds that none changes the environment or the
+profile directory, the operator's settings (the standard's §3: the model
+never widens its own reach).
 
 ## 10. Auth, config, process model
 
@@ -1743,6 +1714,10 @@ Not to be reopened without a reason written into §18.
    and `clear_calendar` are (§9).
 9. No webhooks, no local replica, no migration, no quickAdd (§1).
 10. Tool names disjoint from the three sibling servers (§1).
+11. The server asks the person nothing; the client approves each call.
+    `GCAL_REQUIRE_PROMPT` is refused at start. `delete_calendar` and
+    `clear_calendar` carry `requiresUserInteraction` for every client
+    (§9a, decided 2026-10-23).
 
 ## 15. What must be verified live
 
@@ -3188,7 +3163,7 @@ what §15 exists to settle, and they are marked.
 | 80 | A client that declares elicitation has a person to answer it | Tier 2, from a sibling server's evidence log: `claude -p` 2.1.284 against a probe, and the Codex source at `codex-rs/codex-mcp/src/elicitation.rs` | **Refuted.** `claude -p` declares it and answers `cancel` in milliseconds; Codex under approval policy `never` with full access accepts a fieldless form. So a refusal never says the person declined, and an unattended client that declares elicitation cannot make these writes |
 | 81 | A client draws a question as plain text | Tier 2, from a sibling server's evidence log: VS Code's `mcpElicitationService.ts` builds the message as a `MarkdownString` | **Refuted.** Calendar text in a question stands in a code span, and the server's own lines hold no Markdown (§9a) |
 | 82 | A 503 on a write may be retried, and a 404 on a retried delete means it was never there | `google/rpc/code.proto` in googleapis, `UNAVAILABLE`, read 2026-10-01: "Note that it is not always safe to retry non-idempotent operations", HTTP mapping 503 | **Refuted for both.** A 5xx or a lost answer on `events.move` or `acl.insert` is `[ambiguous_outcome]`, like `events.insert` and `calendars.insert`, never `[unavailable]`, which invites a retry. A delete whose first attempt got a 5xx or no answer and whose retry got 404 or 410 is `[ambiguous_outcome]`: that first attempt most likely landed. A 404 after a 429 stays `[not_found]`, since Google did not act on the 429 |
-| 83 | A destructive tool should carry both `requiresUserInteraction` and the server's own question | Tier 2: the owner was asked twice for one delete in another server built the same way (2026-10-09); the MCP spec, GitHub's `delete_repository`, Supabase, and Claude Code's own documentation of the mark | **Refuted.** No source recommends two hard gates for one call; GitHub and Supabase confirm with `destructiveHint` plus a form elicitation, and Claude Code scopes the mark to "tools whose permission prompt is itself the point". The mark is now sent only to a client that cannot ask. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to stop the call before it reached the server |
+| 83 | A destructive tool should carry both `requiresUserInteraction` and the server's own question | Tier 2: the owner was asked twice for one delete in another server built the same way (2026-10-09); the MCP spec, GitHub's `delete_repository`, Supabase, and Claude Code's own documentation of the mark | **Refuted.** No source recommends two hard gates for one call; GitHub and Supabase confirm with `destructiveHint` plus a form elicitation, and Claude Code scopes the mark to "tools whose permission prompt is itself the point". The mark is now sent only to a client that cannot ask. A Claude Code `Elicitation` hook that accepts now confirms these deletes alone, where the mark used to stop the call before it reached the server. **Corrected 2026-10-23 (row 104):** GitHub's `delete_repository` asks through form elicitation with no switch to skip it, and only Supabase calls its question a guardrail. The server asks nobody now, and the mark is on the two deletes for every client (row 105) |
 | 84 | A room's address has a documented shape, so a server can tell a room from a person by it | Read 2026-10-09: the Calendar API's domain-resources guide ("add its email address as an event attendee"), the Admin SDK `resources.calendars` reference (`resourceEmail`: "Generated as part of creating a new calendar resource") and the Admin help on creating resources | **Refuted: no Google source states the shape.** Every resource address is under `resource.calendar.google.com`, but only third-party tools say so. Adopted as an observation, because both ways it could be wrong are safe: a room it misses counts as a guest, as every room did before; and only Google issues addresses under google.com, so no person is taken for a room. The documented path, row 85, sits beside it |
 | 85 | A client names a room by flagging the attendee as a resource | Calendar discovery revision 20261002, `EventAttendee.resource`: "Whether the attendee is a resource. Can only be set when the attendee is added to the event for the first time." | **Confirmed in the reference; not yet seen live with a real room**, which the driver cannot create. `create_event` takes `rooms` and `update_event` `add_rooms`, sent with `resource: true`, as is a room's address given as a guest. The flag does not decide who is counted: it holds whatever the call that added the attendee said, so a person passed as a room would carry it and slip past §4.3.4. The address decides, by row 84 |
 | 86 | A write reaches the guests the event already has | Read against §4.3, 2026-10-09 | **Refuted: it reaches the guests it adds too.** `update_event` counted the event as read, so adding a guest to an event with none asked for no `notify`, and `none` went through for a guest outside the domain. The count now includes the guests a write adds, on both halves of a series split |
@@ -3207,18 +3182,21 @@ what §15 exists to settle, and they are marked.
 | 99 | Status events are read-only here: create_event makes ordinary events, and the details blocks are written off | Google's status-events guide, read 2026-10-09: "Secondary calendars can't have status events"; focus time and out of office need their properties and `transparency` `opaque`, and "cannot be all-day events"; a working location needs its properties, `visibility` `public` and `transparency` `transparent`, and an all-day one "spans exactly one day"; an update "must maintain the required fields". Calendar discovery revision 20261002, fetched 2026-10-09: `autoDeclineMode` `declineNone`, `declineAllConflictingInvitations` or `declineOnlyNewConflictingInvitations`, the second declining "all conflicting meeting invitations that conflict with the event"; `chatStatus` "available or doNotDisturb"; `declineMessage` on both; `workingLocationProperties.type` `homeOffice`, `officeLocation` or `customLocation`, "Any details are specified in a sub-field of the specified name, but this field may be missing if empty", and `homeOffice` typed `any` | **Reversed: `create_event` makes all three.** `event_type` with `auto_decline` (required, no default, `all` asks the person), `decline_message`, `chat_status`, `working_location` and `working_location_label`, refused on a calendar other than the primary and in every shape the guide refuses; the server sets the transparency and visibility. The blocks are kept raw so a split still carries them whole, and every read shows them in the input words. The fake refuses what the guide refuses, on insert and on a patch. **Confirmed live on 2026-10-09, one type per run:** an out-of-office event, a focus time and a custom working location were each created on the primary calendar, read back with their details and deleted by id; and spike P found Google refuses a status event on a secondary calendar, with 400 `malformedOutOfOfficeEvent`, as the guide says. **Not yet probed live, tier 3:** the body Google takes for `home`, sent as `homeOffice: {}`; what it does with guests, rooms, optional guests and a Meet link on a status event, all refused with `[blocked]` on create and on every update until a probe; whether an organizer is emailed about an automatic decline, where the question says only that they see it; and whether a split of a series declining all declines again (row 88). The driver makes one status event per run on the primary calendar under §9.1's exception, declining nothing |
 | 100 | A calendar past `calendarExpansionMax` is left out of the free/busy answer | Calendar discovery revision 20261005, read 2026-10-09: `calendarExpansionMax` "Maximal number of calendars for which FreeBusy information is to be provided. Optional. Maximum value is 50"; `Error.reason` "tooManyCalendarsRequested - The number of calendars requested is too large for a single query" | **Not settled, tier 3.** Google names the reason and not where it lands: a calendar past the cap may be left out, or answered with that error. Nor does it say whether a group's members count toward the cap (row 87), and row 12's live run, with no cap set, saw 51 entries come back. The server treats both shapes as no answer and asks those calendars again on their own, up to 200; one still past the cap is unknown, never free, with the reason in words. The fake answers either way, and the tests hold both. A live check needs a group of more than fifty readable members, which the driver cannot make, so it waits on the group probe of §15; the probe should count both shapes. Its one run, on 2026-10-09, had a group of 13 members, so this row is still unexercised by a real group |
 | 101 | `default` visibility ranks between `public` and `private` when Google compares one occurrence's visibility with the series' | Calendar discovery revision 20261002, read 2026-10-09: `visibility` "If the new setting is more restrictive (e.g. from public to private), it is applied to all instances. If the new setting is less restrictive (e.g. from private to public), the change is ignored"; `default` "Uses the default visibility for events on the calendar" | **Confirmed live on 2026-10-09 for one half, in three runs:** a `default` occurrence made a public series default, so Google ranks it above public. That it ranks below private is still a belief, tier 3. The reference ranks public below private and says nothing of `default`, which takes the calendar's own setting. The server and the fake both put it in the middle: private to default, and default to public, on one occurrence are refused as ignored, and public to default is made with a note that the whole series changed. Ranked otherwise by Google, the server would refuse a change Google makes, or report as made one Google ignores, the worse of the two. The live driver makes its series public, one occurrence default, and reads the series |
-| 102 | A change to an out-of-office or focus-time event that declines all declines nothing new, so only a create asks | Calendar discovery revision 20261005, read 2026-10-09: `autoDeclineMode` `declineAllConflictingInvitations`, "meaning that all conflicting meeting invitations that conflict with the event are declined", with nothing on when; `Event.start` "For a recurring event, this is the start time of the first instance". The status-events and recurring-events guides, read 2026-10-09, say nothing about an update to either | **Not settled; treated as refuted until a probe.** A move, a later end or more occurrences put meetings inside the event that were outside it, and the reference does not say they are spared. `update_event` asks the person before a change that makes such an event cover time it did not, at any scope, and a dry run says so; a change that only shrinks the time asks nothing (§7.4, §9a). The time is read from the rule, so a canceled occurrence of a series counts as covered: whether a change to the whole series brings one back is not probed either. One occurrence is judged by the details it carries when read on its own, which Google is believed to copy from its series; one read without them asks nothing. No tool changes `auto_decline` on an existing event, so a switch to `all` has no path yet; the check counts one as more. **Not yet probed live, tier 3**, and the driver cannot: its one status event declines nothing, and the probe needs another organizer's meeting on the primary calendar |
+| 102 | A change to an out-of-office or focus-time event that declines all declines nothing new, so only a create asks | Calendar discovery revision 20261005, read 2026-10-09: `autoDeclineMode` `declineAllConflictingInvitations`, "meaning that all conflicting meeting invitations that conflict with the event are declined", with nothing on when; `Event.start` "For a recurring event, this is the start time of the first instance". The status-events and recurring-events guides, read 2026-10-09, say nothing about an update to either | **Not settled; treated as refuted until a probe.** A move, a later end or more occurrences put meetings inside the event that were outside it, and the reference does not say they are spared. `update_event` says in its result, a dry run included, that Google may decline the meetings in time such a change adds, at any scope; a change that only shrinks the time says nothing of it (§7.4). From 3.0.0 to 3.1.0 it asked the person first. On 2026-10-23 the maintainer decided that a probe settles whether such a change is refused: refused `[blocked]` if Google declines in the new time, let through if it does not (§9a). The time is read from the rule, so a canceled occurrence of a series counts as covered: whether a change to the whole series brings one back is not probed either. One occurrence is judged by the details it carries when read on its own, which Google is believed to copy from its series; one read without them counts as declining nothing. No tool changes `auto_decline` on an existing event, so a switch to `all` has no path yet; the check counts one as more. **Not yet probed live, tier 3**, and the driver cannot: its one status event declines nothing, and the probe needs another organizer's meeting on the primary calendar |
 | 103 | A 412 under the etag of this server's own read means somebody else changed the event, so it is `[stale]` | **Live, 2026-10-09**, three passes of the driver: in passes 2 and 3, `move_event back` — the driver's own event, with no guests, moved straight back from the calendar the step before had moved it to, with no `etag` from the caller — read the event and was refused with 412 under that read's etag. Pass 1 moved it back. Nothing else wrote to either scratch calendar | **Refuted: Google changes a just-moved event by itself, moments after the move.** What it changes is not known. An event write made without the caller's `etag` — update, the split's truncate, cancel, move and respond — now reads the event again after a 412, plans the write again and makes it once more, if the new plan makes the same changes, reaches the same guests and asks the person the same question. The result says so. Otherwise, and after a second 412, it is `[stale]`. A caller's `etag` stays strict, because it names the version they decided on. The calendar and sharing writes keep the plain rule: no such change has been seen there. The fake changes an event once after a read, on request. **Seen live on 2026-10-09:** the second try landed (step `move_event back`). Two runs followed the fix, and Google changed the event in one of them. The driver's move back says which try it took |
+| 104 | A server should confirm a write with the person itself, through MCP form elicitation, before the writes that cannot be taken back | Tier 2, from the family standard's §3 and its evidence, every quote re-read at its source on 2026-10-23: the MCP specification, `server/tools` at 2025-06-18, 2025-11-25 and 2026-07-28 (clients "SHOULD … prompt for user confirmation on sensitive operations") and `client/elicitation` (no consent rule); the 110 most used MCP servers, among them github/github-mcp-server (`delete_repository` asks, with no switch to skip it), awslabs/mcp (the Redshift server asks before every statement it cannot read as a read) and microsoft/mcp (about 145 destructive or secret commands ask); Claude Code's documentation of the `Elicitation` hook ("no dialog") and open reports of the question not drawn, hung or cut to three lines; a Codex change that accepts a form with no fields under full access | **Refuted.** The specification gives per-call approval to the client and never makes elicitation consent. 83 of the 91 servers with risky writes ask nothing; the 8 that ask pick their own scope. A client may answer, decline, hang or cut the question with nobody looking, and no client's permission rules match it. So the server asks nobody; registration, `confirm`, the guards, the witnesses and `dry_run` stay (§9a). Rows 78 to 81 and 83 describe the question this replaces |
+| 105 | Claude Code's `requiresUserInteraction` belongs on every destructive tool, or only for a client the server cannot ask | Tier 2, from the family standard's §3, 2026-10-23: Claude Code's documentation (the mark is for "tools whose permission prompt is itself the point"; from v2.1.199 it prompts on every call in every interactive mode, and denies the call where no prompt can be drawn); no other client reads it | **Refined.** It goes where the prompt is the point and the call is never made many times in a row: an unrecoverable delete of a whole container, a permanent delete past a trash, and a public or domain-wide share. Here that is `delete_calendar` and `clear_calendar`, for every client: the first removes a calendar and every event on it, the second every event on the primary calendar, and Calendar keeps neither (§9). `cancel_event` stays unmarked: Google keeps a canceled event, and canceling is done many times in a row (§9a) |
 
 ### Deviations from the shared Go MCP server standard
 
-The standard at `~/.claude/mcp-server-standard.md`, read 2026-09-15.
-One deviation, and one place where this server can hold a rule a sibling
-could not.
+The standard at `~/.claude/mcp-server-standard.md`, read 2026-09-15,
+and its §3 again on 2026-10-23. Two deviations, and one place where this
+server can hold a rule a sibling could not.
 
 | The standard says | Here | Why |
 |---|---|---|
 | Errors use six classes: `invalid`, `not_found`, `auth`, `conflict`, `unavailable`, `unsupported` | Twelve, adding `forbidden`, `stale`, `ambiguous`, `blocked`, `rate_limited`, `ambiguous_outcome` | `stale` (412) and `conflict` ask the caller to do different things; `ambiguous_outcome` is forced by §2.11, where a retry may double-book. The vocabulary is closed, derived from the code and asserted in both directions (§6.5) |
+| Sending communication, mail that leaves as sent, is its own tool behind a flag, with drafts by default (§3) | The invitations, updates and cancellations Google emails go out through `notify` on the ordinary event writes | Calendar has no draft: an event's email is part of the write the person asked for, not a message of its own. `notify` is required with no default, so every write that emails says whom, and `none` is refused with a guest outside the organization (§4.3). Gating them would put a flag between the model and creating a meeting, and §9's argument holds: a gate everybody turns on protects nobody. Decided 2026-10-23 |
 | Never overwrite: compute a minimal diff | Held as written | Recorded because the sibling Sheets server had to deviate here and a reader may expect the same. Calendar supports partial updates and `If-Match` properly (§2.3, §2.4), so the rule is implementable: §4.4 patches always and §8a writes off all four PUT methods |
 
 Everything else is adopted as written, including the preamble's three
