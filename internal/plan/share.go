@@ -225,13 +225,13 @@ func OrdinaryRole(role string) error {
 		gatedTool("widen_calendar_access"))
 }
 
-// Narrows reports whether a share only lowers the role of a rule the
-// calendar already has. That takes nothing new past where the rule
+// WithinRule reports whether a share keeps or lowers the role of a rule
+// the calendar already has. That takes nothing past where the rule
 // already reaches, so share_calendar makes it whatever the rule's reach:
-// lowering exposure needs neither the destructive flag nor confirm.
-func Narrows(existing []model.Sharing, a Audience, role string) bool {
+// it needs neither the destructive flag nor confirm.
+func WithinRule(existing []model.Sharing, a Audience, role string) bool {
 	rule, had := FindRule(existing, a)
-	return had && role != rule.Role && gcal.AtLeast(rule.Role, role)
+	return had && gcal.AtLeast(rule.Role, role)
 }
 
 // PublicRole refuses owner on a public or a domain rule. Everybody in a

@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Breaking:** `delete_calendar` and `clear_calendar` carry Claude Code's `requiresUserInteraction` for every client, so Claude Code prompts on every call whatever your rules say, and refuses them where it cannot prompt, as with `-p`. 3.1.0 told you to put both on the allow list; that no longer skips the prompt.
 
 - **Breaking:** `create_event` refuses `auto_decline: all`, `[blocked]`, naming `create_event_declining_all`. `none` and `new` are unchanged.
-- **Breaking:** `share_calendar` takes only named people and groups inside your organization, below owner. An address is inside when its domain is your account's own, and a personal Google account has no organization, so every address is outside it. The public, a whole domain, an address outside and the owner role are refused, `[blocked]`, naming the tool that takes them, except that lowering the role of a rule the calendar already has is made whoever it reaches. Its `allow_public` input is gone.
+- **Breaking:** `share_calendar` takes only named people and groups inside your organization, below owner. An address is inside when its domain is your account's own, and a personal Google account has no organization, so every address is outside it. The public, a whole domain, an address outside and the owner role are refused, `[blocked]`, naming the tool that takes them, except that keeping or lowering the role of a rule the calendar already has is made whoever it reaches. Its `allow_public` input is gone.
 
 ### Added
 

@@ -105,6 +105,15 @@ func TestInstructionsNameTheTraps(t *testing.T) {
 	}
 }
 
+// share_calendar lowers any rule a calendar has, the public one
+// included, so the instructions must not leave a model believing that
+// needs a tool the operator left off.
+func TestInstructionsSayShareCalendarLowersAnyRule(t *testing.T) {
+	if got := instructionsOf(t, deps(t)); !strings.Contains(got, "lowers the access of any rule") {
+		t.Fatalf("the server instructions do not say share_calendar lowers any rule:\n%s", got)
+	}
+}
+
 func instructionsOf(t *testing.T, d server.Deps) string {
 	t.Helper()
 	// The SDK exposes instructions on initialize; drive a session to

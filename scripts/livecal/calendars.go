@@ -277,18 +277,19 @@ func calendarSteps(c *calendarState) []step {
 		{
 			// The wider shares carry the calendar's title as this account
 			// reads it. The calendar's own title is not that, since this
-			// account renamed it for itself, so it is refused before a
-			// request is built.
+			// account renamed it for itself, so it is refused before the
+			// rules are read. A dry run without confirm, so the step can
+			// write nothing even if the title were taken.
 			name: "widen_calendar_access refuses another title",
 			tool: "widen_calendar_access",
 			argsFn: args(map[string]any{
 				"calendar_title": probeRenamed, "who": probeGuest, "role": "reader", "notify": "none",
-				"confirm": true,
+				"dry_run": true,
 			}),
 			skip: c.needProbe,
 			check: func(r callResult) (verdict, string) {
 				if !r.isError {
-					return fail, "a calendar was shared outside under a title that is not the one read"
+					return fail, "a title that is not the one read was taken"
 				}
 				if !strings.Contains(r.text, "[stale]") || !strings.Contains(r.text, "calendar_title") {
 					return fail, "the refusal is not [stale] naming calendar_title: " + truncate(r.text, 200)

@@ -1209,9 +1209,10 @@ identical.
     §3: where a question showed what an argument means, the argument
     carries it).
   - `share_calendar` refuses a wider share with `[blocked]`, naming the
-    tool that takes it and its flag, before it asks for `notify`. It
-    lowers the role of a rule the calendar already has whoever the rule
-    reaches, since that widens nothing; raising a wider rule goes through
+    tool that takes it and its flag, before it asks for the role or
+    `notify`. It keeps or lowers the role of a rule the calendar already
+    has whoever the rule reaches, since that widens nothing, and says
+    nothing of publishing when it does; raising a wider rule goes through
     the wider tools, and `unshare_calendar` removes any rule. Each wider
     tool refuses what another takes with `[invalid]`, and
     `publish_calendar` never grants owner.
@@ -3048,6 +3049,30 @@ row 80).
     `calendar_title` now, refused `[stale]` when it is not the title of
     the calendar the call reached (§7.6).
 
+A second review, of the code written after the first, fixed:
+
+20. **The refusals about `auto_decline` still offered `all`, or named
+    its tool without its flag.** An unknown word and a decline message
+    with `none` offered `all`, which `create_event` refuses, and the
+    missing-word refusal did not say `create_event_declining_all` is off
+    by default. Each names the tool and its flag now.
+21. **`share_calendar` asked for the role before saying a share was
+    another tool's,** so a caller fixed the role and then met
+    `[blocked]`. The audience is refused first again, unless the
+    calendar already has the rule.
+22. **Asking `share_calendar` for the role a wider rule already has**
+    was refused `[blocked]`, naming a flagged tool, for a call that
+    writes nothing. It is reported unchanged now.
+23. **Lowering a public or domain rule read as publishing.** The notes
+    on what such a rule reaches print only when a call adds or raises
+    one.
+24. **The live step that refuses another title sent `confirm: true`
+    without a dry run,** so it would have shared for real had the title
+    been taken. It is a dry run without confirm now.
+25. **The server instructions did not say `share_calendar` lowers any
+    rule,** so a model could send a person to the destructive flag to
+    make a public calendar free/busy only.
+
 Written down, not changed:
 
 - `update_event` making a decline-all event cover more goes through
@@ -3060,6 +3085,12 @@ Written down, not changed:
   other events' organizers by Google's own doing, and no parameter of
   this insert governs it. `create_event` with `auto_decline` `new` was
   the same before.
+- `share_calendar` may lower the role of a rule for somebody outside
+  the organization, and with `notify: all` Google may email them about
+  it. That is fix 14's decision: lowering widens nothing, and the
+  result shows the rule before and after. The maintainer may prefer
+  the outside note `widen_calendar_access` adds, or `notify: none`
+  forced there.
 
 ## 17. Open decisions
 

@@ -158,17 +158,21 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
+	// A share past the organization is refused, naming the tool that
+	// takes it, before the role or notify is asked of the call. The one
+	// exception is a rule the calendar already has, which this tool may
+	// keep or lower whatever it reaches, since that widens nothing.
+	wider := plan.OrdinaryAudience(audience, s.outside(ctx, audience))
+	if _, had := plan.FindRule(before, audience); !had && wider != nil {
+		return render.SharingReport{}, classifyPlan(wider)
+	}
 	role, err := plan.ParseRole(o.Role)
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
-	// Lowering the role of a rule the calendar already has widens
-	// nothing, whatever the rule reaches, so it is made here. Anything
-	// else past the organization or at owner is refused, naming the tool
-	// that takes it, before notify is asked of the call.
-	if !plan.Narrows(before, audience, role) {
-		if err := plan.OrdinaryAudience(audience, s.outside(ctx, audience)); err != nil {
-			return render.SharingReport{}, classifyPlan(err)
+	if !plan.WithinRule(before, audience, role) {
+		if wider != nil {
+			return render.SharingReport{}, classifyPlan(wider)
 		}
 		if err := plan.OrdinaryRole(role); err != nil {
 			return render.SharingReport{}, classifyPlan(err)
@@ -302,12 +306,9 @@ func (s *Service) WidenCalendarAccess(ctx context.Context, o WidenOptions) (rend
 // resolving "primary" and asking who is outside cost one request, not
 // two.
 func (s *Service) ownCalendar(ctx context.Context, ref string) (context.Context, model.Calendar, error) {
-	if err := s.ready(); err != nil {
-		return ctx, model.Calendar{}, err
-	}
 	ctx = gapi.WithCounter(ctx)
 	s.primaryID(ctx)
-	cal, err := s.ResolveCalendar(ctx, ref)
+	ctx, cal, err := s.openCalendar(ctx, ref)
 	if err != nil {
 		return ctx, model.Calendar{}, err
 	}
@@ -382,11 +383,15 @@ func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.
 			" — the scope type was "+string(audience.Source)+
 			". Pass scope_type if that is not what you meant; a group address and a person's look the same.")
 	}
-	if audience.Scope.Type == gcal.ScopeTypeDomain {
+	// What a public or a domain rule reaches is said when a call adds or
+	// raises one, never when it keeps or lowers it: share_calendar does
+	// that, and it publishes nothing.
+	within := plan.WithinRule(before, audience, role)
+	if audience.Scope.Type == gcal.ScopeTypeDomain && !within {
 		report.Notes = append(report.Notes, "This rule opens the calendar to everybody in "+audience.Scope.Value+
 			", now and whoever joins it later.")
 	}
-	if audience.Scope.IsPublic() {
+	if audience.Scope.IsPublic() && !within {
 		// Tense-neutral, because this same note prints under a dry run.
 		// "This calendar is now PUBLIC" beneath the words "nothing was
 		// written" is the contradiction phase 2 found on a cancellation,

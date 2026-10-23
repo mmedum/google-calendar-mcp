@@ -213,10 +213,10 @@ func TestAWideShareIsOutsideOrAnOwner(t *testing.T) {
 	}
 }
 
-// Lowering the role of a rule the calendar already has narrows it,
-// whoever the rule reaches; raising it, keeping it, or a rule it does not
-// have does not.
-func TestNarrowsOnlyLowersAnExistingRule(t *testing.T) {
+// Lowering or keeping the role of a rule the calendar already has stays
+// within it, whoever the rule reaches; raising it, or a rule it does not
+// have, does not.
+func TestWithinRuleOnlyLowersOrKeepsAnExistingRule(t *testing.T) {
 	existing := []model.Sharing{
 		{RuleID: "user:somebody@elsewhere.test", ScopeType: gcal.ScopeTypeUser, Value: "somebody@elsewhere.test",
 			Role: gcal.RoleWriter},
@@ -243,12 +243,12 @@ func TestNarrowsOnlyLowersAnExistingRule(t *testing.T) {
 		{"writer to reader, outside", outside, gcal.RoleReader, true},
 		{"reader to free/busy, public", public, gcal.RoleFreeBusyReader, true},
 		{"writer to owner", outside, gcal.RoleOwner, false},
-		{"reader kept", public, gcal.RoleReader, false},
+		{"reader kept", public, gcal.RoleReader, true},
 		{"reader to writer, public", public, gcal.RoleWriter, false},
 		{"no rule yet", stranger, gcal.RoleFreeBusyReader, false},
 	} {
-		if got := plan.Narrows(existing, c.a, c.role); got != c.want {
-			t.Errorf("%s: Narrows = %v, want %v", c.name, got, c.want)
+		if got := plan.WithinRule(existing, c.a, c.role); got != c.want {
+			t.Errorf("%s: WithinRule = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

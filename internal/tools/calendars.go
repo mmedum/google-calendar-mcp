@@ -109,8 +109,8 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"already has a rule for it — pass `scope_type` to be sure, because a group address and a person's " +
 			"look identical. " +
 			"`role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. The " +
-			"result explains the one it set. Lowering the role of a rule the calendar already has is made " +
-			"here whoever the rule reaches, since it widens nothing. " +
+			"result explains the one it set. Keeping or lowering the role of a rule the calendar already has " +
+			"is made here whoever the rule reaches, since it widens nothing. " +
 			"An address is inside your organization when its domain is your account's own; a personal Google " +
 			"account has no organization, so every address is outside it. The wider shares are refused here, " +
 			"each naming its own tool: publish_calendar for \"anyone\" or a whole domain, and " +

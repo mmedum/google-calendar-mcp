@@ -151,7 +151,9 @@ func TestShareCalendarRefusesExternalOnly(t *testing.T) {
 
 // share_calendar takes named people and groups inside the organization,
 // below owner (§7.6). Everything wider is refused before anything is
-// written, naming the tool that takes it.
+// written, naming the tool that takes it, and an audience before the
+// role, so a caller is not walked through fixing a role for a share this
+// tool refuses anyway.
 func TestShareCalendarStopsAtTheOrganization(t *testing.T) {
 	for _, c := range []struct {
 		name, who, scopeType, role, names string
@@ -161,6 +163,8 @@ func TestShareCalendarStopsAtTheOrganization(t *testing.T) {
 		{"a person outside", "somebody@elsewhere.test", "", "reader", "widen_calendar_access"},
 		{"a group outside", "team@elsewhere.test", "group", "reader", "widen_calendar_access"},
 		{"an owner inside", "colleague@example.test", "", "owner", "widen_calendar_access"},
+		{"the public, before the role", "anyone", "", "viewer", "publish_calendar"},
+		{"a person outside, before the role", "somebody@elsewhere.test", "", "viewer", "widen_calendar_access"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			svc, fake := calendarSeed(t)
@@ -180,7 +184,8 @@ func TestShareCalendarStopsAtTheOrganization(t *testing.T) {
 
 // Lowering the role of a rule the calendar already has widens nothing,
 // so share_calendar makes it whoever the rule reaches, with no flag and
-// no confirm. Raising the same rule is still refused.
+// no confirm, and the result does not describe it as publishing. Asking
+// for the role the rule has writes nothing; raising it is still refused.
 func TestShareCalendarLowersAWiderRule(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -191,6 +196,8 @@ func TestShareCalendarLowersAWiderRule(t *testing.T) {
 			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "somebody@elsewhere.test"}}, "somebody@elsewhere.test"},
 		{"the public", gcal.AclRule{ID: "default", Role: gcal.RoleWriter,
 			Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}}, "anyone"},
+		{"a domain", gcal.AclRule{ID: "domain:example.test", Role: gcal.RoleWriter,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeDomain, Value: "example.test"}}, "example.test"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			svc, fake := calendarSeed(t)
@@ -206,6 +213,20 @@ func TestShareCalendarLowersAWiderRule(t *testing.T) {
 			}
 			if !strings.Contains(got.Text(), "from writer to reader") {
 				t.Fatalf("the result does not say what the access changed from:\n%s", got.Text())
+			}
+			for _, claim := range []string{"publishing rather than sharing", "opens the calendar to everybody"} {
+				if strings.Contains(got.Text(), claim) {
+					t.Fatalf("lowering a rule says %q:\n%s", claim, got.Text())
+				}
+			}
+			kept, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "team@group.calendar.example.test", Who: c.who, Role: "reader", Notify: "none",
+			})
+			if err != nil {
+				t.Fatalf("keeping the role: %v", err)
+			}
+			if w := fake.Wrote(); len(w) != 1 || !strings.Contains(kept.Text(), "already had reader access") {
+				t.Fatalf("keeping the role: got writes %+v, want no new one, and:\n%s", w, kept.Text())
 			}
 			_, err = svc.ShareCalendar(context.Background(), service.ShareOptions{
 				Calendar: "team@group.calendar.example.test", Who: c.who, Role: "writer", Notify: "none",

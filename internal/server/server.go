@@ -45,7 +45,8 @@ const instructions = "Google Calendar tools. This server answers *when*: calenda
 	"Never answer \"are they free\" from a list of events: events you cannot see the details of are still busy, " +
 	"and an event marked free is not. That is what check_availability is for, and it reports a calendar it could " +
 	"not read as unknown rather than as free. " +
-	"share_calendar shares with people and groups inside your organization. Publishing a calendar, sharing it " +
+	"share_calendar shares with people and groups inside your organization, and lowers the access of any rule a " +
+	"calendar already has, a public one included. Publishing a calendar, sharing it " +
 	"outside the organization or with a new owner, and an out-of-office or focus-time event that declines every " +
 	"meeting it overlaps are tools of their own, present only when the person running this server turned them on; " +
 	"a refusal names the tool."
