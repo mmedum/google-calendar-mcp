@@ -90,6 +90,15 @@ func TestTheSixWaysAManifestBreaks(t *testing.T) {
 			want: "the manifest declares no entry_point",
 		},
 		{
+			// A staged program, and not the one the default command runs:
+			// the bundle names the Windows binary as the server and spawns
+			// the macOS one.
+			name: "an entry point the default command does not run",
+			edit: func(d map[string]any) { dig(d, "server")["entry_point"] = "server/google-calendar-mcp.exe" },
+			want: `entry_point is "server/google-calendar-mcp.exe", and mcp_config.command runs ` +
+				`"server/google-calendar-mcp-darwin"`,
+		},
+		{
 			// Packed, and not a program: the license is there to be read.
 			name: "an entry point naming the license",
 			edit: func(d map[string]any) { dig(d, "server")["entry_point"] = "LICENSE" },
@@ -139,9 +148,11 @@ func TestTheSixWaysAManifestBreaks(t *testing.T) {
 		},
 		{
 			// Staged, and a program, and the file staged for another
-			// platform: macOS would spawn a Windows binary.
+			// platform: macOS would spawn a Windows binary. entry_point
+			// follows the command, so that only this is wrong.
 			name: "macOS spawning the Windows binary",
 			edit: func(d map[string]any) {
+				dig(d, "server")["entry_point"] = "server/google-calendar-mcp.exe"
 				dig(d, "server", "mcp_config")["command"] = "${__dirname}/server/google-calendar-mcp.exe"
 			},
 			want: `platform "darwin" runs "server/google-calendar-mcp.exe", and the file staged for it is ` +
@@ -275,6 +286,17 @@ func TestManifestProblemsRunsEveryCheck(t *testing.T) {
 			old: "google-calendar-mcp-linux-amd64", new: "google-calendar-mcp-linux-x64",
 			want: "the launcher runs [google-calendar-mcp-linux-arm64 google-calendar-mcp-linux-x64]; " +
 				"the packer stages [google-calendar-mcp-linux-amd64 google-calendar-mcp-linux-arm64]"},
+		// The decode into manifest merges the two, so every check sees
+		// the env and the overrides; the schema and the host keep the
+		// second, which has neither.
+		{name: "a second server object", file: manifestPath, old: `  "user_config": {`,
+			new: `  "server": {"type": "binary", "entry_point": "server/google-calendar-mcp-darwin", ` +
+				`"mcp_config": {"command": "${__dirname}/server/google-calendar-mcp-darwin", "args": []}},` +
+				"\n" + `  "user_config": {`,
+			want: "the manifest has server more than once"},
+		{name: "a variable mapped twice", file: manifestPath, old: `"GCAL_PROFILE": "${user_config.profile}",`,
+			new:  `"GCAL_PROFILE": "${user_config.profile}", "GCAL_PROFILE": "${user_config.profile}",`,
+			want: "the manifest has server.mcp_config.env.GCAL_PROFILE more than once"},
 		// The install hint is held to go.mod, which moves at every major
 		// version.
 		{name: "a go.mod at another major version", file: "go.mod", old: "/v5", new: "/v4",
@@ -300,6 +322,25 @@ func TestManifestProblemsRunsEveryCheck(t *testing.T) {
 				t.Errorf("problems:\n%s\nwant the one containing %q", strings.Join(problems, "\n"), tc.want)
 			}
 		})
+	}
+}
+
+// A key is repeated only within one object, and each repeated key is
+// named once, by its path, a list's elements and a repeated object's
+// own keys included.
+func TestRepeatedKeysNameEachPathOnce(t *testing.T) {
+	for _, tc := range []struct {
+		doc  string
+		want []string
+	}{
+		{`{"a": [{"b": 1, "b": 2, "b": 3}], "c": {"d": 1}, "d": 1}`, []string{"a[0].b"}},
+		{`{"x": {"y": 1}, "x": {"y": 1, "y": 2}}`, []string{"x", "x.y"}},
+		{`{"server": {"type": "binary"}, "user_config": {"type": {"type": "boolean"}}}`, nil},
+		{`{"a": 1,`, nil},
+	} {
+		if got := repeatedKeys([]byte(tc.doc)); !slices.Equal(got, tc.want) {
+			t.Errorf("repeatedKeys(%s) = %q, want %q", tc.doc, got, tc.want)
+		}
 	}
 }
 
@@ -821,7 +862,7 @@ func refusals(t *testing.T, m manifest, declared [][]string) []string {
 
 // undeclaredReadOnly is the problem refusingReadOnly gives with nothing
 // declared.
-const undeclaredReadOnly = "the server refuses read_only together, and bundleRefused does not declare it"
+const undeclaredReadOnly = "the server refuses [read_only on], and bundleRefused does not declare it"
 
 // Every set of the switches is started, and the refused ones are held to
 // the declared list both ways, each defect reported once, for the
@@ -836,7 +877,7 @@ func TestTheBundleRefusalsAreDeclared(t *testing.T) {
 	if got := refusals(t, refusingReadOnly(t, func(map[string]any) {}), declared); len(got) != 0 {
 		t.Errorf("a declared refusal gives %q, want nothing", got)
 	}
-	const starts = "bundleRefused declares that the server refuses read_only together, and it starts with them"
+	const starts = "bundleRefused declares that the server refuses [read_only on], and it starts with them"
 	if got := refusals(t, committed, declared); !slices.Equal(got, []string{starts}) {
 		t.Errorf("a declared refusal the server starts with gives %q, want %q once", got, starts)
 	}
@@ -887,9 +928,10 @@ func TestTheDeclaredSetsNameEachOther(t *testing.T) {
 	}
 }
 
-// A switch in a set is on, whatever its default: a required one with
-// none, or one with a list, is not left out, which would hide a refusal.
-func TestTheRefusalsTurnASwitchOnWhateverItsDefault(t *testing.T) {
+// A switch in a set is on unless its default is true: a required one
+// with no default, or one with a list, is turned on rather than left
+// out, which would hide a refusal.
+func TestTheRefusalsTurnASwitchOnUnlessItDefaultsOn(t *testing.T) {
 	for name, edit := range map[string]func(map[string]any){
 		"required with no default": func(d map[string]any) {
 			dig(d, "user_config", "read_only")["required"] = true
@@ -901,6 +943,24 @@ func TestTheRefusalsTurnASwitchOnWhateverItsDefault(t *testing.T) {
 		if !slices.ContainsFunc(got, func(p string) bool { return strings.HasPrefix(p, undeclaredReadOnly) }) {
 			t.Errorf("%s: got %q, want one starting %q", name, got, undeclaredReadOnly)
 		}
+	}
+}
+
+// A switch that defaults to true is started off, so a refusal that
+// needs sharing off is found. The profile is made to depend on sharing:
+// "true" is four letters and "false" five, so after 60 letters the name
+// is 64 characters with sharing on, which the profile rule allows, and
+// 65 with it off, which it refuses.
+func TestTheRefusalsTurnSharingOff(t *testing.T) {
+	m := edited(t, func(d map[string]any) {
+		dig(d, "server", "mcp_config", "env")["GCAL_PROFILE"] = strings.Repeat("a", 60) + "${user_config.sharing}"
+	})
+	const want = "the server refuses [sharing off], and bundleRefused does not declare it"
+	if got := refusals(t, m, nil); len(got) != 1 || !strings.HasPrefix(got[0], want) {
+		t.Errorf("a refusal of sharing off gives %q, want the one problem %q", got, want)
+	}
+	if got := refusals(t, m, [][]string{{"sharing"}}); len(got) != 0 {
+		t.Errorf("a declared refusal of sharing off gives %q, want nothing", got)
 	}
 }
 

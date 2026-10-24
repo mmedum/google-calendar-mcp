@@ -1794,20 +1794,28 @@ recorded for the profile, and a file picked there must be that client,
 since the refresh token belongs to it. Claude Desktop approves each
 tool, and a person can set a tool to always allow, so a switch left at
 the server's own default is the one guard a bundle install keeps (§18
-row 109). No combination of the fields is refused: read-only leaves the
-destructive, sharing and decline-all switches nothing to register, and
-sharing off takes the destructive switch's two shares, so those fields
-say so. The manifest names Google's privacy policy (§18 row 111).
+row 109). No combination of the fields is refused, and the gate holds
+that, starting each with sharing off and the other switches on:
+read-only leaves the destructive, sharing and decline-all switches
+nothing to register, and sharing off takes the destructive switch's two
+shares, so those fields say so. The manifest names Google's privacy
+policy (§18 row 111).
 
 **What `gates mcpb` holds, derived rather than typed.** The gate and
 the packer start from one function, `committedManifest`, which reads
 and decodes the committed manifest once and runs every check over it,
-so the release packs no manifest the gate would refuse: the placeholder
-version, the no-login sentence, the `$schema` declaration and the
-vendored schema, the staged names, what the bundle says it is, the
-settings, and the launcher, `go.mod` and `LICENSE`, read from the root
-it is given. What the bundle says it is: the server's own name, a
-binary, the family's Claude Desktop floor, a privacy policy, and
+so the release packs no manifest the gate would refuse. A key an object
+repeats is refused first, naming its path: the decode merges a repeated
+object, while the schema, the packer and the host keep the last, so the
+checks would read another document than the one shipped. The checks are
+the placeholder version, the no-login sentence, the `$schema`
+declaration and the vendored schema, the staged names, what the bundle
+says it is, the settings, and the launcher, `go.mod` and `LICENSE`, read
+from the root it is given. The packer refuses a version that is not
+Semantic Versioning's, which the schema does not, since it takes any
+string, and holds the manifest it stamps, encoded again, to the vendored
+schema before writing it. What the bundle says it is: the server's own
+name, a binary, the family's Claude Desktop floor, a privacy policy, and
 exactly the platforms the packer stages an entry point for, so dropping
 a platform together with its override is refused. The launcher's
 install hint is held to the module `modulePath` reads from `go.mod`,
@@ -1825,9 +1833,11 @@ config directory and the refresh token. A reason for a variable the
 server does not read or a release removed, a left-out, removed or
 unknown variable in `env`, and a key that is no setting's are each
 refused. A config test holds that every `GCAL_` name the server's code
-spells, as a literal or a `+` chain read in order, is in that registry.
-`entry_point` and every command name a staged program, never `LICENSE`
-or `README.md`; every command starts with `${__dirname}/` (§18 row 112);
+and `scripts/` spell, as a literal or a `+` chain read in order, is in
+that registry, less the live driver's own `GCAL_LIVE_` variables, which
+the server never reads. `entry_point` and every command name a staged
+program, never `LICENSE` or `README.md`, and `entry_point` is what the
+default command runs; a command starts with `${__dirname}/` (§18 row 112);
 each claimed platform spawns the file staged for it; and an override
 for a platform the bundle does not claim is refused. `mcp_config.args`
 is present and `[]`, and an override's `env` or `args`, present but
@@ -1837,8 +1847,9 @@ boolean. The defaults are started through `config.Load`, from the
 environment the reference host builds from them and from none, and any
 difference is refused, naming the fields; a default that is a list or
 an object is reported rather than guessed at. Every set of the switches
-is started over the defaults, each key in a set on, and the sets the
-server refuses are held to `bundleRefused`, both ways; each key in a
+is started over the defaults, each switch in a set turned from its
+default, so sharing off and the others on, and the sets the server
+refuses are held to `bundleRefused`, both ways; each key in a
 declared set is a titled switch, and every other field in its set names
 that title. The list is empty, as the paragraph above says. The profile
 field states `config.ProfileRule`, which Build's refusal states too,

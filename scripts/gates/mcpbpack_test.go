@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -300,6 +301,40 @@ func TestPackRunsEveryCheckTheGateRuns(t *testing.T) {
 				t.Errorf("pack = %v, want it refused, naming %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// A version that is not Semantic Versioning's is refused, which the
+// vendored schema would not do: it takes any string as the version.
+// What goreleaser passes, the tag without its v, and a snapshot's
+// version with a pre-release after it, pack.
+func TestPackRefusesAVersionThatIsNotSemver(t *testing.T) {
+	t.Chdir("../..")
+	dist := fakeDist(t)
+	for _, version := range []string{"v1.2.3", "1.2.3 ", " 1.2.3", "1.2", "01.2.3", "dev"} {
+		err := packMCPB(dist, version, filepath.Join(t.TempDir(), "b.mcpb"))
+		want := "pack needs a version such as 1.2.3, with no v and no spaces; " + strconv.Quote(version) + " is not one"
+		if err == nil || err.Error() != want {
+			t.Errorf("packing version %q gave %v, want %q", version, err, want)
+		}
+	}
+	for _, version := range []string{"1.2.3", "5.0.1-SNAPSHOT-88c5e56", "1.2.3-rc.1+build.5"} {
+		if err := packMCPB(dist, version, filepath.Join(t.TempDir(), "b.mcpb")); err != nil {
+			t.Errorf("packing version %q: %v", version, err)
+		}
+	}
+}
+
+// What ships is held to the vendored schema, not only what is
+// committed, since the stamp encodes the document again.
+func TestTheStampedManifestIsHeldToTheSchema(t *testing.T) {
+	if _, err := stampManifest(repoFile(t, manifestPath), "1.2.3"); err != nil {
+		t.Fatalf("the committed manifest does not stamp: %v", err)
+	}
+	_, err := stampManifest(editedRaw(t, func(d map[string]any) { d["keywords"] = "calendar" }), "1.2.3")
+	if want := "the stamped manifest does not satisfy mcpb-manifest-v0.3.schema.json"; err == nil ||
+		!strings.Contains(err.Error(), want) {
+		t.Errorf("stamping a document the schema refuses gave %v, want an error containing %q", err, want)
 	}
 }
 

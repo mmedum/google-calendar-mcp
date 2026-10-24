@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -159,8 +160,15 @@ func mcpbGate() error {
 
 // committedManifest is where the gate and the packer both start: the
 // committed manifest under root, read once and decoded once, and every
-// problem manifestProblems finds in it. The packer ships raw, so the
-// bytes checked are the bytes shipped.
+// problem manifestProblems finds in it. The packer ships this document
+// with the real version stamped in and encoded again, not these bytes,
+// and holds what it stamps to the vendored schema too.
+//
+// A key repeated in one object is refused before anything else is
+// checked. The decode into manifest merges a repeated object into the
+// first, while the schema validator, the packer's encode and the host
+// each keep the last, so every other check would read a document that
+// is not the one shipped.
 func committedManifest(root string) (raw []byte, m manifest, problems []string, err error) {
 	raw, err = os.ReadFile(filepath.Join(root, manifestPath)) //nolint:gosec // a repository path from a constant
 	if err != nil {
@@ -169,7 +177,67 @@ func committedManifest(root string) (raw []byte, m manifest, problems []string, 
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return raw, manifest{}, []string{fmt.Sprintf("the manifest does not decode: %v", err)}, nil
 	}
+	if repeated := repeatedKeys(raw); len(repeated) > 0 {
+		for _, at := range repeated {
+			problems = append(problems, fmt.Sprintf("the manifest has %s more than once; the gate's decode merges "+
+				"a repeated key, and the schema, the packer and the host keep the last, so they would read "+
+				"different documents", at))
+		}
+		return raw, manifest{}, problems, nil
+	}
 	return raw, m, manifestProblems(raw, m, bundleFiles, root), nil
+}
+
+// repeatedKeys is the path of every key an object in raw has more than
+// once, each once, in document order: "server" at the top level,
+// "server.mcp_config.env.GCAL_PROFILE" inside, and [i] for an element
+// of a list. A document that is not JSON has none here, since the
+// decode reports it.
+func repeatedKeys(raw []byte) []string {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var repeated []string
+	var walk func(path string) error
+	walk = func(path string) error {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch tok {
+		case json.Delim('{'):
+			seen := map[string]int{}
+			for dec.More() {
+				keyTok, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				key, _ := keyTok.(string)
+				at := key
+				if path != "" {
+					at = path + "." + key
+				}
+				if seen[key]++; seen[key] == 2 {
+					repeated = append(repeated, at)
+				}
+				if err := walk(at); err != nil {
+					return err
+				}
+			}
+		case json.Delim('['):
+			for i := 0; dec.More(); i++ {
+				if err := walk(fmt.Sprintf("%s[%d]", path, i)); err != nil {
+					return err
+				}
+			}
+		default:
+			return nil
+		}
+		_, err = dec.Token() // the closing brace or bracket
+		return err
+	}
+	if walk("") != nil {
+		return nil
+	}
+	return repeated
 }
 
 // manifestProblems is every check the gate and the packer both run, so
@@ -254,7 +322,8 @@ func validateManifest(m manifest, files []staged) []string {
 		}
 	}
 
-	// 1. entry_point names a program that is actually packed.
+	// 1. entry_point names a program that is actually packed, and the
+	// one the default command runs, which follows check 2.
 	switch _, ok := programs[m.Server.EntryPoint]; {
 	case m.Server.EntryPoint == "":
 		problems = append(problems, "the manifest declares no entry_point")
@@ -291,6 +360,15 @@ func validateManifest(m manifest, files []staged) []string {
 		default:
 			runs[platform] = file
 		}
+	}
+	// And check 1's other half: entry_point is the file the default
+	// command runs, so the bundle does not name one file as the server
+	// and spawn another. An entry point or a command that names no
+	// program is reported above.
+	_, entryStaged := programs[m.Server.EntryPoint]
+	if file, ok := runs[""]; ok && entryStaged && file.path != m.Server.EntryPoint {
+		problems = append(problems, fmt.Sprintf("entry_point is %q, and mcp_config.command runs %q",
+			m.Server.EntryPoint, file.path))
 	}
 
 	// 3. every ${user_config.x} an env value or an argument spends is a
@@ -715,6 +793,29 @@ func (o *userConfigOption) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(o.Default, &o.value)
 }
 
+// turnedTo is the value a switch takes when the person changes it from
+// its default: off for one that defaults to true, and on for any other,
+// a missing or unreadable default included. The defaults check holds
+// each default to the server's own, so a switch the server has on, such
+// as sharing, is started off.
+func (o userConfigOption) turnedTo() bool {
+	on, _ := o.value.(bool)
+	return !on
+}
+
+// turnedNames is keys as a set gives them, each with the value turnedTo
+// gives it: [read_only on, sharing off].
+func turnedNames(m manifest, keys []string) string {
+	named := make([]string, len(keys))
+	for i, key := range keys {
+		named[i] = key + " off"
+		if m.UserConfig[key].turnedTo() {
+			named[i] = key + " on"
+		}
+	}
+	return "[" + strings.Join(named, ", ") + "]"
+}
+
 // fieldRule is the exact words a setting's field must carry, since the
 // server refuses anything else at start, and what a field without them
 // fails to do.
@@ -835,10 +936,10 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 }
 
 // hostEnv is the environment the reference host builds from the
-// bundle's defaults, with each key in on set to true whatever its
-// default, as the person turning it on would. A boolean becomes "true"
-// or "false", a "" default stays "", a number is written out, and a
-// reference with no default is passed through as written.
+// bundle's defaults, with each key in turned set to the value turnedTo
+// gives it, as the person changing that field would. A boolean becomes
+// "true" or "false", a "" default stays "", a number is written out,
+// and a reference with no default is passed through as written.
 //
 // A variable spending a required key with no default is left out, since
 // the person supplies it and it is theirs either way. One with a default
@@ -850,7 +951,7 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 // It reads mcp_config.env alone. That is sound only because
 // settingProblems refuses an argument and an override's env; relaxing
 // either needs this to read the same.
-func hostEnv(m manifest, on ...string) (env, unreadable map[string]string) {
+func hostEnv(m manifest, turned ...string) (env, unreadable map[string]string) {
 	env, unreadable = map[string]string{}, map[string]string{}
 	for name, value := range m.Server.MCPConfig.Env {
 		var b strings.Builder
@@ -859,8 +960,8 @@ func hostEnv(m manifest, on ...string) (env, unreadable map[string]string) {
 			key, sub := value[at[2]:at[3]], value[at[0]:at[1]]
 			opt := m.UserConfig[key]
 			def := opt.value
-			if slices.Contains(on, key) {
-				def = true
+			if slices.Contains(turned, key) {
+				def = opt.turnedTo()
 			}
 			switch d := def.(type) {
 			case bool:
@@ -976,17 +1077,20 @@ func strictlyComparable(t reflect.Type) bool {
 }
 
 // bundleRefused are the sets of the bundle's switches the server refuses
-// at start, each sorted. Each field in one names the others' titles in
-// its description. Build refuses none: read-only leaves the destructive,
-// sharing and decline-all switches nothing to register, and sharing off
-// takes the destructive switch's two shares, rather than either pair
-// being refused. The gate starts every set of the switches and holds
-// the refused ones to this list, both ways, so a refusal added to Build
-// fails here until it is declared and the fields say so.
+// at start, each sorted, each switch in a set turned from its default.
+// Each field in one names the others' titles in its description. Build
+// refuses none: read-only leaves the destructive, sharing and
+// decline-all switches nothing to register, and sharing off takes the
+// destructive switch's two shares, rather than either pair being
+// refused. The gate starts every set of the switches, sharing off and
+// the others on, and holds the refused ones to this list, both ways, so
+// a refusal added to Build fails here until it is declared and the
+// fields say so.
 var bundleRefused [][]string
 
-// refusalProblems starts every set of the bundle's switches, each on
-// over the defaults, and holds the ones the server refuses to declared:
+// refusalProblems starts every set of the bundle's switches over the
+// defaults, each switch in it turned from its default, and holds the
+// ones the server refuses to declared:
 // a refusal it does not declare, which no description then warns of,
 // and a declared one the server starts with, each reported for the
 // smallest set that shows it. switches is the user_config key of every
@@ -1044,26 +1148,27 @@ func declaredProblems(m manifest, switches []string, declared [][]string) []stri
 	return problems
 }
 
-// startProblems starts every set of the switches over the defaults and
-// holds the server's refusals to declared, both ways. Every subset of a
-// set comes before it in this order, so the first set to show a defect
-// is the smallest, and a superset is not reported again.
+// startProblems starts every set of the switches over the defaults,
+// each switch in the set turned from its default, and holds the
+// server's refusals to declared, both ways. Every subset of a set comes
+// before it in this order, so the first set to show a defect is the
+// smallest, and a superset is not reported again.
 func startProblems(m manifest, switches []string, declared [][]string) []string {
 	var problems []string
 	var undeclared []int
 	startsDeclared := map[int]bool{}
 	for bits := 1; bits < 1<<len(switches); bits++ {
-		var on []string
+		var turned []string
 		for i, key := range switches {
 			if bits&(1<<i) != 0 {
-				on = append(on, key)
+				turned = append(turned, key)
 			}
 		}
-		env, _ := hostEnv(m, on...)
+		env, _ := hostEnv(m, turned...)
 		_, err := loadEnv(env)
 		var within []int
 		for i, set := range declared {
-			if !slices.ContainsFunc(set, func(key string) bool { return !slices.Contains(on, key) }) {
+			if !slices.ContainsFunc(set, func(key string) bool { return !slices.Contains(turned, key) }) {
 				within = append(within, i)
 			}
 		}
@@ -1073,14 +1178,14 @@ func startProblems(m manifest, switches []string, declared [][]string) []string 
 				continue
 			}
 			undeclared = append(undeclared, bits)
-			problems = append(problems, fmt.Sprintf("the server refuses %s together, and bundleRefused does not "+
-				"declare it, so no field's description warns of it: %v", strings.Join(on, ", "), err))
+			problems = append(problems, fmt.Sprintf("the server refuses %s, and bundleRefused does not "+
+				"declare it, so no field's description warns of it: %v", turnedNames(m, turned), err))
 		case err == nil:
 			for _, i := range within {
 				if !startsDeclared[i] {
 					startsDeclared[i] = true
-					problems = append(problems, fmt.Sprintf("bundleRefused declares that the server refuses %s "+
-						"together, and it starts with them", strings.Join(declared[i], ", ")))
+					problems = append(problems, fmt.Sprintf("bundleRefused declares that the server refuses %s, "+
+						"and it starts with them", turnedNames(m, declared[i])))
 				}
 			}
 		}

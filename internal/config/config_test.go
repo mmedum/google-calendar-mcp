@@ -486,10 +486,15 @@ func TestDefineReadsEachVariableOnce(t *testing.T) {
 
 // Every GCAL_ variable the server's code spells is one EnvVars lists, so
 // a variable read outside Define cannot escape the bundle and staleness
-// gates. A name is seen as a string literal, or as a chain of literals
-// and EnvPrefix joined by +; one built from any other constant, or
-// through a format verb, is not seen. The scan must read every root and
-// find a name outside the config package, or it read too little.
+// gates. So is every one scripts/ spells: the live driver and the smoke
+// test set them for the server, and a misspelling there tests a
+// configuration nobody asked for. The live driver's own variables,
+// GCAL_LIVE_ and a name, are left out, since the driver reads them
+// itself and the server never does. A name is seen as a string literal,
+// or as a chain of literals and EnvPrefix joined by +; one built from
+// any other constant, or through a format verb, is not seen. The scan
+// must read every root and find a name outside the config package, or
+// it read too little.
 func TestEveryVariableTheCodeNamesIsInEnvVars(t *testing.T) {
 	known := map[string]bool{}
 	for _, name := range config.EnvVars() {
@@ -499,7 +504,8 @@ func TestEveryVariableTheCodeNamesIsInEnvVars(t *testing.T) {
 	found := map[string]string{}
 	elsewhere := 0
 	fset := token.NewFileSet()
-	roots := []string{"../../cmd", "../../internal"}
+	roots := []string{"../../cmd", "../../internal", "../../scripts"}
+	liveDriver := filepath.Join("..", "..", "scripts", "livecal") + string(filepath.Separator)
 	files := map[string]int{}
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -512,11 +518,14 @@ func TestEveryVariableTheCodeNamesIsInEnvVars(t *testing.T) {
 			}
 			files[root]++
 			outside := filepath.Dir(path) != filepath.Join("..", "..", "internal", "config")
+			driverOwn := func(word string) bool {
+				return strings.HasPrefix(path, liveDriver) && strings.HasPrefix(word, "GCAL_LIVE_")
+			}
 			spell := func(s string, at token.Pos) {
 				for _, word := range strings.FieldsFunc(s, func(r rune) bool {
 					return r != '_' && (r < 'A' || r > 'Z') && (r < '0' || r > '9')
 				}) {
-					if name.MatchString(word) {
+					if name.MatchString(word) && !driverOwn(word) {
 						found[word] = fset.Position(at).String()
 						if outside {
 							elsewhere++
