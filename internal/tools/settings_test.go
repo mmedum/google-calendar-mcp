@@ -11,8 +11,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/tools"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/tools"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/userconfig"
 )
 
 // argumentFor is a value for each required input a tool takes, by its
@@ -33,7 +34,7 @@ var argumentFor = map[string]any{
 // the profile directory. Every registered tool is called, and none of
 // them changes any of it.
 func TestNoToolWritesTheServersOwnSettings(t *testing.T) {
-	t.Setenv(userconfig.EnvDir, t.TempDir())
+	t.Setenv(config.EnvConfigDir, t.TempDir())
 	if err := userconfig.Save("default", userconfig.Config{AccountEmail: "owner@example.test"}); err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
 // isolate points the profile state at a temporary directory. Every test
@@ -440,45 +440,43 @@ func TestServeOverTheInjectedStreams(t *testing.T) {
 	}
 }
 
-// Read-only is GCAL_READ_ONLY, and GCAL_READONLY, its name until 4.1.0,
-// still works and says it was renamed, on stderr.
+// Read-only is GCAL_READ_ONLY. GCAL_READONLY, its name until 4.1.0, on
+// stops the server before it announces itself, naming the new one, and
+// writes nothing to stdout.
 func TestServeRespectsReadOnly(t *testing.T) {
-	for _, tc := range []struct{ name, warning string }{
-		{"GCAL_READ_ONLY", ""},
-		{"GCAL_READONLY", "a setting was renamed; the old name still works"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			env := func(k string) string {
-				switch k {
-				case "GCAL_CONFIG_DIR":
-					return dir
-				case tc.name:
-					return "true"
-				}
-				return ""
+	dir := t.TempDir()
+	env := func(name string) func(string) string {
+		return func(k string) string {
+			switch k {
+			case "GCAL_CONFIG_DIR":
+				return dir
+			case name:
+				return "true"
 			}
-			frames, stderr := serveSession(t, env, initMessages, 2)
-			if len(frames) < 2 {
-				t.Fatalf("read %d frames", len(frames))
-			}
-			raw, err := json.Marshal(frames[len(frames)-1])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(raw), "list_calendars") {
-				t.Fatalf("read-only mode dropped the read tools: %s", raw)
-			}
-			if strings.Contains(string(raw), "create_event") {
-				t.Fatalf("read-only mode registered a write: %s", raw)
-			}
-			renamed := strings.Contains(stderr, "a setting was renamed")
-			if tc.warning == "" && renamed {
-				t.Errorf("the new name was warned about:\n%s", stderr)
-			}
-			if tc.warning != "" && (!strings.Contains(stderr, tc.warning) || !strings.Contains(stderr, "new=GCAL_READ_ONLY")) {
-				t.Errorf("the old name was not warned about, naming the new one:\n%s", stderr)
-			}
-		})
+			return ""
+		}
+	}
+	frames, _ := serveSession(t, env("GCAL_READ_ONLY"), initMessages, 2)
+	if len(frames) < 2 {
+		t.Fatalf("read %d frames", len(frames))
+	}
+	raw, err := json.Marshal(frames[len(frames)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "list_calendars") {
+		t.Fatalf("read-only mode dropped the read tools: %s", raw)
+	}
+	if strings.Contains(string(raw), "create_event") {
+		t.Fatalf("read-only mode registered a write: %s", raw)
+	}
+
+	var out, errOut bytes.Buffer
+	err = run(nil, strings.NewReader(""), &out, &errOut, env("GCAL_READONLY"))
+	if err == nil || !strings.Contains(err.Error(), "GCAL_READONLY was removed: it is GCAL_READ_ONLY") {
+		t.Errorf("GCAL_READONLY=true: %v; want the server refused, naming GCAL_READ_ONLY", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("a refused start wrote to stdout, which carries only JSON-RPC frames: %q", out.String())
 	}
 }

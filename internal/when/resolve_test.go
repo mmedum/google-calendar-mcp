@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // TestResolveOrder holds §4.1's order: the call, then the calendar, then

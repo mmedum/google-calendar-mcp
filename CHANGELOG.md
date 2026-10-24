@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-10-24
+
+### Changed
+
+- **Breaking:** the module path is `github.com/mmedum/google-calendar-mcp/v5`; install with `go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest`.
+- The Claude Desktop bundle says that its OAuth client field may be left empty to use the client `google-calendar-mcp login` recorded for the profile, as before, and that a file picked there must be that same client, since the refresh token belongs to it.
+- The Claude Desktop bundle's profile field says what a profile name may be: up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit, with capitals read as lowercase. The server's refusal of another name states the same rule.
+
+### Removed
+
+- **Breaking:** `GCAL_READONLY`, the read-only switch's name before 4.1.0. Unset or off (`false`, `0`, `no`, `off` or empty), it starts the server and does nothing. Set on, or to anything that is not a boolean, the server refuses to start and names `GCAL_READ_ONLY`, which is the one to set.
+
+### Fixed
+
+- A profile name with a character that Unicode lowercases into a to z, such as the Kelvin sign (U+212A), is refused rather than read as another profile's name.
+- A variable set to spaces alone is unset, as an empty one is, `GCAL_CONFIG_DIR` and `GCAL_REFRESH_TOKEN` included, and the spaces around either are dropped; a bundle field cleared to a space no longer stops the server.
+
 ## [4.1.0] - 2026-10-24
 
 ### Added
@@ -1032,7 +1049,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v5.0.0...HEAD
+[5.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.1.0...v5.0.0
 [4.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...v3.1.0

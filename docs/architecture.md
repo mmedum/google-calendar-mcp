@@ -1,12 +1,25 @@
 # Architecture — google-calendar-mcp
 
-**Status: 4.1.0 (2026-10-24), built with Go 1.27.3:** the Claude Desktop
+**Status: 5.0.0 (2026-10-24), built with Go 1.27.3:** `GCAL_READONLY` is
+removed: unset or off it starts, and on it is refused at start, naming
+`GCAL_READ_ONLY`. The module path is `/v5`. The bundle gate holds the
+family's rules (standard §10b): the settings derived from the server's
+own registry, the defaults started through `config.Load`, `args` and
+overrides refused, each platform spawning its own staged file, every set
+of the switches started each away from its default, the field text held
+to the code. A profile name is lowered A to Z alone, and a variable of
+spaces alone is unset. 4.1.0 shipped without `/simplify` or a review;
+5.0.0 had `/simplify`, `/code-review medium` and `/security-review`,
+findings fixed with a test each, and two live runs, the second 138
+steps with none failed (the first lost three steps to Google's rate
+limit), their transcripts read. 4.1.0 (2026-10-24): the Claude Desktop
 bundle has the shape the sibling servers' bundles share: every setting
 another client sets, each defaulting as the server does, a blank OAuth
 client file reaching the server empty rather than as
 `${user_config.client_secret}`, the shared file names and Google's
-privacy policy; read-only is `GCAL_READ_ONLY`, and `GCAL_READONLY` still
-works. 4.0.0 (2026-10-23): the server asks
+privacy policy; read-only is `GCAL_READ_ONLY`. `GCAL_READONLY` is removed
+in 5.0.0: unset or off it starts, and on it is refused at start, naming
+`GCAL_READ_ONLY`. 4.0.0 (2026-10-23): the server asks
 nobody, and the client approves each call (§9a). Sharing is three tools
 by reach: `share_calendar` inside the organization below owner, and
 `publish_calendar` and `widen_calendar_access` behind the destructive
@@ -1590,8 +1603,9 @@ would arm `clear_calendar` too.
 
 **Read-only mode** (`GCAL_READ_ONLY=true`) registers only the nine read
 tools and requests only the read scopes. `GCAL_READONLY`, its name until
-4.1.0, still works and logs a warning; both set and disagreeing is
-refused at start.
+4.1.0, was removed in 5.0.0 rather than kept as an alias: unset or off
+it starts and does nothing, and on, or a value that is not a boolean,
+is refused at start, naming `GCAL_READ_ONLY`.
 
 ### 9a. Per-call approval is the client's
 
@@ -1784,18 +1798,77 @@ with `LICENSE` and `README.md` at the root. It asks for what a person
 sets in another client's configuration: the OAuth client file, the
 profile, read-only, the destructive switch, sharing and the decline-all
 switch, each under its variable's name without `GCAL_`, lowercased.
-Logging, the read budgets, the concurrency, the timeouts, the config
-directory and the refresh token are left out, each with its reason in
-`gates mcpb`, and the gate fails on a variable with no verdict. Each
-switch defaults to the server's own default: sharing on, the others
-off. The client file and the profile default to `""`, which the server
-reads as unset. Claude Desktop approves each tool, and a person can set
-a tool to always allow, so a switch left at the server's own default
-is the one guard a bundle install keeps (§18 row 109). No
-combination of the fields is refused: read-only leaves the destructive,
-sharing and decline-all switches nothing to register, and sharing off
-takes the destructive switch's two shares, so those fields say so. The
-manifest names Google's privacy policy (§18 row 111).
+Each switch defaults to the server's own default: sharing on, the
+others off. The client file and the profile default to `""`, which the
+server reads as unset, as it does a variable of spaces alone. The
+client file is optional: left empty, the server uses the client `login`
+recorded for the profile, and a file picked there must be that client,
+since the refresh token belongs to it. Claude Desktop approves each
+tool, and a person can set a tool to always allow, so a switch left at
+the server's own default is the one guard a bundle install keeps (§18
+row 109). No combination of the fields is refused, and the gate holds
+that, starting each with sharing off and the other switches on:
+read-only leaves the destructive, sharing and decline-all switches
+nothing to register, and sharing off takes the destructive switch's two
+shares, so those fields say so. The manifest names Google's privacy
+policy (§18 row 111).
+
+**What `gates mcpb` holds, derived rather than typed.** The gate and
+the packer start from one function, `committedManifest`, which reads
+and decodes the committed manifest once and runs every check over it,
+so the release packs no manifest the gate would refuse. A key an object
+repeats is refused first, naming its path: the decode merges a repeated
+object, while the schema, the packer and the host keep the last, so the
+checks would read another document than the one shipped. The checks are
+the placeholder version, the no-login sentence, the `$schema`
+declaration and the vendored schema, the staged names, what the bundle
+says it is, the settings, and the launcher, `go.mod` and `LICENSE`, read
+from the root it is given. The packer refuses a version that is not
+Semantic Versioning's, which the schema does not, since it takes any
+string, and holds the manifest it stamps, encoded again, to the vendored
+schema before writing it. What the bundle says it is: the server's own
+name, a binary, the family's Claude Desktop floor, a privacy policy, and
+exactly the platforms the packer stages an entry point for, so dropping
+a platform together with its override is refused. The launcher's
+install hint is held to the module `modulePath` reads from `go.mod`,
+which the release's tag check reads too. The keys come from
+`config.Vars`, which records every variable Define reads, the removed
+ones included, and names the two read outside it, the config directory
+and the refresh token, by constants config owns, so the gate imports no
+keyring. Every variable is read through `config.Lookup`, which drops
+the spaces around a value and reads spaces alone as unset, and a config
+test walks the registry, failing on a variable read outside Define that
+it has no reader for. The bundle asks for every one,
+less the removed ones and less each one `bundleLeftOut` gives a reason
+for: logging, the read budgets, the concurrency, the timeouts, the
+config directory and the refresh token. A reason for a variable the
+server does not read or a release removed, a left-out, removed or
+unknown variable in `env`, and a key that is no setting's are each
+refused. A config test holds that every `GCAL_` name the server's code
+and `scripts/` spell, as a literal or a `+` chain read in order, is in
+that registry, less the live driver's own `GCAL_LIVE_` variables, which
+the server never reads. `entry_point` and every command name a staged
+program, never `LICENSE` or `README.md`, and `entry_point` is what the
+default command runs; a command starts with `${__dirname}/` (§18 row 112);
+each claimed platform spawns the file staged for it; and an override
+for a platform the bundle does not claim is refused. `mcp_config.args`
+is present and `[]`, and an override's `env` or `args`, present but
+empty included, is refused, since the host substitutes an override for
+the base rather than merging (§18 row 113). A switch is asked as a
+boolean. The defaults are started through `config.Load`, from the
+environment the reference host builds from them and from none, and any
+difference is refused, naming the fields; a default that is a list or
+an object is reported rather than guessed at. Every set of the switches
+is started over the defaults, each switch in a set turned from its
+default, so sharing off and the others on, and the sets the server
+refuses are held to `bundleRefused`, both ways; each key in a
+declared set is a titled switch, and every other field in its set names
+that title. The list is empty, as the paragraph above says. The profile
+field states `config.ProfileRule`, which Build's refusal states too,
+with a floor: a bundle that stops asking for the profile is refused
+rather than passing in silence. The staleness gate holds the
+configuration page to name every variable as a whole word and to state
+the same rule.
 
 The procedure a tag actually follows is `docs/release.md`, including the
 three steps no rehearsal reaches and the recovery for each.
@@ -3575,9 +3648,11 @@ what §15 exists to settle, and they are marked.
 | 106 | A public, domain-wide, outside or owner share may be an argument of the ordinary share, as `allow_public: true` and `role: owner` were | Tier 2, from the family standard's §3, 2026-10-23: claude.ai, Codex, VS Code and Copilot remember "always allow" per tool, never per argument value, and Claude Code matches an MCP argument only in a command-line deny rule; first-party servers with no sharing tool (Notion, Slack, Canva, Figma, Asana, Airtable), Box's sharing tools off until an admin enables them | **Refuted.** An always-allowed `share_calendar` carried every wider share unseen, and `allow_public` was a refusal the model lifted itself. Sharing is three tools now: `share_calendar` inside the organization below owner, and `publish_calendar` and `widen_calendar_access` behind the destructive flag with `confirm` (§7.6). Inside is the account's own domain; a personal account has none, so every address is outside it |
 | 107 | `auto_decline: all` may be a value of `create_event`'s argument, guarded by a question or by typing it | Tier 2, from the family standard's §3, 2026-10-23 ("Every risky variant is its own tool, never an argument, and a coarse registration flag decides whether that tool exists"); Calendar discovery revision 20261005, `autoDeclineMode` `declineAllConflictingInvitations`, "all conflicting meeting invitations that conflict with the event are declined" | **Refuted.** An always-allowed `create_event` declined every accepted meeting in the window unseen, each organizer told, and the only guard beyond typing `all` was the question. `create_event` refuses it now, before it checks the calendar, and `create_event_declining_all` makes it behind `GCAL_ENABLE_DECLINE_ALL`, a flag of its own so that turning it on arms nothing else (§7.4, §9). A change that widens such an event, and a split of one, are row 102's |
 | 108 | A group whose address is inside the organization reaches only people inside it | Google's help pages, read 2026-10-23, prose rather than evidence (CLAUDE.md rule 13), which probe T is to settle: "If external sharing is prohibited, only group members who are in your organization can access the group's shared content" and "If you remove members from a group, they lose access to content shared with the group" (support.google.com/a/users/answer/167101); "New group members get email notifications about the calendars they can access" (knowledge.workspace.google.com/admin/calendar/create-and-share-a-group-calendar); "Group owners can add members outside of your organization to their groups" (knowledge.workspace.google.com/admin/groups/set-organization-wide-policies-for-using-groups); an address in the organization's own domain can still be an external member (support.google.com/groups/answer/10394258) | **Refuted on Google's word, unproven live.** Access follows membership, later members included, and an outside member gets in unless the administrator prohibits external sharing. Whether the external sharing level caps such a member is not said. `share_calendar` keeps groups and says what a group rule reaches (§7.6); probe T asks whether this server can see an outside member (§17 item 7) |
-| 109 | A bundle install has a second approval behind the server, as Claude Code's ask rules are | Read 2026-10-23, from the family standard's §10b and its evidence: anthropics/mcpb v2.1.2 declares `tools` for display, and its `src/` reads it only in `init`; its `src/shared/config.ts` passes a boolean to `env` as "true" or "false". claude.com/docs/connectors/getting-started: "Select Allow once to continue, or Always allow to skip the prompt for that tool from now on". claude.com/docs/connectors/building/review-criteria: readOnlyHint and destructiveHint "determine auto-permissions in Claude" | **Refuted (the docs and the reference host; Claude Desktop not probed, and no page names desktop extensions).** Claude Desktop has nothing like Claude Code's `permissions.ask`. So every switch the bundle asks for defaults to the server's own default, sharing on and the others off, and `gates mcpb` refuses one that does not, compared as JSON. The bundle declares no `tools` list, which would be display only and wrong for most installs, since four settings change what registers (§12) |
-| 110 | A bundle's optional setting the person leaves blank reaches the server empty | Read 2026-10-23: anthropics/mcpb v2.1.2 `src/shared/config.ts` builds its variables from the defaults and the person's values, and `replaceVariables` leaves a variable it does not have as written | **Refuted (the reference host; Claude Desktop not probed).** An optional key with no default is never a variable. The 4.0.0 bundle's client file was one, so a blank field would reach the server as `${user_config.client_secret}`, which it takes as a path over the one login stored, and every call would answer `[auth]`. Every optional key now has a default, `""` for the file and the profile, and `gates mcpb` refuses one without. The environment the defaults give the server must configure it as no environment does, which the gate builds and compares, and `TestVarsDescribeWhatBuildDoes` holds each setting's default and `""` to mean unset |
+| 109 | A bundle install has a second approval behind the server, as Claude Code's ask rules are | Read 2026-10-23, from the family standard's §10b and its evidence: anthropics/mcpb v2.1.2 declares `tools` for display, and its `src/` reads it only in `init`; its `src/shared/config.ts` passes a boolean to `env` as "true" or "false". claude.com/docs/connectors/getting-started: "Select Allow once to continue, or Always allow to skip the prompt for that tool from now on". claude.com/docs/connectors/building/review-criteria: readOnlyHint and destructiveHint "determine auto-permissions in Claude" | **Refuted (the docs and the reference host; Claude Desktop not probed, and no page names desktop extensions).** Claude Desktop has nothing like Claude Code's `permissions.ask`. So every switch the bundle asks for defaults to the server's own default, sharing on and the others off, and `gates mcpb` refuses one that does not: it starts the server from the bundle's defaults and from no environment, and names the fields that differ (§12). The bundle declares no `tools` list, which would be display only and wrong for most installs, since four settings change what registers (§12) |
+| 110 | A bundle's optional setting the person leaves blank reaches the server empty | Read 2026-10-23: anthropics/mcpb v2.1.2 `src/shared/config.ts` builds its variables from the defaults and the person's values, and `replaceVariables` leaves a variable it does not have as written | **Refuted (the reference host; Claude Desktop not probed).** An optional key with no default is never a variable. The 4.0.0 bundle's client file was one, so a blank field would reach the server as `${user_config.client_secret}`, which it takes as a path over the one login stored, and every call would answer `[auth]`. Every optional key now has a default, `""` for the file and the profile, and `gates mcpb` refuses one without. The environment the defaults give the server must configure it as no environment does, which the gate builds and compares, and `TestVarsDescribeWhatBuildDoes` holds `""` to mean unset, and `TestASettingOfSpacesIsUnset` spaces alone |
 | 111 | `privacy_policies` is optional for a bundle | Read 2026-10-23: anthropics/mcpb, MANIFEST.md: "Required when the extension connects to external services (first- or third-party) that process user data"; added in manifest_version 0.2, and enforced by neither the schema nor `mcpb validate` | **Refuted (the specification).** The manifest names https://policies.google.com/privacy, which answered 200 on 2026-10-24, and `gates mcpb` refuses an empty list |
+| 112 | Any `command` the specification shows runs from the bundle | Read 2026-10-24: anthropics/mcpb v2.1.2, MANIFEST.md L497 and L510-515 give a binary the command `server/my-server`, and L532 says `${__dirname}` "is replaced with the absolute path to the extension's directory"; `src/shared/config.ts` L118, L133 and L173-176 substitute variables in `command` and resolve no path | **Refined (the specification and the reference host; Claude Desktop not probed).** The specification shows a relative command once and never says what it is resolved against, and the reference host passes it to the spawn as written. `${__dirname}` is the one form whose meaning the specification fixes. `gates mcpb` requires every command to start with `${__dirname}/` and to name a staged program, as the committed manifest's do, and refuses a relative or absolute one; 4.1.0's gate stripped a leading `/` and passed `/server/x`. A probe of Claude Desktop's working directory would settle the relative form |
+| 113 | A platform override's `env` and `args` are merged into `mcp_config`'s | Read 2026-10-24: anthropics/mcpb v2.1.2 `src/shared/config.ts` L118-120, `result.args = platformConfig.args \|\| result.args` and `result.env = platformConfig.env \|\| result.env`, and L173-176 substitute `${user_config.x}` into the whole configuration, `args` included | **Refuted (the reference host; Claude Desktop not probed).** An override's `env` or `args`, an empty one included, replaces the base's, so the settings would not reach that platform, and an argument such as `-enable-destructive=true` would reach the server past every check on `env`. `gates mcpb` refuses any `env` or `args` on an override and an argument in `mcp_config.args`, and keeps the base's `"args": []`, refusing it missing or null: only the reference host was read |
 
 ### Deviations from the shared Go MCP server standard
 

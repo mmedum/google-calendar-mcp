@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/server"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/server"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
 func deps(t *testing.T) server.Deps {

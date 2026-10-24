@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
 // A step whose call the interrupt cut short is not run rather than

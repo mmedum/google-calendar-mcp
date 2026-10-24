@@ -108,20 +108,7 @@ type Config struct {
 	HTTPTimeout      time.Duration
 	WriteTimeout     time.Duration
 	ClientSecretPath string
-	// Deprecated is each old setting name this run was given, for the
-	// caller to warn about once it has a logger.
-	Deprecated []Rename
 }
-
-// Rename is a setting that took a new name and still answers to the
-// old one.
-type Rename struct {
-	Old, New string
-}
-
-// renamedReadOnly is the read-only switch's name until 4.1.0, renamed to
-// match the sibling servers and the bundle key read_only.
-var renamedReadOnly = Rename{Old: EnvPrefix + "READONLY", New: EnvPrefix + "READ_ONLY"}
 
 // Settings holds the raw string values before validation. Flags and the
 // environment both feed it; Build turns it into a Config.
@@ -133,49 +120,94 @@ type Settings struct {
 	EnableDestructive string
 	Sharing           string
 	EnableDeclineAll  string
-	// ReadOnlyOld is GCAL_READONLY, ReadOnly's old name, still read.
-	ReadOnlyOld string
-	// RequirePrompt is the removed GCAL_REQUIRE_PROMPT, read only to
-	// refuse it turned on.
-	RequirePrompt    string
-	MaxEvents        string
-	MaxCalendars     string
-	Concurrency      string
-	HTTPTimeout      string
-	WriteTimeout     string
-	ClientSecretPath string
+	MaxEvents         string
+	MaxCalendars      string
+	Concurrency       string
+	HTTPTimeout       string
+	WriteTimeout      string
+	ClientSecretPath  string
+	// removed are the settings a release took out, in removedSettings'
+	// order, read only to refuse one still set.
+	removed []string
 	// vars is every setting Define reads, in order.
 	vars []Var
 }
 
-// Var is one setting Define reads.
+// Var is one variable the server reads.
 type Var struct {
 	// Name is the environment variable.
 	Name string
-	// Default is what the server uses when neither the variable nor its
-	// flag is set. A switch's is "true" or "false", which is also how a
-	// bundle's checkbox reaches the environment.
-	Default string
 	// Switch marks a setting that is on or off.
 	Switch bool
-	// ReplacedBy names the variable that took this one's place. The old
-	// name still works, and nothing should offer it.
-	ReplacedBy string
 	// Removed marks a setting a release took out, read only to refuse it.
 	Removed bool
+}
+
+// The variables read outside Define. internal/userconfig reads the
+// profile directory before any flag is parsed, and internal/credentials
+// the refresh token; each takes its name from here, so config imports
+// neither, and the bundle gate imports no keyring.
+const (
+	EnvConfigDir    = EnvPrefix + "CONFIG_DIR"
+	EnvRefreshToken = EnvPrefix + "REFRESH_TOKEN"
+)
+
+// envOnly is every variable read outside Define, for Vars.
+var envOnly = []string{EnvConfigDir, EnvRefreshToken}
+
+// DefaultProfile is the profile used when none is named.
+const DefaultProfile = "default"
+
+// Lookup is the variable name as env gives it, without the spaces around
+// it. Spaces alone are "", unset as an empty variable is, so a form field
+// cleared to a space means the default rather than a value the server
+// refuses. Define reads every setting through it, and so does each
+// reader of a variable outside Define.
+func Lookup(env func(string) string, name string) string {
+	return strings.TrimSpace(env(name))
+}
+
+// removedSettings are the settings a release took out, each with why
+// and what to do instead. Each was off by default, and unset or off is
+// still accepted. On, or a value that is not a boolean, is refused at
+// start: ignored, it would quietly leave the server otherwise than its
+// owner set it. None has a flag. A setting renamed later goes the same
+// way, rather than answering to two names.
+var removedSettings = []struct{ key, why string }{
+	// The server's question went in 4.0.0 (§9a), and its flag with it.
+	{key: "REQUIRE_PROMPT",
+		why: "the server no longer asks the person, and the client's own approval decides each call. Unset it, " +
+			"and leave " + EnvPrefix + "ENABLE_DESTRUCTIVE and " + EnvPrefix + "ENABLE_DECLINE_ALL off for a client " +
+			"that runs with nobody watching"},
+	// The read-only switch's name until 4.1.0 renamed it to match the
+	// sibling servers and the bundle key read_only. It never had a flag.
+	{key: "READONLY",
+		why: "it is " + EnvPrefix + "READ_ONLY (-read-only) now. Unset it, and set that in its place"},
+}
+
+// removedSet refuses each removed setting that is set to anything but
+// off.
+func (s *Settings) removedSet() []error {
+	var errs []error
+	for i, r := range removedSettings {
+		if on, err := parseBool(r.key, s.removed[i]); err == nil && !on {
+			continue
+		}
+		errs = append(errs, fmt.Errorf("%w: %s was removed: %s", ErrInvalid, EnvPrefix+r.key, r.why))
+	}
+	return errs
 }
 
 // Define registers one flag per setting on fs. Each flag defaults to the
 // matching GCAL_* variable, so a flag on the command line wins over the
 // environment and the environment wins over the built-in default.
 //
-// The staleness gate reads these def() and sw() calls to learn the
-// setting names, so the documentation cannot fall behind a setting added
-// here.
+// Each variable it reads is recorded for Vars, which the staleness and
+// bundle gates read, so neither can fall behind a setting added here.
 func Define(fs *flag.FlagSet, env func(string) string) *Settings {
-	s := &Settings{}
+	s := &Settings{removed: make([]string, len(removedSettings))}
 	bind := func(p *string, name, fallback, usage string, v Var) {
-		value := env(v.Name)
+		value := Lookup(env, v.Name)
 		if value == "" {
 			value = fallback
 		}
@@ -183,77 +215,94 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 		s.vars = append(s.vars, v)
 	}
 	def := func(p *string, name, key, fallback, usage string) {
-		bind(p, name, fallback, usage, Var{Name: EnvPrefix + key, Default: fallback})
+		bind(p, name, fallback, usage, Var{Name: EnvPrefix + key})
 	}
-	// A switch is registered empty rather than with its default, so
-	// Build can tell one nobody set from one set to its default. Empty
-	// is the default.
-	sw := func(p *string, name, key string, on bool, usage string) {
-		bind(p, name, "", usage, Var{Name: EnvPrefix + key, Default: strconv.FormatBool(on), Switch: true})
+	defSwitch := func(p *string, name, key, fallback, usage string) {
+		bind(p, name, fallback, usage, Var{Name: EnvPrefix + key, Switch: true})
 	}
-	def(&s.Profile, "profile", "PROFILE", "default", "named configuration profile")
+	def(&s.Profile, "profile", "PROFILE", DefaultProfile, "named configuration profile")
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
-	sw(&s.ReadOnly, "read-only", "READ_ONLY", false, "register only read tools and request read-only scopes (default off)")
-	sw(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", false, "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call (default off)")
-	sw(&s.Sharing, "sharing", "SHARING", true, "register the calendar sharing tools, the wider ones with -enable-destructive: on, off (default on)")
-	sw(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", false, "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps (default off)")
+	defSwitch(&s.ReadOnly, "read-only", "READ_ONLY", "false", "register only read tools and request read-only scopes")
+	defSwitch(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call")
+	defSwitch(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools, the wider ones with -enable-destructive: on, off")
+	defSwitch(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", "false", "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps")
 	def(&s.MaxEvents, "max-events", "MAX_EVENTS", strconv.Itoa(DefaultMaxEvents), "default event budget for a read")
 	def(&s.MaxCalendars, "max-calendars", "MAX_CALENDARS", strconv.Itoa(DefaultMaxCalendars), "how many calendars one call may fan out across")
 	def(&s.Concurrency, "concurrency", "CONCURRENCY", strconv.Itoa(DefaultConcurrency), "requests in flight during a fan-out")
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-attempt timeout for a read")
 	def(&s.WriteTimeout, "write-timeout", "WRITE_TIMEOUT", "120s", "timeout for a write")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
-	renamed(&s.ReadOnlyOld, env, "READONLY")
-	s.vars = append(s.vars, Var{Name: renamedReadOnly.Old, Default: "false", Switch: true, ReplacedBy: renamedReadOnly.New})
-	removed(&s.RequirePrompt, env, "REQUIRE_PROMPT")
-	s.vars = append(s.vars, Var{Name: EnvPrefix + "REQUIRE_PROMPT", Removed: true})
+	for i, r := range removedSettings {
+		s.removed[i] = Lookup(env, EnvPrefix+r.key)
+		s.vars = append(s.vars, Var{Name: EnvPrefix + r.key, Removed: true})
+	}
 	return s
 }
 
-// renamed reads a setting's old name, with no flag: the flag kept its
-// name, and only the variable moved. The staleness gate reads these
-// calls, so the documentation may name an old name to say it still
-// works.
-func renamed(p *string, env func(string) string, key string) {
-	*p = env(EnvPrefix + key)
-}
-
-// removed reads a setting a release took away, with no flag: it is read
-// only so Build can refuse it turned on. The staleness gate reads these
-// calls, so the documentation may name a removed setting to say it is
-// gone.
-func removed(p *string, env func(string) string, key string) {
-	*p = env(EnvPrefix + key)
-}
-
-// Vars is every setting Define reads, in the order it reads them. The
-// bundle gate reads each switch's default here.
+// Vars is every variable the server reads, sorted by name: Define's,
+// the removed ones included, and the ones read outside it. Define's are
+// recorded rather than listed, so they cannot fall behind. The bundle
+// and staleness gates derive what they hold from these.
 func Vars() []Var {
+	vars := defined()
+	for _, name := range envOnly {
+		vars = append(vars, Var{Name: name})
+	}
+	slices.SortFunc(vars, func(a, b Var) int { return strings.Compare(a.Name, b.Name) })
+	return vars
+}
+
+// defined is every variable Define reads, in the order it reads them.
+func defined() []Var {
 	fs := flag.NewFlagSet("vars", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	return Define(fs, func(string) string { return "" }).vars
 }
 
-// EnvVars is every variable Define looks up, sorted. It is recorded from
-// the lookups rather than listed, so it cannot fall behind.
+// EnvVars is the names of Vars, sorted. A name listed twice is a
+// variable read under two rules, which a test refuses, so it is not
+// compacted.
 func EnvVars() []string {
-	var seen []string
-	fs := flag.NewFlagSet("envvars", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	Define(fs, func(name string) string {
-		seen = append(seen, name)
-		return ""
-	})
-	slices.Sort(seen)
-	return slices.Compact(seen)
+	vars := Vars()
+	names := make([]string, 0, len(vars))
+	for _, v := range vars {
+		names = append(names, v.Name)
+	}
+	return names
 }
+
+// Load is Define, Parse and Build for a caller with no flags of its own.
+func Load(args []string, env func(string) string) (Config, error) {
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	s := Define(fs, env)
+	if err := fs.Parse(args); err != nil {
+		return Config{}, err
+	}
+	return s.Build()
+}
+
+// ProfileRule is profilePattern in words, which Build's refusal and the
+// bundle's profile field both give.
+const ProfileRule = "up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit"
 
 var (
 	profilePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 	logLevels      = map[LogLevel]bool{LogDebug: true, LogInfo: true, LogWarn: true, LogError: true}
 	logFormats     = map[LogFormat]bool{LogText: true, LogJSON: true}
 )
+
+// asciiLower lowers A to Z alone, so a character Unicode folds into a
+// to z, such as the Kelvin sign, is refused rather than renamed.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
+}
 
 // ErrInvalid wraps every validation failure.
 var ErrInvalid = errors.New("config: invalid")
@@ -263,9 +312,9 @@ func (s *Settings) Build() (Config, error) {
 	var c Config
 	var errs []error
 
-	c.Profile = strings.ToLower(strings.TrimSpace(s.Profile))
+	c.Profile = asciiLower(strings.TrimSpace(s.Profile))
 	if !profilePattern.MatchString(c.Profile) {
-		errs = append(errs, fmt.Errorf("%w: profile %q must match %s", ErrInvalid, s.Profile, profilePattern))
+		errs = append(errs, fmt.Errorf("%w: profile %q must be %s", ErrInvalid, s.Profile, ProfileRule))
 	}
 
 	c.LogLevel = LogLevel(strings.ToLower(strings.TrimSpace(s.LogLevel)))
@@ -278,11 +327,8 @@ func (s *Settings) Build() (Config, error) {
 	}
 
 	var err error
-	if c.ReadOnly, err = s.readOnly(); err != nil {
+	if c.ReadOnly, err = parseBool("read-only", s.ReadOnly); err != nil {
 		errs = append(errs, err)
-	}
-	if strings.TrimSpace(s.ReadOnlyOld) != "" {
-		c.Deprecated = append(c.Deprecated, renamedReadOnly)
 	}
 	if c.EnableDestructive, err = parseBool("enable-destructive", s.EnableDestructive); err != nil {
 		errs = append(errs, err)
@@ -296,16 +342,7 @@ func (s *Settings) Build() (Config, error) {
 	if c.EnableDeclineAll, err = parseBool("enable-decline-all", s.EnableDeclineAll); err != nil {
 		errs = append(errs, err)
 	}
-	// GCAL_REQUIRE_PROMPT refused the writes that asked the person when
-	// the client could not ask. The question is gone (§9a), and ignored,
-	// the setting would quietly allow what its owner set it to stop, so
-	// anything but off is refused, a value it never took included.
-	if on, perr := parseBool("GCAL_REQUIRE_PROMPT", s.RequirePrompt); on || perr != nil {
-		errs = append(errs, fmt.Errorf("%w: GCAL_REQUIRE_PROMPT was removed: the server no longer asks the "+
-			"person, and the client's own approval decides each call. Unset it, and leave "+
-			"GCAL_ENABLE_DESTRUCTIVE and GCAL_ENABLE_DECLINE_ALL off for a client that runs with nobody watching",
-			ErrInvalid))
-	}
+	errs = append(errs, s.removedSet()...)
 
 	if c.MaxEvents, err = parseCount("max-events", s.MaxEvents, DefaultMaxEvents, MaxMaxEvents); err != nil {
 		errs = append(errs, err)
@@ -330,26 +367,6 @@ func (s *Settings) Build() (Config, error) {
 		return Config{}, errors.Join(errs...)
 	}
 	return c, nil
-}
-
-// readOnly reads the read-only switch under its name and under its old
-// one. Either alone decides. Both set have to agree, because a run that
-// took one over the other would turn on or leave off what its owner set
-// the other to say.
-func (s *Settings) readOnly() (bool, error) {
-	on, err := parseBool("read-only", s.ReadOnly)
-	if err != nil || strings.TrimSpace(s.ReadOnlyOld) == "" {
-		return on, err
-	}
-	old, err := parseBool(renamedReadOnly.Old, s.ReadOnlyOld)
-	if err != nil {
-		return false, err
-	}
-	if strings.TrimSpace(s.ReadOnly) != "" && old != on {
-		return false, fmt.Errorf("%w: %s is %t and %s, its old name, is %t: unset %s",
-			ErrInvalid, renamedReadOnly.New, on, renamedReadOnly.Old, old, renamedReadOnly.Old)
-	}
-	return old, nil
 }
 
 func parseBool(name, v string) (bool, error) {

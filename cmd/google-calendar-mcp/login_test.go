@@ -9,9 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
 )
 
 // fakeKeyring stands in for the OS keyring. Every test in this file
@@ -300,7 +299,6 @@ func TestBuildServiceFailsWithoutCredentialsAndTheServerStartsAnyway(t *testing.
 	if _, err := buildService(t.Context(), configForTest(), env, func(string) {}); err == nil {
 		t.Fatal("buildService succeeded with no stored token")
 	}
-	_ = credentials.EnvVar
 }
 
 // TestTheServerStartsSignedInAfterLogin is the other half: once login

@@ -7,8 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 )
@@ -31,41 +31,37 @@ import (
 // impossible 1980-00-00.
 var zipTime = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 
+// releaseVersion is a Semantic Versioning 2.0.0 version, by the
+// expression semver.org gives: what goreleaser passes for a tag, the tag
+// without its v, and for a snapshot, with a pre-release after it. The
+// vendored schema takes any string as the version, so a hook passing
+// {{ .Tag }} or a stray space would otherwise ship.
+var releaseVersion = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)` +
+	`(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?` +
+	`(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
+
 // packMCPB writes the bundle for one version.
 func packMCPB(dist, version, out string) error {
 	if version == "" || version == placeholderVersion {
 		return fmt.Errorf("pack needs the real version; %q is the committed placeholder", version)
 	}
+	if !releaseVersion.MatchString(version) {
+		return fmt.Errorf("pack needs a version such as 1.2.3, with no v and no spaces; %q is not one", version)
+	}
 
-	m, err := readManifest(manifestPath)
+	// The gate's own start, read once. The placeholder version is among
+	// the checks: a committed manifest claiming a version means somebody
+	// stamped it in the tree, and the next build would ship whatever they
+	// left behind.
+	raw, _, problems, err := committedManifest(".")
 	if err != nil {
 		return err
 	}
-	// Refused rather than overwritten: a committed manifest claiming a
-	// version means somebody stamped it in the tree, and the next build
-	// would ship whatever they left behind.
-	if m.Version != placeholderVersion {
-		return fmt.Errorf("%s says version %q; the committed manifest must carry the placeholder %q",
-			manifestPath, m.Version, placeholderVersion)
-	}
-	if problems := append(validateManifest(m, bundleFiles, launcherNames()), bundleProblems(m)...); len(problems) > 0 {
-		sort.Strings(problems)
+	if len(problems) > 0 {
 		return fmt.Errorf("the manifest does not describe the bundle this would pack:\n  %s",
 			strings.Join(problems, "\n  "))
 	}
-
-	// The version goes in through a decode and an encode. A sed over
-	// JSON is how a quote ends up inside a string.
-	raw, err := os.ReadFile(manifestPath) //nolint:gosec // a repository path from a constant
-	if err != nil {
-		return err
-	}
-	var document map[string]any
-	if err := json.Unmarshal(raw, &document); err != nil {
-		return err
-	}
-	document["version"] = version
-	stamped, err := json.MarshalIndent(document, "", "  ")
+	stamped, err := stampManifest(raw, version)
 	if err != nil {
 		return err
 	}
@@ -111,9 +107,37 @@ func packMCPB(dist, version, out string) error {
 	if err := zw.Close(); err != nil {
 		return err
 	}
+	// Close's error is the pack's: the last of the archive can reach the
+	// disk only there, and a bundle cut short must not pass. The deferred
+	// Close then does nothing.
+	if err := file.Close(); err != nil {
+		return err
+	}
 
 	fmt.Printf("  %s: %d files, version %s\n", out, len(sources)+1, version)
 	return nil
+}
+
+// stampManifest is the committed manifest raw with version written in,
+// as the bundle carries it. The version goes in through a decode and an
+// encode, because a sed over JSON is how a quote ends up inside a
+// string. That encode sorts the keys and escapes <, > and &, so what it
+// returns is the committed document but not its bytes, and it is held
+// to the vendored schema again before anything ships it.
+func stampManifest(raw []byte, version string) ([]byte, error) {
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, err
+	}
+	document["version"] = version
+	stamped, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := validateDocument(mcpbSchemaFile, "the stamped manifest", stamped); err != nil {
+		return nil, err
+	}
+	return stamped, nil
 }
 
 func addEntry(zw *zip.Writer, name string, body []byte, mode os.FileMode) error {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
 // These hold §9.1's guard without a network or an account, so they run

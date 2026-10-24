@@ -2,7 +2,9 @@
 
 Every setting is an environment variable with a `GCAL_` prefix and a
 command-line flag with the same name. A flag given explicitly beats the
-environment; the environment beats the built-in default.
+environment; the environment beats the built-in default. A variable set
+to spaces alone is unset, as an empty one is, and the spaces around a
+value are dropped.
 
 Environment variables are the ones that matter in practice: every MCP
 client passes command, args and env to a stdio server, and nothing else.
@@ -11,7 +13,7 @@ client passes command, args and env to a stdio server, and nothing else.
 
 | Variable | Flag | Default | What it does |
 |---|---|---|---|
-| `GCAL_PROFILE` | `-profile` | `default` | Named configuration profile. Separate profiles keep separate tokens. |
+| `GCAL_PROFILE` | `-profile` | `default` | Named configuration profile. Separate profiles keep separate tokens. A name is up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit; capitals are read as lowercase, and any other name stops the server at start. |
 | `GCAL_LOG_LEVEL` | `-log-level` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr. |
 | `GCAL_LOG_FORMAT` | `-log-format` | `text` | `text` or `json`. |
 | `GCAL_READ_ONLY` | `-read-only` | `false` | Register only read tools, and request only read scopes so the API itself refuses a write. |
@@ -23,12 +25,13 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_CONCURRENCY` | `-concurrency` | `4` | Requests in flight during a fan-out. |
 | `GCAL_HTTP_TIMEOUT` | `-http-timeout` | `60s` | Per-attempt timeout for a read. |
 | `GCAL_WRITE_TIMEOUT` | `-write-timeout` | `120s` | Timeout for a write. |
-| `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. |
+| `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. Unset or empty, the server uses the client `login` recorded for the profile. |
 
 `GCAL_READ_ONLY` was `GCAL_READONLY` until 4.1.0, and took the name
-the sibling servers and the Claude Desktop bundle use. The old name
-still works, and the server logs a warning naming the new one. Set both
-and they must agree, or the server refuses to start.
+the sibling servers and the Claude Desktop bundle use. 5.0.0 removed the
+old name. Unset or off (`false`, `0`, `no`, `off` or empty, in any case)
+it starts the server and does nothing. On, or a value that is not a
+boolean, is refused at start, naming `GCAL_READ_ONLY`: use that instead.
 
 `GCAL_REQUIRE_PROMPT` and `-require-prompt` were removed with the
 server's question: the server asks the person nothing, and your client's

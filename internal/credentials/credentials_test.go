@@ -10,7 +10,8 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/credentials"
 )
 
 // fakeKeyring is an in-memory Backend. failGet/failSet make it behave
@@ -96,7 +97,7 @@ func TestEnvironmentWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Env = func(k string) string {
-		if k == credentials.EnvVar {
+		if k == config.EnvRefreshToken {
 			return "from-env"
 		}
 		return ""

@@ -17,11 +17,12 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/userconfig"
 )
 
 // The scratch calendar's contents. Everything here is invented: the
@@ -103,7 +104,7 @@ type liveAPI struct {
 
 func newAPI(ctx context.Context, profile string) (*liveAPI, error) {
 	if profile == "" {
-		profile = userconfig.DefaultProfile
+		profile = config.DefaultProfile
 	}
 	tokenPath, err := userconfig.TokenFilePath(profile)
 	if err != nil {

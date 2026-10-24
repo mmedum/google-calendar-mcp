@@ -7,7 +7,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/userconfig"
 )
 
 // isolate points the package at a temporary directory. Every test in
@@ -17,7 +18,7 @@ import (
 func isolate(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv(userconfig.EnvDir, dir)
+	t.Setenv(config.EnvConfigDir, dir)
 	return dir
 }
 
@@ -182,6 +183,20 @@ func TestBaseDirHonorsTheEnvironmentOverride(t *testing.T) {
 	}
 	if got != dir {
 		t.Fatalf("BaseDir() = %q, want the override %q", got, dir)
+	}
+}
+
+// With no override, the base is the user's config directory. A value of
+// spaces alone is the same: config's TestASettingOfSpacesIsUnset holds
+// this reader to the rule every variable is read by.
+func TestBaseDirWithNoOverrideIsTheUserConfigDir(t *testing.T) {
+	want, err := os.UserConfigDir()
+	if err != nil {
+		t.Skipf("no user config dir on this system: %v", err)
+	}
+	t.Setenv(config.EnvConfigDir, "")
+	if got, err := userconfig.BaseDir(); err != nil || got != filepath.Join(want, userconfig.AppDir) {
+		t.Errorf("%s unset: BaseDir() = %q, %v; want it under %q", config.EnvConfigDir, got, err, want)
 	}
 }
 

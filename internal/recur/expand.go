@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // MaxOccurrences bounds every expansion.

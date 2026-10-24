@@ -2,7 +2,10 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
 // A Claude Code permission rule for a tool the binary does not publish
@@ -20,32 +23,37 @@ func TestAPermissionRuleNamesAPublishedTool(t *testing.T) {
 	}
 }
 
-// A setting a release removed may be named in the documentation, to say
-// it is gone; a setting the code never read may not.
-func TestTheDocsMayNameARemovedSetting(t *testing.T) {
-	src := []byte(`def(&s.Profile, "profile", "PROFILE", "default", "x")
-	removed(&s.RequirePrompt, env, "REQUIRE_PROMPT")`)
-	if got, n := settingProblems(src, "`GCAL_PROFILE` and the removed `GCAL_REQUIRE_PROMPT`"); len(got) != 0 || n != 1 {
-		t.Errorf("got %v and %d settings, want none and 1", got, n)
+// The configuration page names every variable the server reads, a
+// removed one included, as a whole word, names no other, and says what
+// a profile name is in the server's own words.
+func TestConfigDocProblems(t *testing.T) {
+	doc := string(repoFile(t, configDocPath))
+	if got := configDocProblems(config.Vars(), doc); len(got) != 0 {
+		t.Errorf("the committed page: %q", got)
 	}
-	got, _ := settingProblems(src, "`GCAL_PROFILE` and `GCAL_ASK_FIRST`")
-	want := []string{"docs/configuration.md documents GCAL_ASK_FIRST, which the code does not define"}
-	if !slices.Equal(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
-// A switch is a setting like any other, and an old name a release
-// replaced may be named, to say it still works.
-func TestTheDocsHoldSwitchesAndOldNames(t *testing.T) {
-	src := []byte(`sw(&s.ReadOnly, "read-only", "READ_ONLY", false, "x")
-	renamed(&s.ReadOnlyOld, env, "READONLY")`)
-	if got, n := settingProblems(src, "`GCAL_READ_ONLY`, once `GCAL_READONLY`"); len(got) != 0 || n != 1 {
-		t.Errorf("got %v and %d settings, want none and 1", got, n)
-	}
-	got, _ := settingProblems(src, "`GCAL_READONLY` alone")
-	want := []string{"docs/configuration.md does not document GCAL_READ_ONLY"}
-	if !slices.Equal(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	for _, tc := range []struct {
+		name, old, new string
+		want           []string
+	}{
+		{"a variable left out", "`GCAL_WRITE_TIMEOUT`", "`the write timeout`",
+			[]string{"docs/configuration.md does not document GCAL_WRITE_TIMEOUT"}},
+		{"a removed variable left out", "`GCAL_REQUIRE_PROMPT`", "`the prompt setting`",
+			[]string{"docs/configuration.md does not document GCAL_REQUIRE_PROMPT"}},
+		{"a name kept only inside a longer one", "`GCAL_CONFIG_DIR`", "`GCAL_CONFIG_DIRECTORY`", []string{
+			"docs/configuration.md does not document GCAL_CONFIG_DIR",
+			"docs/configuration.md documents GCAL_CONFIG_DIRECTORY, which the code does not read",
+		}},
+		{"a variable the code does not read", "`GCAL_CONCURRENCY`", "`GCAL_CONCURRENCY` and `GCAL_FANOUT`",
+			[]string{"docs/configuration.md documents GCAL_FANOUT, which the code does not read"}},
+		{"the profile rule in other words", "- and _, starting", "`-` and `_`, starting",
+			[]string{`docs/configuration.md does not say a profile name is "up to 64 characters from a to z, ` +
+				`0 to 9, - and _, starting with a letter or digit"`}},
+	} {
+		if !strings.Contains(doc, tc.old) {
+			t.Fatalf("%s: the page does not say %q", tc.name, tc.old)
+		}
+		if got := configDocProblems(config.Vars(), strings.ReplaceAll(doc, tc.old, tc.new)); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

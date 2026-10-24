@@ -12,12 +12,12 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/userconfig"
 )
 
 // keyringBackend is the credential store's keyring.
@@ -92,7 +92,6 @@ func subConfig(name string, args []string, out io.Writer, env func(string) strin
 	if err != nil {
 		return config.Config{}, nil, err
 	}
-	warnRenamed(cfg, config.NewLogger(cfg, out))
 	// Carried on the FlagSet so cmdLogin can read it without a second
 	// parse; nothing else needs it.
 	if *noBrowser {

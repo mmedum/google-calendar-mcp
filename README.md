@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/mmedum/google-calendar-mcp)](https://github.com/mmedum/google-calendar-mcp/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp/v4.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp/v4)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp/v5.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp/v5)
 
 An MCP server for Google Calendar. One binary, stdio, per-user OAuth
 against your own Google account.
@@ -45,7 +45,7 @@ tools are listed below, and the phase plan and what is still owed are in
 ## Install
 
 ```
-go install github.com/mmedum/google-calendar-mcp/v4/cmd/google-calendar-mcp@latest
+go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest
 ```
 
 Or download an archive from the releases page.
@@ -98,8 +98,8 @@ Every setting is in `docs/configuration.md`.
 
 Every release also carries a `.mcpb` bundle. Open it and Claude Desktop
 installs the server and asks for the settings a client's configuration
-would carry: your OAuth client JSON, the profile, read-only and three
-switches. Deleting a calendar or every event on one, publishing it and
+would carry: your OAuth client JSON, which may be left empty to use the
+one `login` recorded, the profile, read-only and three switches. Deleting a calendar or every event on one, publishing it and
 sharing it outside your organization (`enable_destructive`), and an
 event that declines every meeting it overlaps (`enable_decline_all`)
 stay off unless you turn them on. Sharing inside your organization

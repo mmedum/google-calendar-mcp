@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
 // spikeN — which parameters suppress `nextSyncToken`?

@@ -33,8 +33,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 func main() {

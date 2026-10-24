@@ -117,7 +117,7 @@ func TestTheTagMajorMustBeTheModules(t *testing.T) {
 // the entry refuses a tag whose major is not go.mod's on its own.
 func TestTheEntryRefusesATagOfAnotherMajor(t *testing.T) {
 	t.Chdir("../..")
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestTheBundleRowMustBeExactlyOne(t *testing.T) {
 func TestTheRegistryEntryIsBuiltFromTheRepository(t *testing.T) {
 	t.Chdir("../..")
 
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,15 +236,21 @@ func TestTheRegistryEntryIsBuiltFromTheRepository(t *testing.T) {
 func TestTheVersionMayCarryItsVOrNot(t *testing.T) {
 	t.Chdir("../..")
 	path := checksums(t, oneBundle)
-
-	var withV, without bytes.Buffer
-	if err := serverJSON("v4.2.1", path, &withV); err != nil {
+	module, err := modulePath(".")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := serverJSON("4.2.1", path, &without); err != nil {
+	// The release's major is go.mod's, or serverJSON refuses it.
+	version := fmt.Sprintf("%d.2.1", moduleMajor(module))
+
+	var withV, without bytes.Buffer
+	if err := serverJSON("v"+version, path, &withV); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverJSON(version, path, &without); err != nil {
 		t.Fatal(err)
 	}
 	if withV.String() != without.String() {
-		t.Fatalf("v4.2.1 and 4.2.1 produced different entries:\n%s\n%s", withV.String(), without.String())
+		t.Fatalf("v%s and %s produced different entries:\n%s\n%s", version, version, withV.String(), without.String())
 	}
 }
