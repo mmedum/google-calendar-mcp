@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-10-24
+
 ### Changed
 
 - **Breaking:** the module path is `github.com/mmedum/google-calendar-mcp/v5`; install with `go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest`.
@@ -1047,7 +1049,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v4.1.0...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v5.0.0...HEAD
+[5.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.1.0...v5.0.0
 [4.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...v3.1.0

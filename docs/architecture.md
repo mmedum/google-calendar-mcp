@@ -1,6 +1,18 @@
 # Architecture — google-calendar-mcp
 
-**Status: 4.1.0 (2026-10-24), built with Go 1.27.3:** the Claude Desktop
+**Status: 5.0.0 (2026-10-24), built with Go 1.27.3:** `GCAL_READONLY` is
+removed: unset or off it starts, and on it is refused at start, naming
+`GCAL_READ_ONLY`. The module path is `/v5`. The bundle gate holds the
+family's rules (standard §10b): the settings derived from the server's
+own registry, the defaults started through `config.Load`, `args` and
+overrides refused, each platform spawning its own staged file, every set
+of the switches started each away from its default, the field text held
+to the code. A profile name is lowered A to Z alone, and a variable of
+spaces alone is unset. 4.1.0 shipped without `/simplify` or a review;
+5.0.0 had `/simplify`, `/code-review medium` and `/security-review`,
+findings fixed with a test each, and two live runs, the second 138
+steps with none failed (the first lost three steps to Google's rate
+limit), their transcripts read. 4.1.0 (2026-10-24): the Claude Desktop
 bundle has the shape the sibling servers' bundles share: every setting
 another client sets, each defaulting as the server does, a blank OAuth
 client file reaching the server empty rather than as
