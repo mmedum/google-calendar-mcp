@@ -22,13 +22,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/render"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // Service holds the client and the policy.

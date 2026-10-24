@@ -433,11 +433,11 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 		{"a variable the bundle does not ask for", func(d map[string]any) {
 			dig(d, "server", "mcp_config", "env")["GCAL_LOG_LEVEL"] = "debug"
 		}, "mcp_config.env sets GCAL_LOG_LEVEL, which the bundle does not ask for"},
-		{"the old read-only name", func(d map[string]any) {
+		{"the read-only switch's removed name", func(d map[string]any) {
 			env := dig(d, "server", "mcp_config", "env")
 			env["GCAL_READONLY"] = env["GCAL_READ_ONLY"]
 			delete(env, "GCAL_READ_ONLY")
-		}, "mcp_config.env sets GCAL_READONLY, whose name is now GCAL_READ_ONLY; offer the new one"},
+		}, "mcp_config.env sets GCAL_READONLY, which a release removed"},
 		{"a default that configures the server", func(d map[string]any) {
 			dig(d, "user_config", "profile")["default"] = "work"
 		}, "the bundle's defaults configure the server otherwise than no environment does"},
@@ -468,7 +468,7 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 }
 
 // Every variable the server reads has a verdict: asked for, left out
-// with a reason, or an old or removed name config marks. A new one with
+// with a reason, or a removed name config marks. A new one with
 // none fails, and so does a verdict on one the server no longer reads.
 func TestEverySettingHasABundleVerdict(t *testing.T) {
 	known := serverVars()

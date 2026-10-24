@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
 func build(t *testing.T, env map[string]string, args ...string) (config.Config, error) {
@@ -92,7 +92,7 @@ func TestInvalidValuesAreRejected(t *testing.T) {
 		{"log level", "GCAL_LOG_LEVEL", "chatty"},
 		{"log format", "GCAL_LOG_FORMAT", "yaml"},
 		{"read-only", "GCAL_READ_ONLY", "perhaps"},
-		{"read-only under its old name", "GCAL_READONLY", "perhaps"},
+		{"the read-only switch's removed name", "GCAL_READONLY", "perhaps"},
 		{"destructive", "GCAL_ENABLE_DESTRUCTIVE", "perhaps"},
 		{"max events not a number", "GCAL_MAX_EVENTS", "lots"},
 		{"max events too large", "GCAL_MAX_EVENTS", "999999"},
@@ -214,68 +214,60 @@ func TestTheRemovedRequirePromptIsRefused(t *testing.T) {
 	}
 }
 
-// The read-only switch is GCAL_READ_ONLY, the family's name, and
-// GCAL_READONLY, its name until 4.1.0, still works. Both set and
-// disagreeing is refused rather than settled by either.
-func TestTheReadOnlySwitchAnswersToItsOldName(t *testing.T) {
-	const (
-		newName = "GCAL_READ_ONLY"
-		oldName = "GCAL_READONLY"
-	)
-	renamed := []config.Rename{{Old: oldName, New: newName}}
-	for _, tc := range []struct {
-		name       string
-		env        map[string]string
-		args       []string
-		on         bool
-		deprecated []config.Rename
-	}{
-		{name: "neither", on: false},
-		{name: "the new name on", env: map[string]string{newName: "true"}, on: true},
-		{name: "the new name off", env: map[string]string{newName: "false"}, on: false},
-		{name: "the old name alone on", env: map[string]string{oldName: "true"}, on: true, deprecated: renamed},
-		{name: "the old name alone off", env: map[string]string{oldName: "false"}, on: false, deprecated: renamed},
-		{name: "both on", env: map[string]string{newName: "true", oldName: "1"}, on: true, deprecated: renamed},
-		{name: "both off", env: map[string]string{newName: "off", oldName: "false"}, on: false, deprecated: renamed},
-		{name: "the flag", args: []string{"-read-only", "true"}, on: true},
-		{name: "the flag agreeing with the old name", env: map[string]string{oldName: "true"},
-			args: []string{"-read-only", "true"}, on: true, deprecated: renamed},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			c, err := build(t, tc.env, tc.args...)
-			if err != nil {
-				t.Fatalf("refused: %v", err)
-			}
-			if c.ReadOnly != tc.on {
-				t.Errorf("ReadOnly = %t, want %t", c.ReadOnly, tc.on)
-			}
-			if !slices.Equal(c.Deprecated, tc.deprecated) {
-				t.Errorf("Deprecated = %v, want %v", c.Deprecated, tc.deprecated)
-			}
-		})
-	}
-
+// The read-only switch is GCAL_READ_ONLY alone. GCAL_READONLY, its name
+// until 4.1.0, is a removed setting: off or unset it starts and does
+// nothing, and the new name decides; on, or not a boolean, it is refused,
+// beside the new name too, naming the new one and not echoing the value.
+func TestTheReadOnlySwitchsOldNameIsRemoved(t *testing.T) {
+	const refused = "config: invalid: GCAL_READONLY was removed: " +
+		"it is GCAL_READ_ONLY (-read-only) now. Unset it, and set that in its place"
 	for _, tc := range []struct {
 		name string
 		env  map[string]string
 		args []string
+		// want is the refusal, or empty for a run that starts.
 		want string
+		// on is ReadOnly in a run that starts: the new switch's.
+		on bool
 	}{
-		{name: "the new on, the old off", env: map[string]string{newName: "true", oldName: "false"},
-			want: newName + " is true and " + oldName + ", its old name, is false: unset " + oldName},
-		{name: "the new off, the old on", env: map[string]string{newName: "false", oldName: "true"},
-			want: newName + " is false and " + oldName + ", its old name, is true"},
-		{name: "the flag against the old name", env: map[string]string{oldName: "true"},
-			args: []string{"-read-only", "false"}, want: newName + " is false and " + oldName},
-		{name: "the old name not a boolean", env: map[string]string{oldName: "maybe"},
-			want: oldName + ` "maybe"`},
+		{name: "neither", on: false},
+		{name: "the new name on", env: map[string]string{"GCAL_READ_ONLY": "true"}, on: true},
+		{name: "the flag", args: []string{"-read-only", "true"}, on: true},
+		{name: "the old name off", env: map[string]string{"GCAL_READONLY": "false"}, on: false},
+		{name: "the old name off in capitals and spaces", env: map[string]string{"GCAL_READONLY": " OFF "}, on: false},
+		{name: "the old name 0", env: map[string]string{"GCAL_READONLY": "0"}, on: false},
+		{name: "the old name empty", env: map[string]string{"GCAL_READONLY": ""}, on: false},
+		{name: "the old name off leaves the new one on",
+			env: map[string]string{"GCAL_READONLY": "false", "GCAL_READ_ONLY": "true"}, on: true},
+		{name: "the old name on", env: map[string]string{"GCAL_READONLY": "true"}, want: refused},
+		{name: "the old name 1", env: map[string]string{"GCAL_READONLY": "1"}, want: refused},
+		{name: "the old name on beside the new one",
+			env: map[string]string{"GCAL_READONLY": "on", "GCAL_READ_ONLY": "true"}, want: refused},
+		{name: "the old name on beside the flag", env: map[string]string{"GCAL_READONLY": "yes"},
+			args: []string{"-read-only", "true"}, want: refused},
+		{name: "the old name not a boolean", env: map[string]string{"GCAL_READONLY": "maybe"}, want: refused},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := build(t, tc.env, tc.args...)
-			if err == nil || !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("got %v, want an invalid setting naming %q", err, tc.want)
+			c, err := build(t, tc.env, tc.args...)
+			if tc.want != "" {
+				if err == nil || err.Error() != tc.want {
+					t.Errorf("got %v\nwant %s", err, tc.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+			if c.ReadOnly != tc.on {
+				t.Errorf("ReadOnly = %t, want the new switch's %t", c.ReadOnly, tc.on)
 			}
 		})
+	}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(&bytes.Buffer{})
+	config.Define(fs, func(string) string { return "" })
+	if fs.Lookup("readonly") != nil {
+		t.Error("-readonly is a flag; GCAL_READONLY never had one")
 	}
 }
 
@@ -322,16 +314,12 @@ func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 				t.Errorf("%s=%q is refused: %v", v.Name, value, err)
 				continue
 			}
-			c.Deprecated = nil
 			if !reflect.DeepEqual(c, unset) {
 				t.Errorf("%s=%q configures something:\n got %+v\nwant %+v", v.Name, value, c, unset)
 			}
 		}
-		if v.ReplacedBy != "" && !slices.ContainsFunc(vars, func(w config.Var) bool { return w.Name == v.ReplacedBy }) {
-			t.Errorf("%s is replaced by %s, which is not a setting", v.Name, v.ReplacedBy)
-		}
 	}
-	want := []string{"GCAL_READ_ONLY", "GCAL_ENABLE_DESTRUCTIVE", "GCAL_SHARING", "GCAL_ENABLE_DECLINE_ALL", "GCAL_READONLY"}
+	want := []string{"GCAL_READ_ONLY", "GCAL_ENABLE_DESTRUCTIVE", "GCAL_SHARING", "GCAL_ENABLE_DECLINE_ALL"}
 	if !slices.Equal(switches, want) {
 		t.Errorf("switches %v, want %v", switches, want)
 	}
@@ -341,8 +329,14 @@ func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 			t.Errorf("%s does not default to %s in Vars", name, def)
 		}
 	}
-	if i := slices.IndexFunc(vars, func(v config.Var) bool { return v.Removed }); i < 0 || vars[i].Name != "GCAL_REQUIRE_PROMPT" {
-		t.Errorf("Vars does not mark GCAL_REQUIRE_PROMPT removed")
+	var removed []string
+	for _, v := range vars {
+		if v.Removed {
+			removed = append(removed, v.Name)
+		}
+	}
+	if want := []string{"GCAL_REQUIRE_PROMPT", "GCAL_READONLY"}; !slices.Equal(removed, want) {
+		t.Errorf("Vars marks %v removed, want %v", removed, want)
 	}
 }
 

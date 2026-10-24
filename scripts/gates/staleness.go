@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
 // staleness holds the documentation against the code.
@@ -24,7 +26,7 @@ import (
 //  1. every tool the binary publishes appears in the README's table,
 //     every tool named there exists, and every Claude Code permission
 //     rule the README gives names a tool the binary publishes;
-//  2. every GCAL_* setting the code defines is documented, and every
+//  2. every GCAL_* setting config reads is documented, and every
 //     setting documented exists or is one a release removed;
 //  3. every repository path the docs name still exists;
 //  4. no version number is written in prose in the README — a badge
@@ -150,42 +152,31 @@ func looksLikeToolName(s string) bool {
 	return false
 }
 
-var defRe = regexp.MustCompile(`(?:def|sw)\(&s\.\w+,\s*"[^"]+",\s*"([A-Z_0-9]+)"`)
-
-// removedRe finds a setting a release removed, which the server reads
-// only to refuse it turned on, or an old name a release replaced, which
-// still works. The docs may name either, to say what became of it.
-var removedRe = regexp.MustCompile(`(?:removed|renamed)\(&s\.\w+,\s*env,\s*"([A-Z_0-9]+)"\)`)
-
 func checkSettings() ([]string, int, error) {
-	src, err := os.ReadFile("internal/config/config.go")
-	if err != nil {
-		return nil, 0, err
-	}
 	docs, err := os.ReadFile("docs/configuration.md")
 	if err != nil {
 		return nil, 0, err
 	}
-	problems, n := settingProblems(src, string(docs))
+	problems, n := settingProblems(config.Vars(), string(docs))
 	return problems, n, nil
 }
 
 // settingProblems holds docs/configuration.md, text, to the settings
-// config.go, src, defines, both ways. A setting a release removed may be
+// config reads, vars, both ways. A setting a release removed may be
 // named, to say it is gone.
-func settingProblems(src []byte, text string) ([]string, int) {
+func settingProblems(vars []config.Var, text string) ([]string, int) {
 	var problems []string
-	defined := map[string]bool{}
-	for _, m := range defRe.FindAllSubmatch(src, -1) {
-		name := "GCAL_" + string(m[1])
-		defined[name] = true
-		if !strings.Contains(text, name) {
-			problems = append(problems, fmt.Sprintf("docs/configuration.md does not document %s", name))
+	known := map[string]bool{}
+	defined := 0
+	for _, v := range vars {
+		known[v.Name] = true
+		if v.Removed {
+			continue
 		}
-	}
-	removed := map[string]bool{}
-	for _, m := range removedRe.FindAllSubmatch(src, -1) {
-		removed["GCAL_"+string(m[1])] = true
+		defined++
+		if !strings.Contains(text, v.Name) {
+			problems = append(problems, fmt.Sprintf("docs/configuration.md does not document %s", v.Name))
+		}
 	}
 	// Settings the docs invent.
 	for _, m := range regexp.MustCompile(`GCAL_[A-Z_0-9]+`).FindAllString(text, -1) {
@@ -195,11 +186,11 @@ func settingProblems(src []byte, text string) ([]string, int) {
 		case "GCAL_CONFIG_DIR", "GCAL_REFRESH_TOKEN":
 			continue
 		}
-		if !defined[m] && !removed[m] {
+		if !known[m] {
 			problems = append(problems, fmt.Sprintf("docs/configuration.md documents %s, which the code does not define", m))
 		}
 	}
-	return problems, len(defined)
+	return problems, defined
 }
 
 // pathRe finds anything shaped like a repository path in prose.

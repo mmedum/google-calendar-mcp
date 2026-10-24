@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // The calendar half of the plan package: what a calendar write changes,

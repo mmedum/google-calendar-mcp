@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/render"
 )
 
 // The sharing tools (§7.6): list_sharing, share_calendar,

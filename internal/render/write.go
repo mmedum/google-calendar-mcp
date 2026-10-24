@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // WriteReport is everything a write produced (§4.9).

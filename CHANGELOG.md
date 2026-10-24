@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the module path is `github.com/mmedum/google-calendar-mcp/v5`; install with `go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest`.
+
+### Removed
+
+- **Breaking:** `GCAL_READONLY`, the read-only switch's name before 4.1.0. Unset or off (`false`, `0`, `no`, `off` or empty), it starts the server and does nothing. Set on, or to anything that is not a boolean, the server refuses to start and names `GCAL_READ_ONLY`, which is the one to set.
+
 ## [4.1.0] - 2026-10-24
 
 ### Added

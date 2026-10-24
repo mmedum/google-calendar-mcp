@@ -30,7 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // ErrInvalid wraps every parse and validation failure here.

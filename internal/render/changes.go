@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // Changes is what `list_changes` answers with (§17.1).

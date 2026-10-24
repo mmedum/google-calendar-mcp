@@ -6,7 +6,7 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/credentials"
 )
 
 // TestMain makes it STRUCTURALLY impossible for a test in this package

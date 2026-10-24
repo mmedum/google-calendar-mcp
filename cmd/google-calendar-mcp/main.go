@@ -12,7 +12,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,10 +24,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/server"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/version"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/server"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/version"
 )
 
 func main() {
@@ -79,7 +78,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, env func(stri
 		return err
 	}
 	logger := config.NewLogger(cfg, stderr)
-	warnRenamed(cfg, logger)
 
 	if *dumpSchemas {
 		// The dump is the one time stdout carries something that is not
@@ -128,15 +126,6 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, env func(stri
 		return err
 	}
 	return nil
-}
-
-// warnRenamed tells the person each old setting name this run was given.
-// The old name still works, and the new one is what the docs and the
-// bundle use.
-func warnRenamed(cfg config.Config, logger *slog.Logger) {
-	for _, r := range cfg.Deprecated {
-		logger.Warn("a setting was renamed; the old name still works", "old", r.Old, "new", r.New)
-	}
 }
 
 // readCloser and writeCloser adapt the process's streams to the

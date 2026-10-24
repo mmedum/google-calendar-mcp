@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi/caltest"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
 func TestListSharingExplainsEveryRole(t *testing.T) {

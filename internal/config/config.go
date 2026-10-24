@@ -108,20 +108,7 @@ type Config struct {
 	HTTPTimeout      time.Duration
 	WriteTimeout     time.Duration
 	ClientSecretPath string
-	// Deprecated is each old setting name this run was given, for the
-	// caller to warn about once it has a logger.
-	Deprecated []Rename
 }
-
-// Rename is a setting that took a new name and still answers to the
-// old one.
-type Rename struct {
-	Old, New string
-}
-
-// renamedReadOnly is the read-only switch's name until 4.1.0, renamed to
-// match the sibling servers and the bundle key read_only.
-var renamedReadOnly = Rename{Old: EnvPrefix + "READONLY", New: EnvPrefix + "READ_ONLY"}
 
 // Settings holds the raw string values before validation. Flags and the
 // environment both feed it; Build turns it into a Config.
@@ -133,17 +120,15 @@ type Settings struct {
 	EnableDestructive string
 	Sharing           string
 	EnableDeclineAll  string
-	// ReadOnlyOld is GCAL_READONLY, ReadOnly's old name, still read.
-	ReadOnlyOld string
-	// RequirePrompt is the removed GCAL_REQUIRE_PROMPT, read only to
-	// refuse it turned on.
-	RequirePrompt    string
-	MaxEvents        string
-	MaxCalendars     string
-	Concurrency      string
-	HTTPTimeout      string
-	WriteTimeout     string
-	ClientSecretPath string
+	MaxEvents         string
+	MaxCalendars      string
+	Concurrency       string
+	HTTPTimeout       string
+	WriteTimeout      string
+	ClientSecretPath  string
+	// removed are the settings a release took out, in removedSettings'
+	// order, read only to refuse one still set.
+	removed []string
 	// vars is every setting Define reads, in order.
 	vars []Var
 }
@@ -158,22 +143,49 @@ type Var struct {
 	Default string
 	// Switch marks a setting that is on or off.
 	Switch bool
-	// ReplacedBy names the variable that took this one's place. The old
-	// name still works, and nothing should offer it.
-	ReplacedBy string
 	// Removed marks a setting a release took out, read only to refuse it.
 	Removed bool
+}
+
+// removedSettings are the settings a release took out, each with why
+// and what to do instead. Each was off by default, and unset or off is
+// still accepted. On, or a value that is not a boolean, is refused at
+// start: ignored, it would quietly leave the server otherwise than its
+// owner set it. None has a flag. A setting renamed later goes the same
+// way, rather than answering to two names.
+var removedSettings = []struct{ key, why string }{
+	// The server's question went in 4.0.0 (§9a), and its flag with it.
+	{key: "REQUIRE_PROMPT",
+		why: "the server no longer asks the person, and the client's own approval decides each call. Unset it, " +
+			"and leave " + EnvPrefix + "ENABLE_DESTRUCTIVE and " + EnvPrefix + "ENABLE_DECLINE_ALL off for a client " +
+			"that runs with nobody watching"},
+	// The read-only switch's name until 4.1.0 renamed it to match the
+	// sibling servers and the bundle key read_only. It never had a flag.
+	{key: "READONLY",
+		why: "it is " + EnvPrefix + "READ_ONLY (-read-only) now. Unset it, and set that in its place"},
+}
+
+// removedSet refuses each removed setting that is set to anything but
+// off.
+func (s *Settings) removedSet() []error {
+	var errs []error
+	for i, r := range removedSettings {
+		if on, err := parseBool(r.key, s.removed[i]); err == nil && !on {
+			continue
+		}
+		errs = append(errs, fmt.Errorf("%w: %s was removed: %s", ErrInvalid, EnvPrefix+r.key, r.why))
+	}
+	return errs
 }
 
 // Define registers one flag per setting on fs. Each flag defaults to the
 // matching GCAL_* variable, so a flag on the command line wins over the
 // environment and the environment wins over the built-in default.
 //
-// The staleness gate reads these def() and sw() calls to learn the
-// setting names, so the documentation cannot fall behind a setting added
-// here.
+// Each variable it reads is recorded for Vars, which the staleness and
+// bundle gates read, so neither can fall behind a setting added here.
 func Define(fs *flag.FlagSet, env func(string) string) *Settings {
-	s := &Settings{}
+	s := &Settings{removed: make([]string, len(removedSettings))}
 	bind := func(p *string, name, fallback, usage string, v Var) {
 		value := env(v.Name)
 		if value == "" {
@@ -204,27 +216,11 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-attempt timeout for a read")
 	def(&s.WriteTimeout, "write-timeout", "WRITE_TIMEOUT", "120s", "timeout for a write")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
-	renamed(&s.ReadOnlyOld, env, "READONLY")
-	s.vars = append(s.vars, Var{Name: renamedReadOnly.Old, Default: "false", Switch: true, ReplacedBy: renamedReadOnly.New})
-	removed(&s.RequirePrompt, env, "REQUIRE_PROMPT")
-	s.vars = append(s.vars, Var{Name: EnvPrefix + "REQUIRE_PROMPT", Removed: true})
+	for i, r := range removedSettings {
+		s.removed[i] = env(EnvPrefix + r.key)
+		s.vars = append(s.vars, Var{Name: EnvPrefix + r.key, Removed: true})
+	}
 	return s
-}
-
-// renamed reads a setting's old name, with no flag: the flag kept its
-// name, and only the variable moved. The staleness gate reads these
-// calls, so the documentation may name an old name to say it still
-// works.
-func renamed(p *string, env func(string) string, key string) {
-	*p = env(EnvPrefix + key)
-}
-
-// removed reads a setting a release took away, with no flag: it is read
-// only so Build can refuse it turned on. The staleness gate reads these
-// calls, so the documentation may name a removed setting to say it is
-// gone.
-func removed(p *string, env func(string) string, key string) {
-	*p = env(EnvPrefix + key)
 }
 
 // Vars is every setting Define reads, in the order it reads them. The
@@ -278,11 +274,8 @@ func (s *Settings) Build() (Config, error) {
 	}
 
 	var err error
-	if c.ReadOnly, err = s.readOnly(); err != nil {
+	if c.ReadOnly, err = parseBool("read-only", s.ReadOnly); err != nil {
 		errs = append(errs, err)
-	}
-	if strings.TrimSpace(s.ReadOnlyOld) != "" {
-		c.Deprecated = append(c.Deprecated, renamedReadOnly)
 	}
 	if c.EnableDestructive, err = parseBool("enable-destructive", s.EnableDestructive); err != nil {
 		errs = append(errs, err)
@@ -296,16 +289,7 @@ func (s *Settings) Build() (Config, error) {
 	if c.EnableDeclineAll, err = parseBool("enable-decline-all", s.EnableDeclineAll); err != nil {
 		errs = append(errs, err)
 	}
-	// GCAL_REQUIRE_PROMPT refused the writes that asked the person when
-	// the client could not ask. The question is gone (§9a), and ignored,
-	// the setting would quietly allow what its owner set it to stop, so
-	// anything but off is refused, a value it never took included.
-	if on, perr := parseBool("GCAL_REQUIRE_PROMPT", s.RequirePrompt); on || perr != nil {
-		errs = append(errs, fmt.Errorf("%w: GCAL_REQUIRE_PROMPT was removed: the server no longer asks the "+
-			"person, and the client's own approval decides each call. Unset it, and leave "+
-			"GCAL_ENABLE_DESTRUCTIVE and GCAL_ENABLE_DECLINE_ALL off for a client that runs with nobody watching",
-			ErrInvalid))
-	}
+	errs = append(errs, s.removedSet()...)
 
 	if c.MaxEvents, err = parseCount("max-events", s.MaxEvents, DefaultMaxEvents, MaxMaxEvents); err != nil {
 		errs = append(errs, err)
@@ -330,26 +314,6 @@ func (s *Settings) Build() (Config, error) {
 		return Config{}, errors.Join(errs...)
 	}
 	return c, nil
-}
-
-// readOnly reads the read-only switch under its name and under its old
-// one. Either alone decides. Both set have to agree, because a run that
-// took one over the other would turn on or leave off what its owner set
-// the other to say.
-func (s *Settings) readOnly() (bool, error) {
-	on, err := parseBool("read-only", s.ReadOnly)
-	if err != nil || strings.TrimSpace(s.ReadOnlyOld) == "" {
-		return on, err
-	}
-	old, err := parseBool(renamedReadOnly.Old, s.ReadOnlyOld)
-	if err != nil {
-		return false, err
-	}
-	if strings.TrimSpace(s.ReadOnly) != "" && old != on {
-		return false, fmt.Errorf("%w: %s is %t and %s, its old name, is %t: unset %s",
-			ErrInvalid, renamedReadOnly.New, on, renamedReadOnly.Old, old, renamedReadOnly.Old)
-	}
-	return old, nil
 }
 
 func parseBool(name, v string) (bool, error) {

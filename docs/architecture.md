@@ -1590,8 +1590,9 @@ would arm `clear_calendar` too.
 
 **Read-only mode** (`GCAL_READ_ONLY=true`) registers only the nine read
 tools and requests only the read scopes. `GCAL_READONLY`, its name until
-4.1.0, still works and logs a warning; both set and disagreeing is
-refused at start.
+4.1.0, was removed in 5.0.0 rather than kept as an alias: unset or off
+it starts and does nothing, and on, or a value that is not a boolean,
+is refused at start, naming `GCAL_READ_ONLY`.
 
 ### 9a. Per-call approval is the client's
 

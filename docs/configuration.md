@@ -26,9 +26,10 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. |
 
 `GCAL_READ_ONLY` was `GCAL_READONLY` until 4.1.0, and took the name
-the sibling servers and the Claude Desktop bundle use. The old name
-still works, and the server logs a warning naming the new one. Set both
-and they must agree, or the server refuses to start.
+the sibling servers and the Claude Desktop bundle use. 5.0.0 removed the
+old name. Unset or off (`false`, `0`, `no`, `off` or empty, in any case)
+it starts the server and does nothing. On, or a value that is not a
+boolean, is refused at start, naming `GCAL_READ_ONLY`: use that instead.
 
 `GCAL_REQUIRE_PROMPT` and `-require-prompt` were removed with the
 server's question: the server asks the person nothing, and your client's

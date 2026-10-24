@@ -17,9 +17,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/credentials"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/userconfig"
 )
 
 // The bundle gate and the packer (§12, and the standard's §10b).
@@ -584,8 +584,8 @@ const (
 )
 
 // bundleLeftOut is every other variable the server reads, with why the
-// bundle does not ask for it. An old or removed name is left out
-// without an entry, because config says which it is.
+// bundle does not ask for it. A removed setting is left out without an
+// entry, because config says which it is.
 var bundleLeftOut = map[string]string{
 	config.EnvPrefix + "LOG_LEVEL":     diagnostics,
 	config.EnvPrefix + "LOG_FORMAT":    diagnostics,
@@ -645,7 +645,7 @@ func bundleSettingProblems(m manifest, known []string) []string {
 	var problems []string
 	for _, name := range known {
 		v := vars[name]
-		if !slices.Contains(bundleAsked, name) && bundleLeftOut[name] == "" && v.ReplacedBy == "" && !v.Removed {
+		if !slices.Contains(bundleAsked, name) && bundleLeftOut[name] == "" && !v.Removed {
 			problems = append(problems, fmt.Sprintf("the server reads %s, and the bundle neither asks for it "+
 				"nor says why not", name))
 		}
@@ -700,9 +700,8 @@ func bundleSettingProblems(m manifest, known []string) []string {
 	}
 	for _, name := range slices.Sorted(maps.Keys(m.Server.MCPConfig.Env)) {
 		switch {
-		case vars[name].ReplacedBy != "":
-			problems = append(problems, fmt.Sprintf("mcp_config.env sets %s, whose name is now %s; offer the new one",
-				name, vars[name].ReplacedBy))
+		case vars[name].Removed:
+			problems = append(problems, fmt.Sprintf("mcp_config.env sets %s, which a release removed", name))
 		case !slices.Contains(bundleAsked, name):
 			problems = append(problems, fmt.Sprintf("mcp_config.env sets %s, which the bundle does not ask for", name))
 		}

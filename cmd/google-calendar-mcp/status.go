@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v4/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/userconfig"
-	"github.com/mmedum/google-calendar-mcp/v4/internal/version"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/userconfig"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/version"
 )
 
 // cmdStatus prints what this profile is configured with. It touches no
