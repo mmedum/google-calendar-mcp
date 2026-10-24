@@ -1,6 +1,12 @@
 # Architecture — google-calendar-mcp
 
-**Status: 4.0.0 (2026-10-23), built with Go 1.27.3:** the server asks
+**Status: 4.1.0 (2026-10-24), built with Go 1.27.3:** the Claude Desktop
+bundle has the shape the sibling servers' bundles share: every setting
+another client sets, each defaulting as the server does, a blank OAuth
+client file reaching the server empty rather than as
+`${user_config.client_secret}`, the shared file names and Google's
+privacy policy; read-only is `GCAL_READ_ONLY`, and `GCAL_READONLY` still
+works. 4.0.0 (2026-10-23): the server asks
 nobody, and the client approves each call (§9a). Sharing is three tools
 by reach: `share_calendar` inside the organization below owner, and
 `publish_calendar` and `widen_calendar_access` behind the destructive

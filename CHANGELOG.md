@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-10-24
+
 ### Added
 
 - The Claude Desktop bundle asks for the destructive switch and `enable_decline_all` as well as the client file, the profile, read-only and sharing, each as an unconfigured server has it unless you change it, names Google's privacy policy, and carries `LICENSE` and the README beside the binaries.
@@ -1030,7 +1032,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v4.0.0...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v4.1.0...HEAD
+[4.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.0...v3.0.1

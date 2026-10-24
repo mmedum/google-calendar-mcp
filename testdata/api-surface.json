@@ -1,5 +1,5 @@
 {
-  "fetched": "2026-10-23",
+  "fetched": "2026-10-24",
   "note": "Written by `gates api-diff`; nobody edits this. One verdict per method lives in testdata/api-coverage.tsv and one per field in testdata/api-fields.tsv.",
   "apis": [
     {
