@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -78,6 +79,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, env func(stri
 		return err
 	}
 	logger := config.NewLogger(cfg, stderr)
+	warnRenamed(cfg, logger)
 
 	if *dumpSchemas {
 		// The dump is the one time stdout carries something that is not
@@ -126,6 +128,15 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, env func(stri
 		return err
 	}
 	return nil
+}
+
+// warnRenamed tells the person each old setting name this run was given.
+// The old name still works, and the new one is what the docs and the
+// bundle use.
+func warnRenamed(cfg config.Config, logger *slog.Logger) {
+	for _, r := range cfg.Deprecated {
+		logger.Warn("a setting was renamed; the old name still works", "old", r.Old, "new", r.New)
+	}
 }
 
 // readCloser and writeCloser adapt the process's streams to the

@@ -92,6 +92,7 @@ func subConfig(name string, args []string, out io.Writer, env func(string) strin
 	if err != nil {
 		return config.Config{}, nil, err
 	}
+	warnRenamed(cfg, config.NewLogger(cfg, out))
 	// Carried on the FlagSet so cmdLogin can read it without a second
 	// parse; nothing else needs it.
 	if *noBrowser {

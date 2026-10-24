@@ -150,11 +150,12 @@ func looksLikeToolName(s string) bool {
 	return false
 }
 
-var defRe = regexp.MustCompile(`def\(&s\.\w+,\s*"[^"]+",\s*"([A-Z_0-9]+)"`)
+var defRe = regexp.MustCompile(`(?:def|sw)\(&s\.\w+,\s*"[^"]+",\s*"([A-Z_0-9]+)"`)
 
 // removedRe finds a setting a release removed, which the server reads
-// only to refuse it turned on. The docs may name one, to say it is gone.
-var removedRe = regexp.MustCompile(`removed\(&s\.\w+,\s*env,\s*"([A-Z_0-9]+)"\)`)
+// only to refuse it turned on, or an old name a release replaced, which
+// still works. The docs may name either, to say what became of it.
+var removedRe = regexp.MustCompile(`(?:removed|renamed)\(&s\.\w+,\s*env,\s*"([A-Z_0-9]+)"\)`)
 
 func checkSettings() ([]string, int, error) {
 	src, err := os.ReadFile("internal/config/config.go")

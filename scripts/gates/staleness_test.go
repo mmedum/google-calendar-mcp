@@ -34,3 +34,18 @@ func TestTheDocsMayNameARemovedSetting(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+// A switch is a setting like any other, and an old name a release
+// replaced may be named, to say it still works.
+func TestTheDocsHoldSwitchesAndOldNames(t *testing.T) {
+	src := []byte(`sw(&s.ReadOnly, "read-only", "READ_ONLY", false, "x")
+	renamed(&s.ReadOnlyOld, env, "READONLY")`)
+	if got, n := settingProblems(src, "`GCAL_READ_ONLY`, once `GCAL_READONLY`"); len(got) != 0 || n != 1 {
+		t.Errorf("got %v and %d settings, want none and 1", got, n)
+	}
+	got, _ := settingProblems(src, "`GCAL_READONLY` alone")
+	want := []string{"docs/configuration.md does not document GCAL_READ_ONLY"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}

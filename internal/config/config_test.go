@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -89,7 +91,8 @@ func TestInvalidValuesAreRejected(t *testing.T) {
 		{"profile", "GCAL_PROFILE", "Not A Profile"},
 		{"log level", "GCAL_LOG_LEVEL", "chatty"},
 		{"log format", "GCAL_LOG_FORMAT", "yaml"},
-		{"read-only", "GCAL_READONLY", "perhaps"},
+		{"read-only", "GCAL_READ_ONLY", "perhaps"},
+		{"read-only under its old name", "GCAL_READONLY", "perhaps"},
 		{"destructive", "GCAL_ENABLE_DESTRUCTIVE", "perhaps"},
 		{"max events not a number", "GCAL_MAX_EVENTS", "lots"},
 		{"max events too large", "GCAL_MAX_EVENTS", "999999"},
@@ -208,5 +211,151 @@ func TestTheRemovedRequirePromptIsRefused(t *testing.T) {
 	config.Define(fs, func(string) string { return "" })
 	if err := fs.Parse([]string{"-require-prompt"}); err == nil {
 		t.Error("the removed -require-prompt flag was accepted")
+	}
+}
+
+// The read-only switch is GCAL_READ_ONLY, the family's name, and
+// GCAL_READONLY, its name until 4.1.0, still works. Both set and
+// disagreeing is refused rather than settled by either.
+func TestTheReadOnlySwitchAnswersToItsOldName(t *testing.T) {
+	const (
+		newName = "GCAL_READ_ONLY"
+		oldName = "GCAL_READONLY"
+	)
+	renamed := []config.Rename{{Old: oldName, New: newName}}
+	for _, tc := range []struct {
+		name       string
+		env        map[string]string
+		args       []string
+		on         bool
+		deprecated []config.Rename
+	}{
+		{name: "neither", on: false},
+		{name: "the new name on", env: map[string]string{newName: "true"}, on: true},
+		{name: "the new name off", env: map[string]string{newName: "false"}, on: false},
+		{name: "the old name alone on", env: map[string]string{oldName: "true"}, on: true, deprecated: renamed},
+		{name: "the old name alone off", env: map[string]string{oldName: "false"}, on: false, deprecated: renamed},
+		{name: "both on", env: map[string]string{newName: "true", oldName: "1"}, on: true, deprecated: renamed},
+		{name: "both off", env: map[string]string{newName: "off", oldName: "false"}, on: false, deprecated: renamed},
+		{name: "the flag", args: []string{"-read-only", "true"}, on: true},
+		{name: "the flag agreeing with the old name", env: map[string]string{oldName: "true"},
+			args: []string{"-read-only", "true"}, on: true, deprecated: renamed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := build(t, tc.env, tc.args...)
+			if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+			if c.ReadOnly != tc.on {
+				t.Errorf("ReadOnly = %t, want %t", c.ReadOnly, tc.on)
+			}
+			if !slices.Equal(c.Deprecated, tc.deprecated) {
+				t.Errorf("Deprecated = %v, want %v", c.Deprecated, tc.deprecated)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		args []string
+		want string
+	}{
+		{name: "the new on, the old off", env: map[string]string{newName: "true", oldName: "false"},
+			want: newName + " is true and " + oldName + ", its old name, is false: unset " + oldName},
+		{name: "the new off, the old on", env: map[string]string{newName: "false", oldName: "true"},
+			want: newName + " is false and " + oldName + ", its old name, is true"},
+		{name: "the flag against the old name", env: map[string]string{oldName: "true"},
+			args: []string{"-read-only", "false"}, want: newName + " is false and " + oldName},
+		{name: "the old name not a boolean", env: map[string]string{oldName: "maybe"},
+			want: oldName + ` "maybe"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := build(t, tc.env, tc.args...)
+			if err == nil || !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("got %v, want an invalid setting naming %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Vars is what the bundle gate reads a setting's default and kind from,
+// so each claim it makes is held to what Build does. A switch takes true
+// and false and refuses anything else, and nothing else does that. Its
+// default and an empty value each configure what setting nothing does,
+// which is what lets a bundle leave a field blank.
+func TestVarsDescribeWhatBuildDoes(t *testing.T) {
+	vars := config.Vars()
+	if len(vars) != 15 {
+		t.Fatalf("Vars has %d settings; Define reads 15", len(vars))
+	}
+	names := make([]string, len(vars))
+	for i, v := range vars {
+		names[i] = v.Name
+	}
+	slices.Sort(names)
+	if want := config.EnvVars(); !slices.Equal(names, want) {
+		t.Errorf("Vars names\n%v\nwant every variable Define reads\n%v", names, want)
+	}
+	unset, err := build(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var switches []string
+	for _, v := range vars {
+		accepts := func(value string) bool {
+			_, err := build(t, map[string]string{v.Name: value})
+			return err == nil
+		}
+		if boolean := accepts("true") && accepts("false") && !accepts("maybe"); boolean != v.Switch {
+			t.Errorf("%s: Switch is %t, and Build reads it as a boolean: %t", v.Name, v.Switch, boolean)
+		}
+		if v.Switch {
+			switches = append(switches, v.Name)
+			if v.Default != "true" && v.Default != "false" {
+				t.Errorf("%s is a switch defaulting to %q, which a bundle's checkbox cannot be", v.Name, v.Default)
+			}
+		}
+		for _, value := range []string{v.Default, ""} {
+			c, err := build(t, map[string]string{v.Name: value})
+			if err != nil {
+				t.Errorf("%s=%q is refused: %v", v.Name, value, err)
+				continue
+			}
+			c.Deprecated = nil
+			if !reflect.DeepEqual(c, unset) {
+				t.Errorf("%s=%q configures something:\n got %+v\nwant %+v", v.Name, value, c, unset)
+			}
+		}
+		if v.ReplacedBy != "" && !slices.ContainsFunc(vars, func(w config.Var) bool { return w.Name == v.ReplacedBy }) {
+			t.Errorf("%s is replaced by %s, which is not a setting", v.Name, v.ReplacedBy)
+		}
+	}
+	want := []string{"GCAL_READ_ONLY", "GCAL_ENABLE_DESTRUCTIVE", "GCAL_SHARING", "GCAL_ENABLE_DECLINE_ALL", "GCAL_READONLY"}
+	if !slices.Equal(switches, want) {
+		t.Errorf("switches %v, want %v", switches, want)
+	}
+	for name, def := range map[string]string{"GCAL_SHARING": "true", "GCAL_READ_ONLY": "false"} {
+		i := slices.IndexFunc(vars, func(v config.Var) bool { return v.Name == name })
+		if i < 0 || vars[i].Default != def {
+			t.Errorf("%s does not default to %s in Vars", name, def)
+		}
+	}
+	if i := slices.IndexFunc(vars, func(v config.Var) bool { return v.Removed }); i < 0 || vars[i].Name != "GCAL_REQUIRE_PROMPT" {
+		t.Errorf("Vars does not mark GCAL_REQUIRE_PROMPT removed")
+	}
+}
+
+// EnvVars is recorded from the lookups Define makes, so it holds the old
+// and removed names that no flag binds as well as every one that does.
+func TestEnvVarsIsEveryLookup(t *testing.T) {
+	got := config.EnvVars()
+	for _, name := range []string{"GCAL_READ_ONLY", "GCAL_READONLY", "GCAL_REQUIRE_PROMPT", "GCAL_CLIENT_SECRET"} {
+		if !slices.Contains(got, name) {
+			t.Errorf("EnvVars lacks %s, which Define reads: %v", name, got)
+		}
+	}
+	if len(got) != 15 || !slices.IsSorted(got) {
+		t.Errorf("EnvVars is %v; want the 15 variables Define reads, sorted", got)
 	}
 }
