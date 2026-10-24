@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/userconfig"
 )
 
@@ -17,7 +18,7 @@ import (
 func isolate(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv(userconfig.EnvDir, dir)
+	t.Setenv(config.EnvConfigDir, dir)
 	return dir
 }
 
@@ -182,6 +183,27 @@ func TestBaseDirHonorsTheEnvironmentOverride(t *testing.T) {
 	}
 	if got != dir {
 		t.Fatalf("BaseDir() = %q, want the override %q", got, dir)
+	}
+}
+
+// The override is trimmed, and spaces alone are unset, as empty is, so
+// a form field cleared to a space means the user's config directory.
+func TestBaseDirReadsTheOverrideAsEverySettingIsRead(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(config.EnvConfigDir, "  "+dir+" ")
+	if got, err := userconfig.BaseDir(); err != nil || got != dir {
+		t.Errorf("%s with spaces around: BaseDir() = %q, %v; want %q", config.EnvConfigDir, got, err, dir)
+	}
+	want, err := os.UserConfigDir()
+	if err != nil {
+		t.Skipf("no user config dir on this system: %v", err)
+	}
+	for _, v := range []string{"", "  "} {
+		t.Setenv(config.EnvConfigDir, v)
+		got, err := userconfig.BaseDir()
+		if err != nil || got != filepath.Join(want, userconfig.AppDir) {
+			t.Errorf("%s=%q: BaseDir() = %q, %v; want it under %q", config.EnvConfigDir, v, got, err, want)
+		}
 	}
 }
 

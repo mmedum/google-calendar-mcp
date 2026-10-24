@@ -5,7 +5,7 @@
   "display_name": "Google Calendar",
   "version": "0.0.0-dev",
   "description": "Google Calendar over MCP: calendars, events, recurrence and availability.",
-  "long_description": "Read and write Google Calendar from your own account: what is on a calendar, when people are free, and the writes that change it \u2014 with the time model this kind of server usually gets wrong. An all-day event stays a date, every timed event carries its IANA zone, a recurring write keeps its wall-clock time across a daylight-saving change, and availability comes from Google's free/busy service rather than from a list of events.\n\nTHIS BUNDLE DOES NOT LOG YOU IN, and cannot. Google requires each user to bring their own OAuth Desktop client, so before the tools work you need to create one in a Google Cloud project, enable the Calendar API, and run `google-calendar-mcp login` once in a terminal. The setup is documented at https://github.com/mmedum/google-calendar-mcp/blob/main/docs/gcp-setup.md. Installing this without that step produces a server that starts, lists its tools, and answers every call with \"not signed in\".\n\nThe bundle asks for the same settings as a client's configuration file, and each one left as it is does what an unconfigured server does. The tools that delete a calendar or every event on one, publish a calendar or share it outside your organization, and make an event that declines every meeting it overlaps are registered only once you turn on their switch. This server asks nobody before a call, so Claude Desktop's approval of each tool is then the only check.",
+  "long_description": "Read and write Google Calendar from your own account: what is on a calendar, when people are free, and the writes that change it \u2014 with the time model this kind of server usually gets wrong. An all-day event stays a date, every timed event carries its IANA zone, a recurring write keeps its wall-clock time across a daylight-saving change, and availability comes from Google's free/busy service rather than from a list of events.\n\nTHIS BUNDLE DOES NOT LOG YOU IN, and cannot. Google requires each user to bring their own OAuth Desktop client, so before the tools work you need to create one in a Google Cloud project, enable the Calendar API, and run `google-calendar-mcp login` once in a terminal. During install, leave the OAuth client field empty to use the client that login recorded; a file you pick there must be that same client, since the refresh token belongs to it. The setup is documented at https://github.com/mmedum/google-calendar-mcp/blob/main/docs/gcp-setup.md. Installing this without that step produces a server that starts, lists its tools, and answers every call with \"not signed in\".\n\nThe bundle asks for the same settings as a client's configuration file, and each one left as it is does what an unconfigured server does. The tools that delete a calendar or every event on one, publish a calendar or share it outside your organization, and make an event that declines every meeting it overlaps are registered only once you turn on their switch. This server asks nobody before a call, so Claude Desktop's approval of each tool is then the only check.",
   "author": {
     "name": "Mark Medum Bundgaard"
   },
@@ -54,14 +54,14 @@
     "client_secret": {
       "type": "file",
       "title": "OAuth client JSON",
-      "description": "The OAuth Desktop client you created in your own Google Cloud project, the same file you passed to `google-calendar-mcp login`. Leave it empty to use the one that login stored for the profile. The bundle cannot log you in, so run `google-calendar-mcp login` once in a terminal first.",
+      "description": "The OAuth Desktop client you created in your own Google Cloud project. Leave it empty to use the one `google-calendar-mcp login` recorded for the profile. A file picked here must be the client that login used, since the refresh token belongs to it. The bundle cannot log you in, so run `google-calendar-mcp login` once in a terminal first.",
       "default": "",
       "required": false
     },
     "profile": {
       "type": "string",
       "title": "Profile",
-      "description": "Which stored login to use. Each profile keeps its own client JSON, token and account, so one machine can hold several Google accounts, each logged in to with `google-calendar-mcp login --profile <name>`. Lower case, digits, - and _. Leave it empty for the default profile.",
+      "description": "Which stored login to use. Each profile keeps its own client JSON, token and account, so one machine can hold several Google accounts, each logged in to with `google-calendar-mcp login --profile <name>`. A name is up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit; capitals are read as lowercase, and any other name stops the server at start. Leave it empty for the default profile.",
       "default": "",
       "required": false
     },

@@ -10,6 +10,7 @@ import (
 
 	"github.com/zalando/go-keyring"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/credentials"
 )
 
@@ -96,7 +97,7 @@ func TestEnvironmentWins(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Env = func(k string) string {
-		if k == credentials.EnvVar {
+		if k == config.EnvRefreshToken {
 			return "from-env"
 		}
 		return ""
@@ -115,6 +116,34 @@ func TestEnvironmentWins(t *testing.T) {
 	}
 	if tok != "from-keyring" || src != credentials.SourceKeyring {
 		t.Fatalf("ResolveStored = %q from %q, want the stored token", tok, src)
+	}
+}
+
+// A refresh token of spaces alone is unset, so the stored one is used,
+// and one with spaces around it is trimmed.
+func TestTheEnvironmentTokenIsReadAsEverySettingIsRead(t *testing.T) {
+	s, _ := store(t, newFake(), false)
+	if _, err := s.Save("from-keyring"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		value, tok string
+		src        credentials.Source
+	}{
+		{"  ", "from-keyring", credentials.SourceKeyring},
+		{" from-env ", "from-env", credentials.SourceEnv},
+	} {
+		s.Env = func(k string) string {
+			if k == config.EnvRefreshToken {
+				return tc.value
+			}
+			return ""
+		}
+		tok, src, err := s.Resolve()
+		if err != nil || tok != tc.tok || src != tc.src {
+			t.Errorf("%s=%q: Resolve = %q from %q, %v; want %q from %q",
+				config.EnvRefreshToken, tc.value, tok, src, err, tc.tok, tc.src)
+		}
 	}
 }
 

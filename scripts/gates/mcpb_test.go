@@ -2,10 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
 // The standard says: break the manifest all six ways and watch each be
@@ -61,67 +67,252 @@ func TestTheCommittedManifestIsValid(t *testing.T) {
 	if problems := validateManifest(good(t), bundleFiles, testLauncher()); len(problems) > 0 {
 		t.Fatalf("the committed manifest does not describe the bundle:\n%s", strings.Join(problems, "\n"))
 	}
+	t.Chdir("../..")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems := manifestProblems(raw, bundleFiles, launcherNames()); len(problems) > 0 {
+		t.Fatalf("the committed manifest fails the gate:\n%s", strings.Join(problems, "\n"))
+	}
 }
 
 func TestTheSixWaysAManifestBreaks(t *testing.T) {
+	overrides := []string{"server", "mcp_config", "platform_overrides"}
 	cases := []struct {
-		name   string
-		breaks func(m *manifest)
-		want   string
+		name string
+		edit func(map[string]any)
+		want string
 	}{
 		{
-			name:   "an entry point nobody stages",
-			breaks: func(m *manifest) { m.Server.EntryPoint = "server/google-calendar-mcp-mac" },
-			want:   "entry_point",
+			name: "an entry point nobody stages",
+			edit: func(d map[string]any) { dig(d, "server")["entry_point"] = "server/google-calendar-mcp-mac" },
+			want: `entry_point "server/google-calendar-mcp-mac" is not a program the packer stages`,
+		},
+		{
+			name: "no entry point at all",
+			edit: func(d map[string]any) { delete(dig(d, "server"), "entry_point") },
+			want: "the manifest declares no entry_point",
+		},
+		{
+			// Packed, and not a program: the license is there to be read.
+			name: "an entry point naming the license",
+			edit: func(d map[string]any) { dig(d, "server")["entry_point"] = "LICENSE" },
+			want: `entry_point "LICENSE" is not a program the packer stages`,
 		},
 		{
 			name: "a platform command nobody stages",
-			breaks: func(m *manifest) {
-				over := m.Server.MCPConfig.PlatformOverrides["win32"]
-				over.Command = "${__dirname}/server/google-calendar-mcp-windows.exe"
-				m.Server.MCPConfig.PlatformOverrides["win32"] = over
+			edit: func(d map[string]any) {
+				dig(d, append(overrides, "win32")...)["command"] = "${__dirname}/server/google-calendar-mcp-windows.exe"
 			},
-			want: "platform_overrides.win32.command",
+			want: `platform_overrides.win32.command is "${__dirname}/server/google-calendar-mcp-windows.exe", ` +
+				"which is not a program the packer stages",
 		},
 		{
-			name: "an env value spending a key nobody declared",
-			breaks: func(m *manifest) {
-				// Composed, not the whole value: a check that only looked
-				// at values that ARE a reference would miss this one and
-				// the server would start with ${user_config.dir}
-				// unsubstituted.
-				m.Server.MCPConfig.Env["GCAL_CONFIG_DIR"] = "${user_config.dir}/google-calendar-mcp"
+			name: "a command outside the bundle",
+			edit: func(d map[string]any) {
+				dig(d, "server", "mcp_config")["command"] = "/usr/local/bin/google-calendar-mcp"
 			},
-			want: "user_config does not declare",
+			want: `mcp_config.command is "/usr/local/bin/google-calendar-mcp"; a command starts with ${__dirname}/`,
+		},
+		{
+			// The specification shows this form once and never says what
+			// it is resolved against (§18 row 112).
+			name: "a relative command",
+			edit: func(d map[string]any) {
+				dig(d, "server", "mcp_config")["command"] = "server/google-calendar-mcp-darwin"
+			},
+			want: `mcp_config.command is "server/google-calendar-mcp-darwin"; a command starts with ${__dirname}/`,
+		},
+		{
+			// 4.1.0 stripped the leading slash and read this as staged.
+			name: "an override's absolute command",
+			edit: func(d map[string]any) {
+				dig(d, append(overrides, "win32")...)["command"] = "/server/google-calendar-mcp.exe"
+			},
+			want: `platform_overrides.win32.command is "/server/google-calendar-mcp.exe"; a command starts with ${__dirname}/`,
+		},
+		{
+			name: "a command naming the README",
+			edit: func(d map[string]any) { dig(d, "server", "mcp_config")["command"] = "${__dirname}/README.md" },
+			want: `mcp_config.command is "${__dirname}/README.md", which is not a program the packer stages`,
+		},
+		{
+			name: "an override naming the license",
+			edit: func(d map[string]any) { dig(d, append(overrides, "linux")...)["command"] = "${__dirname}/LICENSE" },
+			want: `platform_overrides.linux.command is "${__dirname}/LICENSE", which is not a program the packer stages`,
+		},
+		{
+			// Staged, and a program, and the file staged for another
+			// platform: macOS would spawn a Windows binary.
+			name: "macOS spawning the Windows binary",
+			edit: func(d map[string]any) {
+				dig(d, "server", "mcp_config")["command"] = "${__dirname}/server/google-calendar-mcp.exe"
+			},
+			want: `platform "darwin" runs "server/google-calendar-mcp.exe", and the file staged for it is ` +
+				`"server/google-calendar-mcp-darwin"`,
+		},
+		{
+			name: "Windows spawning the macOS binary",
+			edit: func(d map[string]any) {
+				dig(d, append(overrides, "win32")...)["command"] = "${__dirname}/server/google-calendar-mcp-darwin"
+			},
+			want: `platform "win32" runs "server/google-calendar-mcp-darwin", and the file staged for it is ` +
+				`"server/google-calendar-mcp.exe"`,
+		},
+		{
+			// Deleting the override passes every check above: win32 then
+			// runs the default command, which is the macOS universal
+			// binary, and that file really is in the bundle.
+			name: "no win32 override",
+			edit: func(d map[string]any) { delete(dig(d, overrides...), "win32") },
+			want: `platform "win32" runs "server/google-calendar-mcp-darwin"`,
+		},
+		{
+			name: "no linux override",
+			edit: func(d map[string]any) { delete(dig(d, overrides...), "linux") },
+			want: `platform "linux" runs "server/google-calendar-mcp-darwin", and the file staged for it is ` +
+				`"server/launch-linux.sh"`,
+		},
+		{
+			// Right for one of the two architectures Claude Desktop for
+			// Linux ships.
+			name: "one Linux binary for both architectures",
+			edit: func(d map[string]any) {
+				dig(d, append(overrides, "linux")...)["command"] = "${__dirname}/server/google-calendar-mcp-linux-amd64"
+			},
+			want: `platform "linux" runs "server/google-calendar-mcp-linux-amd64", and the file staged for it is ` +
+				`"server/launch-linux.sh"`,
 		},
 		{
 			name: "an override for a platform the bundle does not claim",
-			breaks: func(m *manifest) {
-				m.Server.MCPConfig.PlatformOverrides["freebsd"] = m.Server.MCPConfig.PlatformOverrides["linux"]
+			edit: func(d map[string]any) {
+				dig(d, overrides...)["freebsd"] = map[string]any{"command": "${__dirname}/server/launch-linux.sh"}
 			},
-			want: "compatibility.platforms does not claim",
+			want: `platform_overrides has "freebsd", which compatibility.platforms does not claim`,
 		},
 		{
-			name: "a platform running another platform's binary",
-			breaks: func(m *manifest) {
-				// Deleting the override passes every check above: win32
-				// then runs the default command, which is the macOS
-				// universal binary, and that file really is in the bundle.
-				delete(m.Server.MCPConfig.PlatformOverrides, "win32")
+			name: "a claimed platform the packer stages nothing for",
+			edit: func(d map[string]any) {
+				dig(d, "compatibility")["platforms"] = []any{"darwin", "win32", "linux", "freebsd"}
 			},
-			want: `platform "win32" runs`,
+			want: `compatibility.platforms claims "freebsd" and the packer stages no entry point for it`,
+		},
+		{
+			// Composed, not the whole value: a check that only looked at
+			// values that ARE a reference would miss this one and the
+			// server would start with ${user_config.dir} unsubstituted.
+			name: "an env value spending a key nobody declared",
+			edit: func(d map[string]any) {
+				dig(d, "server", "mcp_config", "env")["GCAL_CONFIG_DIR"] = "${user_config.dir}/google-calendar-mcp"
+			},
+			want: "mcp_config.env.GCAL_CONFIG_DIR spends ${user_config.dir}, which user_config does not declare",
+		},
+		{
+			name: "an argument spending a key nobody declared",
+			edit: func(d map[string]any) { dig(d, "server", "mcp_config")["args"] = []any{"${user_config.verbose}"} },
+			want: "mcp_config.args spends ${user_config.verbose}, which user_config does not declare",
+		},
+		{
+			name: "an override's argument spending a key nobody declared",
+			edit: func(d map[string]any) {
+				dig(d, append(overrides, "win32")...)["args"] = []any{"-profile=${user_config.account}"}
+			},
+			want: "platform_overrides.win32.args spends ${user_config.account}, which user_config does not declare",
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			m := good(t)
-			c.breaks(&m)
-			problems := validateManifest(m, bundleFiles, testLauncher())
-			if !mentions(problems, c.want) {
-				t.Fatalf("breaking %s was not refused; problems: %v", c.name, problems)
+			problems := validateManifest(edited(t, c.edit), bundleFiles, testLauncher())
+			if len(problems) != 1 || !strings.Contains(problems[0], c.want) {
+				t.Fatalf("problems:\n%s\nwant the one containing %q", strings.Join(problems, "\n"), c.want)
 			}
 		})
+	}
+}
+
+// copiedRoot is a repository holding the files the gate and the packer
+// read from the working directory, copied from this one, made the
+// working directory for the rest of the test, so that one can be broken.
+func copiedRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, rel := range []string{manifestPath, launcherPath, "go.mod", "LICENSE", "README.md"} {
+		put(t, root, rel, string(repoFile(t, rel)))
+	}
+	t.Chdir(root)
+	return root
+}
+
+// put writes body to rel under root.
+func put(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// manifestProblems runs every check the gate has: each family broken
+// once here is refused by the one function the gate and the packer run.
+func TestManifestProblemsRunsEveryCheck(t *testing.T) {
+	root := copiedRoot(t)
+	for _, tc := range []struct {
+		name     string
+		edit     func(map[string]any)
+		launcher []string
+		want     string
+	}{
+		{name: "the shape that ships", edit: func(map[string]any) {}},
+		{name: "a version in the tree", edit: func(d map[string]any) { d["version"] = "1.2.3" },
+			want: `the committed manifest says version "1.2.3"`},
+		{name: "no word of the login", edit: func(d map[string]any) { d["long_description"] = "A calendar server." },
+			want: "long_description does not say the bundle cannot log the user in"},
+		{name: "a schema at a branch", edit: func(d map[string]any) {
+			d["$schema"] = "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json"
+		}, want: "can be re-pointed"},
+		{name: "a document the schema refuses", edit: func(d map[string]any) { d["keywords"] = "calendar" },
+			want: "the committed manifest does not satisfy mcpb-manifest-v0.3.schema.json"},
+		{name: "another license", edit: func(d map[string]any) { d["license"] = "MIT" },
+			want: `the manifest says the license is "MIT" and LICENSE is Apache-2.0`},
+		{name: "a relative command", edit: func(d map[string]any) {
+			dig(d, "server", "mcp_config")["command"] = "server/google-calendar-mcp-darwin"
+		}, want: "a command starts with ${__dirname}/"},
+		{name: "a launcher of other names", edit: func(map[string]any) {},
+			launcher: []string{"google-calendar-mcp-linux-x64"}, want: "the launcher runs [google-calendar-mcp-linux-x64]"},
+		{name: "no privacy policy", edit: func(d map[string]any) { delete(d, "privacy_policies") },
+			want: "privacy_policies is empty"},
+		{name: "an argument", edit: func(d map[string]any) { dig(d, "server", "mcp_config")["args"] = []any{"-sharing=off"} },
+			want: `mcp_config.args is ["-sharing=off"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			launcher := tc.launcher
+			if launcher == nil {
+				launcher = testLauncher()
+			}
+			problems := manifestProblems(editedRaw(t, tc.edit), bundleFiles, launcher)
+			if tc.want == "" {
+				if len(problems) > 0 {
+					t.Fatalf("the shape that ships was refused:\n%s", strings.Join(problems, "\n"))
+				}
+				return
+			}
+			if !mentions(problems, tc.want) {
+				t.Errorf("problems:\n%s\nwant one containing %q", strings.Join(problems, "\n"), tc.want)
+			}
+		})
+	}
+	// And the files beside the manifest: the launcher's install hint is
+	// held to go.mod, which moves at every major version.
+	put(t, root, "go.mod", strings.Replace(string(repoFile(t, "go.mod")), "/v5", "/v4", 1))
+	want := `the launcher says "go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest", ` +
+		`and go.mod's module gives "go install github.com/mmedum/google-calendar-mcp/v4/cmd/google-calendar-mcp@latest"`
+	if got := manifestProblems(editedRaw(t, func(map[string]any) {}), bundleFiles, testLauncher()); !slices.Equal(got, []string{want}) {
+		t.Errorf("a go.mod a major version on gives %q, want %q", got, want)
 	}
 }
 
@@ -365,9 +556,9 @@ func TestTheCommittedManifestMeetsTheFloor(t *testing.T) {
 	}
 }
 
-// edited is the committed manifest with one edit applied to its decoded
-// document, read back the way the gate reads it.
-func edited(t *testing.T, edit func(map[string]any)) manifest {
+// editedRaw is the committed manifest with one edit applied to its
+// decoded document, encoded again.
+func editedRaw(t *testing.T, edit func(map[string]any)) []byte {
 	t.Helper()
 	var doc map[string]any
 	if err := json.Unmarshal(repoFile(t, manifestPath), &doc); err != nil {
@@ -378,8 +569,15 @@ func edited(t *testing.T, edit func(map[string]any)) manifest {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return raw
+}
+
+// edited is the committed manifest with one edit applied, read back the
+// way the gate reads it.
+func edited(t *testing.T, edit func(map[string]any)) manifest {
+	t.Helper()
 	var m manifest
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := json.Unmarshal(editedRaw(t, edit), &m); err != nil {
 		t.Fatal(err)
 	}
 	return m
@@ -404,21 +602,58 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 		{name: "the shape that ships", edit: func(map[string]any) {}},
 		{"a switch the bundle turns on", func(d map[string]any) {
 			dig(d, "user_config", "enable_destructive")["default"] = true
-		}, "user_config.enable_destructive is a boolean defaulting to true; GCAL_ENABLE_DESTRUCTIVE is a switch " +
-			"the server defaults to false"},
+		}, "the bundle's defaults configure the server otherwise than no environment does, in EnableDestructive;"},
+		{"a required switch the bundle turns on, which Claude Desktop fills in", func(d map[string]any) {
+			dig(d, "user_config", "enable_destructive")["default"] = true
+			dig(d, "user_config", "enable_destructive")["required"] = true
+		}, "the bundle's defaults configure the server otherwise than no environment does, in EnableDestructive;"},
 		{"a switch the bundle turns off", func(d map[string]any) {
 			dig(d, "user_config", "sharing")["default"] = false
-		}, "user_config.sharing is a boolean defaulting to false; GCAL_SHARING is a switch the server defaults to true"},
+		}, "the bundle's defaults configure the server otherwise than no environment does, in Sharing;"},
+		{"two defaults that configure something", func(d map[string]any) {
+			dig(d, "user_config", "read_only")["default"] = true
+			dig(d, "user_config", "profile")["default"] = "work"
+		}, "the bundle's defaults configure the server otherwise than no environment does, in Profile, ReadOnly;"},
+		{"a default the server refuses", func(d map[string]any) {
+			dig(d, "user_config", "profile")["default"] = "Not A Profile"
+		}, "the environment the bundle's defaults give the server is refused: config: invalid: profile"},
+		{"a field with a list for a default", func(d map[string]any) {
+			dig(d, "user_config", "client_secret")["default"] = []any{"client.json"}
+		}, "user_config.client_secret defaults to a list, which the defaults check cannot build an environment from"},
 		{"a switch asked as text", func(d map[string]any) {
 			dig(d, "user_config", "sharing")["type"] = "string"
 			dig(d, "user_config", "sharing")["default"] = "on"
-		}, `user_config.sharing is a string defaulting to "on"; GCAL_SHARING is a switch`},
+		}, "user_config.sharing is a string; GCAL_SHARING is a switch, so ask for a boolean"},
 		{"a switch with no default", func(d map[string]any) {
 			delete(dig(d, "user_config", "enable_decline_all"), "default")
-		}, "user_config.enable_decline_all is a boolean defaulting to nothing"},
+		}, `the environment the bundle's defaults give the server is refused: config: invalid: enable-decline-all ` +
+			`"${user_config.enable_decline_all}"`},
 		{"an optional key with no default, as 4.0.0 shipped the client file", func(d map[string]any) {
 			delete(dig(d, "user_config", "client_secret"), "default")
 		}, "user_config.client_secret is optional with no default"},
+		{"an override's env, which replaces the base", func(d map[string]any) {
+			dig(d, "server", "mcp_config", "platform_overrides", "win32")["env"] = map[string]any{
+				"GCAL_ENABLE_DESTRUCTIVE": "true",
+			}
+		}, "platform_overrides.win32.env is set"},
+		{"an empty override env, which replaces the base too", func(d map[string]any) {
+			dig(d, "server", "mcp_config", "platform_overrides", "linux")["env"] = map[string]any{}
+		}, "platform_overrides.linux.env is set"},
+		{"no argument list in mcp_config", func(d map[string]any) {
+			delete(dig(d, "server", "mcp_config"), "args")
+		}, "mcp_config.args is missing; keep it as []"},
+		{"a null argument list in mcp_config", func(d map[string]any) {
+			dig(d, "server", "mcp_config")["args"] = nil
+		}, "mcp_config.args is null; keep it as []"},
+		{"an argument that turns the deletes on", func(d map[string]any) {
+			dig(d, "server", "mcp_config")["args"] = []any{"-enable-destructive=true"}
+		}, `mcp_config.args is ["-enable-destructive=true"]`},
+		{"an override's argument, which replaces the base", func(d map[string]any) {
+			dig(d, "server", "mcp_config", "platform_overrides", "linux")["args"] = []any{"-enable-destructive=true"}
+		}, "platform_overrides.linux.args is set"},
+		{"an empty override argument list, which replaces the base too", func(d map[string]any) {
+			dig(d, "server", "mcp_config", "platform_overrides", "win32")["args"] = []any{}
+		}, "platform_overrides.win32.args is set"},
 		{"a setting the bundle no longer asks for", func(d map[string]any) {
 			delete(dig(d, "user_config"), "enable_decline_all")
 			delete(dig(d, "server", "mcp_config", "env"), "GCAL_ENABLE_DECLINE_ALL")
@@ -430,20 +665,24 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 			dig(d, "user_config")["verbose"] = map[string]any{
 				"type": "boolean", "title": "Verbose", "description": "d", "default": false}
 		}, "user_config asks for verbose, which is no setting's key"},
-		{"a variable the bundle does not ask for", func(d map[string]any) {
+		{"a setting the bundle leaves out", func(d map[string]any) {
 			dig(d, "server", "mcp_config", "env")["GCAL_LOG_LEVEL"] = "debug"
-		}, "mcp_config.env sets GCAL_LOG_LEVEL, which the bundle does not ask for"},
+		}, "mcp_config.env sets GCAL_LOG_LEVEL, which the bundle leaves out: diagnostics"},
 		{"the read-only switch's removed name", func(d map[string]any) {
 			env := dig(d, "server", "mcp_config", "env")
 			env["GCAL_READONLY"] = env["GCAL_READ_ONLY"]
 			delete(env, "GCAL_READ_ONLY")
 		}, "mcp_config.env sets GCAL_READONLY, which a release removed"},
-		{"a default that configures the server", func(d map[string]any) {
-			dig(d, "user_config", "profile")["default"] = "work"
-		}, "the bundle's defaults configure the server otherwise than no environment does"},
-		{"a default the server refuses", func(d map[string]any) {
-			dig(d, "user_config", "profile")["default"] = "Not A Profile"
-		}, "the environment the bundle's defaults give the server is refused: config: invalid: profile"},
+		{"a removed setting", func(d map[string]any) {
+			dig(d, "server", "mcp_config", "env")["GCAL_REQUIRE_PROMPT"] = "false"
+		}, "mcp_config.env sets GCAL_REQUIRE_PROMPT, which a release removed"},
+		{"a variable the server does not read", func(d map[string]any) {
+			dig(d, "server", "mcp_config", "env")["GCAL_SHARE"] = "${user_config.sharing}"
+		}, "mcp_config.env sets GCAL_SHARE, which the server does not read"},
+		{"a profile field that does not say what a name is", func(d map[string]any) {
+			dig(d, "user_config", "profile")["description"] = "Which stored login to use. Lower case, digits, - and _."
+		}, `user_config.profile does not say a profile name is "up to 64 characters from a to z, 0 to 9, - and _, ` +
+			`starting with a letter or digit"`},
 		{"no privacy policy", func(d map[string]any) { delete(d, "privacy_policies") },
 			"privacy_policies is empty"},
 		{"an empty privacy policy list", func(d map[string]any) { d["privacy_policies"] = []any{} },
@@ -453,7 +692,7 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := edited(t, tc.edit)
-			problems := append(claimProblems(m), bundleSettingProblems(m, serverVars())...)
+			problems := append(claimProblems(m), settingProblems(m, bundleLeftOut)...)
 			if tc.want == "" {
 				if len(problems) > 0 {
 					t.Fatalf("the shape that ships was refused:\n%s", strings.Join(problems, "\n"))
@@ -467,26 +706,267 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 	}
 }
 
-// Every variable the server reads has a verdict: asked for, left out
-// with a reason, or a removed name config marks. A new one with
-// none fails, and so does a verdict on one the server no longer reads.
-func TestEverySettingHasABundleVerdict(t *testing.T) {
-	known := serverVars()
-	if len(known) < 17 {
-		t.Fatalf("the server reads %d variables; this would be checking a stub", len(known))
+// Every default the check cannot read is reported, in key order, and
+// the comparison still runs over the rest, so one run names everything
+// wrong with the defaults.
+func TestDefaultsProblemsReportsEveryUnreadableDefaultAndTheRest(t *testing.T) {
+	m := edited(t, func(d map[string]any) {
+		uc := dig(d, "user_config")
+		dig(uc, "profile")["default"] = map[string]any{"name": "work"}
+		dig(uc, "client_secret")["default"] = []any{"client.json"}
+		dig(uc, "enable_destructive")["default"] = true
+	})
+	const cannot = ", which the defaults check cannot build an environment from: give it a boolean, a string or a number"
+	want := []string{
+		"user_config.client_secret defaults to a list" + cannot,
+		"user_config.profile defaults to an object" + cannot,
 	}
-	m := good(t)
-	if p := bundleSettingProblems(m, known); len(p) != 0 {
-		t.Fatalf("the committed manifest fails: %v", p)
+	got, err := defaultsProblems(m, options(t, m))
+	if err != nil || len(got) != 3 || !slices.Equal(got[:2], want) ||
+		!strings.HasPrefix(got[2], "the bundle's defaults configure the server otherwise than no environment does, in EnableDestructive;") {
+		t.Errorf("defaultsProblems = %v,\n%s\nwant\n%s\nand then the comparison", err, strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	got := bundleSettingProblems(m, append(slices.Clone(known), "GCAL_NEW"))
-	if !mentions(got, "the server reads GCAL_NEW, and the bundle neither asks for it nor says why not") {
-		t.Errorf("a setting with no verdict passed: %v", got)
+}
+
+// options is a manifest's user_config, decoded as settingProblems
+// decodes it.
+func options(t *testing.T, m manifest) map[string]userConfigOption {
+	t.Helper()
+	out := map[string]userConfigOption{}
+	for key, raw := range m.UserConfig {
+		var opt userConfigOption
+		if err := json.Unmarshal(raw, &opt); err != nil {
+			t.Fatal(err)
+		}
+		out[key] = opt
 	}
-	without := slices.DeleteFunc(slices.Clone(known), func(s string) bool { return s == "GCAL_WRITE_TIMEOUT" })
-	got = bundleSettingProblems(m, without)
-	if !mentions(got, "the bundle has a verdict on GCAL_WRITE_TIMEOUT, which the server does not read") {
-		t.Errorf("a verdict on a setting the server does not read passed: %v", got)
+	return out
+}
+
+// The bundle asks for every variable the server reads, less the removed
+// ones and less each one left out with a reason, so a setting added
+// later is a decision about the bundle rather than a gap in it. An
+// exclusion the server has no use for is refused.
+func TestBundleVarsAreDerivedFromTheSettings(t *testing.T) {
+	if read := config.EnvVars(); len(read) < 17 {
+		t.Fatalf("the server reads %d variables; this would be deriving from a stub", len(read))
+	}
+	asked, problems := bundleVarsFrom(
+		[]string{"GCAL_ASKED", "GCAL_LEFT_OUT", "GCAL_REMOVED", "GCAL_ADDED_LATER"},
+		map[string]config.Var{"GCAL_ASKED": {Name: "GCAL_ASKED"}, "GCAL_REMOVED": {Name: "GCAL_REMOVED", Removed: true}},
+		map[string]string{"GCAL_LEFT_OUT": "a reason", "GCAL_GONE": "a reason", "GCAL_REMOVED": "a reason"},
+	)
+	if want := []string{"GCAL_ASKED", "GCAL_ADDED_LATER"}; !slices.Equal(asked, want) {
+		t.Errorf("asked = %v, want %v", asked, want)
+	}
+	want := []string{
+		"bundleLeftOut names GCAL_GONE, which the server does not read",
+		"bundleLeftOut names GCAL_REMOVED, which a release removed, and so left out already",
+	}
+	if !slices.Equal(problems, want) {
+		t.Errorf("problems = %q, want %q", problems, want)
+	}
+}
+
+// A stale exclusion fails the gate itself, not only the derivation, and
+// a variable added later is asked for until the bundle asks or a reason
+// is written.
+func TestSettingProblemsRefuseAStaleExclusion(t *testing.T) {
+	leftOut := maps.Clone(bundleLeftOut)
+	leftOut["GCAL_GONE"] = "a reason"
+	want := "bundleLeftOut names GCAL_GONE, which the server does not read"
+	if got := settingProblems(good(t), leftOut); !slices.Contains(got, want) {
+		t.Errorf("settingProblems = %q, want %q among them", got, want)
+	}
+	leftOut = maps.Clone(bundleLeftOut)
+	delete(leftOut, "GCAL_WRITE_TIMEOUT")
+	want = "user_config does not ask for write_timeout, which sets GCAL_WRITE_TIMEOUT"
+	if got := settingProblems(good(t), leftOut); !slices.Contains(got, want) {
+		t.Errorf("settingProblems = %q, want %q among them", got, want)
+	}
+}
+
+// The profile field is held to what the server accepts. A bundle that
+// drops the field is told so once, and one that leaves the setting out
+// is refused, so the field check cannot pass in silence.
+func TestTheFieldRulesHaveAFloor(t *testing.T) {
+	dropped := edited(t, func(d map[string]any) {
+		delete(dig(d, "user_config"), "profile")
+		delete(dig(d, "server", "mcp_config", "env"), "GCAL_PROFILE")
+	})
+	if p := slices.DeleteFunc(settingProblems(dropped, bundleLeftOut), func(p string) bool {
+		return !strings.Contains(p, "GCAL_PROFILE")
+	}); !slices.Equal(p, []string{"user_config does not ask for profile, which sets GCAL_PROFILE"}) {
+		t.Errorf("a dropped profile field gives %q, want the one problem", p)
+	}
+	leftOut := maps.Clone(bundleLeftOut)
+	leftOut["GCAL_PROFILE"] = "left out"
+	want := fmt.Sprintf("the bundle asks for no GCAL_PROFILE, so nothing holds its field to %q",
+		"up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit")
+	if got := settingProblems(dropped, leftOut); !slices.Contains(got, want) {
+		t.Errorf("a bundle with no GCAL_PROFILE gives %q, want %q among them", got, want)
+	}
+}
+
+// A field the defaults change is named, an unexported one included
+// where its type compares; an unexported one that does not is reported
+// unnamed, rather than panicking.
+func TestTheConfigDiffNamesTheFieldsThatDiffer(t *testing.T) {
+	type cfg struct {
+		Shown  int
+		hidden int
+		rest   []string
+		held   any
+	}
+	for _, tc := range []struct {
+		b    cfg
+		want []string
+	}{
+		{cfg{2, 1, nil, nil}, []string{"Shown"}},
+		{cfg{1, 2, nil, nil}, []string{"hidden"}},
+		{cfg{1, 1, []string{"x"}, nil}, []string{"an unexported field"}},
+		{cfg{1, 1, nil, nil}, nil},
+	} {
+		if got := fieldDiff(cfg{1, 1, nil, nil}, tc.b); !slices.Equal(got, tc.want) {
+			t.Errorf("fieldDiff against %+v = %q, want %q", tc.b, got, tc.want)
+		}
+	}
+	// An interface holding a slice on both sides compares as a type and
+	// panics in Value.Equal; it is reported unnamed instead.
+	if got := fieldDiff(cfg{held: []string{"y"}}, cfg{held: []string{"x"}}); !slices.Equal(got,
+		[]string{"an unexported field"}) {
+		t.Errorf("an interface field differing gives %q, want [an unexported field]", got)
+	}
+	if got := configDiff(config.Config{Profile: "a", Sharing: true}, config.Config{Profile: "a"}); !slices.Equal(got,
+		[]string{"Sharing"}) {
+		t.Errorf("configDiff = %q, want [Sharing]", got)
+	}
+}
+
+// bundleSwitches is the switches the committed bundle asks for.
+var bundleSwitches = []string{"enable_decline_all", "enable_destructive", "read_only", "sharing"}
+
+// refusingReadOnly is the committed manifest with GCAL_REQUIRE_PROMPT
+// spending read_only, so the server refuses read_only on, and nothing
+// else. Build refuses no set of the switches, and no setting it reads
+// can be made to refuse a pair, so this is how the refusal check is made
+// to fire.
+func refusingReadOnly(t *testing.T, edit func(map[string]any)) manifest {
+	t.Helper()
+	return edited(t, func(d map[string]any) {
+		dig(d, "server", "mcp_config", "env")["GCAL_REQUIRE_PROMPT"] = "${user_config.read_only}"
+		edit(d)
+	})
+}
+
+// refusals is refusalProblems over the bundle's switches, the defaults
+// checked first as settingProblems checks them.
+func refusals(t *testing.T, m manifest, declared [][]string) []string {
+	t.Helper()
+	opts := options(t, m)
+	_, defaultsErr := defaultsProblems(m, opts)
+	return refusalProblems(m, opts, bundleSwitches, declared, defaultsErr)
+}
+
+// undeclaredReadOnly is the problem refusingReadOnly gives with nothing
+// declared.
+const undeclaredReadOnly = "the server refuses read_only together, and bundleRefused does not declare it"
+
+// Every set of the switches is started, and the refused ones are held to
+// the declared list both ways, each defect reported once, for the
+// smallest set that shows it.
+func TestTheBundleRefusalsAreDeclared(t *testing.T) {
+	committed := good(t)
+	if got := refusals(t, refusingReadOnly(t, func(map[string]any) {}), nil); len(got) != 1 ||
+		!strings.HasPrefix(got[0], undeclaredReadOnly) {
+		t.Errorf("an undeclared refusal gives %q, want the one problem %q", got, undeclaredReadOnly)
+	}
+	declared := [][]string{{"read_only"}}
+	if got := refusals(t, refusingReadOnly(t, func(map[string]any) {}), declared); len(got) != 0 {
+		t.Errorf("a declared refusal gives %q, want nothing", got)
+	}
+	const starts = "bundleRefused declares that the server refuses read_only together, and it starts with them"
+	if got := refusals(t, committed, declared); !slices.Equal(got, []string{starts}) {
+		t.Errorf("a declared refusal the server starts with gives %q, want %q once", got, starts)
+	}
+	// When the defaults do not start, no set is started: the defaults
+	// check reports it.
+	if got := refusalProblems(committed, options(t, committed), bundleSwitches, declared,
+		errors.New("the defaults do not start")); len(got) != 0 {
+		t.Errorf("a set was started beside defaults that do not start: %q", got)
+	}
+	if got := refusals(t, committed, [][]string{{"profile", "read_only"}}); !slices.Contains(got,
+		"bundleRefused names profile, which is not a switch the bundle asks for") {
+		t.Errorf("a declared key that is not a switch gives %q", got)
+	}
+}
+
+// Each field in a declared set names the others' titles, trimmed, and a
+// key with no title is reported once, however many sets name it.
+func TestTheDeclaredSetsNameEachOther(t *testing.T) {
+	pair := [][]string{{"enable_destructive", "read_only"}}
+	named := options(t, edited(t, func(d map[string]any) {
+		dig(d, "user_config", "read_only")["description"] = "Refused with Deleting on."
+		dig(d, "user_config", "enable_destructive")["description"] = "Refused with Read-only on."
+		dig(d, "user_config", "enable_destructive")["title"] = " Deleting "
+	}))
+	if got := declaredProblems(named, bundleSwitches, pair); len(got) != 0 {
+		t.Errorf("fields that name each other give %q, want nothing", got)
+	}
+	unnamed := options(t, edited(t, func(d map[string]any) {
+		dig(d, "user_config", "read_only")["description"] = "Register only the reads."
+		dig(d, "user_config", "enable_destructive")["description"] = "Register the deletes."
+	}))
+	want := []string{
+		`user_config.enable_destructive does not name "Read-only", which the server refuses it with`,
+		`user_config.read_only does not name "Deleting, publishing and sharing outside", which the server refuses it with`,
+	}
+	if got := declaredProblems(unnamed, bundleSwitches, pair); !slices.Equal(got, want) {
+		t.Errorf("fields that do not name each other give %q, want %q", got, want)
+	}
+	untitled := edited(t, func(d map[string]any) { dig(d, "user_config", "read_only")["title"] = " " })
+	twice := [][]string{{"enable_destructive", "read_only"}, {"read_only"}}
+	for _, defaultsErr := range []error{nil, errors.New("the defaults do not start")} {
+		got := refusalProblems(untitled, options(t, untitled), bundleSwitches, twice, defaultsErr)
+		if n := len(slices.DeleteFunc(got, func(p string) bool {
+			return !strings.HasPrefix(p, "user_config.read_only has no title")
+		})); n != 1 {
+			t.Errorf("defaults error %v: an untitled read_only is reported %d times, want 1", defaultsErr, n)
+		}
+	}
+}
+
+// A switch in a set is on, whatever its default: a required one with
+// none, or one with a list, is not left out, which would hide a refusal.
+func TestTheRefusalsTurnASwitchOnWhateverItsDefault(t *testing.T) {
+	for name, edit := range map[string]func(map[string]any){
+		"required with no default": func(d map[string]any) {
+			dig(d, "user_config", "read_only")["required"] = true
+			delete(dig(d, "user_config", "read_only"), "default")
+		},
+		"a list default": func(d map[string]any) { dig(d, "user_config", "read_only")["default"] = []any{"true"} },
+	} {
+		got := refusals(t, refusingReadOnly(t, edit), nil)
+		if !slices.ContainsFunc(got, func(p string) bool { return strings.HasPrefix(p, undeclaredReadOnly) }) {
+			t.Errorf("%s: got %q, want one starting %q", name, got, undeclaredReadOnly)
+		}
+	}
+}
+
+// settingProblems runs the refusal check over the switches the bundle
+// asks for, so a refusal Build adds fails the gate itself.
+func TestSettingProblemsHoldTheRefusals(t *testing.T) {
+	got := settingProblems(refusingReadOnly(t, func(map[string]any) {}), bundleLeftOut)
+	if !slices.ContainsFunc(got, func(p string) bool { return strings.HasPrefix(p, undeclaredReadOnly) }) {
+		t.Errorf("settingProblems = %q, want one starting %q", got, undeclaredReadOnly)
+	}
+	// Defaults the server refuses start no set, which would each fail
+	// with them: the defaults problem is the one report.
+	got = settingProblems(edited(t, func(d map[string]any) {
+		dig(d, "user_config", "profile")["default"] = "Not A Profile"
+	}), bundleLeftOut)
+	if len(got) != 1 || !strings.HasPrefix(got[0], "the environment the bundle's defaults give the server is refused") {
+		t.Errorf("defaults the server refuses give %q, want that one problem", got)
 	}
 }
 

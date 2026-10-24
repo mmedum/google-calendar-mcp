@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 )
@@ -37,29 +36,22 @@ func packMCPB(dist, version, out string) error {
 		return fmt.Errorf("pack needs the real version; %q is the committed placeholder", version)
 	}
 
-	m, err := readManifest(manifestPath)
+	// Read once: the bytes checked are the bytes shipped. The checks are
+	// the gate's own, manifestProblems, the placeholder version among
+	// them: a committed manifest claiming a version means somebody
+	// stamped it in the tree, and the next build would ship whatever they
+	// left behind.
+	raw, err := os.ReadFile(manifestPath) //nolint:gosec // a repository path from a constant
 	if err != nil {
 		return err
 	}
-	// Refused rather than overwritten: a committed manifest claiming a
-	// version means somebody stamped it in the tree, and the next build
-	// would ship whatever they left behind.
-	if m.Version != placeholderVersion {
-		return fmt.Errorf("%s says version %q; the committed manifest must carry the placeholder %q",
-			manifestPath, m.Version, placeholderVersion)
-	}
-	if problems := append(validateManifest(m, bundleFiles, launcherNames()), bundleProblems(m)...); len(problems) > 0 {
-		sort.Strings(problems)
+	if problems := manifestProblems(raw, bundleFiles, launcherNames()); len(problems) > 0 {
 		return fmt.Errorf("the manifest does not describe the bundle this would pack:\n  %s",
 			strings.Join(problems, "\n  "))
 	}
 
 	// The version goes in through a decode and an encode. A sed over
 	// JSON is how a quote ends up inside a string.
-	raw, err := os.ReadFile(manifestPath) //nolint:gosec // a repository path from a constant
-	if err != nil {
-		return err
-	}
 	var document map[string]any
 	if err := json.Unmarshal(raw, &document); err != nil {
 		return err

@@ -4,9 +4,17 @@ import (
 	"bytes"
 	"errors"
 	"flag"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"log/slog"
+	"maps"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -271,29 +279,22 @@ func TestTheReadOnlySwitchsOldNameIsRemoved(t *testing.T) {
 	}
 }
 
-// Vars is what the bundle gate reads a setting's default and kind from,
-// so each claim it makes is held to what Build does. A switch takes true
-// and false and refuses anything else, and nothing else does that. Its
-// default and an empty value each configure what setting nothing does,
-// which is what lets a bundle leave a field blank.
+// Vars is what the bundle gate reads a setting's kind from, so each
+// claim it makes is held to what Build does. A switch takes true and
+// false and refuses anything else, and nothing else does that. A
+// removed setting takes false and refuses true. An empty value
+// configures what setting nothing does, which is what lets a bundle
+// leave a field blank.
 func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 	vars := config.Vars()
-	if len(vars) != 15 {
-		t.Fatalf("Vars has %d settings; Define reads 15", len(vars))
-	}
-	names := make([]string, len(vars))
-	for i, v := range vars {
-		names[i] = v.Name
-	}
-	slices.Sort(names)
-	if want := config.EnvVars(); !slices.Equal(names, want) {
-		t.Errorf("Vars names\n%v\nwant every variable Define reads\n%v", names, want)
+	if len(vars) < 17 {
+		t.Fatalf("Vars has %d variables; the server reads at least 17", len(vars))
 	}
 	unset, err := build(t, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var switches []string
+	var switches, removed []string
 	for _, v := range vars {
 		accepts := func(value string) bool {
 			_, err := build(t, map[string]string{v.Name: value})
@@ -302,54 +303,263 @@ func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 		if boolean := accepts("true") && accepts("false") && !accepts("maybe"); boolean != v.Switch {
 			t.Errorf("%s: Switch is %t, and Build reads it as a boolean: %t", v.Name, v.Switch, boolean)
 		}
+		if gone := accepts("false") && !accepts("true") && !accepts("maybe"); gone != v.Removed {
+			t.Errorf("%s: Removed is %t, and Build refuses it on: %t", v.Name, v.Removed, gone)
+		}
 		if v.Switch {
 			switches = append(switches, v.Name)
-			if v.Default != "true" && v.Default != "false" {
-				t.Errorf("%s is a switch defaulting to %q, which a bundle's checkbox cannot be", v.Name, v.Default)
-			}
 		}
-		for _, value := range []string{v.Default, ""} {
-			c, err := build(t, map[string]string{v.Name: value})
-			if err != nil {
-				t.Errorf("%s=%q is refused: %v", v.Name, value, err)
-				continue
-			}
-			if !reflect.DeepEqual(c, unset) {
-				t.Errorf("%s=%q configures something:\n got %+v\nwant %+v", v.Name, value, c, unset)
-			}
-		}
-	}
-	want := []string{"GCAL_READ_ONLY", "GCAL_ENABLE_DESTRUCTIVE", "GCAL_SHARING", "GCAL_ENABLE_DECLINE_ALL"}
-	if !slices.Equal(switches, want) {
-		t.Errorf("switches %v, want %v", switches, want)
-	}
-	for name, def := range map[string]string{"GCAL_SHARING": "true", "GCAL_READ_ONLY": "false"} {
-		i := slices.IndexFunc(vars, func(v config.Var) bool { return v.Name == name })
-		if i < 0 || vars[i].Default != def {
-			t.Errorf("%s does not default to %s in Vars", name, def)
-		}
-	}
-	var removed []string
-	for _, v := range vars {
 		if v.Removed {
 			removed = append(removed, v.Name)
 		}
+		c, err := build(t, map[string]string{v.Name: ""})
+		if err != nil || !reflect.DeepEqual(c, unset) {
+			t.Errorf("%s=\"\": %+v, %v; want the unconfigured configuration", v.Name, c, err)
+		}
 	}
-	if want := []string{"GCAL_REQUIRE_PROMPT", "GCAL_READONLY"}; !slices.Equal(removed, want) {
+	if want := []string{"GCAL_ENABLE_DECLINE_ALL", "GCAL_ENABLE_DESTRUCTIVE", "GCAL_READ_ONLY", "GCAL_SHARING"}; !slices.Equal(switches, want) {
+		t.Errorf("switches %v, want %v", switches, want)
+	}
+	if want := []string{"GCAL_READONLY", "GCAL_REQUIRE_PROMPT"}; !slices.Equal(removed, want) {
 		t.Errorf("Vars marks %v removed, want %v", removed, want)
 	}
 }
 
-// EnvVars is recorded from the lookups Define makes, so it holds the old
-// and removed names that no flag binds as well as every one that does.
-func TestEnvVarsIsEveryLookup(t *testing.T) {
-	got := config.EnvVars()
-	for _, name := range []string{"GCAL_READ_ONLY", "GCAL_READONLY", "GCAL_REQUIRE_PROMPT", "GCAL_CLIENT_SECRET"} {
-		if !slices.Contains(got, name) {
-			t.Errorf("EnvVars lacks %s, which Define reads: %v", name, got)
+// EnvVars is every variable the server reads, the removed ones and the
+// two read outside Define included.
+func TestEnvVars(t *testing.T) {
+	want := []string{
+		"GCAL_CLIENT_SECRET", "GCAL_CONCURRENCY", "GCAL_CONFIG_DIR", "GCAL_ENABLE_DECLINE_ALL",
+		"GCAL_ENABLE_DESTRUCTIVE", "GCAL_HTTP_TIMEOUT", "GCAL_LOG_FORMAT", "GCAL_LOG_LEVEL",
+		"GCAL_MAX_CALENDARS", "GCAL_MAX_EVENTS", "GCAL_PROFILE", "GCAL_READONLY", "GCAL_READ_ONLY",
+		"GCAL_REFRESH_TOKEN", "GCAL_REQUIRE_PROMPT", "GCAL_SHARING", "GCAL_WRITE_TIMEOUT",
+	}
+	if got := config.EnvVars(); !slices.Equal(got, want) {
+		t.Errorf("EnvVars =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// definedFloor is how many variables Define reads today, on purpose: the
+// floor moves with it, so a Define that reads nothing cannot pass.
+const definedFloor = 15
+
+// A setting given as spaces alone is unset, as an empty one is, so a
+// form field cleared to a space starts the server with the default. A
+// removed setting of spaces is off.
+func TestASettingOfSpacesIsUnset(t *testing.T) {
+	want, err := build(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vars := config.Defined()
+	if len(vars) < definedFloor {
+		t.Fatalf("Define reads %d settings, want at least %d", len(vars), definedFloor)
+	}
+	for _, v := range vars {
+		got, err := build(t, map[string]string{v.Name: "  "})
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("%s=\"  \": %+v, %v; want the unconfigured configuration", v.Name, got, err)
 		}
 	}
-	if len(got) != 15 || !slices.IsSorted(got) {
-		t.Errorf("EnvVars is %v; want the 15 variables Define reads, sorted", got)
+}
+
+// A profile name is held to ProfileRule, and the refusal says it. Only A
+// to Z are lowered: a character Unicode folds into a to z, such as the
+// Kelvin sign, is refused rather than renamed to another profile.
+func TestProfileRule(t *testing.T) {
+	if config.ProfileRule != "up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit" {
+		t.Errorf("ProfileRule = %q", config.ProfileRule)
 	}
+	for _, tc := range []struct{ name, want string }{
+		{"Work", "work"}, {" work ", "work"}, {"a", "a"}, {"9-", "9-"}, {"a-b_c", "a-b_c"},
+		{strings.Repeat("a", 64), strings.Repeat("a", 64)},
+	} {
+		if c, err := build(t, map[string]string{"GCAL_PROFILE": tc.name}); err != nil || c.Profile != tc.want {
+			t.Errorf("GCAL_PROFILE=%q: profile %q, %v; want %q", tc.name, c.Profile, err, tc.want)
+		}
+	}
+	for _, name := range []string{strings.Repeat("a", 65), "-a", "_a", "a.b", "a b", "caf\u00e9", "\u212aey"} {
+		_, err := build(t, map[string]string{"GCAL_PROFILE": name})
+		if !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), "must be "+config.ProfileRule) {
+			t.Errorf("GCAL_PROFILE=%q: %v; want it refused, naming the rule", name, err)
+		}
+	}
+}
+
+// Load is Define, Parse and Build: a flag is read, and an unknown one
+// refused.
+func TestLoad(t *testing.T) {
+	c, err := config.Load([]string{"-read-only", "true"}, func(string) string { return "" })
+	if err != nil || !c.ReadOnly {
+		t.Errorf("Load = %+v, %v; want read-only", c, err)
+	}
+	if _, err := config.Load([]string{"-unknown"}, func(string) string { return "" }); err == nil {
+		t.Error("an unknown flag was accepted")
+	}
+}
+
+// Define reads each variable once, and records each once for Vars. Two
+// settings on one variable would leave it to whichever Build reads
+// last.
+func TestDefineReadsEachVariableOnce(t *testing.T) {
+	reads := map[string]int{}
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(&bytes.Buffer{})
+	config.Define(fs, func(name string) string { reads[name]++; return "" })
+	var listed []string
+	for _, v := range config.Defined() {
+		listed = append(listed, v.Name)
+	}
+	slices.Sort(listed)
+	if len(listed) < definedFloor {
+		t.Fatalf("Define records %d settings, want at least %d", len(listed), definedFloor)
+	}
+	if read := slices.Sorted(maps.Keys(reads)); !slices.Equal(listed, read) {
+		t.Errorf("Define records %v\nDefine reads %v", listed, read)
+	}
+	for name, n := range reads {
+		if n != 1 {
+			t.Errorf("Define reads %s %d times", name, n)
+		}
+	}
+	// A variable Define reads and something outside it reads too would
+	// be read under two rules; EnvVars lists it twice, so this sees it.
+	if names := config.EnvVars(); !slices.Equal(names, slices.Compact(slices.Clone(names))) {
+		t.Errorf("EnvVars names a variable twice: %v", names)
+	}
+}
+
+// Every GCAL_ variable the server's code spells is one EnvVars lists, so
+// a variable read outside Define cannot escape the bundle and staleness
+// gates. A name is seen as a string literal, or as a chain of literals
+// and EnvPrefix joined by +; one built from any other constant, or
+// through a format verb, is not seen. The scan must read every root and
+// find a name outside the config package, or it read too little.
+func TestEveryVariableTheCodeNamesIsInEnvVars(t *testing.T) {
+	known := map[string]bool{}
+	for _, name := range config.EnvVars() {
+		known[name] = true
+	}
+	name := regexp.MustCompile(`^GCAL_[A-Z0-9][A-Z0-9_]*$`)
+	found := map[string]string{}
+	elsewhere := 0
+	fset := token.NewFileSet()
+	roots := []string{"../../cmd", "../../internal"}
+	files := map[string]int{}
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			f, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				return err
+			}
+			files[root]++
+			outside := filepath.Dir(path) != filepath.Join("..", "..", "internal", "config")
+			spell := func(s string, at token.Pos) {
+				for _, word := range strings.FieldsFunc(s, func(r rune) bool {
+					return r != '_' && (r < 'A' || r > 'Z') && (r < '0' || r > '9')
+				}) {
+					if name.MatchString(word) {
+						found[word] = fset.Position(at).String()
+						if outside {
+							elsewhere++
+						}
+					}
+				}
+			}
+			var visit func(n ast.Node) bool
+			visit = func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.BinaryExpr:
+					if n.Op != token.ADD {
+						return true
+					}
+					// A + chain is read in order: each run of literals
+					// and EnvPrefix is one string, and any other operand
+					// ends the run and is read on its own.
+					run, at := "", n.Pos()
+					for _, op := range operands(n) {
+						if s, ok := joined(op); ok {
+							if run == "" {
+								at = op.Pos()
+							}
+							run += s
+							continue
+						}
+						spell(run, at)
+						run = ""
+						ast.Inspect(op, visit)
+					}
+					spell(run, at)
+					return false
+				case *ast.BasicLit:
+					if s, err := strconv.Unquote(n.Value); n.Kind == token.STRING && err == nil {
+						spell(s, n.Pos())
+					}
+				}
+				return true
+			}
+			ast.Inspect(f, visit)
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, root := range roots {
+		if files[root] == 0 {
+			t.Errorf("the scan parsed no Go file under %s; it read too little", root)
+		}
+	}
+	if elsewhere == 0 {
+		t.Error("the scan found no GCAL_ name outside internal/config; it read too little")
+	}
+	for _, v := range slices.Sorted(maps.Keys(found)) {
+		if !known[v] {
+			t.Errorf("%s names %s, which EnvVars does not list", found[v], v)
+		}
+	}
+}
+
+// operands is a + chain's operands in order, through parentheses.
+func operands(e ast.Expr) []ast.Expr {
+	switch e := e.(type) {
+	case *ast.BinaryExpr:
+		if e.Op == token.ADD {
+			return append(operands(e.X), operands(e.Y)...)
+		}
+	case *ast.ParenExpr:
+		if b, ok := e.X.(*ast.BinaryExpr); ok && b.Op == token.ADD {
+			return operands(b)
+		}
+	}
+	return []ast.Expr{e}
+}
+
+// joined is a + chain of string literals and EnvPrefix as one string.
+func joined(e ast.Expr) (string, bool) {
+	switch e := e.(type) {
+	case *ast.BinaryExpr:
+		if e.Op != token.ADD {
+			return "", false
+		}
+		x, ok := joined(e.X)
+		if !ok {
+			return "", false
+		}
+		y, ok := joined(e.Y)
+		return x + y, ok
+	case *ast.ParenExpr:
+		return joined(e.X)
+	case *ast.BasicLit:
+		s, err := strconv.Unquote(e.Value)
+		return s, e.Kind == token.STRING && err == nil
+	case *ast.Ident:
+		return config.EnvPrefix, e.Name == "EnvPrefix"
+	case *ast.SelectorExpr:
+		return config.EnvPrefix, e.Sel.Name == "EnvPrefix"
+	}
+	return "", false
 }

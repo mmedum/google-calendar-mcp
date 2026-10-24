@@ -98,8 +98,8 @@ Every setting is in `docs/configuration.md`.
 
 Every release also carries a `.mcpb` bundle. Open it and Claude Desktop
 installs the server and asks for the settings a client's configuration
-would carry: your OAuth client JSON, the profile, read-only and three
-switches. Deleting a calendar or every event on one, publishing it and
+would carry: your OAuth client JSON, which may be left empty to use the
+one `login` recorded, the profile, read-only and three switches. Deleting a calendar or every event on one, publishing it and
 sharing it outside your organization (`enable_destructive`), and an
 event that declines every meeting it overlaps (`enable_decline_all`)
 stay off unless you turn them on. Sharing inside your organization

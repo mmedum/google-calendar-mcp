@@ -133,19 +133,32 @@ type Settings struct {
 	vars []Var
 }
 
-// Var is one setting Define reads.
+// Var is one variable the server reads.
 type Var struct {
 	// Name is the environment variable.
 	Name string
-	// Default is what the server uses when neither the variable nor its
-	// flag is set. A switch's is "true" or "false", which is also how a
-	// bundle's checkbox reaches the environment.
-	Default string
 	// Switch marks a setting that is on or off.
 	Switch bool
 	// Removed marks a setting a release took out, read only to refuse it.
 	Removed bool
 }
+
+// The variables read outside Define. internal/userconfig reads the
+// profile directory before any flag is parsed, and internal/credentials
+// the refresh token; each takes its name from here, so config imports
+// neither, and the bundle gate imports no keyring.
+const (
+	EnvConfigDir    = EnvPrefix + "CONFIG_DIR"
+	EnvRefreshToken = EnvPrefix + "REFRESH_TOKEN"
+)
+
+// envOnly is every variable read outside Define, for Vars.
+var envOnly = []string{EnvConfigDir, EnvRefreshToken}
+
+// Blank reports whether a variable's value leaves it unset: empty, or
+// spaces alone, so a form field cleared to a space means the default
+// rather than a value the server refuses.
+func Blank(v string) bool { return strings.TrimSpace(v) == "" }
 
 // removedSettings are the settings a release took out, each with why
 // and what to do instead. Each was off by default, and unset or off is
@@ -188,28 +201,26 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	s := &Settings{removed: make([]string, len(removedSettings))}
 	bind := func(p *string, name, fallback, usage string, v Var) {
 		value := env(v.Name)
-		if value == "" {
+		if Blank(value) {
 			value = fallback
 		}
 		fs.StringVar(p, name, value, usage+" [env "+v.Name+"]")
 		s.vars = append(s.vars, v)
 	}
 	def := func(p *string, name, key, fallback, usage string) {
-		bind(p, name, fallback, usage, Var{Name: EnvPrefix + key, Default: fallback})
+		bind(p, name, fallback, usage, Var{Name: EnvPrefix + key})
 	}
-	// A switch is registered empty rather than with its default, so
-	// Build can tell one nobody set from one set to its default. Empty
-	// is the default.
-	sw := func(p *string, name, key string, on bool, usage string) {
-		bind(p, name, "", usage, Var{Name: EnvPrefix + key, Default: strconv.FormatBool(on), Switch: true})
+	// A switch is registered empty, which Build reads as its default.
+	sw := func(p *string, name, key, usage string) {
+		bind(p, name, "", usage, Var{Name: EnvPrefix + key, Switch: true})
 	}
 	def(&s.Profile, "profile", "PROFILE", "default", "named configuration profile")
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
-	sw(&s.ReadOnly, "read-only", "READ_ONLY", false, "register only read tools and request read-only scopes (default off)")
-	sw(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", false, "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call (default off)")
-	sw(&s.Sharing, "sharing", "SHARING", true, "register the calendar sharing tools, the wider ones with -enable-destructive: on, off (default on)")
-	sw(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", false, "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps (default off)")
+	sw(&s.ReadOnly, "read-only", "READ_ONLY", "register only read tools and request read-only scopes (default off)")
+	sw(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call (default off)")
+	sw(&s.Sharing, "sharing", "SHARING", "register the calendar sharing tools, the wider ones with -enable-destructive: on, off (default on)")
+	sw(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps (default off)")
 	def(&s.MaxEvents, "max-events", "MAX_EVENTS", strconv.Itoa(DefaultMaxEvents), "default event budget for a read")
 	def(&s.MaxCalendars, "max-calendars", "MAX_CALENDARS", strconv.Itoa(DefaultMaxCalendars), "how many calendars one call may fan out across")
 	def(&s.Concurrency, "concurrency", "CONCURRENCY", strconv.Itoa(DefaultConcurrency), "requests in flight during a fan-out")
@@ -223,33 +234,69 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	return s
 }
 
-// Vars is every setting Define reads, in the order it reads them. The
-// bundle gate reads each switch's default here.
+// Vars is every variable the server reads, sorted by name: Define's,
+// the removed ones included, and the ones read outside it. Define's are
+// recorded rather than listed, so they cannot fall behind. The bundle
+// and staleness gates derive what they hold from these.
 func Vars() []Var {
+	vars := defined()
+	for _, name := range envOnly {
+		vars = append(vars, Var{Name: name})
+	}
+	slices.SortFunc(vars, func(a, b Var) int { return strings.Compare(a.Name, b.Name) })
+	return vars
+}
+
+// defined is every variable Define reads, in the order it reads them.
+func defined() []Var {
 	fs := flag.NewFlagSet("vars", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	return Define(fs, func(string) string { return "" }).vars
 }
 
-// EnvVars is every variable Define looks up, sorted. It is recorded from
-// the lookups rather than listed, so it cannot fall behind.
+// EnvVars is the names of Vars, sorted. A name listed twice is a
+// variable read under two rules, which a test refuses, so it is not
+// compacted.
 func EnvVars() []string {
-	var seen []string
-	fs := flag.NewFlagSet("envvars", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	Define(fs, func(name string) string {
-		seen = append(seen, name)
-		return ""
-	})
-	slices.Sort(seen)
-	return slices.Compact(seen)
+	vars := Vars()
+	names := make([]string, 0, len(vars))
+	for _, v := range vars {
+		names = append(names, v.Name)
+	}
+	return names
 }
+
+// Load is Define, Parse and Build for a caller with no flags of its own.
+func Load(args []string, env func(string) string) (Config, error) {
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	s := Define(fs, env)
+	if err := fs.Parse(args); err != nil {
+		return Config{}, err
+	}
+	return s.Build()
+}
+
+// ProfileRule is profilePattern in words, which Build's refusal and the
+// bundle's profile field both give.
+const ProfileRule = "up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit"
 
 var (
 	profilePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 	logLevels      = map[LogLevel]bool{LogDebug: true, LogInfo: true, LogWarn: true, LogError: true}
 	logFormats     = map[LogFormat]bool{LogText: true, LogJSON: true}
 )
+
+// asciiLower lowers A to Z alone, so a character Unicode folds into a
+// to z, such as the Kelvin sign, is refused rather than renamed.
+func asciiLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
+		}
+		return r
+	}, s)
+}
 
 // ErrInvalid wraps every validation failure.
 var ErrInvalid = errors.New("config: invalid")
@@ -259,9 +306,9 @@ func (s *Settings) Build() (Config, error) {
 	var c Config
 	var errs []error
 
-	c.Profile = strings.ToLower(strings.TrimSpace(s.Profile))
+	c.Profile = asciiLower(strings.TrimSpace(s.Profile))
 	if !profilePattern.MatchString(c.Profile) {
-		errs = append(errs, fmt.Errorf("%w: profile %q must match %s", ErrInvalid, s.Profile, profilePattern))
+		errs = append(errs, fmt.Errorf("%w: profile %q must be %s", ErrInvalid, s.Profile, ProfileRule))
 	}
 
 	c.LogLevel = LogLevel(strings.ToLower(strings.TrimSpace(s.LogLevel)))

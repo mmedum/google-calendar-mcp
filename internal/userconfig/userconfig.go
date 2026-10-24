@@ -18,14 +18,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/fileperm"
 )
 
 // AppDir is the directory name under the user's config directory.
 const AppDir = "google-calendar-mcp"
-
-// EnvDir overrides the base directory.
-const EnvDir = "GCAL_CONFIG_DIR"
 
 // DefaultProfile is the profile used when none is named.
 const DefaultProfile = "default"
@@ -42,10 +40,12 @@ type Config struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// BaseDir returns the application config directory.
+// BaseDir returns the application config directory: config.EnvConfigDir
+// trimmed, or the user's config directory when that is unset or spaces
+// alone, as for every setting.
 func BaseDir() (string, error) {
-	if v := os.Getenv(EnvDir); v != "" {
-		return v, nil
+	if v := os.Getenv(config.EnvConfigDir); !config.Blank(v) {
+		return strings.TrimSpace(v), nil
 	}
 	d, err := os.UserConfigDir()
 	if err != nil {

@@ -26,8 +26,9 @@ import (
 //  1. every tool the binary publishes appears in the README's table,
 //     every tool named there exists, and every Claude Code permission
 //     rule the README gives names a tool the binary publishes;
-//  2. every GCAL_* setting config reads is documented, and every
-//     setting documented exists or is one a release removed;
+//  2. every GCAL_* variable the server reads is documented by name, a
+//     removed one included, no other is, and the configuration page
+//     states the profile rule;
 //  3. every repository path the docs name still exists;
 //  4. no version number is written in prose in the README — a badge
 //     cannot go stale, a copy of a fact can.
@@ -152,45 +153,52 @@ func looksLikeToolName(s string) bool {
 	return false
 }
 
+// configDocPath is the page every setting is documented on.
+const configDocPath = "docs/configuration.md"
+
 func checkSettings() ([]string, int, error) {
-	docs, err := os.ReadFile("docs/configuration.md")
+	docs, err := os.ReadFile(configDocPath)
 	if err != nil {
 		return nil, 0, err
 	}
-	problems, n := settingProblems(config.Vars(), string(docs))
-	return problems, n, nil
+	vars := config.Vars()
+	return configDocProblems(vars, string(docs)), len(vars), nil
 }
 
-// settingProblems holds docs/configuration.md, text, to the settings
-// config reads, vars, both ways. A setting a release removed may be
-// named, to say it is gone.
-func settingProblems(vars []config.Var, text string) ([]string, int) {
+// configDocProblems holds the configuration page, text, to the variables
+// the server reads, vars, both ways. It names every one as a whole word,
+// a removed one it refuses and the two read outside Define included,
+// names no other, and says what a profile name is in the words the
+// server refuses one with.
+func configDocProblems(vars []config.Var, text string) []string {
 	var problems []string
 	known := map[string]bool{}
-	defined := 0
 	for _, v := range vars {
 		known[v.Name] = true
-		if v.Removed {
-			continue
-		}
-		defined++
-		if !strings.Contains(text, v.Name) {
-			problems = append(problems, fmt.Sprintf("docs/configuration.md does not document %s", v.Name))
+		if !namesWord(text, v.Name) {
+			problems = append(problems, fmt.Sprintf("%s does not document %s", configDocPath, v.Name))
 		}
 	}
-	// Settings the docs invent.
-	for _, m := range regexp.MustCompile(`GCAL_[A-Z_0-9]+`).FindAllString(text, -1) {
-		switch m {
-		// Not flag-bound: these are read directly, and are documented
-		// deliberately.
-		case "GCAL_CONFIG_DIR", "GCAL_REFRESH_TOKEN":
-			continue
-		}
-		if !known[m] {
-			problems = append(problems, fmt.Sprintf("docs/configuration.md documents %s, which the code does not define", m))
+	// Settings the page invents.
+	for _, m := range settingWord.FindAllStringSubmatch(text, -1) {
+		if !known[m[2]] {
+			problems = append(problems, fmt.Sprintf("%s documents %s, which the code does not read", configDocPath, m[2]))
 		}
 	}
-	return problems, defined
+	if !strings.Contains(text, config.ProfileRule) {
+		problems = append(problems, fmt.Sprintf("%s does not say a profile name is %q", configDocPath, config.ProfileRule))
+	}
+	return problems
+}
+
+// settingWord is a GCAL_ name standing as a word of its own.
+var settingWord = regexp.MustCompile(`(^|[^A-Z0-9_])(GCAL_[A-Z0-9_]+)`)
+
+// namesWord reports whether text names the variable as a whole word, so
+// a longer name that contains it, such as GCAL_READ_ONLY_X, does not
+// count as GCAL_READ_ONLY.
+func namesWord(text, name string) bool {
+	return regexp.MustCompile(`(^|[^A-Z0-9_])` + regexp.QuoteMeta(name) + `($|[^A-Z0-9_])`).MatchString(text)
 }
 
 // pathRe finds anything shaped like a repository path in prose.

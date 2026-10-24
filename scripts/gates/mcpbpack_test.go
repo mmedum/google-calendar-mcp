@@ -264,6 +264,44 @@ func TestAnIncompleteDistIsRefused(t *testing.T) {
 	}
 }
 
+// The packer refuses what the gate refuses, because both run
+// manifestProblems: a check the gate alone used to run stops the pack,
+// and so does a file beside the manifest.
+func TestPackRunsEveryCheckTheGateRuns(t *testing.T) {
+	root := copiedRoot(t)
+	dist := fakeDist(t)
+	out := filepath.Join(t.TempDir(), "b.mcpb")
+	if err := packMCPB(dist, "1.0.0", out); err != nil {
+		t.Fatalf("the copied repository does not pack: %v", err)
+	}
+	manifest := string(repoFile(t, manifestPath))
+	for _, tc := range []struct{ name, file, old, new, want string }{
+		{"no word of the login", manifestPath, "THIS BUNDLE DOES NOT LOG YOU IN", "THIS BUNDLE IS READY",
+			"long_description does not say the bundle cannot log the user in"},
+		{"another license", "LICENSE", "Apache License", "MIT License",
+			`the manifest says the license is "Apache-2.0" and LICENSE is MIT`},
+		{"a relative command", manifestPath, `"command": "${__dirname}/server/google-calendar-mcp-darwin"`,
+			`"command": "server/google-calendar-mcp-darwin"`, "a command starts with ${__dirname}/"},
+		{"an argument", manifestPath, `"args": []`, `"args": ["-sharing=off"]`, `mcp_config.args is ["-sharing=off"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := manifest
+			if tc.file != manifestPath {
+				body = string(repoFile(t, tc.file))
+			}
+			if !strings.Contains(body, tc.old) {
+				t.Fatalf("%s does not say %q", tc.file, tc.old)
+			}
+			put(t, root, tc.file, strings.ReplaceAll(body, tc.old, tc.new))
+			t.Cleanup(func() { put(t, root, tc.file, body) })
+			err := packMCPB(dist, "1.0.0", filepath.Join(t.TempDir(), "b.mcpb"))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("pack = %v, want it refused, naming %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // The placeholder is refused as a version, so a release cannot ship a
 // bundle claiming to be the committed development copy.
 func TestPackRefusesThePlaceholder(t *testing.T) {
