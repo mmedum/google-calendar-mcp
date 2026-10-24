@@ -15,7 +15,7 @@ dir=$(dirname "$0")
 
 case "$(uname -m)" in
   x86_64 | amd64)
-    exec "$dir/google-calendar-mcp-linux-x64" "$@"
+    exec "$dir/google-calendar-mcp-linux-amd64" "$@"
     ;;
   aarch64 | arm64)
     exec "$dir/google-calendar-mcp-linux-arm64" "$@"
@@ -25,5 +25,5 @@ esac
 # Never stdout: a line of English there corrupts the JSON-RPC stream
 # before the client's first request completes, and the client reports it
 # as a protocol error rather than as this.
-echo "google-calendar-mcp: no binary in this bundle for $(uname -m); builds for x86_64 and aarch64 are at https://github.com/mmedum/google-calendar-mcp/releases" >&2
+echo "google-calendar-mcp: this bundle carries x86_64 and aarch64 binaries, not $(uname -m)." "Install with: go install github.com/mmedum/google-calendar-mcp/v4/cmd/google-calendar-mcp@latest" >&2
 exit 1

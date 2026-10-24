@@ -14,7 +14,7 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_PROFILE` | `-profile` | `default` | Named configuration profile. Separate profiles keep separate tokens. |
 | `GCAL_LOG_LEVEL` | `-log-level` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr. |
 | `GCAL_LOG_FORMAT` | `-log-format` | `text` | `text` or `json`. |
-| `GCAL_READONLY` | `-read-only` | `false` | Register only read tools, and request only read scopes so the API itself refuses a write. |
+| `GCAL_READ_ONLY` | `-read-only` | `false` | Register only read tools, and request only read scopes so the API itself refuses a write. |
 | `GCAL_ENABLE_DESTRUCTIVE` | `-enable-destructive` | `false` | Register `delete_calendar` and `clear_calendar`, and with sharing on `publish_calendar` and `widen_calendar_access`. Each still needs `confirm` on the call. |
 | `GCAL_ENABLE_DECLINE_ALL` | `-enable-decline-all` | `false` | Register `create_event_declining_all`: an out-of-office or focus-time event that declines every meeting it overlaps, the ones already accepted too. `create_event` refuses that whatever this says. |
 | `GCAL_SHARING` | `-sharing` | `on` | `on` or `off`. Off removes the calendar sharing tools entirely, the wider ones included. |
@@ -24,6 +24,11 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_HTTP_TIMEOUT` | `-http-timeout` | `60s` | Per-attempt timeout for a read. |
 | `GCAL_WRITE_TIMEOUT` | `-write-timeout` | `120s` | Timeout for a write. |
 | `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. |
+
+`GCAL_READ_ONLY` was `GCAL_READONLY` until 4.1.0, and took the name
+the sibling servers and the Claude Desktop bundle use. The old name
+still works, and the server logs a warning naming the new one. Set both
+and they must agree, or the server refuses to start.
 
 `GCAL_REQUIRE_PROMPT` and `-require-prompt` were removed with the
 server's question: the server asks the person nothing, and your client's

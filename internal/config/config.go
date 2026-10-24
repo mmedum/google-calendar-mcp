@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -107,7 +108,20 @@ type Config struct {
 	HTTPTimeout      time.Duration
 	WriteTimeout     time.Duration
 	ClientSecretPath string
+	// Deprecated is each old setting name this run was given, for the
+	// caller to warn about once it has a logger.
+	Deprecated []Rename
 }
+
+// Rename is a setting that took a new name and still answers to the
+// old one.
+type Rename struct {
+	Old, New string
+}
+
+// renamedReadOnly is the read-only switch's name until 4.1.0, renamed to
+// match the sibling servers and the bundle key read_only.
+var renamedReadOnly = Rename{Old: EnvPrefix + "READONLY", New: EnvPrefix + "READ_ONLY"}
 
 // Settings holds the raw string values before validation. Flags and the
 // environment both feed it; Build turns it into a Config.
@@ -119,6 +133,8 @@ type Settings struct {
 	EnableDestructive string
 	Sharing           string
 	EnableDeclineAll  string
+	// ReadOnlyOld is GCAL_READONLY, ReadOnly's old name, still read.
+	ReadOnlyOld string
 	// RequirePrompt is the removed GCAL_REQUIRE_PROMPT, read only to
 	// refuse it turned on.
 	RequirePrompt    string
@@ -128,38 +144,79 @@ type Settings struct {
 	HTTPTimeout      string
 	WriteTimeout     string
 	ClientSecretPath string
+	// vars is every setting Define reads, in order.
+	vars []Var
+}
+
+// Var is one setting Define reads.
+type Var struct {
+	// Name is the environment variable.
+	Name string
+	// Default is what the server uses when neither the variable nor its
+	// flag is set. A switch's is "true" or "false", which is also how a
+	// bundle's checkbox reaches the environment.
+	Default string
+	// Switch marks a setting that is on or off.
+	Switch bool
+	// ReplacedBy names the variable that took this one's place. The old
+	// name still works, and nothing should offer it.
+	ReplacedBy string
+	// Removed marks a setting a release took out, read only to refuse it.
+	Removed bool
 }
 
 // Define registers one flag per setting on fs. Each flag defaults to the
 // matching GCAL_* variable, so a flag on the command line wins over the
 // environment and the environment wins over the built-in default.
 //
-// The staleness gate reads these def() calls to learn the setting names,
-// so the documentation cannot fall behind a setting added here.
+// The staleness gate reads these def() and sw() calls to learn the
+// setting names, so the documentation cannot fall behind a setting added
+// here.
 func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	s := &Settings{}
-	def := func(p *string, name, key, fallback, usage string) {
-		v := env(EnvPrefix + key)
-		if v == "" {
-			v = fallback
+	bind := func(p *string, name, fallback, usage string, v Var) {
+		value := env(v.Name)
+		if value == "" {
+			value = fallback
 		}
-		fs.StringVar(p, name, v, usage+" [env "+EnvPrefix+key+"]")
+		fs.StringVar(p, name, value, usage+" [env "+v.Name+"]")
+		s.vars = append(s.vars, v)
+	}
+	def := func(p *string, name, key, fallback, usage string) {
+		bind(p, name, fallback, usage, Var{Name: EnvPrefix + key, Default: fallback})
+	}
+	// A switch is registered empty rather than with its default, so
+	// Build can tell one nobody set from one set to its default. Empty
+	// is the default.
+	sw := func(p *string, name, key string, on bool, usage string) {
+		bind(p, name, "", usage, Var{Name: EnvPrefix + key, Default: strconv.FormatBool(on), Switch: true})
 	}
 	def(&s.Profile, "profile", "PROFILE", "default", "named configuration profile")
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
-	def(&s.ReadOnly, "read-only", "READONLY", "false", "register only read tools and request read-only scopes")
-	def(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call")
-	def(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools, the wider ones with -enable-destructive: on, off")
-	def(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", "false", "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps")
+	sw(&s.ReadOnly, "read-only", "READ_ONLY", false, "register only read tools and request read-only scopes (default off)")
+	sw(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", false, "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call (default off)")
+	sw(&s.Sharing, "sharing", "SHARING", true, "register the calendar sharing tools, the wider ones with -enable-destructive: on, off (default on)")
+	sw(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", false, "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps (default off)")
 	def(&s.MaxEvents, "max-events", "MAX_EVENTS", strconv.Itoa(DefaultMaxEvents), "default event budget for a read")
 	def(&s.MaxCalendars, "max-calendars", "MAX_CALENDARS", strconv.Itoa(DefaultMaxCalendars), "how many calendars one call may fan out across")
 	def(&s.Concurrency, "concurrency", "CONCURRENCY", strconv.Itoa(DefaultConcurrency), "requests in flight during a fan-out")
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-attempt timeout for a read")
 	def(&s.WriteTimeout, "write-timeout", "WRITE_TIMEOUT", "120s", "timeout for a write")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
+	renamed(&s.ReadOnlyOld, env, "READONLY")
+	s.vars = append(s.vars, Var{Name: renamedReadOnly.Old, Default: "false", Switch: true, ReplacedBy: renamedReadOnly.New})
 	removed(&s.RequirePrompt, env, "REQUIRE_PROMPT")
+	s.vars = append(s.vars, Var{Name: EnvPrefix + "REQUIRE_PROMPT", Removed: true})
 	return s
+}
+
+// renamed reads a setting's old name, with no flag: the flag kept its
+// name, and only the variable moved. The staleness gate reads these
+// calls, so the documentation may name an old name to say it still
+// works.
+func renamed(p *string, env func(string) string, key string) {
+	*p = env(EnvPrefix + key)
 }
 
 // removed reads a setting a release took away, with no flag: it is read
@@ -168,6 +225,28 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 // gone.
 func removed(p *string, env func(string) string, key string) {
 	*p = env(EnvPrefix + key)
+}
+
+// Vars is every setting Define reads, in the order it reads them. The
+// bundle gate reads each switch's default here.
+func Vars() []Var {
+	fs := flag.NewFlagSet("vars", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	return Define(fs, func(string) string { return "" }).vars
+}
+
+// EnvVars is every variable Define looks up, sorted. It is recorded from
+// the lookups rather than listed, so it cannot fall behind.
+func EnvVars() []string {
+	var seen []string
+	fs := flag.NewFlagSet("envvars", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	Define(fs, func(name string) string {
+		seen = append(seen, name)
+		return ""
+	})
+	slices.Sort(seen)
+	return slices.Compact(seen)
 }
 
 var (
@@ -199,8 +278,11 @@ func (s *Settings) Build() (Config, error) {
 	}
 
 	var err error
-	if c.ReadOnly, err = parseBool("read-only", s.ReadOnly); err != nil {
+	if c.ReadOnly, err = s.readOnly(); err != nil {
 		errs = append(errs, err)
+	}
+	if strings.TrimSpace(s.ReadOnlyOld) != "" {
+		c.Deprecated = append(c.Deprecated, renamedReadOnly)
 	}
 	if c.EnableDestructive, err = parseBool("enable-destructive", s.EnableDestructive); err != nil {
 		errs = append(errs, err)
@@ -248,6 +330,26 @@ func (s *Settings) Build() (Config, error) {
 		return Config{}, errors.Join(errs...)
 	}
 	return c, nil
+}
+
+// readOnly reads the read-only switch under its name and under its old
+// one. Either alone decides. Both set have to agree, because a run that
+// took one over the other would turn on or leave off what its owner set
+// the other to say.
+func (s *Settings) readOnly() (bool, error) {
+	on, err := parseBool("read-only", s.ReadOnly)
+	if err != nil || strings.TrimSpace(s.ReadOnlyOld) == "" {
+		return on, err
+	}
+	old, err := parseBool(renamedReadOnly.Old, s.ReadOnlyOld)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(s.ReadOnly) != "" && old != on {
+		return false, fmt.Errorf("%w: %s is %t and %s, its old name, is %t: unset %s",
+			ErrInvalid, renamedReadOnly.New, on, renamedReadOnly.Old, old, renamedReadOnly.Old)
+	}
+	return old, nil
 }
 
 func parseBool(name, v string) (bool, error) {

@@ -94,6 +94,27 @@ first. Use `--no-browser`: it prints the authorization URL and the exact
 
 Every setting is in `docs/configuration.md`.
 
+### Claude Desktop
+
+Every release also carries a `.mcpb` bundle. Open it and Claude Desktop
+installs the server and asks for the settings a client's configuration
+would carry: your OAuth client JSON, the profile, read-only and three
+switches. Deleting a calendar or every event on one, publishing it and
+sharing it outside your organization (`enable_destructive`), and an
+event that declines every meeting it overlaps (`enable_decline_all`)
+stay off unless you turn them on. Sharing inside your organization
+(`sharing`) stays on, as on a server you configure by hand, and
+read-only leaves every switch nothing to register. This server asks
+nobody before a call. Claude Desktop approves each tool, with Allow once
+or Always allow, and a tool you always allow then runs unasked, so leave
+a switch off unless you need its tools.
+
+The bundle covers macOS, Windows and Linux on both architectures: macOS
+through a universal binary, Windows through amd64, and Linux through a
+small launcher that picks the binary at start. It does not log you in.
+Install the binary as well, run `google-calendar-mcp login` once, and
+the bundle uses the same login.
+
 ## Tools
 
 | Tool | What it does |
@@ -123,7 +144,7 @@ Every setting is in `docs/configuration.md`.
 | `delete_calendar` | Delete a calendar and every event on it. Gated. |
 | `clear_calendar` | Delete every event on your primary calendar. Gated. |
 
-`GCAL_READONLY=true` registers the first nine and requests only read
+`GCAL_READ_ONLY=true` registers the first nine and requests only read
 scopes, so the API itself refuses a write.
 
 `manage_calendar` covers what the API splits across two resources and

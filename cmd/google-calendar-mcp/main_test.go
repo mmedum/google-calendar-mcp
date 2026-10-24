@@ -143,7 +143,7 @@ func TestStatusReportsTheConfiguredFlags(t *testing.T) {
 		switch k {
 		case "GCAL_CONFIG_DIR":
 			return dir
-		case "GCAL_READONLY":
+		case "GCAL_READ_ONLY":
 			return "true"
 		case "GCAL_SHARING":
 			return "off"
@@ -156,7 +156,7 @@ func TestStatusReportsTheConfiguredFlags(t *testing.T) {
 	}
 	s := out.String()
 	if !strings.Contains(s, "read-only:     true") {
-		t.Fatalf("status does not reflect GCAL_READONLY:\n%s", s)
+		t.Fatalf("status does not reflect GCAL_READ_ONLY:\n%s", s)
 	}
 	if !strings.Contains(s, "sharing tools: false") {
 		t.Fatalf("status does not reflect GCAL_SHARING=off:\n%s", s)
@@ -440,26 +440,45 @@ func TestServeOverTheInjectedStreams(t *testing.T) {
 	}
 }
 
+// Read-only is GCAL_READ_ONLY, and GCAL_READONLY, its name until 4.1.0,
+// still works and says it was renamed, on stderr.
 func TestServeRespectsReadOnly(t *testing.T) {
-	dir := t.TempDir()
-	env := func(k string) string {
-		switch k {
-		case "GCAL_CONFIG_DIR":
-			return dir
-		case "GCAL_READONLY":
-			return "true"
-		}
-		return ""
-	}
-	frames, _ := serveSession(t, env, initMessages, 2)
-	if len(frames) < 2 {
-		t.Fatalf("read %d frames", len(frames))
-	}
-	raw, err := json.Marshal(frames[len(frames)-1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "list_calendars") {
-		t.Fatalf("read-only mode dropped the read tools: %s", raw)
+	for _, tc := range []struct{ name, warning string }{
+		{"GCAL_READ_ONLY", ""},
+		{"GCAL_READONLY", "a setting was renamed; the old name still works"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			env := func(k string) string {
+				switch k {
+				case "GCAL_CONFIG_DIR":
+					return dir
+				case tc.name:
+					return "true"
+				}
+				return ""
+			}
+			frames, stderr := serveSession(t, env, initMessages, 2)
+			if len(frames) < 2 {
+				t.Fatalf("read %d frames", len(frames))
+			}
+			raw, err := json.Marshal(frames[len(frames)-1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(raw), "list_calendars") {
+				t.Fatalf("read-only mode dropped the read tools: %s", raw)
+			}
+			if strings.Contains(string(raw), "create_event") {
+				t.Fatalf("read-only mode registered a write: %s", raw)
+			}
+			renamed := strings.Contains(stderr, "a setting was renamed")
+			if tc.warning == "" && renamed {
+				t.Errorf("the new name was warned about:\n%s", stderr)
+			}
+			if tc.warning != "" && (!strings.Contains(stderr, tc.warning) || !strings.Contains(stderr, "new=GCAL_READ_ONLY")) {
+				t.Errorf("the old name was not warned about, naming the new one:\n%s", stderr)
+			}
+		})
 	}
 }

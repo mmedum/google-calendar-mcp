@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -19,7 +20,7 @@ import (
 // otherwise correct, and asserts the sentence that names it.
 
 func testLauncher() []string {
-	return []string{"google-calendar-mcp-linux-arm64", "google-calendar-mcp-linux-x64"}
+	return []string{"google-calendar-mcp-linux-amd64", "google-calendar-mcp-linux-arm64"}
 }
 
 // repoFile reads a path relative to the repository root.
@@ -127,7 +128,9 @@ func TestTheSixWaysAManifestBreaks(t *testing.T) {
 // TestTheLauncherNamesAreThePackers is the sixth way, and the one no
 // manifest can see: the names live in a shell script nothing else reads.
 func TestTheLauncherNamesAreThePackers(t *testing.T) {
-	problems := validateManifest(good(t), bundleFiles, []string{"google-calendar-mcp-linux-amd64"})
+	// The 4.0.0 name: the family's layout is -linux-amd64.
+	problems := validateManifest(good(t), bundleFiles,
+		[]string{"google-calendar-mcp-linux-arm64", "google-calendar-mcp-linux-x64"})
 	if !mentions(problems, "the launcher runs") {
 		t.Fatalf("a launcher running a binary nobody stages was not refused; problems: %v", problems)
 	}
@@ -359,5 +362,160 @@ func TestTheFloorComparesVersionsAsNumbers(t *testing.T) {
 func TestTheCommittedManifestMeetsTheFloor(t *testing.T) {
 	if behind(good(t).ManifestVersion, minManifestVersion) {
 		t.Fatalf("the committed manifest is below the floor this repository claims to have checked")
+	}
+}
+
+// edited is the committed manifest with one edit applied to its decoded
+// document, read back the way the gate reads it.
+func edited(t *testing.T, edit func(map[string]any)) manifest {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(repoFile(t, manifestPath), &doc); err != nil {
+		t.Fatal(err)
+	}
+	edit(doc)
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// dig is the object at a path in a decoded manifest.
+func dig(doc map[string]any, path ...string) map[string]any {
+	for _, key := range path {
+		doc = doc[key].(map[string]any)
+	}
+	return doc
+}
+
+// Each rule the bundle's settings and claims are held to, broken once in
+// the committed manifest, and the shape that ships passing all of them.
+func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]any)
+		want string
+	}{
+		{name: "the shape that ships", edit: func(map[string]any) {}},
+		{"a switch the bundle turns on", func(d map[string]any) {
+			dig(d, "user_config", "enable_destructive")["default"] = true
+		}, "user_config.enable_destructive is a boolean defaulting to true; GCAL_ENABLE_DESTRUCTIVE is a switch " +
+			"the server defaults to false"},
+		{"a switch the bundle turns off", func(d map[string]any) {
+			dig(d, "user_config", "sharing")["default"] = false
+		}, "user_config.sharing is a boolean defaulting to false; GCAL_SHARING is a switch the server defaults to true"},
+		{"a switch asked as text", func(d map[string]any) {
+			dig(d, "user_config", "sharing")["type"] = "string"
+			dig(d, "user_config", "sharing")["default"] = "on"
+		}, `user_config.sharing is a string defaulting to "on"; GCAL_SHARING is a switch`},
+		{"a switch with no default", func(d map[string]any) {
+			delete(dig(d, "user_config", "enable_decline_all"), "default")
+		}, "user_config.enable_decline_all is a boolean defaulting to nothing"},
+		{"an optional key with no default, as 4.0.0 shipped the client file", func(d map[string]any) {
+			delete(dig(d, "user_config", "client_secret"), "default")
+		}, "user_config.client_secret is optional with no default"},
+		{"a setting the bundle no longer asks for", func(d map[string]any) {
+			delete(dig(d, "user_config"), "enable_decline_all")
+			delete(dig(d, "server", "mcp_config", "env"), "GCAL_ENABLE_DECLINE_ALL")
+		}, "user_config does not ask for enable_decline_all, which sets GCAL_ENABLE_DECLINE_ALL"},
+		{"a setting spent under another key", func(d map[string]any) {
+			dig(d, "server", "mcp_config", "env")["GCAL_PROFILE"] = "${user_config.sharing}"
+		}, `mcp_config.env.GCAL_PROFILE is "${user_config.sharing}", want "${user_config.profile}"`},
+		{"a key no setting has", func(d map[string]any) {
+			dig(d, "user_config")["verbose"] = map[string]any{
+				"type": "boolean", "title": "Verbose", "description": "d", "default": false}
+		}, "user_config asks for verbose, which is no setting's key"},
+		{"a variable the bundle does not ask for", func(d map[string]any) {
+			dig(d, "server", "mcp_config", "env")["GCAL_LOG_LEVEL"] = "debug"
+		}, "mcp_config.env sets GCAL_LOG_LEVEL, which the bundle does not ask for"},
+		{"the old read-only name", func(d map[string]any) {
+			env := dig(d, "server", "mcp_config", "env")
+			env["GCAL_READONLY"] = env["GCAL_READ_ONLY"]
+			delete(env, "GCAL_READ_ONLY")
+		}, "mcp_config.env sets GCAL_READONLY, whose name is now GCAL_READ_ONLY; offer the new one"},
+		{"a default that configures the server", func(d map[string]any) {
+			dig(d, "user_config", "profile")["default"] = "work"
+		}, "the bundle's defaults configure the server otherwise than no environment does"},
+		{"a default the server refuses", func(d map[string]any) {
+			dig(d, "user_config", "profile")["default"] = "Not A Profile"
+		}, "the environment the bundle's defaults give the server is refused: config: invalid: profile"},
+		{"no privacy policy", func(d map[string]any) { delete(d, "privacy_policies") },
+			"privacy_policies is empty"},
+		{"an empty privacy policy list", func(d map[string]any) { d["privacy_policies"] = []any{} },
+			"privacy_policies is empty"},
+		{"no Claude Desktop floor", func(d map[string]any) { delete(dig(d, "compatibility"), "claude_desktop") },
+			`compatibility.claude_desktop is ""; the family's bundles claim ">=0.10.0"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := edited(t, tc.edit)
+			problems := append(claimProblems(m), bundleSettingProblems(m, serverVars())...)
+			if tc.want == "" {
+				if len(problems) > 0 {
+					t.Fatalf("the shape that ships was refused:\n%s", strings.Join(problems, "\n"))
+				}
+				return
+			}
+			if !mentions(problems, tc.want) {
+				t.Errorf("problems:\n%s\nwant one containing %q", strings.Join(problems, "\n"), tc.want)
+			}
+		})
+	}
+}
+
+// Every variable the server reads has a verdict: asked for, left out
+// with a reason, or an old or removed name config marks. A new one with
+// none fails, and so does a verdict on one the server no longer reads.
+func TestEverySettingHasABundleVerdict(t *testing.T) {
+	known := serverVars()
+	if len(known) < 17 {
+		t.Fatalf("the server reads %d variables; this would be checking a stub", len(known))
+	}
+	m := good(t)
+	if p := bundleSettingProblems(m, known); len(p) != 0 {
+		t.Fatalf("the committed manifest fails: %v", p)
+	}
+	got := bundleSettingProblems(m, append(slices.Clone(known), "GCAL_NEW"))
+	if !mentions(got, "the server reads GCAL_NEW, and the bundle neither asks for it nor says why not") {
+		t.Errorf("a setting with no verdict passed: %v", got)
+	}
+	without := slices.DeleteFunc(slices.Clone(known), func(s string) bool { return s == "GCAL_WRITE_TIMEOUT" })
+	got = bundleSettingProblems(m, without)
+	if !mentions(got, "the bundle has a verdict on GCAL_WRITE_TIMEOUT, which the server does not read") {
+		t.Errorf("a verdict on a setting the server does not read passed: %v", got)
+	}
+}
+
+// The launcher's install hint names the module go.mod declares, read
+// under Windows line endings too. The path moves with each major
+// version, so a hint left behind sends somebody to an old one.
+func TestTheLauncherInstallHintIsGoModsModule(t *testing.T) {
+	const hint = `echo "no binary." "Install with: go install example.com/m/v4/cmd/google-calendar-mcp@latest" >&2`
+	for _, goMod := range []string{"module example.com/m/v4\n\ngo 1.27\n", "module example.com/m/v4\r\n\r\ngo 1.27\r\n"} {
+		if problems := installHintProblems(hint, goMod); len(problems) > 0 {
+			t.Errorf("go.mod %q: %v", goMod, problems)
+		}
+	}
+	for _, tc := range []struct{ name, launcher, goMod, want string }{
+		{"a hint without the major version", strings.Replace(hint, "/v4", "", 1), "module example.com/m/v4\n",
+			`the launcher says "go install example.com/m/cmd/google-calendar-mcp@latest"`},
+		{"a hint a major version behind", strings.Replace(hint, "/v4", "/v3", 1), "module example.com/m/v4\r\n",
+			`the launcher says "go install example.com/m/v3/cmd/google-calendar-mcp@latest"`},
+		{"no hint at all", "exit 1", "module example.com/m/v4\n", "gives no install hint"},
+		{"no module line", hint, "go 1.27\n", "go.mod names no module"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := installHintProblems(tc.launcher, tc.goMod); !mentions(got, tc.want) {
+				t.Errorf("problems %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// And the committed launcher against the committed go.mod.
+	if problems := installHintProblems(launcherSource(t), string(repoFile(t, "go.mod"))); len(problems) > 0 {
+		t.Errorf("the committed launcher: %v", problems)
 	}
 }

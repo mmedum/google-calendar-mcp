@@ -19,7 +19,7 @@ organization, choose **External** and add yourself as a test user.
 
 Add these scopes. The set depends on how you run the server:
 
-### Read-only (`GCAL_READONLY=true`)
+### Read-only (`GCAL_READ_ONLY=true`)
 
 ```
 https://www.googleapis.com/auth/calendar.readonly

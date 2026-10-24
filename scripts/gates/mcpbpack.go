@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ func packMCPB(dist, version, out string) error {
 		return fmt.Errorf("%s says version %q; the committed manifest must carry the placeholder %q",
 			manifestPath, m.Version, placeholderVersion)
 	}
-	if problems := validateManifest(m, bundleFiles, launcherNames()); len(problems) > 0 {
+	if problems := append(validateManifest(m, bundleFiles, launcherNames()), bundleProblems(m)...); len(problems) > 0 {
 		sort.Strings(problems)
 		return fmt.Errorf("the manifest does not describe the bundle this would pack:\n  %s",
 			strings.Join(problems, "\n  "))
@@ -92,21 +93,18 @@ func packMCPB(dist, version, out string) error {
 		return err
 	}
 	// Sorted, so two packs of the same inputs write the same bytes.
-	paths := make([]string, 0, len(sources))
-	for p := range sources {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-	for _, p := range paths {
-		// 0755 on every staged binary. The packer forces the execute bit
-		// on the entry point alone and copies the filesystem mode for the
-		// rest, so the Windows binary arrives unrunnable unless it is
-		// staged executable.
+	files := slices.Clone(bundleFiles)
+	slices.SortFunc(files, func(a, b staged) int { return strings.Compare(a.path, b.path) })
+	for _, f := range files {
+		// 0755 on every staged binary and the launcher. The packer forces
+		// the execute bit on the entry point alone and copies the
+		// filesystem mode for the rest, so the Windows binary arrives
+		// unrunnable unless it is staged executable.
 		//
 		// Streamed rather than read whole: the macOS slot is a universal
 		// binary, so holding one in memory to deflate it is tens of
 		// megabytes for no reason.
-		if err := addFile(zw, p, sources[p], 0o755); err != nil {
+		if err := addFile(zw, f.path, sources[f.path], f.mode()); err != nil {
 			return err
 		}
 	}

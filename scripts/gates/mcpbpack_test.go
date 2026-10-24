@@ -4,8 +4,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -161,14 +163,17 @@ func TestThePackedManifestCarriesTheRealVersion(t *testing.T) {
 	}
 }
 
-// Every staged file arrives executable, whatever mode it was staged in.
+// Every staged binary and the launcher arrive executable, whatever mode
+// they were staged in, and the license and the README arrive readable.
 //
 // This packer writes 0755 into the zip deliberately rather than copying
 // the source's mode, because the reference implementation forces the bit
 // on the entry point and copies the mode for the rest — a binary packed
 // 0644 installs and cannot run. The fixture stages its files 0600, so
 // this fails the day somebody replaces that constant with the source's
-// own mode, which is the regression it is here for.
+// own mode, which is the regression it is here for. The modes are
+// literals, not staged.mode(), so the assertion does not check the code
+// against itself.
 func TestEveryStagedBinaryIsExecutable(t *testing.T) {
 	t.Chdir("../..")
 	out := filepath.Join(t.TempDir(), "b.mcpb")
@@ -181,12 +186,66 @@ func TestEveryStagedBinaryIsExecutable(t *testing.T) {
 	}
 	defer func() { _ = z.Close() }()
 
+	want := map[string]os.FileMode{
+		"manifest.json":                          0o644,
+		"LICENSE":                                0o644,
+		"README.md":                              0o644,
+		"server/launch-linux.sh":                 0o755,
+		"server/google-calendar-mcp-darwin":      0o755,
+		"server/google-calendar-mcp.exe":         0o755,
+		"server/google-calendar-mcp-linux-amd64": 0o755,
+		"server/google-calendar-mcp-linux-arm64": 0o755,
+	}
+	var names []string
 	for _, f := range z.File {
-		if f.Name == "manifest.json" {
+		names = append(names, f.Name)
+		mode, ok := want[f.Name]
+		if !ok {
+			t.Errorf("the bundle carries %s, which is not the family's layout", f.Name)
 			continue
 		}
-		if mode := f.Mode(); mode&0o111 == 0 {
-			t.Errorf("%s is packed %v, which installs and cannot run", f.Name, mode)
+		if got := f.Mode().Perm(); got != mode {
+			t.Errorf("%s is packed %v, want %v", f.Name, got, mode)
+		}
+	}
+	if len(names) != len(want) {
+		t.Errorf("the bundle carries %v; want the %d files of the family's layout", names, len(want))
+	}
+}
+
+// The license and the README are the repository's own, byte for byte.
+func TestTheBundleCarriesTheLicenseAndTheReadme(t *testing.T) {
+	t.Chdir("../..")
+	out := filepath.Join(t.TempDir(), "b.mcpb")
+	if err := packMCPB(fakeDist(t), "1.0.0", out); err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+	z, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = z.Close() }()
+	for _, name := range []string{"LICENSE", "README.md"} {
+		want, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(z.File, func(f *zip.File) bool { return f.Name == name })
+		if i < 0 {
+			t.Errorf("the bundle carries no %s", name)
+			continue
+		}
+		rc, err := z.File[i].Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := io.ReadAll(rc)
+		_ = rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("the packed %s is not the repository's", name)
 		}
 	}
 }

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The Claude Desktop bundle asks for the destructive switch and `enable_decline_all` as well as the client file, the profile, read-only and sharing, each as an unconfigured server has it unless you change it, names Google's privacy policy, and carries `LICENSE` and the README beside the binaries.
+
+### Changed
+
+- The read-only switch is `GCAL_READ_ONLY`, the name the sibling servers and the bundle use. `GCAL_READONLY` still works and logs a warning; set both and they must agree, or the server refuses to start.
+- The bundle asks for sharing as a checkbox, on by default as before, where 4.0.0 asked for the text `on` or `off`. If you turned it off in the 4.0.0 bundle, check that it is still off after updating.
+- The bundle stages its Linux binaries as `server/google-calendar-mcp-linux-amd64` and `server/google-calendar-mcp-linux-arm64`, and its Linux launcher names the `go install` command for an architecture the bundle does not carry.
+
+### Fixed
+
+- The bundle's OAuth client file defaults to empty, which the server reads as unset. It had no default, and the reference host passes `${user_config.client_secret}` through as written when you leave the field blank; the server then read that as the client file's path in place of the one your login stored, and every call answered `[auth]`.
+
 ## [4.0.0] - 2026-10-23
 
 ### Changed

@@ -1582,8 +1582,10 @@ own.** `create_event_declining_all` registers only with
 served, and that is the trouble: a flag people set to get out-of-office
 would arm `clear_calendar` too.
 
-**Read-only mode** (`GCAL_READONLY=true`) registers only the nine read
-tools and requests only the read scopes.
+**Read-only mode** (`GCAL_READ_ONLY=true`) registers only the nine read
+tools and requests only the read scopes. `GCAL_READONLY`, its name until
+4.1.0, still works and logs a warning; both set and disagreeing is
+refused at start.
 
 ### 9a. Per-call approval is the client's
 
@@ -1768,6 +1770,27 @@ the first-run failure: the bundle does not log you in, and cannot — the
 user needs their own OAuth Desktop client and one `login` from a
 terminal first.
 
+**The bundle has the family's shape (§10b of the standard).** It stages
+`server/google-calendar-mcp-darwin`, `server/google-calendar-mcp.exe`,
+`server/google-calendar-mcp-linux-amd64`,
+`server/google-calendar-mcp-linux-arm64` and `server/launch-linux.sh`,
+with `LICENSE` and `README.md` at the root. It asks for what a person
+sets in another client's configuration: the OAuth client file, the
+profile, read-only, the destructive switch, sharing and the decline-all
+switch, each under its variable's name without `GCAL_`, lowercased.
+Logging, the read budgets, the concurrency, the timeouts, the config
+directory and the refresh token are left out, each with its reason in
+`gates mcpb`, and the gate fails on a variable with no verdict. Each
+switch defaults to the server's own default: sharing on, the others
+off. The client file and the profile default to `""`, which the server
+reads as unset. Claude Desktop approves each tool, and a person can set
+a tool to always allow, so a switch left at the server's own default
+is the one guard a bundle install keeps (§18 row 109). No
+combination of the fields is refused: read-only leaves the destructive,
+sharing and decline-all switches nothing to register, and sharing off
+takes the destructive switch's two shares, so those fields say so. The
+manifest names Google's privacy policy (§18 row 111).
+
 The procedure a tag actually follows is `docs/release.md`, including the
 three steps no rehearsal reaches and the recovery for each.
 
@@ -1810,7 +1833,8 @@ three steps no rehearsal reaches and the recovery for each.
 
 Two of those are the deterministic halves of things that are otherwise
 run by hand. `mcpb` checks the bundle's manifest against the names the
-packer stages, which needs no build. `evals-check` builds each eval
+packer stages, and what it asks for against the server's own settings
+(§12), which needs no build. `evals-check` builds each eval
 task's calendar, offers the tool list and asserts every task FAILS on a
 calendar nobody touched — a scorer that passes there is scoring nothing,
 and without this in `check` that would be found by spending money.
@@ -3545,6 +3569,9 @@ what §15 exists to settle, and they are marked.
 | 106 | A public, domain-wide, outside or owner share may be an argument of the ordinary share, as `allow_public: true` and `role: owner` were | Tier 2, from the family standard's §3, 2026-10-23: claude.ai, Codex, VS Code and Copilot remember "always allow" per tool, never per argument value, and Claude Code matches an MCP argument only in a command-line deny rule; first-party servers with no sharing tool (Notion, Slack, Canva, Figma, Asana, Airtable), Box's sharing tools off until an admin enables them | **Refuted.** An always-allowed `share_calendar` carried every wider share unseen, and `allow_public` was a refusal the model lifted itself. Sharing is three tools now: `share_calendar` inside the organization below owner, and `publish_calendar` and `widen_calendar_access` behind the destructive flag with `confirm` (§7.6). Inside is the account's own domain; a personal account has none, so every address is outside it |
 | 107 | `auto_decline: all` may be a value of `create_event`'s argument, guarded by a question or by typing it | Tier 2, from the family standard's §3, 2026-10-23 ("Every risky variant is its own tool, never an argument, and a coarse registration flag decides whether that tool exists"); Calendar discovery revision 20261005, `autoDeclineMode` `declineAllConflictingInvitations`, "all conflicting meeting invitations that conflict with the event are declined" | **Refuted.** An always-allowed `create_event` declined every accepted meeting in the window unseen, each organizer told, and the only guard beyond typing `all` was the question. `create_event` refuses it now, before it checks the calendar, and `create_event_declining_all` makes it behind `GCAL_ENABLE_DECLINE_ALL`, a flag of its own so that turning it on arms nothing else (§7.4, §9). A change that widens such an event, and a split of one, are row 102's |
 | 108 | A group whose address is inside the organization reaches only people inside it | Google's help pages, read 2026-10-23, prose rather than evidence (CLAUDE.md rule 13), which probe T is to settle: "If external sharing is prohibited, only group members who are in your organization can access the group's shared content" and "If you remove members from a group, they lose access to content shared with the group" (support.google.com/a/users/answer/167101); "New group members get email notifications about the calendars they can access" (knowledge.workspace.google.com/admin/calendar/create-and-share-a-group-calendar); "Group owners can add members outside of your organization to their groups" (knowledge.workspace.google.com/admin/groups/set-organization-wide-policies-for-using-groups); an address in the organization's own domain can still be an external member (support.google.com/groups/answer/10394258) | **Refuted on Google's word, unproven live.** Access follows membership, later members included, and an outside member gets in unless the administrator prohibits external sharing. Whether the external sharing level caps such a member is not said. `share_calendar` keeps groups and says what a group rule reaches (§7.6); probe T asks whether this server can see an outside member (§17 item 7) |
+| 109 | A bundle install has a second approval behind the server, as Claude Code's ask rules are | Read 2026-10-23, from the family standard's §10b and its evidence: anthropics/mcpb v2.1.2 declares `tools` for display, and its `src/` reads it only in `init`; its `src/shared/config.ts` passes a boolean to `env` as "true" or "false". claude.com/docs/connectors/getting-started: "Select Allow once to continue, or Always allow to skip the prompt for that tool from now on". claude.com/docs/connectors/building/review-criteria: readOnlyHint and destructiveHint "determine auto-permissions in Claude" | **Refuted (the docs and the reference host; Claude Desktop not probed, and no page names desktop extensions).** Claude Desktop has nothing like Claude Code's `permissions.ask`. So every switch the bundle asks for defaults to the server's own default, sharing on and the others off, and `gates mcpb` refuses one that does not, compared as JSON. The bundle declares no `tools` list, which would be display only and wrong for most installs, since four settings change what registers (§12) |
+| 110 | A bundle's optional setting the person leaves blank reaches the server empty | Read 2026-10-23: anthropics/mcpb v2.1.2 `src/shared/config.ts` builds its variables from the defaults and the person's values, and `replaceVariables` leaves a variable it does not have as written | **Refuted (the reference host; Claude Desktop not probed).** An optional key with no default is never a variable. The 4.0.0 bundle's client file was one, so a blank field would reach the server as `${user_config.client_secret}`, which it takes as a path over the one login stored, and every call would answer `[auth]`. Every optional key now has a default, `""` for the file and the profile, and `gates mcpb` refuses one without. The environment the defaults give the server must configure it as no environment does, which the gate builds and compares, and `TestVarsDescribeWhatBuildDoes` holds each setting's default and `""` to mean unset |
+| 111 | `privacy_policies` is optional for a bundle | Read 2026-10-23: anthropics/mcpb, MANIFEST.md: "Required when the extension connects to external services (first- or third-party) that process user data"; added in manifest_version 0.2, and enforced by neither the schema nor `mcpb validate` | **Refuted (the specification).** The manifest names https://policies.google.com/privacy, which answered 200 on 2026-10-24, and `gates mcpb` refuses an empty list |
 
 ### Deviations from the shared Go MCP server standard
 
