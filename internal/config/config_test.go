@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"flag"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -19,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/credentials"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/userconfig"
 )
 
 func build(t *testing.T, env map[string]string, args ...string) (config.Config, error) {
@@ -100,7 +103,6 @@ func TestInvalidValuesAreRejected(t *testing.T) {
 		{"log level", "GCAL_LOG_LEVEL", "chatty"},
 		{"log format", "GCAL_LOG_FORMAT", "yaml"},
 		{"read-only", "GCAL_READ_ONLY", "perhaps"},
-		{"the read-only switch's removed name", "GCAL_READONLY", "perhaps"},
 		{"destructive", "GCAL_ENABLE_DESTRUCTIVE", "perhaps"},
 		{"max events not a number", "GCAL_MAX_EVENTS", "lots"},
 		{"max events too large", "GCAL_MAX_EVENTS", "999999"},
@@ -179,82 +181,118 @@ func TestNewLoggerWritesWhereItIsTold(t *testing.T) {
 	}
 }
 
-// TestEveryFlagNamesItsEnvVar keeps the usage strings usable as
-// documentation: the staleness gate reads them to learn the settings.
+// Every flag names its variable in --help, and the flags are Define's
+// settings less the removed ones, which have none.
 func TestEveryFlagNamesItsEnvVar(t *testing.T) {
+	registry(t)
+	var want []string
+	for _, v := range config.Defined() {
+		if !v.Removed {
+			want = append(want, v.Name)
+		}
+	}
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	config.Define(fs, func(string) string { return "" })
-	n := 0
+	envName := regexp.MustCompile(`\[env (` + config.EnvPrefix + `[A-Z0-9_]+)\]$`)
+	var named []string
 	fs.VisitAll(func(f *flag.Flag) {
-		n++
-		if !strings.Contains(f.Usage, "[env "+config.EnvPrefix) {
-			t.Fatalf("flag -%s does not name its environment variable: %q", f.Name, f.Usage)
+		m := envName.FindStringSubmatch(f.Usage)
+		if m == nil {
+			t.Errorf("flag -%s does not name its environment variable: %q", f.Name, f.Usage)
+			return
 		}
+		named = append(named, m[1])
 	})
-	if n < 12 {
-		t.Fatalf("only %d flags defined; the gate needs a floor so an empty read is not mistaken for a pass", n)
+	slices.Sort(want)
+	slices.Sort(named)
+	if !slices.Equal(named, want) {
+		t.Errorf("the flags name %v\nDefine's settings are %v", named, want)
 	}
 }
 
-// GCAL_REQUIRE_PROMPT went with the server's question (§9a). Turned on,
-// it meant writes nobody could be asked about to be refused, so a
-// configuration that still turns it on is refused rather than quietly
-// allowed; off or unset, it is ignored.
-func TestTheRemovedRequirePromptIsRefused(t *testing.T) {
-	for v, refused := range map[string]bool{
-		"true": true, "1": true, "on": true, "always": true,
-		"": false, "false": false, "0": false, "off": false,
-	} {
-		_, err := build(t, map[string]string{"GCAL_REQUIRE_PROMPT": v})
-		if got := err != nil; got != refused {
-			t.Errorf("GCAL_REQUIRE_PROMPT=%q: err = %v, want refused %v", v, err, refused)
-			continue
-		}
-		if refused && (!errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), "GCAL_REQUIRE_PROMPT was removed")) {
-			t.Errorf("GCAL_REQUIRE_PROMPT=%q: the refusal does not say the setting was removed: %v", v, err)
-		}
-	}
+// --help shows each switch's default, which is Build's for an empty
+// value too.
+func TestASwitchsHelpShowsItsDefault(t *testing.T) {
+	var help bytes.Buffer
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	fs.SetOutput(&bytes.Buffer{})
+	fs.SetOutput(&help)
 	config.Define(fs, func(string) string { return "" })
-	if err := fs.Parse([]string{"-require-prompt"}); err == nil {
-		t.Error("the removed -require-prompt flag was accepted")
+	fs.PrintDefaults()
+	for _, want := range []string{
+		"[env GCAL_READ_ONLY] (default \"false\")\n",
+		"[env GCAL_ENABLE_DESTRUCTIVE] (default \"false\")\n",
+		"[env GCAL_SHARING] (default \"on\")\n",
+		"[env GCAL_ENABLE_DECLINE_ALL] (default \"false\")\n",
+	} {
+		if !strings.Contains(help.String(), want) {
+			t.Errorf("--help does not say %q:\n%s", want, help.String())
+		}
+	}
+	unset, err := build(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := build(t, nil, "-read-only=", "-enable-destructive=", "-sharing=", "-enable-decline-all=")
+	if err != nil || !reflect.DeepEqual(empty, unset) {
+		t.Errorf("empty switches: %+v, %v; want the unconfigured configuration %+v", empty, err, unset)
 	}
 }
 
-// The read-only switch is GCAL_READ_ONLY alone. GCAL_READONLY, its name
-// until 4.1.0, is a removed setting: off or unset it starts and does
-// nothing, and the new name decides; on, or not a boolean, it is refused,
-// beside the new name too, naming the new one and not echoing the value.
-func TestTheReadOnlySwitchsOldNameIsRemoved(t *testing.T) {
-	const refused = "config: invalid: GCAL_READONLY was removed: " +
-		"it is GCAL_READ_ONLY (-read-only) now. Unset it, and set that in its place"
-	for _, tc := range []struct {
+// A removed setting starts when unset or off, and does nothing: for the
+// read-only switch's old name, GCAL_READ_ONLY decides. On, or not a
+// boolean, it is refused, beside its replacement too, saying what to do
+// instead and not echoing the value. None has a flag.
+func TestARemovedSettingIsRefusedUnlessOff(t *testing.T) {
+	refusal := map[string]string{
+		"GCAL_READONLY": "config: invalid: GCAL_READONLY was removed: " +
+			"it is GCAL_READ_ONLY (-read-only) now. Unset it, and set that in its place",
+		"GCAL_REQUIRE_PROMPT": "config: invalid: GCAL_REQUIRE_PROMPT was removed: " +
+			"the server no longer asks the person, and the client's own approval decides each call. Unset it, " +
+			"and leave GCAL_ENABLE_DESTRUCTIVE and GCAL_ENABLE_DECLINE_ALL off for a client that runs with nobody watching",
+	}
+	type run struct {
 		name string
 		env  map[string]string
 		args []string
 		// want is the refusal, or empty for a run that starts.
 		want string
-		// on is ReadOnly in a run that starts: the new switch's.
-		on bool
-	}{
-		{name: "neither", on: false},
-		{name: "the new name on", env: map[string]string{"GCAL_READ_ONLY": "true"}, on: true},
-		{name: "the flag", args: []string{"-read-only", "true"}, on: true},
-		{name: "the old name off", env: map[string]string{"GCAL_READONLY": "false"}, on: false},
-		{name: "the old name off in capitals and spaces", env: map[string]string{"GCAL_READONLY": " OFF "}, on: false},
-		{name: "the old name 0", env: map[string]string{"GCAL_READONLY": "0"}, on: false},
-		{name: "the old name empty", env: map[string]string{"GCAL_READONLY": ""}, on: false},
-		{name: "the old name off leaves the new one on",
-			env: map[string]string{"GCAL_READONLY": "false", "GCAL_READ_ONLY": "true"}, on: true},
-		{name: "the old name on", env: map[string]string{"GCAL_READONLY": "true"}, want: refused},
-		{name: "the old name 1", env: map[string]string{"GCAL_READONLY": "1"}, want: refused},
-		{name: "the old name on beside the new one",
-			env: map[string]string{"GCAL_READONLY": "on", "GCAL_READ_ONLY": "true"}, want: refused},
-		{name: "the old name on beside the flag", env: map[string]string{"GCAL_READONLY": "yes"},
-			args: []string{"-read-only", "true"}, want: refused},
-		{name: "the old name not a boolean", env: map[string]string{"GCAL_READONLY": "maybe"}, want: refused},
-	} {
+		// readOnly is ReadOnly in a run that starts: the new switch's.
+		readOnly bool
+	}
+	var runs []run
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.SetOutput(&bytes.Buffer{})
+	config.Define(fs, func(string) string { return "" })
+	for _, v := range registry(t) {
+		if !v.Removed {
+			continue
+		}
+		if name := strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(v.Name, config.EnvPrefix)), "_", "-"); fs.Lookup(name) != nil {
+			t.Errorf("-%s is a flag; %s is removed", name, v.Name)
+		}
+		want, ok := refusal[v.Name]
+		if !ok {
+			t.Errorf("%s is removed, and this test has no refusal for it", v.Name)
+			continue
+		}
+		for _, value := range []string{"false", "0", " OFF "} {
+			runs = append(runs, run{name: v.Name + "=" + value, env: map[string]string{v.Name: value}})
+		}
+		for _, value := range []string{"true", "1", "always"} {
+			runs = append(runs, run{name: v.Name + "=" + value, env: map[string]string{v.Name: value}, want: want})
+		}
+	}
+	runs = append(runs,
+		run{name: "the old read-only name off leaves the new one on",
+			env: map[string]string{"GCAL_READONLY": "false", "GCAL_READ_ONLY": "true"}, readOnly: true},
+		run{name: "the old read-only name off leaves the flag on",
+			env: map[string]string{"GCAL_READONLY": "0"}, args: []string{"-read-only", "true"}, readOnly: true},
+		run{name: "the old read-only name on beside the new one",
+			env: map[string]string{"GCAL_READONLY": "on", "GCAL_READ_ONLY": "true"}, want: refusal["GCAL_READONLY"]},
+		run{name: "the old read-only name on beside the flag",
+			env: map[string]string{"GCAL_READONLY": "yes"}, args: []string{"-read-only", "true"}, want: refusal["GCAL_READONLY"]},
+	)
+	for _, tc := range runs {
 		t.Run(tc.name, func(t *testing.T) {
 			c, err := build(t, tc.env, tc.args...)
 			if tc.want != "" {
@@ -266,36 +304,20 @@ func TestTheReadOnlySwitchsOldNameIsRemoved(t *testing.T) {
 			if err != nil {
 				t.Fatalf("refused: %v", err)
 			}
-			if c.ReadOnly != tc.on {
-				t.Errorf("ReadOnly = %t, want the new switch's %t", c.ReadOnly, tc.on)
+			if c.ReadOnly != tc.readOnly {
+				t.Errorf("ReadOnly = %t, want the new switch's %t", c.ReadOnly, tc.readOnly)
 			}
 		})
-	}
-	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	fs.SetOutput(&bytes.Buffer{})
-	config.Define(fs, func(string) string { return "" })
-	if fs.Lookup("readonly") != nil {
-		t.Error("-readonly is a flag; GCAL_READONLY never had one")
 	}
 }
 
 // Vars is what the bundle gate reads a setting's kind from, so each
 // claim it makes is held to what Build does. A switch takes true and
 // false and refuses anything else, and nothing else does that. A
-// removed setting takes false and refuses true. An empty value
-// configures what setting nothing does, which is what lets a bundle
-// leave a field blank.
+// removed setting takes false and refuses true.
 func TestVarsDescribeWhatBuildDoes(t *testing.T) {
-	vars := config.Vars()
-	if len(vars) < 17 {
-		t.Fatalf("Vars has %d variables; the server reads at least 17", len(vars))
-	}
-	unset, err := build(t, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var switches, removed []string
-	for _, v := range vars {
+	for _, v := range registry(t) {
 		accepts := func(value string) bool {
 			_, err := build(t, map[string]string{v.Name: value})
 			return err == nil
@@ -311,10 +333,6 @@ func TestVarsDescribeWhatBuildDoes(t *testing.T) {
 		}
 		if v.Removed {
 			removed = append(removed, v.Name)
-		}
-		c, err := build(t, map[string]string{v.Name: ""})
-		if err != nil || !reflect.DeepEqual(c, unset) {
-			t.Errorf("%s=\"\": %+v, %v; want the unconfigured configuration", v.Name, c, err)
 		}
 	}
 	if want := []string{"GCAL_ENABLE_DECLINE_ALL", "GCAL_ENABLE_DESTRUCTIVE", "GCAL_READ_ONLY", "GCAL_SHARING"}; !slices.Equal(switches, want) {
@@ -339,27 +357,66 @@ func TestEnvVars(t *testing.T) {
 	}
 }
 
-// definedFloor is how many variables Define reads today, on purpose: the
-// floor moves with it, so a Define that reads nothing cannot pass.
-const definedFloor = 15
+// varsFloor is how many variables the server reads today, on purpose:
+// the floor moves with it, so a registry that records nothing cannot
+// pass a walk over it. Define's are Vars less the two read outside it,
+// so the floor holds a walk over Defined as well.
+const varsFloor = 17
 
-// A setting given as spaces alone is unset, as an empty one is, so a
-// form field cleared to a space starts the server with the default. A
-// removed setting of spaces is off.
+// registry is config.Vars, refused below the floor.
+func registry(t *testing.T) []config.Var {
+	t.Helper()
+	vars := config.Vars()
+	if len(vars) < varsFloor {
+		t.Fatalf("Vars has %d variables, want at least %d", len(vars), varsFloor)
+	}
+	return vars
+}
+
+// A variable of spaces alone is unset, as an empty one is, and the spaces
+// around a value are dropped, so a form field cleared to a space starts
+// the server with the default. That holds for every variable the server
+// reads: Define's through Build, and each one read outside Define through
+// its reader. One read outside Define with no reader here fails, so a
+// variable added there cannot miss the rule.
 func TestASettingOfSpacesIsUnset(t *testing.T) {
-	want, err := build(t, nil)
-	if err != nil {
-		t.Fatal(err)
+	outside := map[string]func(t *testing.T, value string) string{
+		config.EnvConfigDir: func(t *testing.T, value string) string {
+			t.Setenv(config.EnvConfigDir, value)
+			dir, err := userconfig.BaseDir()
+			return fmt.Sprintf("%q %v", dir, err)
+		},
+		config.EnvRefreshToken: func(_ *testing.T, value string) string {
+			s := credentials.Store{Profile: "p", Env: func(string) string { return value }}
+			tok, src, err := s.Resolve()
+			return fmt.Sprintf("%q %q %v", tok, src, err)
+		},
 	}
-	vars := config.Defined()
-	if len(vars) < definedFloor {
-		t.Fatalf("Define reads %d settings, want at least %d", len(vars), definedFloor)
+	defined := map[string]bool{}
+	for _, v := range config.Defined() {
+		defined[v.Name] = true
 	}
-	for _, v := range vars {
-		got, err := build(t, map[string]string{v.Name: "  "})
-		if err != nil || !reflect.DeepEqual(got, want) {
-			t.Errorf("%s=\"  \": %+v, %v; want the unconfigured configuration", v.Name, got, err)
+	for _, v := range registry(t) {
+		read := func(t *testing.T, value string) string {
+			c, err := build(t, map[string]string{v.Name: value})
+			return fmt.Sprintf("%+v %v", c, err)
 		}
+		if !defined[v.Name] {
+			var ok bool
+			if read, ok = outside[v.Name]; !ok {
+				t.Errorf("%s is read outside Define, and this test has no reader for it", v.Name)
+				continue
+			}
+			delete(outside, v.Name)
+		}
+		for _, pair := range [][2]string{{"  ", ""}, {" x ", "x"}} {
+			if got, want := read(t, pair[0]), read(t, pair[1]); got != want {
+				t.Errorf("%s=%q: %s\nwant %s, as %s=%q", v.Name, pair[0], got, want, v.Name, pair[1])
+			}
+		}
+	}
+	for name := range outside {
+		t.Errorf("this test has a reader for %s, which Vars does not list as read outside Define", name)
 	}
 }
 
@@ -402,6 +459,7 @@ func TestLoad(t *testing.T) {
 // settings on one variable would leave it to whichever Build reads
 // last.
 func TestDefineReadsEachVariableOnce(t *testing.T) {
+	registry(t)
 	reads := map[string]int{}
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	fs.SetOutput(&bytes.Buffer{})
@@ -411,9 +469,6 @@ func TestDefineReadsEachVariableOnce(t *testing.T) {
 		listed = append(listed, v.Name)
 	}
 	slices.Sort(listed)
-	if len(listed) < definedFloor {
-		t.Fatalf("Define records %d settings, want at least %d", len(listed), definedFloor)
-	}
 	if read := slices.Sorted(maps.Keys(reads)); !slices.Equal(listed, read) {
 		t.Errorf("Define records %v\nDefine reads %v", listed, read)
 	}

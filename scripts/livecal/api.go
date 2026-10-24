@@ -18,6 +18,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/credentials"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
@@ -103,7 +104,7 @@ type liveAPI struct {
 
 func newAPI(ctx context.Context, profile string) (*liveAPI, error) {
 	if profile == "" {
-		profile = userconfig.DefaultProfile
+		profile = config.DefaultProfile
 	}
 	tokenPath, err := userconfig.TokenFilePath(profile)
 	if err != nil {

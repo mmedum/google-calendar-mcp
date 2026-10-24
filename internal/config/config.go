@@ -155,10 +155,17 @@ const (
 // envOnly is every variable read outside Define, for Vars.
 var envOnly = []string{EnvConfigDir, EnvRefreshToken}
 
-// Blank reports whether a variable's value leaves it unset: empty, or
-// spaces alone, so a form field cleared to a space means the default
-// rather than a value the server refuses.
-func Blank(v string) bool { return strings.TrimSpace(v) == "" }
+// DefaultProfile is the profile used when none is named.
+const DefaultProfile = "default"
+
+// Lookup is the variable name as env gives it, without the spaces around
+// it. Spaces alone are "", unset as an empty variable is, so a form field
+// cleared to a space means the default rather than a value the server
+// refuses. Define reads every setting through it, and so does each
+// reader of a variable outside Define.
+func Lookup(env func(string) string, name string) string {
+	return strings.TrimSpace(env(name))
+}
 
 // removedSettings are the settings a release took out, each with why
 // and what to do instead. Each was off by default, and unset or off is
@@ -200,8 +207,8 @@ func (s *Settings) removedSet() []error {
 func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	s := &Settings{removed: make([]string, len(removedSettings))}
 	bind := func(p *string, name, fallback, usage string, v Var) {
-		value := env(v.Name)
-		if Blank(value) {
+		value := Lookup(env, v.Name)
+		if value == "" {
 			value = fallback
 		}
 		fs.StringVar(p, name, value, usage+" [env "+v.Name+"]")
@@ -210,17 +217,16 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def := func(p *string, name, key, fallback, usage string) {
 		bind(p, name, fallback, usage, Var{Name: EnvPrefix + key})
 	}
-	// A switch is registered empty, which Build reads as its default.
-	sw := func(p *string, name, key, usage string) {
-		bind(p, name, "", usage, Var{Name: EnvPrefix + key, Switch: true})
+	defSwitch := func(p *string, name, key, fallback, usage string) {
+		bind(p, name, fallback, usage, Var{Name: EnvPrefix + key, Switch: true})
 	}
-	def(&s.Profile, "profile", "PROFILE", "default", "named configuration profile")
+	def(&s.Profile, "profile", "PROFILE", DefaultProfile, "named configuration profile")
 	def(&s.LogLevel, "log-level", "LOG_LEVEL", string(LogInfo), "log level: debug, info, warn, error")
 	def(&s.LogFormat, "log-format", "LOG_FORMAT", string(LogText), "log format: text, json")
-	sw(&s.ReadOnly, "read-only", "READ_ONLY", "register only read tools and request read-only scopes (default off)")
-	sw(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call (default off)")
-	sw(&s.Sharing, "sharing", "SHARING", "register the calendar sharing tools, the wider ones with -enable-destructive: on, off (default on)")
-	sw(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps (default off)")
+	defSwitch(&s.ReadOnly, "read-only", "READ_ONLY", "false", "register only read tools and request read-only scopes")
+	defSwitch(&s.EnableDestructive, "enable-destructive", "ENABLE_DESTRUCTIVE", "false", "register delete_calendar, clear_calendar, publish_calendar and widen_calendar_access; each still needs confirm on the call")
+	defSwitch(&s.Sharing, "sharing", "SHARING", "on", "register the calendar sharing tools, the wider ones with -enable-destructive: on, off")
+	defSwitch(&s.EnableDeclineAll, "enable-decline-all", "ENABLE_DECLINE_ALL", "false", "register create_event_declining_all, an out-of-office or focus-time event that declines every meeting it overlaps")
 	def(&s.MaxEvents, "max-events", "MAX_EVENTS", strconv.Itoa(DefaultMaxEvents), "default event budget for a read")
 	def(&s.MaxCalendars, "max-calendars", "MAX_CALENDARS", strconv.Itoa(DefaultMaxCalendars), "how many calendars one call may fan out across")
 	def(&s.Concurrency, "concurrency", "CONCURRENCY", strconv.Itoa(DefaultConcurrency), "requests in flight during a fan-out")
@@ -228,7 +234,7 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.WriteTimeout, "write-timeout", "WRITE_TIMEOUT", "120s", "timeout for a write")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
 	for i, r := range removedSettings {
-		s.removed[i] = env(EnvPrefix + r.key)
+		s.removed[i] = Lookup(env, EnvPrefix+r.key)
 		s.vars = append(s.vars, Var{Name: EnvPrefix + r.key, Removed: true})
 	}
 	return s

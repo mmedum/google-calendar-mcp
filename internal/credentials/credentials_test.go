@@ -119,34 +119,6 @@ func TestEnvironmentWins(t *testing.T) {
 	}
 }
 
-// A refresh token of spaces alone is unset, so the stored one is used,
-// and one with spaces around it is trimmed.
-func TestTheEnvironmentTokenIsReadAsEverySettingIsRead(t *testing.T) {
-	s, _ := store(t, newFake(), false)
-	if _, err := s.Save("from-keyring"); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		value, tok string
-		src        credentials.Source
-	}{
-		{"  ", "from-keyring", credentials.SourceKeyring},
-		{" from-env ", "from-env", credentials.SourceEnv},
-	} {
-		s.Env = func(k string) string {
-			if k == config.EnvRefreshToken {
-				return tc.value
-			}
-			return ""
-		}
-		tok, src, err := s.Resolve()
-		if err != nil || tok != tc.tok || src != tc.src {
-			t.Errorf("%s=%q: Resolve = %q from %q, %v; want %q from %q",
-				config.EnvRefreshToken, tc.value, tok, src, err, tc.tok, tc.src)
-		}
-	}
-}
-
 // TestFileFallbackWarnsEveryTime: the plaintext file is a downgrade, and
 // a warning at login only is a warning the user has forgotten by the
 // time it matters.

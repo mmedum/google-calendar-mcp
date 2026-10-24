@@ -36,16 +36,15 @@ func packMCPB(dist, version, out string) error {
 		return fmt.Errorf("pack needs the real version; %q is the committed placeholder", version)
 	}
 
-	// Read once: the bytes checked are the bytes shipped. The checks are
-	// the gate's own, manifestProblems, the placeholder version among
-	// them: a committed manifest claiming a version means somebody
-	// stamped it in the tree, and the next build would ship whatever they
-	// left behind.
-	raw, err := os.ReadFile(manifestPath) //nolint:gosec // a repository path from a constant
+	// The gate's own start, read once: the bytes checked are the bytes
+	// shipped. The placeholder version is among the checks: a committed
+	// manifest claiming a version means somebody stamped it in the tree,
+	// and the next build would ship whatever they left behind.
+	raw, _, problems, err := committedManifest(".")
 	if err != nil {
 		return err
 	}
-	if problems := manifestProblems(raw, bundleFiles, launcherNames()); len(problems) > 0 {
+	if len(problems) > 0 {
 		return fmt.Errorf("the manifest does not describe the bundle this would pack:\n  %s",
 			strings.Join(problems, "\n  "))
 	}

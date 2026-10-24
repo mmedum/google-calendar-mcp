@@ -117,7 +117,7 @@ func TestTheTagMajorMustBeTheModules(t *testing.T) {
 // the entry refuses a tag whose major is not go.mod's on its own.
 func TestTheEntryRefusesATagOfAnotherMajor(t *testing.T) {
 	t.Chdir("../..")
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestTheBundleRowMustBeExactlyOne(t *testing.T) {
 func TestTheRegistryEntryIsBuiltFromTheRepository(t *testing.T) {
 	t.Chdir("../..")
 
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestTheRegistryEntryIsBuiltFromTheRepository(t *testing.T) {
 func TestTheVersionMayCarryItsVOrNot(t *testing.T) {
 	t.Chdir("../..")
 	path := checksums(t, oneBundle)
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -186,24 +186,17 @@ func TestBaseDirHonorsTheEnvironmentOverride(t *testing.T) {
 	}
 }
 
-// The override is trimmed, and spaces alone are unset, as empty is, so
-// a form field cleared to a space means the user's config directory.
-func TestBaseDirReadsTheOverrideAsEverySettingIsRead(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv(config.EnvConfigDir, "  "+dir+" ")
-	if got, err := userconfig.BaseDir(); err != nil || got != dir {
-		t.Errorf("%s with spaces around: BaseDir() = %q, %v; want %q", config.EnvConfigDir, got, err, dir)
-	}
+// With no override, the base is the user's config directory. A value of
+// spaces alone is the same: config's TestASettingOfSpacesIsUnset holds
+// this reader to the rule every variable is read by.
+func TestBaseDirWithNoOverrideIsTheUserConfigDir(t *testing.T) {
 	want, err := os.UserConfigDir()
 	if err != nil {
 		t.Skipf("no user config dir on this system: %v", err)
 	}
-	for _, v := range []string{"", "  "} {
-		t.Setenv(config.EnvConfigDir, v)
-		got, err := userconfig.BaseDir()
-		if err != nil || got != filepath.Join(want, userconfig.AppDir) {
-			t.Errorf("%s=%q: BaseDir() = %q, %v; want it under %q", config.EnvConfigDir, v, got, err, want)
-		}
+	t.Setenv(config.EnvConfigDir, "")
+	if got, err := userconfig.BaseDir(); err != nil || got != filepath.Join(want, userconfig.AppDir) {
+		t.Errorf("%s unset: BaseDir() = %q, %v; want it under %q", config.EnvConfigDir, got, err, want)
 	}
 }
 

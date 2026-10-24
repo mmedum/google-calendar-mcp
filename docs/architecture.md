@@ -5,8 +5,9 @@ bundle has the shape the sibling servers' bundles share: every setting
 another client sets, each defaulting as the server does, a blank OAuth
 client file reaching the server empty rather than as
 `${user_config.client_secret}`, the shared file names and Google's
-privacy policy; read-only is `GCAL_READ_ONLY`, and `GCAL_READONLY` still
-works. 4.0.0 (2026-10-23): the server asks
+privacy policy; read-only is `GCAL_READ_ONLY`. `GCAL_READONLY` is removed
+in 5.0.0: unset or off it starts, and on it is refused at start, naming
+`GCAL_READ_ONLY`. 4.0.0 (2026-10-23): the server asks
 nobody, and the client approves each call (§9a). Sharing is three tools
 by reach: `share_calendar` inside the organization below owner, and
 `publish_calendar` and `widen_calendar_access` behind the destructive
@@ -1799,14 +1800,25 @@ sharing off takes the destructive switch's two shares, so those fields
 say so. The manifest names Google's privacy policy (§18 row 111).
 
 **What `gates mcpb` holds, derived rather than typed.** The gate and
-the packer run one function, `manifestProblems`, so the release packs
-no manifest the gate would refuse: the placeholder version, the
-no-login sentence, the `$schema` declaration and the vendored schema,
-the license, the staged names, the settings and the launcher's install
-hint. The keys come from `config.Vars`, which records every variable
-Define reads, the removed ones included, and names the two read outside
-it, the config directory and the refresh token, by constants config
-owns, so the gate imports no keyring. The bundle asks for every one,
+the packer start from one function, `committedManifest`, which reads
+and decodes the committed manifest once and runs every check over it,
+so the release packs no manifest the gate would refuse: the placeholder
+version, the no-login sentence, the `$schema` declaration and the
+vendored schema, the staged names, what the bundle says it is, the
+settings, and the launcher, `go.mod` and `LICENSE`, read from the root
+it is given. What the bundle says it is: the server's own name, a
+binary, the family's Claude Desktop floor, a privacy policy, and
+exactly the platforms the packer stages an entry point for, so dropping
+a platform together with its override is refused. The launcher's
+install hint is held to the module `modulePath` reads from `go.mod`,
+which the release's tag check reads too. The keys come from
+`config.Vars`, which records every variable Define reads, the removed
+ones included, and names the two read outside it, the config directory
+and the refresh token, by constants config owns, so the gate imports no
+keyring. Every variable is read through `config.Lookup`, which drops
+the spaces around a value and reads spaces alone as unset, and a config
+test walks the registry, failing on a variable read outside Define that
+it has no reader for. The bundle asks for every one,
 less the removed ones and less each one `bundleLeftOut` gives a reason
 for: logging, the read budgets, the concurrency, the timeouts, the
 config directory and the refresh token. A reason for a variable the

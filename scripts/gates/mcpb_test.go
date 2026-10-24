@@ -25,10 +25,6 @@ import (
 // Each case below breaks exactly one thing in a manifest that is
 // otherwise correct, and asserts the sentence that names it.
 
-func testLauncher() []string {
-	return []string{"google-calendar-mcp-linux-amd64", "google-calendar-mcp-linux-arm64"}
-}
-
 // repoFile reads a path relative to the repository root.
 //
 // The gates run from the root, which they chdir to themselves; a test
@@ -63,16 +59,15 @@ func good(t *testing.T) manifest {
 	return m
 }
 
+// The committed manifest passes every check the gate and the packer
+// run, read from the repository root. The one pass of it here: every
+// other test breaks it.
 func TestTheCommittedManifestIsValid(t *testing.T) {
-	if problems := validateManifest(good(t), bundleFiles, testLauncher()); len(problems) > 0 {
-		t.Fatalf("the committed manifest does not describe the bundle:\n%s", strings.Join(problems, "\n"))
-	}
-	t.Chdir("../..")
-	raw, err := os.ReadFile(manifestPath)
+	_, _, problems, err := committedManifest(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if problems := manifestProblems(raw, bundleFiles, launcherNames()); len(problems) > 0 {
+	if len(problems) > 0 {
 		t.Fatalf("the committed manifest fails the gate:\n%s", strings.Join(problems, "\n"))
 	}
 }
@@ -192,13 +187,6 @@ func TestTheSixWaysAManifestBreaks(t *testing.T) {
 			want: `platform_overrides has "freebsd", which compatibility.platforms does not claim`,
 		},
 		{
-			name: "a claimed platform the packer stages nothing for",
-			edit: func(d map[string]any) {
-				dig(d, "compatibility")["platforms"] = []any{"darwin", "win32", "linux", "freebsd"}
-			},
-			want: `compatibility.platforms claims "freebsd" and the packer stages no entry point for it`,
-		},
-		{
 			// Composed, not the whole value: a check that only looked at
 			// values that ARE a reference would miss this one and the
 			// server would start with ${user_config.dir} unsubstituted.
@@ -224,7 +212,7 @@ func TestTheSixWaysAManifestBreaks(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			problems := validateManifest(edited(t, c.edit), bundleFiles, testLauncher())
+			problems := validateManifest(edited(t, c.edit), bundleFiles)
 			if len(problems) != 1 || !strings.Contains(problems[0], c.want) {
 				t.Fatalf("problems:\n%s\nwant the one containing %q", strings.Join(problems, "\n"), c.want)
 			}
@@ -233,15 +221,13 @@ func TestTheSixWaysAManifestBreaks(t *testing.T) {
 }
 
 // copiedRoot is a repository holding the files the gate and the packer
-// read from the working directory, copied from this one, made the
-// working directory for the rest of the test, so that one can be broken.
+// read, copied from this one, so that one can be broken.
 func copiedRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	for _, rel := range []string{manifestPath, launcherPath, "go.mod", "LICENSE", "README.md"} {
 		put(t, root, rel, string(repoFile(t, rel)))
 	}
-	t.Chdir(root)
 	return root
 }
 
@@ -257,82 +243,63 @@ func put(t *testing.T, root, rel, body string) {
 	}
 }
 
-// manifestProblems runs every check the gate has: each family broken
-// once here is refused by the one function the gate and the packer run.
+// committedManifest runs every check the gate has, on the files under
+// the root it is given, not the working directory: a check broken in a
+// copy of the repository is refused, and refused alone. The checks the
+// packer's table breaks are not broken again here.
 func TestManifestProblemsRunsEveryCheck(t *testing.T) {
-	root := copiedRoot(t)
 	for _, tc := range []struct {
-		name     string
+		name string
+		// file is the one broken; edit applies to the manifest, and
+		// old and new to any other file.
+		file     string
 		edit     func(map[string]any)
-		launcher []string
+		old, new string
 		want     string
 	}{
-		{name: "the shape that ships", edit: func(map[string]any) {}},
-		{name: "a version in the tree", edit: func(d map[string]any) { d["version"] = "1.2.3" },
+		{name: "a version in the tree", file: manifestPath, edit: func(d map[string]any) { d["version"] = "1.2.3" },
 			want: `the committed manifest says version "1.2.3"`},
-		{name: "no word of the login", edit: func(d map[string]any) { d["long_description"] = "A calendar server." },
-			want: "long_description does not say the bundle cannot log the user in"},
-		{name: "a schema at a branch", edit: func(d map[string]any) {
+		{name: "a schema at a branch", file: manifestPath, edit: func(d map[string]any) {
 			d["$schema"] = "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json"
 		}, want: "can be re-pointed"},
-		{name: "a document the schema refuses", edit: func(d map[string]any) { d["keywords"] = "calendar" },
+		{name: "a document the schema refuses", file: manifestPath, edit: func(d map[string]any) { d["keywords"] = "calendar" },
 			want: "the committed manifest does not satisfy mcpb-manifest-v0.3.schema.json"},
-		{name: "another license", edit: func(d map[string]any) { d["license"] = "MIT" },
-			want: `the manifest says the license is "MIT" and LICENSE is Apache-2.0`},
-		{name: "a relative command", edit: func(d map[string]any) {
-			dig(d, "server", "mcp_config")["command"] = "server/google-calendar-mcp-darwin"
-		}, want: "a command starts with ${__dirname}/"},
-		{name: "a launcher of other names", edit: func(map[string]any) {},
-			launcher: []string{"google-calendar-mcp-linux-x64"}, want: "the launcher runs [google-calendar-mcp-linux-x64]"},
-		{name: "no privacy policy", edit: func(d map[string]any) { delete(d, "privacy_policies") },
-			want: "privacy_policies is empty"},
-		{name: "an argument", edit: func(d map[string]any) { dig(d, "server", "mcp_config")["args"] = []any{"-sharing=off"} },
-			want: `mcp_config.args is ["-sharing=off"]`},
+		// Every check before identityProblems passed this: no platform
+		// was left to spawn the wrong file.
+		{name: "Linux dropped with its override", file: manifestPath, edit: func(d map[string]any) {
+			dig(d, "compatibility")["platforms"] = []any{"darwin", "win32"}
+			delete(dig(d, "server", "mcp_config", "platform_overrides"), "linux")
+		}, want: "compatibility.platforms is [darwin win32]; the packer stages entry points for [darwin linux win32]"},
+		// The 4.0.0 name: the family's layout is -linux-amd64.
+		{name: "a launcher of other names", file: launcherPath,
+			old: "google-calendar-mcp-linux-amd64", new: "google-calendar-mcp-linux-x64",
+			want: "the launcher runs [google-calendar-mcp-linux-arm64 google-calendar-mcp-linux-x64]; " +
+				"the packer stages [google-calendar-mcp-linux-amd64 google-calendar-mcp-linux-arm64]"},
+		// The install hint is held to go.mod, which moves at every major
+		// version.
+		{name: "a go.mod at another major version", file: "go.mod", old: "/v5", new: "/v4",
+			want: `the launcher says "go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest", ` +
+				`and go.mod's module gives "go install github.com/mmedum/google-calendar-mcp/v4/cmd/google-calendar-mcp@latest"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			launcher := tc.launcher
-			if launcher == nil {
-				launcher = testLauncher()
-			}
-			problems := manifestProblems(editedRaw(t, tc.edit), bundleFiles, launcher)
-			if tc.want == "" {
-				if len(problems) > 0 {
-					t.Fatalf("the shape that ships was refused:\n%s", strings.Join(problems, "\n"))
+			root := copiedRoot(t)
+			if tc.edit != nil {
+				put(t, root, tc.file, string(editedRaw(t, tc.edit)))
+			} else {
+				body := string(repoFile(t, tc.file))
+				if !strings.Contains(body, tc.old) {
+					t.Fatalf("%s does not say %q", tc.file, tc.old)
 				}
-				return
+				put(t, root, tc.file, strings.Replace(body, tc.old, tc.new, 1))
 			}
-			if !mentions(problems, tc.want) {
-				t.Errorf("problems:\n%s\nwant one containing %q", strings.Join(problems, "\n"), tc.want)
+			_, _, problems, err := committedManifest(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(problems) != 1 || !strings.Contains(problems[0], tc.want) {
+				t.Errorf("problems:\n%s\nwant the one containing %q", strings.Join(problems, "\n"), tc.want)
 			}
 		})
-	}
-	// And the files beside the manifest: the launcher's install hint is
-	// held to go.mod, which moves at every major version.
-	put(t, root, "go.mod", strings.Replace(string(repoFile(t, "go.mod")), "/v5", "/v4", 1))
-	want := `the launcher says "go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest", ` +
-		`and go.mod's module gives "go install github.com/mmedum/google-calendar-mcp/v4/cmd/google-calendar-mcp@latest"`
-	if got := manifestProblems(editedRaw(t, func(map[string]any) {}), bundleFiles, testLauncher()); !slices.Equal(got, []string{want}) {
-		t.Errorf("a go.mod a major version on gives %q, want %q", got, want)
-	}
-}
-
-// TestTheLauncherNamesAreThePackers is the sixth way, and the one no
-// manifest can see: the names live in a shell script nothing else reads.
-func TestTheLauncherNamesAreThePackers(t *testing.T) {
-	// The 4.0.0 name: the family's layout is -linux-amd64.
-	problems := validateManifest(good(t), bundleFiles,
-		[]string{"google-calendar-mcp-linux-arm64", "google-calendar-mcp-linux-x64"})
-	if !mentions(problems, "the launcher runs") {
-		t.Fatalf("a launcher running a binary nobody stages was not refused; problems: %v", problems)
-	}
-	// And the real launcher agrees with the real staged list, read from
-	// the file rather than from the list above.
-	names := launcherNamesIn(launcherSource(t))
-	if len(names) != 2 {
-		t.Fatalf("the launcher execs %d binaries, want 2: %v", len(names), names)
-	}
-	if problems := validateManifest(good(t), bundleFiles, names); len(problems) > 0 {
-		t.Fatalf("the committed launcher and the packer disagree:\n%s", strings.Join(problems, "\n"))
 	}
 }
 
@@ -353,23 +320,6 @@ func TestTheLauncherWritesItsRefusalToStderr(t *testing.T) {
 		if strings.Contains(line, "google-calendar-mcp-linux") && !strings.Contains(line, "exec ") {
 			t.Fatalf("the launcher runs a binary without exec: %q", strings.TrimSpace(line))
 		}
-	}
-}
-
-// TestTheCommittedManifestCarriesThePlaceholder: a manifest in the tree
-// must not be able to claim a version that shipped.
-func TestTheCommittedManifestCarriesThePlaceholder(t *testing.T) {
-	if got := good(t).Version; got != placeholderVersion {
-		t.Fatalf("the committed manifest says %q, want the placeholder %q", got, placeholderVersion)
-	}
-}
-
-// TestTheManifestSaysItCannotLogYouIn is the first-run failure: an
-// install that appears to work and then answers every call with "not
-// signed in".
-func TestTheManifestSaysItCannotLogYouIn(t *testing.T) {
-	if !strings.Contains(strings.ToLower(good(t).LongDescription), "does not log you in") {
-		t.Fatal("long_description does not say the bundle cannot log the user in")
 	}
 }
 
@@ -548,14 +498,6 @@ func TestTheFloorComparesVersionsAsNumbers(t *testing.T) {
 	}
 }
 
-// The floor is a claim about what somebody checked, so it has to name a
-// version upstream actually publishes.
-func TestTheCommittedManifestMeetsTheFloor(t *testing.T) {
-	if behind(good(t).ManifestVersion, minManifestVersion) {
-		t.Fatalf("the committed manifest is below the floor this repository claims to have checked")
-	}
-}
-
 // editedRaw is the committed manifest with one edit applied to its
 // decoded document, encoded again.
 func editedRaw(t *testing.T, edit func(map[string]any)) []byte {
@@ -591,15 +533,14 @@ func dig(doc map[string]any, path ...string) map[string]any {
 	return doc
 }
 
-// Each rule the bundle's settings and claims are held to, broken once in
-// the committed manifest, and the shape that ships passing all of them.
+// Each rule the bundle's settings are held to, broken once in the
+// committed manifest.
 func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		edit func(map[string]any)
 		want string
 	}{
-		{name: "the shape that ships", edit: func(map[string]any) {}},
 		{"a switch the bundle turns on", func(d map[string]any) {
 			dig(d, "user_config", "enable_destructive")["default"] = true
 		}, "the bundle's defaults configure the server otherwise than no environment does, in EnableDestructive;"},
@@ -683,26 +624,55 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 			dig(d, "user_config", "profile")["description"] = "Which stored login to use. Lower case, digits, - and _."
 		}, `user_config.profile does not say a profile name is "up to 64 characters from a to z, 0 to 9, - and _, ` +
 			`starting with a letter or digit"`},
-		{"no privacy policy", func(d map[string]any) { delete(d, "privacy_policies") },
-			"privacy_policies is empty"},
-		{"an empty privacy policy list", func(d map[string]any) { d["privacy_policies"] = []any{} },
-			"privacy_policies is empty"},
-		{"no Claude Desktop floor", func(d map[string]any) { delete(dig(d, "compatibility"), "claude_desktop") },
-			`compatibility.claude_desktop is ""; the family's bundles claim ">=0.10.0"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := edited(t, tc.edit)
-			problems := append(claimProblems(m), settingProblems(m, bundleLeftOut)...)
-			if tc.want == "" {
-				if len(problems) > 0 {
-					t.Fatalf("the shape that ships was refused:\n%s", strings.Join(problems, "\n"))
-				}
-				return
-			}
-			if !mentions(problems, tc.want) {
+			if problems := settingProblems(edited(t, tc.edit), bundleLeftOut); !mentions(problems, tc.want) {
 				t.Errorf("problems:\n%s\nwant one containing %q", strings.Join(problems, "\n"), tc.want)
 			}
 		})
+	}
+}
+
+// What the bundle says it is, broken once each: the server's own name, a
+// binary, the family's floor, a privacy policy, and exactly the
+// platforms the packer stages an entry point for.
+func TestTheIdentityRefusesEachBreak(t *testing.T) {
+	const entryPoints = "; the packer stages entry points for [darwin linux win32]"
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]any)
+		want string
+	}{
+		{"another name", func(d map[string]any) { d["name"] = "google-calendar" },
+			`the manifest's name is "google-calendar" and the server's is "google-calendar-mcp"`},
+		{"a node server", func(d map[string]any) { dig(d, "server")["type"] = "node" },
+			`server.type is "node"; the bundle carries a binary`},
+		{"no Claude Desktop floor", func(d map[string]any) { delete(dig(d, "compatibility"), "claude_desktop") },
+			`compatibility.claude_desktop is ""; the family's bundles claim ">=0.10.0"`},
+		{"no Linux", func(d map[string]any) { dig(d, "compatibility")["platforms"] = []any{"darwin", "win32"} },
+			"compatibility.platforms is [darwin win32]" + entryPoints},
+		{"a platform the packer stages nothing for", func(d map[string]any) {
+			dig(d, "compatibility")["platforms"] = []any{"darwin", "win32", "linux", "freebsd"}
+		}, "compatibility.platforms is [darwin freebsd linux win32]" + entryPoints},
+		{"a platform claimed twice", func(d map[string]any) {
+			dig(d, "compatibility")["platforms"] = []any{"darwin", "win32", "linux", "linux"}
+		}, "compatibility.platforms is [darwin linux linux win32]" + entryPoints},
+		{"no privacy policy", func(d map[string]any) { delete(d, "privacy_policies") }, "privacy_policies is empty"},
+		{"an empty privacy policy list", func(d map[string]any) { d["privacy_policies"] = []any{} },
+			"privacy_policies is empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if problems := identityProblems(edited(t, tc.edit), bundleFiles); len(problems) != 1 ||
+				!strings.HasPrefix(problems[0], tc.want) {
+				t.Errorf("problems:\n%s\nwant the one starting %q", strings.Join(problems, "\n"), tc.want)
+			}
+		})
+	}
+	// The platforms come from what is staged, not from a list of its own.
+	files := slices.DeleteFunc(slices.Clone(bundleFiles), func(f staged) bool { return f.platform == "linux" })
+	want := []string{"compatibility.platforms is [darwin linux win32]; the packer stages entry points for [darwin win32]"}
+	if got := identityProblems(good(t), files); !slices.Equal(got, want) {
+		t.Errorf("nothing staged for Linux gives %q, want %q", got, want)
 	}
 }
 
@@ -721,26 +691,11 @@ func TestDefaultsProblemsReportsEveryUnreadableDefaultAndTheRest(t *testing.T) {
 		"user_config.client_secret defaults to a list" + cannot,
 		"user_config.profile defaults to an object" + cannot,
 	}
-	got, err := defaultsProblems(m, options(t, m))
+	got, err := defaultsProblems(m)
 	if err != nil || len(got) != 3 || !slices.Equal(got[:2], want) ||
 		!strings.HasPrefix(got[2], "the bundle's defaults configure the server otherwise than no environment does, in EnableDestructive;") {
 		t.Errorf("defaultsProblems = %v,\n%s\nwant\n%s\nand then the comparison", err, strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-}
-
-// options is a manifest's user_config, decoded as settingProblems
-// decodes it.
-func options(t *testing.T, m manifest) map[string]userConfigOption {
-	t.Helper()
-	out := map[string]userConfigOption{}
-	for key, raw := range m.UserConfig {
-		var opt userConfigOption
-		if err := json.Unmarshal(raw, &opt); err != nil {
-			t.Fatal(err)
-		}
-		out[key] = opt
-	}
-	return out
 }
 
 // The bundle asks for every variable the server reads, less the removed
@@ -748,15 +703,12 @@ func options(t *testing.T, m manifest) map[string]userConfigOption {
 // later is a decision about the bundle rather than a gap in it. An
 // exclusion the server has no use for is refused.
 func TestBundleVarsAreDerivedFromTheSettings(t *testing.T) {
-	if read := config.EnvVars(); len(read) < 17 {
-		t.Fatalf("the server reads %d variables; this would be deriving from a stub", len(read))
-	}
 	asked, problems := bundleVarsFrom(
-		[]string{"GCAL_ASKED", "GCAL_LEFT_OUT", "GCAL_REMOVED", "GCAL_ADDED_LATER"},
-		map[string]config.Var{"GCAL_ASKED": {Name: "GCAL_ASKED"}, "GCAL_REMOVED": {Name: "GCAL_REMOVED", Removed: true}},
+		[]config.Var{{Name: "GCAL_ASKED"}, {Name: "GCAL_LEFT_OUT"}, {Name: "GCAL_REMOVED", Removed: true},
+			{Name: "GCAL_ADDED_LATER", Switch: true}},
 		map[string]string{"GCAL_LEFT_OUT": "a reason", "GCAL_GONE": "a reason", "GCAL_REMOVED": "a reason"},
 	)
-	if want := []string{"GCAL_ASKED", "GCAL_ADDED_LATER"}; !slices.Equal(asked, want) {
+	if want := []config.Var{{Name: "GCAL_ASKED"}, {Name: "GCAL_ADDED_LATER", Switch: true}}; !slices.Equal(asked, want) {
 		t.Errorf("asked = %v, want %v", asked, want)
 	}
 	want := []string{
@@ -863,9 +815,8 @@ func refusingReadOnly(t *testing.T, edit func(map[string]any)) manifest {
 // checked first as settingProblems checks them.
 func refusals(t *testing.T, m manifest, declared [][]string) []string {
 	t.Helper()
-	opts := options(t, m)
-	_, defaultsErr := defaultsProblems(m, opts)
-	return refusalProblems(m, opts, bundleSwitches, declared, defaultsErr)
+	_, defaultsErr := defaultsProblems(m)
+	return refusalProblems(m, bundleSwitches, declared, defaultsErr)
 }
 
 // undeclaredReadOnly is the problem refusingReadOnly gives with nothing
@@ -891,7 +842,7 @@ func TestTheBundleRefusalsAreDeclared(t *testing.T) {
 	}
 	// When the defaults do not start, no set is started: the defaults
 	// check reports it.
-	if got := refusalProblems(committed, options(t, committed), bundleSwitches, declared,
+	if got := refusalProblems(committed, bundleSwitches, declared,
 		errors.New("the defaults do not start")); len(got) != 0 {
 		t.Errorf("a set was started beside defaults that do not start: %q", got)
 	}
@@ -905,18 +856,18 @@ func TestTheBundleRefusalsAreDeclared(t *testing.T) {
 // key with no title is reported once, however many sets name it.
 func TestTheDeclaredSetsNameEachOther(t *testing.T) {
 	pair := [][]string{{"enable_destructive", "read_only"}}
-	named := options(t, edited(t, func(d map[string]any) {
+	named := edited(t, func(d map[string]any) {
 		dig(d, "user_config", "read_only")["description"] = "Refused with Deleting on."
 		dig(d, "user_config", "enable_destructive")["description"] = "Refused with Read-only on."
 		dig(d, "user_config", "enable_destructive")["title"] = " Deleting "
-	}))
+	})
 	if got := declaredProblems(named, bundleSwitches, pair); len(got) != 0 {
 		t.Errorf("fields that name each other give %q, want nothing", got)
 	}
-	unnamed := options(t, edited(t, func(d map[string]any) {
+	unnamed := edited(t, func(d map[string]any) {
 		dig(d, "user_config", "read_only")["description"] = "Register only the reads."
 		dig(d, "user_config", "enable_destructive")["description"] = "Register the deletes."
-	}))
+	})
 	want := []string{
 		`user_config.enable_destructive does not name "Read-only", which the server refuses it with`,
 		`user_config.read_only does not name "Deleting, publishing and sharing outside", which the server refuses it with`,
@@ -927,7 +878,7 @@ func TestTheDeclaredSetsNameEachOther(t *testing.T) {
 	untitled := edited(t, func(d map[string]any) { dig(d, "user_config", "read_only")["title"] = " " })
 	twice := [][]string{{"enable_destructive", "read_only"}, {"read_only"}}
 	for _, defaultsErr := range []error{nil, errors.New("the defaults do not start")} {
-		got := refusalProblems(untitled, options(t, untitled), bundleSwitches, twice, defaultsErr)
+		got := refusalProblems(untitled, bundleSwitches, twice, defaultsErr)
 		if n := len(slices.DeleteFunc(got, func(p string) bool {
 			return !strings.HasPrefix(p, "user_config.read_only has no title")
 		})); n != 1 {
@@ -970,32 +921,42 @@ func TestSettingProblemsHoldTheRefusals(t *testing.T) {
 	}
 }
 
-// The launcher's install hint names the module go.mod declares, read
-// under Windows line endings too. The path moves with each major
-// version, so a hint left behind sends somebody to an old one.
+// The launcher's install hint names the module go.mod declares, which
+// modulePath reads under Windows line endings too. The path moves with
+// each major version, so a hint left behind sends somebody to an old
+// one.
 func TestTheLauncherInstallHintIsGoModsModule(t *testing.T) {
 	const hint = `echo "no binary." "Install with: go install example.com/m/v4/cmd/google-calendar-mcp@latest" >&2`
-	for _, goMod := range []string{"module example.com/m/v4\n\ngo 1.27\n", "module example.com/m/v4\r\n\r\ngo 1.27\r\n"} {
-		if problems := installHintProblems(hint, goMod); len(problems) > 0 {
-			t.Errorf("go.mod %q: %v", goMod, problems)
-		}
+	if problems := installHintProblems(hint, "example.com/m/v4"); len(problems) > 0 {
+		t.Errorf("the hint for the module: %v", problems)
 	}
-	for _, tc := range []struct{ name, launcher, goMod, want string }{
-		{"a hint without the major version", strings.Replace(hint, "/v4", "", 1), "module example.com/m/v4\n",
+	for _, tc := range []struct{ name, launcher, want string }{
+		{"a hint without the major version", strings.Replace(hint, "/v4", "", 1),
 			`the launcher says "go install example.com/m/cmd/google-calendar-mcp@latest"`},
-		{"a hint a major version behind", strings.Replace(hint, "/v4", "/v3", 1), "module example.com/m/v4\r\n",
+		{"a hint a major version behind", strings.Replace(hint, "/v4", "/v3", 1),
 			`the launcher says "go install example.com/m/v3/cmd/google-calendar-mcp@latest"`},
-		{"no hint at all", "exit 1", "module example.com/m/v4\n", "gives no install hint"},
-		{"no module line", hint, "go 1.27\n", "go.mod names no module"},
+		{"no hint at all", "exit 1", "gives no install hint"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := installHintProblems(tc.launcher, tc.goMod); !mentions(got, tc.want) {
+			if got := installHintProblems(tc.launcher, "example.com/m/v4"); !mentions(got, tc.want) {
 				t.Errorf("problems %q, want %q", got, tc.want)
 			}
 		})
 	}
-	// And the committed launcher against the committed go.mod.
-	if problems := installHintProblems(launcherSource(t), string(repoFile(t, "go.mod"))); len(problems) > 0 {
-		t.Errorf("the committed launcher: %v", problems)
+	for _, tc := range []struct{ goMod, module, err string }{
+		{"module example.com/m/v4\n\ngo 1.27\n", "example.com/m/v4", ""},
+		{"module example.com/m/v4\r\n\r\ngo 1.27\r\n", "example.com/m/v4", ""},
+		{"go 1.27\n", "", "go.mod names no module"},
+	} {
+		root := t.TempDir()
+		put(t, root, "go.mod", tc.goMod)
+		module, err := modulePath(root)
+		refused := ""
+		if err != nil {
+			refused = err.Error()
+		}
+		if module != tc.module || refused != tc.err {
+			t.Errorf("go.mod %q: modulePath = %q, %q; want %q, %q", tc.goMod, module, refused, tc.module, tc.err)
+		}
 	}
 }

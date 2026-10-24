@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -172,17 +174,21 @@ func checkSettings() ([]string, int, error) {
 // server refuses one with.
 func configDocProblems(vars []config.Var, text string) []string {
 	var problems []string
+	documented := map[string]bool{}
+	for _, m := range settingWord.FindAllStringSubmatch(text, -1) {
+		documented[m[2]] = true
+	}
 	known := map[string]bool{}
 	for _, v := range vars {
 		known[v.Name] = true
-		if !namesWord(text, v.Name) {
+		if !documented[v.Name] {
 			problems = append(problems, fmt.Sprintf("%s does not document %s", configDocPath, v.Name))
 		}
 	}
 	// Settings the page invents.
-	for _, m := range settingWord.FindAllStringSubmatch(text, -1) {
-		if !known[m[2]] {
-			problems = append(problems, fmt.Sprintf("%s documents %s, which the code does not read", configDocPath, m[2]))
+	for _, name := range slices.Sorted(maps.Keys(documented)) {
+		if !known[name] {
+			problems = append(problems, fmt.Sprintf("%s documents %s, which the code does not read", configDocPath, name))
 		}
 	}
 	if !strings.Contains(text, config.ProfileRule) {
@@ -191,15 +197,10 @@ func configDocProblems(vars []config.Var, text string) []string {
 	return problems
 }
 
-// settingWord is a GCAL_ name standing as a word of its own.
-var settingWord = regexp.MustCompile(`(^|[^A-Z0-9_])(GCAL_[A-Z0-9_]+)`)
-
-// namesWord reports whether text names the variable as a whole word, so
-// a longer name that contains it, such as GCAL_READ_ONLY_X, does not
-// count as GCAL_READ_ONLY.
-func namesWord(text, name string) bool {
-	return regexp.MustCompile(`(^|[^A-Z0-9_])` + regexp.QuoteMeta(name) + `($|[^A-Z0-9_])`).MatchString(text)
-}
+// settingWord is a setting's name standing as a word of its own, all of
+// it: a longer name that contains one, such as GCAL_READ_ONLY_X, is that
+// longer name and not GCAL_READ_ONLY.
+var settingWord = regexp.MustCompile(`(^|[^A-Z0-9_])(` + config.EnvPrefix + `[A-Z0-9_]+)`)
 
 // pathRe finds anything shaped like a repository path in prose.
 //

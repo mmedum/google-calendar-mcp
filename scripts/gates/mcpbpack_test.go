@@ -264,11 +264,12 @@ func TestAnIncompleteDistIsRefused(t *testing.T) {
 	}
 }
 
-// The packer refuses what the gate refuses, because both run
-// manifestProblems: a check the gate alone used to run stops the pack,
+// The packer refuses what the gate refuses, because both start from
+// committedManifest: a check the gate alone used to run stops the pack,
 // and so does a file beside the manifest.
 func TestPackRunsEveryCheckTheGateRuns(t *testing.T) {
 	root := copiedRoot(t)
+	t.Chdir(root)
 	dist := fakeDist(t)
 	out := filepath.Join(t.TempDir(), "b.mcpb")
 	if err := packMCPB(dist, "1.0.0", out); err != nil {

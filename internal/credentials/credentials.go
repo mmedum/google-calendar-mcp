@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/zalando/go-keyring"
@@ -121,15 +120,10 @@ func (s *Store) env(k string) string {
 	return os.Getenv(k)
 }
 
-// envToken is the refresh token the environment sets, trimmed, so that
-// spaces alone are none, as for every setting.
-func (s *Store) envToken() string {
-	return strings.TrimSpace(s.env(config.EnvRefreshToken))
-}
-
-// Resolve returns the refresh token and where it came from.
+// Resolve returns the refresh token and where it came from. The
+// environment's is read through config.Lookup, as every setting is.
 func (s *Store) Resolve() (string, Source, error) {
-	if v := s.envToken(); v != "" {
+	if v := config.Lookup(s.env, config.EnvRefreshToken); v != "" {
 		return v, SourceEnv, nil
 	}
 	return s.ResolveStored()
