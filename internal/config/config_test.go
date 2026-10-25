@@ -754,8 +754,9 @@ func nameConstants(t *testing.T) map[string]bool {
 	return found
 }
 
-// variableName is a word that is a variable's name.
-var variableName = regexp.MustCompile(`^` + config.EnvPrefix + `[A-Z0-9][A-Z0-9_]*$`)
+// variableName is a word that is a variable's name. A name ends in a
+// capital or a digit, so GCAL_ENABLE_ is a prefix rather than a name.
+var variableName = regexp.MustCompile(`^` + config.EnvPrefix + `[A-Z0-9_]*[A-Z0-9]$`)
 
 // words is s split into runs of capitals, digits and underscores, the
 // characters a name is made of.
@@ -769,9 +770,6 @@ func nameChar(r rune) bool {
 }
 
 // namesIn is every GCAL_ name f spells, each with where it is spelled.
-// A run of literals that another operand follows ends in a prefix
-// rather than a name when its last character is part of a name, as in
-// EnvPrefix + "ENABLE_" + kind, so that last word is not read.
 func namesIn(f *ast.File) map[string]token.Pos {
 	found := map[string]token.Pos{}
 	spell := func(s string, at token.Pos) {
@@ -800,7 +798,7 @@ func namesIn(f *ast.File) map[string]token.Pos {
 					run += s
 					continue
 				}
-				spell(strings.TrimRightFunc(run, nameChar), at)
+				spell(run, at)
 				run = ""
 				ast.Inspect(op, visit)
 			}
@@ -820,10 +818,10 @@ func namesIn(f *ast.File) map[string]token.Pos {
 // The scan reads a literal, EnvPrefix joined to literals by +, through
 // a selector and parentheses, and a run that starts after another
 // operand, which a scan reading only a chain's head would miss. A run
-// that another operand follows ends in a prefix when it ends in a name's
-// character, as EnvPrefix + "ENABLE_" + kind does, and the rest of it
-// is still read. A name built from another constant or through a format
-// verb is not seen.
+// that another operand follows is read whole: one ending in _, as
+// EnvPrefix + "ENABLE_" + kind does, ends in a prefix, and one ending in
+// a name's last character ends in that name. A name built from another
+// constant or through a format verb is not seen.
 func TestTheScanReadsEachChainInOrder(t *testing.T) {
 	const src = `package p
 
@@ -838,6 +836,7 @@ var (
 	j = EnvPrefix + "ENABLE_" + kind
 	k = "set " + x + EnvPrefix + "NEW"
 	l = "GCAL_KEPT=1, " + EnvPrefix + "CUT_" + kind
+	m = EnvPrefix + "WHOLE" + suffix
 )
 `
 	f, err := parser.ParseFile(token.NewFileSet(), "p.go", src, 0)
@@ -845,7 +844,7 @@ var (
 		t.Fatal(err)
 	}
 	want := []string{"GCAL_JOINED", "GCAL_KEPT", "GCAL_LAST", "GCAL_LATER", "GCAL_NEW", "GCAL_PAREN",
-		"GCAL_PLAIN", "GCAL_SELECTED"}
+		"GCAL_PLAIN", "GCAL_SELECTED", "GCAL_WHOLE"}
 	if got := slices.Sorted(maps.Keys(namesIn(f))); !slices.Equal(got, want) {
 		t.Errorf("namesIn = %v, want %v", got, want)
 	}

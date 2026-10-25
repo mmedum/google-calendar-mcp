@@ -166,10 +166,11 @@ func mcpbGate() error {
 //
 // A key repeated in one object, or given twice in different cases, is
 // refused before anything else is checked. The decode into manifest
-// merges a repeated object into the first and matches a key in any case,
-// while the schema validator, the packer's encode and the host each keep
-// the keys as written, so every other check would read a document that
-// is not the one shipped (§18 row 114). A document whose keys cannot be
+// merges a repeated object into the first and matches a field's key in
+// any case, and Windows matches an environment variable's name in any
+// case, while the schema validator, the packer's encode and the host
+// each keep the keys as written, so every other check would read a
+// document that is not the one shipped (§18 row 114). A document whose keys cannot be
 // walked is refused too, rather than passed unread.
 func committedManifest(root string) (raw []byte, m manifest, problems []string, err error) {
 	raw, err = os.ReadFile(filepath.Join(root, manifestPath)) //nolint:gosec // a repository path from a constant
@@ -186,8 +187,8 @@ func committedManifest(root string) (raw []byte, m manifest, problems []string, 
 	if len(repeated) > 0 {
 		for _, at := range repeated {
 			problems = append(problems, fmt.Sprintf("the manifest has %s more than once, or in another case; "+
-				"the gate's decode merges a repeated key and matches one in any case, and the schema, the "+
-				"packer and the host keep each as written, so they would read different documents", at))
+				"one reader takes the two as one key and another as two, so the gate, the schema, the packer "+
+				"and the host would read different documents", at))
 		}
 		return raw, manifest{}, problems, nil
 	}
@@ -891,10 +892,12 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 			problems = append(problems, fmt.Sprintf("user_config.%s is optional with no default; the reference host "+
 				"passes ${user_config.%s} to the server as written when the field is left blank", key, key))
 		}
-		if def := fmt.Sprint(opt.value); opt.Default != nil && strings.Contains(def, "${") {
+		// The decoded value, so an escape cannot hide the reference; the
+		// message quotes the manifest as written.
+		if opt.Default != nil && strings.Contains(fmt.Sprint(opt.value), "${") {
 			problems = append(problems, fmt.Sprintf("user_config.%s defaults to %s, which holds a ${...} reference; "+
 				"a host may substitute ${HOME}, ${__dirname} or another field's value in a default, and the "+
-				"defaults check reads it as written (§18 row 115)", key, def))
+				"defaults check reads it as written (§18 row 115)", key, opt.Default))
 		}
 	}
 

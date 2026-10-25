@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The bundle and configuration gates read the manifest and the docs more strictly: a key repeated in another case, a `${` default, a name spelled outside `internal/config`, an `os.Getenv` of a server variable, and a name in bold on the configuration page are each held. Nothing a person running the server sees changes.
+- `make leaks-history` passes on the existing history. It allows Dependabot's sign-off by the whole address, and a tag's tagger line.
+
 ## [5.0.0] - 2026-10-24
 
 ### Changed

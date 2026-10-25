@@ -205,11 +205,13 @@ func configDocProblems(vars []config.Var, text string) []string {
 var settingWord = regexp.MustCompile(`\b` + config.EnvPrefix + `[A-Z0-9_]*[A-Z0-9]\b`)
 
 // settingNames is every variable text names, each a whole word. One
-// followed by * is a pattern, such as GCAL_LIVE*, and not a variable.
+// followed by * is a pattern, such as GCAL_LIVE*, and not a variable,
+// unless a * comes before it too, as Markdown's bold and italics do.
 func settingNames(text string) []string {
 	var names []string
 	for _, at := range settingWord.FindAllStringIndex(text, -1) {
-		if !strings.HasPrefix(text[at[1]:], "*") {
+		pattern := strings.HasPrefix(text[at[1]:], "*") && !strings.HasSuffix(text[:at[0]], "*")
+		if !pattern {
 			names = append(names, text[at[0]:at[1]])
 		}
 	}

@@ -3383,9 +3383,38 @@ manifest into the archive and reports problems as its error; and
 Nothing a person running the server sees changes: every message reads
 the same words, and the schema diff is empty.
 
-Written down, not changed: §9.1 says the leak gate's exemption list is
-asserted, and no test counts it. A test that counted it would only
-detect a change; each new exemption has a test that fails without it.
+The code review of this round found four more, fixed in it:
+
+37. **The configuration page read a name in bold or italics as a
+    pattern,** since a `*` followed it. A `*` on both sides is Markdown.
+38. **The name scan dropped a whole name that another operand
+    followed,** as in `EnvPrefix + "WHOLE" + suffix`, where it meant to
+    drop only a prefix such as `ENABLE_`. A name now ends in a capital
+    or a digit, so a prefix is not one, and every run is read whole.
+39. **The `${` refusal quoted Go's rendering of the default** rather
+    than the manifest's text. It quotes the manifest.
+40. **The repeated-key refusal said the gate's decode merges keys in
+    any case,** which a map such as `env` does not. It says the readers
+    differ, which is true of both.
+
+Written down, not changed:
+
+- §9.1 says the leak gate's exemption list is asserted, and no test
+  counts it. A test that counted it would only detect a change; each
+  new exemption has a test that fails without it.
+- The `os.Getenv` scan sees a call on the identifier `os`. An aliased
+  import or a function value goes unseen; resolving them needs type
+  information, for a read nobody writes.
+- That scan has no exemption for the live driver's own `GCAL_LIVE_`
+  names, and the history scan knows a tag object only as a tag's tip.
+  Both fail closed: a driver name joined inline, or a tag of a tag, is
+  refused rather than passed.
+- The tagger line is stripped whatever its identity, as no commit's
+  author or committer line is scanned either: the history scan reads
+  what people wrote, and git's identity headers are not that.
+- The `sensitive` check has no field to read in the committed bundle,
+  which leaves the one secret out by design. Its unit test holds the
+  rule for a field added later.
 
 ## 17. Open decisions
 

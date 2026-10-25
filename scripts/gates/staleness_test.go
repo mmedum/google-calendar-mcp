@@ -57,6 +57,9 @@ func TestConfigDocProblems(t *testing.T) {
 		{"a name kept only as a pattern", "`GCAL_HTTP_TIMEOUT`", "`GCAL_HTTP_TIMEOUT*` and `GCAL_LIVE_*`",
 			[]string{"docs/configuration.md does not document GCAL_HTTP_TIMEOUT"}},
 		{"a pattern beside the name", "`GCAL_HTTP_TIMEOUT`", "`GCAL_HTTP_TIMEOUT` and `GCAL_HTTP*`", nil},
+		// Bold and italics put a * on both sides of a name.
+		{"a name in bold", "`GCAL_HTTP_TIMEOUT`", "**GCAL_HTTP_TIMEOUT** and *GCAL_FANOUT*",
+			[]string{"docs/configuration.md documents GCAL_FANOUT, which the code does not read"}},
 		{"the profile rule in other words", "- and _, starting", "`-` and `_`, starting",
 			[]string{`docs/configuration.md does not say a profile name is "up to 64 characters from a to z, ` +
 				`0 to 9, - and _, starting with a letter or digit"`}},

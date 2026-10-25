@@ -636,16 +636,16 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 		// default, which the defaults check reads as written.
 		{"a default holding the home directory", func(d map[string]any) {
 			dig(d, "user_config", "profile")["default"] = "${HOME}"
-		}, "user_config.profile defaults to ${HOME}, which holds a ${...} reference"},
+		}, "user_config.profile defaults to \"${HOME}\", which holds a ${...} reference"},
 		{"a default holding the bundle's directory", func(d map[string]any) {
 			dig(d, "user_config", "client_secret")["default"] = "${__dirname}/client.json"
-		}, "user_config.client_secret defaults to ${__dirname}/client.json, which holds a ${...} reference"},
+		}, "user_config.client_secret defaults to \"${__dirname}/client.json\", which holds a ${...} reference"},
 		{"a default holding another field", func(d map[string]any) {
 			dig(d, "user_config", "profile")["default"] = "${user_config.client_secret}"
-		}, "user_config.profile defaults to ${user_config.client_secret}, which holds a ${...} reference"},
+		}, "user_config.profile defaults to \"${user_config.client_secret}\", which holds a ${...} reference"},
 		{"a list default holding a host variable", func(d map[string]any) {
 			dig(d, "user_config", "client_secret")["default"] = []any{"${DOCUMENTS}/client.json"}
-		}, "user_config.client_secret defaults to [${DOCUMENTS}/client.json], which holds a ${...} reference"},
+		}, "user_config.client_secret defaults to [\"${DOCUMENTS}/client.json\"], which holds a ${...} reference"},
 		{"an override's env, which replaces the base", func(d map[string]any) {
 			dig(d, "server", "mcp_config", "platform_overrides", "win32")["env"] = map[string]any{
 				"GCAL_ENABLE_DESTRUCTIVE": "true",
