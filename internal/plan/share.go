@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
 )
@@ -172,7 +173,7 @@ func looksLikeDomain(v string) bool {
 // gatedTool names a wider tool and the flag it needs, which is the
 // operator's to set, never the caller's.
 func gatedTool(name string) string {
-	return name + ", which is registered only when the server runs with GCAL_ENABLE_DESTRUCTIVE=true; that " +
+	return name + ", which is registered only when the server runs with " + config.EnvPrefix + "ENABLE_DESTRUCTIVE=true; that " +
 		"is for the person running it to decide"
 }
 

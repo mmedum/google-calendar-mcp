@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/recur"
@@ -134,7 +135,7 @@ func (s Status) apply(e *gcal.Event, d Draft) error {
 // set. create_event refuses all, so its refusals offer this, never the
 // word, or a caller meets a second refusal.
 const decliningTool = "create_event_declining_all, which is registered only when the server runs with " +
-	"GCAL_ENABLE_DECLINE_ALL=true; that is for the person running it to decide"
+	config.EnvPrefix + "ENABLE_DECLINE_ALL=true; that is for the person running it to decide"
 
 // declinesAllHere refuses auto_decline all on an out-of-office or focus
 // time event made by any tool but create_event_declining_all. A client

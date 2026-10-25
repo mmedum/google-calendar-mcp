@@ -97,15 +97,21 @@ func githubRepo(module string) (owner, name string, err error) {
 
 // modulePath reads the module the repository under root is, from its
 // go.mod. The release's tag check and the launcher's install hint both
-// read it here, so the two cannot disagree.
+// read it here, so the two cannot disagree. The directive may be
+// followed by a tab or spaces, the path may be quoted, a trailing //
+// comment is dropped, and a line may end in "\r\n".
 func modulePath(root string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(root, "go.mod")) //nolint:gosec // a repository path from a constant
 	if err != nil {
 		return "", err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "module "); ok {
-			return strings.TrimSpace(rest), nil
+		line, _, _ = strings.Cut(line, "//")
+		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "module" {
+			if unquoted, err := strconv.Unquote(fields[1]); err == nil {
+				return unquoted, nil
+			}
+			return fields[1], nil
 		}
 	}
 	return "", fmt.Errorf("go.mod names no module")
@@ -229,9 +235,15 @@ func serverJSON(version, checksums string, stdout io.Writer) error {
 		return err
 	}
 
-	m, err := readManifest(manifestPath)
+	// The gate's own read, so the entry describes the manifest the gate
+	// and the packer held, a repeated key refused.
+	_, m, problems, err := committedManifest(".")
 	if err != nil {
 		return err
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("the bundle manifest is refused, so no entry describes it:\n  %s",
+			strings.Join(problems, "\n  "))
 	}
 	if m.Description == "" {
 		return fmt.Errorf("%s has no description for the registry entry to carry", manifestPath)

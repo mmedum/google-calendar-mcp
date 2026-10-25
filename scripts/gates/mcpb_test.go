@@ -7,9 +7,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
@@ -297,6 +299,13 @@ func TestManifestProblemsRunsEveryCheck(t *testing.T) {
 		{name: "a variable mapped twice", file: manifestPath, old: `"GCAL_PROFILE": "${user_config.profile}",`,
 			new:  `"GCAL_PROFILE": "${user_config.profile}", "GCAL_PROFILE": "${user_config.profile}",`,
 			want: "the manifest has server.mcp_config.env.GCAL_PROFILE more than once"},
+		// The gate's decode matches "Command" to the command field and
+		// keeps the last; the host reads "command" alone and spawns the
+		// Windows binary on macOS.
+		{name: "a command given twice in two cases", file: manifestPath,
+			old:  `"command": "${__dirname}/server/google-calendar-mcp-darwin",`,
+			new:  `"command": "${__dirname}/server/google-calendar-mcp.exe", "Command": "${__dirname}/server/google-calendar-mcp-darwin",`,
+			want: "the manifest has server.mcp_config.Command more than once, or in another case"},
 		// The install hint is held to go.mod, which moves at every major
 		// version.
 		{name: "a go.mod at another major version", file: "go.mod", old: "/v5", new: "/v4",
@@ -327,7 +336,11 @@ func TestManifestProblemsRunsEveryCheck(t *testing.T) {
 
 // A key is repeated only within one object, and each repeated key is
 // named once, by its path, a list's elements and a repeated object's
-// own keys included.
+// own keys included. Two keys equal under Unicode case folding are one
+// key, as Go's decode matches them, the Kelvin sign and k included, and
+// the later is named. A key holding a dot or a bracket, or an empty one,
+// is quoted, so its path names one key. A document the walk cannot read
+// is an error, not a clean one.
 func TestRepeatedKeysNameEachPathOnce(t *testing.T) {
 	for _, tc := range []struct {
 		doc  string
@@ -336,11 +349,17 @@ func TestRepeatedKeysNameEachPathOnce(t *testing.T) {
 		{`{"a": [{"b": 1, "b": 2, "b": 3}], "c": {"d": 1}, "d": 1}`, []string{"a[0].b"}},
 		{`{"x": {"y": 1}, "x": {"y": 1, "y": 2}}`, []string{"x", "x.y"}},
 		{`{"server": {"type": "binary"}, "user_config": {"type": {"type": "boolean"}}}`, nil},
-		{`{"a": 1,`, nil},
+		{`{"command": "a", "Command": "b", "COMMAND": "c"}`, []string{"Command"}},
+		{`{"k": 1, "\u212a": 2}`, []string{"\u212a"}},
+		{`{"env": {"a.b": 1, "a.b": 2}, "a": {"b": 1}}`, []string{`env["a.b"]`}},
+		{`{"x[0]": 1, "X[0]": 2, "": 1, "": 2}`, []string{`["X[0]"]`, `[""]`}},
 	} {
-		if got := repeatedKeys([]byte(tc.doc)); !slices.Equal(got, tc.want) {
-			t.Errorf("repeatedKeys(%s) = %q, want %q", tc.doc, got, tc.want)
+		if got, err := repeatedKeys([]byte(tc.doc)); err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("repeatedKeys(%s) = %q, %v; want %q", tc.doc, got, err, tc.want)
 		}
+	}
+	if got, err := repeatedKeys([]byte(`{"a": 1,`)); err == nil {
+		t.Errorf("a document cut short gave %q and no error", got)
 	}
 }
 
@@ -613,6 +632,20 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 		{"an optional key with no default, as 4.0.0 shipped the client file", func(d map[string]any) {
 			delete(dig(d, "user_config", "client_secret"), "default")
 		}, "user_config.client_secret is optional with no default"},
+		// A host substitutes its own variables, and another field's, in a
+		// default, which the defaults check reads as written.
+		{"a default holding the home directory", func(d map[string]any) {
+			dig(d, "user_config", "profile")["default"] = "${HOME}"
+		}, "user_config.profile defaults to ${HOME}, which holds a ${...} reference"},
+		{"a default holding the bundle's directory", func(d map[string]any) {
+			dig(d, "user_config", "client_secret")["default"] = "${__dirname}/client.json"
+		}, "user_config.client_secret defaults to ${__dirname}/client.json, which holds a ${...} reference"},
+		{"a default holding another field", func(d map[string]any) {
+			dig(d, "user_config", "profile")["default"] = "${user_config.client_secret}"
+		}, "user_config.profile defaults to ${user_config.client_secret}, which holds a ${...} reference"},
+		{"a list default holding a host variable", func(d map[string]any) {
+			dig(d, "user_config", "client_secret")["default"] = []any{"${DOCUMENTS}/client.json"}
+		}, "user_config.client_secret defaults to [${DOCUMENTS}/client.json], which holds a ${...} reference"},
 		{"an override's env, which replaces the base", func(d map[string]any) {
 			dig(d, "server", "mcp_config", "platform_overrides", "win32")["env"] = map[string]any{
 				"GCAL_ENABLE_DESTRUCTIVE": "true",
@@ -671,6 +704,38 @@ func TestTheBundleSettingsRefuseEachBreak(t *testing.T) {
 				t.Errorf("problems:\n%s\nwant one containing %q", strings.Join(problems, "\n"), tc.want)
 			}
 		})
+	}
+}
+
+// A field that sets a credential, which config's Secret marks, is
+// sensitive, so a host masks the value and stores it apart. The bundle
+// leaves the refresh token out today, so the check runs with it asked
+// for, and the floor holds that Secret still marks it.
+func TestACredentialsFieldIsSensitive(t *testing.T) {
+	leftOut := maps.Clone(bundleLeftOut)
+	delete(leftOut, "GCAL_REFRESH_TOKEN")
+	asking := func(sensitive bool) manifest {
+		return edited(t, func(d map[string]any) {
+			dig(d, "user_config")["refresh_token"] = map[string]any{"type": "string", "title": "Refresh token",
+				"description": "d", "default": "", "required": false, "sensitive": sensitive}
+			dig(d, "server", "mcp_config", "env")["GCAL_REFRESH_TOKEN"] = "${user_config.refresh_token}"
+		})
+	}
+	const want = "user_config.refresh_token sets GCAL_REFRESH_TOKEN, a credential, and is not sensitive, " +
+		"so a host shows and stores it as plain text"
+	if got := settingProblems(asking(false), leftOut); !slices.Equal(got, []string{want}) {
+		t.Errorf("a credential's plain field gives %q, want %q", got, want)
+	}
+	if got := settingProblems(asking(true), leftOut); len(got) != 0 {
+		t.Errorf("a credential's sensitive field gives %q, want nothing", got)
+	}
+	unmarked := slices.Clone(config.Vars())
+	for i := range unmarked {
+		unmarked[i].Secret = false
+	}
+	if got := sensitiveProblems(good(t), unmarked, nil); !slices.Equal(got, []string{"config.Vars marks no variable " +
+		"Secret, so no field is held to sensitive; the refresh token is a credential"}) {
+		t.Errorf("no credential marked gives %q, want the floor", got)
 	}
 }
 
@@ -802,26 +867,41 @@ func TestTheFieldRulesHaveAFloor(t *testing.T) {
 }
 
 // A field the defaults change is named, an unexported one included
-// where its type compares; an unexported one that does not is reported
-// unnamed, rather than panicking.
+// where its type compares by value; an unexported one that does not is
+// reported unnamed, rather than panicking, whatever else differs. A
+// pointer is compared by what it points to, never by its address.
 func TestTheConfigDiffNamesTheFieldsThatDiffer(t *testing.T) {
 	type cfg struct {
 		Shown  int
 		hidden int
 		rest   []string
 		held   any
+		at     *int
 	}
+	one, otherOne, two := 1, 1, 2
 	for _, tc := range []struct {
+		name string
 		b    cfg
 		want []string
 	}{
-		{cfg{2, 1, nil, nil}, []string{"Shown"}},
-		{cfg{1, 2, nil, nil}, []string{"hidden"}},
-		{cfg{1, 1, []string{"x"}, nil}, []string{"an unexported field"}},
-		{cfg{1, 1, nil, nil}, nil},
+		{"an exported field", cfg{2, 1, nil, nil, &one}, []string{"Shown"}},
+		{"an unexported field", cfg{1, 2, nil, nil, &one}, []string{"hidden"}},
+		{"an unexported slice", cfg{1, 1, []string{"x"}, nil, &one}, []string{"an unexported field"}},
+		{"an unexported slice beside a named field", cfg{2, 1, []string{"x"}, nil, &one},
+			[]string{"Shown", "an unexported field"}},
+		{"another pointer to the same value", cfg{1, 1, nil, nil, &otherOne}, nil},
+		{"a pointer to another value", cfg{1, 1, nil, nil, &two}, []string{"an unexported field"}},
+		{"no pointer", cfg{1, 1, nil, nil, nil}, []string{"an unexported field"}},
+		{"nothing", cfg{1, 1, nil, nil, &one}, nil},
 	} {
-		if got := fieldDiff(cfg{1, 1, nil, nil}, tc.b); !slices.Equal(got, tc.want) {
-			t.Errorf("fieldDiff against %+v = %q, want %q", tc.b, got, tc.want)
+		if got := fieldDiff(cfg{1, 1, nil, nil, &one}, tc.b); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: fieldDiff = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	for _, typ := range []reflect.Type{reflect.TypeFor[*int](), reflect.TypeFor[chan int](),
+		reflect.TypeFor[unsafe.Pointer](), reflect.TypeFor[struct{ f func() }](), reflect.TypeFor[[2]*int]()} {
+		if strictlyComparable(typ) {
+			t.Errorf("strictlyComparable(%v) = true; Value.Equal compares it by address", typ)
 		}
 	}
 	// An interface holding a slice on both sides compares as a type and
@@ -1006,6 +1086,11 @@ func TestTheLauncherInstallHintIsGoModsModule(t *testing.T) {
 	for _, tc := range []struct{ goMod, module, err string }{
 		{"module example.com/m/v4\n\ngo 1.27\n", "example.com/m/v4", ""},
 		{"module example.com/m/v4\r\n\r\ngo 1.27\r\n", "example.com/m/v4", ""},
+		{"module\texample.com/m/v4\n", "example.com/m/v4", ""},
+		{"module example.com/m/v4 // the calendar server\r\n", "example.com/m/v4", ""},
+		{"module \"example.com/m/v4\"\n", "example.com/m/v4", ""},
+		{"// module example.com/old\nmodule example.com/m/v4\n", "example.com/m/v4", ""},
+		{"modules example.com/m/v4\n", "", "go.mod names no module"},
 		{"go 1.27\n", "", "go.mod names no module"},
 	} {
 		root := t.TempDir()

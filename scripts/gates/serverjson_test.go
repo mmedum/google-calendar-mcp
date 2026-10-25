@@ -232,6 +232,34 @@ func TestTheRegistryEntryIsBuiltFromTheRepository(t *testing.T) {
 	}
 }
 
+// The entry reads the manifest the gate and the packer hold, through
+// committedManifest, so a key repeated in another case, which a decode
+// of its own would take, is refused and no entry is written.
+func TestTheRegistryEntryReadsTheVettedManifest(t *testing.T) {
+	root := copiedRoot(t)
+	body := string(repoFile(t, manifestPath))
+	const old = `  "description": `
+	if !strings.Contains(body, old) {
+		t.Fatalf("the manifest does not say %q", old)
+	}
+	put(t, root, manifestPath, strings.Replace(body, old, `  "Description": "Another description.",`+"\n"+old, 1))
+	path := checksums(t, oneBundle)
+	t.Chdir(root)
+	module, err := modulePath(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err = serverJSON(fmt.Sprintf("v%d.0.0", moduleMajor(module)), path, &out)
+	if err == nil || !strings.Contains(err.Error(), "the bundle manifest is refused, so no entry describes it:\n"+
+		"  the manifest has description more than once, or in another case") {
+		t.Errorf("a description given twice gave %v", err)
+	}
+	if out.Len() > 0 {
+		t.Errorf("a refused manifest still wrote an entry: %s", out.String())
+	}
+}
+
 // A version with no v is the same release as one with it.
 func TestTheVersionMayCarryItsVOrNot(t *testing.T) {
 	t.Chdir("../..")

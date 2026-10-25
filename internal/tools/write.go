@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
@@ -45,7 +46,7 @@ const statusHelp = "`event_type` makes a status event, which only your primary c
 	"busy. `auto_decline` is REQUIRED for them, with no default: none declines nothing, and new declines " +
 	"invitations that arrive for that time. Google shows each organizer the decline, with `decline_message` " +
 	"if you give one. all, which also declines the meetings you already accepted, is refused here: it is " +
-	"create_event_declining_all, registered only when the server runs with GCAL_ENABLE_DECLINE_ALL=true. " +
+	"create_event_declining_all, registered only when the server runs with " + config.EnvPrefix + "ENABLE_DECLINE_ALL=true. " +
 	"Focus time takes `chat_status`: available or do_not_disturb. A working location takes " +
 	"`working_location` (home, office or custom) and `working_location_label` for the office or place; it is " +
 	"timed or exactly one whole day, always public, and shows you free. A status event takes no guests, rooms " +
@@ -103,7 +104,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"time while it stands. Google shows each organizer the decline, with `decline_message` if you give " +
 			"one, and deleting the event later does not take a decline back. This is create_event's " +
 			"auto_decline all, which create_event refuses; it exists only when the server was started with " +
-			"GCAL_ENABLE_DECLINE_ALL=true. To decline only the invitations that arrive later, use create_event " +
+			config.EnvPrefix + "ENABLE_DECLINE_ALL=true. To decline only the invitations that arrive later, use create_event " +
 			"with auto_decline new. " +
 			"`event_type` is outOfOffice or focusTime. `start` and `end` are RFC3339 timestamps, never dates: " +
 			"neither can be all day. Focus time takes `chat_status`: available or do_not_disturb. " +

@@ -175,8 +175,8 @@ func checkSettings() ([]string, int, error) {
 func configDocProblems(vars []config.Var, text string) []string {
 	var problems []string
 	documented := map[string]bool{}
-	for _, m := range settingWord.FindAllStringSubmatch(text, -1) {
-		documented[m[2]] = true
+	for _, name := range settingNames(text) {
+		documented[name] = true
 	}
 	known := map[string]bool{}
 	for _, v := range vars {
@@ -198,9 +198,23 @@ func configDocProblems(vars []config.Var, text string) []string {
 }
 
 // settingWord is a setting's name standing as a word of its own, all of
-// it: a longer name that contains one, such as GCAL_READ_ONLY_X, is that
-// longer name and not GCAL_READ_ONLY.
-var settingWord = regexp.MustCompile(`(^|[^A-Z0-9_])(` + config.EnvPrefix + `[A-Z0-9_]+)`)
+// it: a letter of either case, a digit or _ on either side makes it part
+// of a longer word, so GCAL_READ_ONLY_X, GCAL_READ_ONLYs and
+// xGCAL_READ_ONLY are not GCAL_READ_ONLY. A name ends in a capital or a
+// digit, so GCAL_LIVE_ is a prefix rather than a name.
+var settingWord = regexp.MustCompile(`\b` + config.EnvPrefix + `[A-Z0-9_]*[A-Z0-9]\b`)
+
+// settingNames is every variable text names, each a whole word. One
+// followed by * is a pattern, such as GCAL_LIVE*, and not a variable.
+func settingNames(text string) []string {
+	var names []string
+	for _, at := range settingWord.FindAllStringIndex(text, -1) {
+		if !strings.HasPrefix(text[at[1]:], "*") {
+			names = append(names, text[at[0]:at[1]])
+		}
+	}
+	return names
+}
 
 // pathRe finds anything shaped like a repository path in prose.
 //

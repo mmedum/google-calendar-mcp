@@ -164,11 +164,13 @@ func mcpbGate() error {
 // with the real version stamped in and encoded again, not these bytes,
 // and holds what it stamps to the vendored schema too.
 //
-// A key repeated in one object is refused before anything else is
-// checked. The decode into manifest merges a repeated object into the
-// first, while the schema validator, the packer's encode and the host
-// each keep the last, so every other check would read a document that
-// is not the one shipped.
+// A key repeated in one object, or given twice in different cases, is
+// refused before anything else is checked. The decode into manifest
+// merges a repeated object into the first and matches a key in any case,
+// while the schema validator, the packer's encode and the host each keep
+// the keys as written, so every other check would read a document that
+// is not the one shipped (§18 row 114). A document whose keys cannot be
+// walked is refused too, rather than passed unread.
 func committedManifest(root string) (raw []byte, m manifest, problems []string, err error) {
 	raw, err = os.ReadFile(filepath.Join(root, manifestPath)) //nolint:gosec // a repository path from a constant
 	if err != nil {
@@ -177,11 +179,15 @@ func committedManifest(root string) (raw []byte, m manifest, problems []string, 
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return raw, manifest{}, []string{fmt.Sprintf("the manifest does not decode: %v", err)}, nil
 	}
-	if repeated := repeatedKeys(raw); len(repeated) > 0 {
+	repeated, err := repeatedKeys(raw)
+	if err != nil {
+		return raw, manifest{}, []string{fmt.Sprintf("the manifest's keys cannot be read: %v", err)}, nil
+	}
+	if len(repeated) > 0 {
 		for _, at := range repeated {
-			problems = append(problems, fmt.Sprintf("the manifest has %s more than once; the gate's decode merges "+
-				"a repeated key, and the schema, the packer and the host keep the last, so they would read "+
-				"different documents", at))
+			problems = append(problems, fmt.Sprintf("the manifest has %s more than once, or in another case; "+
+				"the gate's decode merges a repeated key and matches one in any case, and the schema, the "+
+				"packer and the host keep each as written, so they would read different documents", at))
 		}
 		return raw, manifest{}, problems, nil
 	}
@@ -190,10 +196,13 @@ func committedManifest(root string) (raw []byte, m manifest, problems []string, 
 
 // repeatedKeys is the path of every key an object in raw has more than
 // once, each once, in document order: "server" at the top level,
-// "server.mcp_config.env.GCAL_PROFILE" inside, and [i] for an element
-// of a list. A document that is not JSON has none here, since the
-// decode reports it.
-func repeatedKeys(raw []byte) []string {
+// "server.mcp_config.env.GCAL_PROFILE" inside, [i] for an element of a
+// list, and ["a.b"] for a key holding a dot or a bracket. Two keys equal
+// under Unicode case folding are the same key here, as they are to Go's
+// decode, which matches a field in any case; the later is named. A walk
+// that fails is an error rather than none, so the gate refuses what it
+// could not read.
+func repeatedKeys(raw []byte) ([]string, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	var repeated []string
 	var walk func(path string) error
@@ -204,18 +213,19 @@ func repeatedKeys(raw []byte) []string {
 		}
 		switch tok {
 		case json.Delim('{'):
-			seen := map[string]int{}
+			var seen []string
+			reported := map[int]bool{}
 			for dec.More() {
 				keyTok, err := dec.Token()
 				if err != nil {
 					return err
 				}
 				key, _ := keyTok.(string)
-				at := key
-				if path != "" {
-					at = path + "." + key
-				}
-				if seen[key]++; seen[key] == 2 {
+				at := keyPath(path, key)
+				if first := slices.IndexFunc(seen, func(k string) bool { return strings.EqualFold(k, key) }); first < 0 {
+					seen = append(seen, key)
+				} else if !reported[first] {
+					reported[first] = true
 					repeated = append(repeated, at)
 				}
 				if err := walk(at); err != nil {
@@ -234,10 +244,22 @@ func repeatedKeys(raw []byte) []string {
 		_, err = dec.Token() // the closing brace or bracket
 		return err
 	}
-	if walk("") != nil {
-		return nil
+	if err := walk(""); err != nil {
+		return nil, err
 	}
-	return repeated
+	return repeated, nil
+}
+
+// keyPath is the path of key inside path: path.key, or path["key"] for
+// a key a dot or a bracket would make ambiguous, and for an empty one.
+func keyPath(path, key string) string {
+	switch {
+	case key == "" || strings.ContainsAny(key, ".["):
+		return path + "[" + strconv.Quote(key) + "]"
+	case path == "":
+		return key
+	}
+	return path + "." + key
 }
 
 // manifestProblems is every check the gate and the packer both run, so
@@ -475,19 +497,6 @@ func launcherProblems(files []staged, root string) []string {
 		return append(problems, err.Error())
 	}
 	return append(problems, installHintProblems(string(script), module)...)
-}
-
-// readManifest decodes a manifest file, for the registry entry.
-func readManifest(path string) (manifest, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // a repository path from a constant
-	if err != nil {
-		return manifest{}, err
-	}
-	var m manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return manifest{}, fmt.Errorf("%s is not valid JSON: %w", path, err)
-	}
-	return m, nil
 }
 
 // licenseOf reads the SPDX identifier the LICENSE file under root
@@ -777,6 +786,7 @@ type userConfigOption struct {
 	Title       string          `json:"title"`
 	Description string          `json:"description"`
 	Required    bool            `json:"required"`
+	Sensitive   bool            `json:"sensitive"`
 	Default     json.RawMessage `json:"default"`
 	value       any
 }
@@ -876,9 +886,15 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 	}
 
 	for _, key := range slices.Sorted(maps.Keys(m.UserConfig)) {
-		if opt := m.UserConfig[key]; !opt.Required && opt.Default == nil {
+		opt := m.UserConfig[key]
+		if !opt.Required && opt.Default == nil {
 			problems = append(problems, fmt.Sprintf("user_config.%s is optional with no default; the reference host "+
 				"passes ${user_config.%s} to the server as written when the field is left blank", key, key))
+		}
+		if def := fmt.Sprint(opt.value); opt.Default != nil && strings.Contains(def, "${") {
+			problems = append(problems, fmt.Sprintf("user_config.%s defaults to %s, which holds a ${...} reference; "+
+				"a host may substitute ${HOME}, ${__dirname} or another field's value in a default, and the "+
+				"defaults check reads it as written (§18 row 115)", key, def))
 		}
 	}
 
@@ -929,10 +945,34 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 			problems = append(problems, fmt.Sprintf("mcp_config.env sets %s, which the server does not read", name))
 		}
 	}
+	problems = append(problems, sensitiveProblems(m, vars, asked)...)
 	slices.Sort(switches)
 	defaults, defaultsErr := defaultsProblems(m)
 	problems = append(problems, defaults...)
 	return append(problems, refusalProblems(m, switches, bundleRefused, defaultsErr)...)
+}
+
+// sensitiveProblems holds each field that sets a credential, which
+// config's Secret marks, to sensitive, which a host masks and stores
+// apart from the plain settings. The bundle leaves out the one
+// credential there is today, the refresh token, so a floor holds that
+// the flag still marks it: dropped, a credential asked for later would
+// go unheld. vars is every variable the server reads, and asked the
+// ones the bundle asks for.
+func sensitiveProblems(m manifest, vars, asked []config.Var) []string {
+	var problems []string
+	if !slices.ContainsFunc(vars, func(v config.Var) bool { return v.Secret }) {
+		problems = append(problems, "config.Vars marks no variable Secret, so no field is held to sensitive; "+
+			"the refresh token is a credential")
+	}
+	for _, v := range asked {
+		key := bundleKey(v.Name)
+		if opt, ok := m.UserConfig[key]; ok && v.Secret && !opt.Sensitive {
+			problems = append(problems, fmt.Sprintf("user_config.%s sets %s, a credential, and is not sensitive, "+
+				"so a host shows and stores it as plain text", key, v.Name))
+		}
+	}
+	return problems
 }
 
 // hostEnv is the environment the reference host builds from the
@@ -1029,8 +1069,9 @@ func configDiff(a, b config.Config) []string {
 
 // fieldDiff names the fields of two values of one struct type that
 // differ. An unexported field cannot be read out through Interface, so
-// it is compared with Value.Equal where its type compares; one that does
-// not, and differs, is reported unnamed.
+// it is compared with Value.Equal where its type compares strictly; one
+// whose type does not is compared by sameValue and, when it differs,
+// reported unnamed, once, whatever else differs.
 func fieldDiff(a, b any) []string {
 	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
 	var fields []string
@@ -1047,21 +1088,22 @@ func fieldDiff(a, b any) []string {
 				fields = append(fields, f.Name)
 			}
 		default:
-			unnamed = true
+			unnamed = unnamed || !sameValue(va.Field(i), vb.Field(i))
 		}
 	}
-	if unnamed && len(fields) == 0 && !reflect.DeepEqual(a, b) {
+	if unnamed {
 		fields = append(fields, "an unexported field")
 	}
 	return fields
 }
 
-// strictlyComparable reports whether every value of t compares with
-// Value.Equal. An interface type compares as a type, but Equal panics on
-// a dynamic value that does not, so one anywhere inside t rules it out.
+// strictlyComparable reports whether Value.Equal compares every value of
+// t by what it holds. An interface type compares as a type, but Equal
+// panics on a dynamic value that does not; a pointer, a channel and a
+// func compare by address. One anywhere inside t rules it out.
 func strictlyComparable(t reflect.Type) bool {
 	switch t.Kind() {
-	case reflect.Interface:
+	case reflect.Interface, reflect.Pointer, reflect.Chan, reflect.UnsafePointer, reflect.Func:
 		return false
 	case reflect.Struct:
 		for i := range t.NumField() {
@@ -1074,6 +1116,56 @@ func strictlyComparable(t reflect.Type) bool {
 		return strictlyComparable(t.Elem())
 	}
 	return t.Comparable()
+}
+
+// sameValue is reflect.DeepEqual for two values of one type that may be
+// unexported fields, which DeepEqual cannot be handed. A configuration
+// holds no cycle, so none is followed.
+func sameValue(x, y reflect.Value) bool {
+	switch x.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if x.IsNil() || y.IsNil() {
+			return x.IsNil() == y.IsNil()
+		}
+		if x.Elem().Type() != y.Elem().Type() {
+			return false
+		}
+		return sameValue(x.Elem(), y.Elem())
+	case reflect.Slice:
+		if x.IsNil() != y.IsNil() || x.Len() != y.Len() {
+			return false
+		}
+		fallthrough
+	case reflect.Array:
+		for i := range x.Len() {
+			if !sameValue(x.Index(i), y.Index(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if x.IsNil() != y.IsNil() || x.Len() != y.Len() {
+			return false
+		}
+		for _, key := range x.MapKeys() {
+			if v := y.MapIndex(key); !v.IsValid() || !sameValue(x.MapIndex(key), v) {
+				return false
+			}
+		}
+		return true
+	case reflect.Struct:
+		for i := range x.NumField() {
+			if !sameValue(x.Field(i), y.Field(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Func:
+		return x.IsNil() && y.IsNil()
+	case reflect.Chan, reflect.UnsafePointer:
+		return x.Pointer() == y.Pointer()
+	}
+	return x.Equal(y)
 }
 
 // bundleRefused are the sets of the bundle's switches the server refuses

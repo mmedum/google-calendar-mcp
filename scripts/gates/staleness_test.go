@@ -45,6 +45,18 @@ func TestConfigDocProblems(t *testing.T) {
 		}},
 		{"a variable the code does not read", "`GCAL_CONCURRENCY`", "`GCAL_CONCURRENCY` and `GCAL_FANOUT`",
 			[]string{"docs/configuration.md documents GCAL_FANOUT, which the code does not read"}},
+		// A letter of either case on either side makes a longer word.
+		{"a name kept only inside a plural", "`GCAL_CONCURRENCY`", "`GCAL_CONCURRENCYs`",
+			[]string{"docs/configuration.md does not document GCAL_CONCURRENCY"}},
+		{"a name kept only after a letter", "`GCAL_LOG_FORMAT`", "`xGCAL_LOG_FORMAT`",
+			[]string{"docs/configuration.md does not document GCAL_LOG_FORMAT"}},
+		{"a name kept only after a digit", "`GCAL_LOG_LEVEL`", "`2GCAL_LOG_LEVEL`",
+			[]string{"docs/configuration.md does not document GCAL_LOG_LEVEL"}},
+		// A name followed by * is a pattern, documenting nothing, and a
+		// prefix ending in _ is not a name.
+		{"a name kept only as a pattern", "`GCAL_HTTP_TIMEOUT`", "`GCAL_HTTP_TIMEOUT*` and `GCAL_LIVE_*`",
+			[]string{"docs/configuration.md does not document GCAL_HTTP_TIMEOUT"}},
+		{"a pattern beside the name", "`GCAL_HTTP_TIMEOUT`", "`GCAL_HTTP_TIMEOUT` and `GCAL_HTTP*`", nil},
 		{"the profile rule in other words", "- and _, starting", "`-` and `_`, starting",
 			[]string{`docs/configuration.md does not say a profile name is "up to 64 characters from a to z, ` +
 				`0 to 9, - and _, starting with a letter or digit"`}},
