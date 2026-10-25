@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
@@ -50,7 +51,7 @@ func main() {
 	// granted WITHOUT the ACL scopes, so the driver has to be able to
 	// point at one — hardcoding the default profile made that half
 	// unanswerable and would have wasted a login to find out.
-	profile := flag.String("profile", "default", "the configuration profile to drive")
+	profile := flag.String("profile", config.DefaultProfile, "the configuration profile to drive")
 	// Spike I's readable half creates 51 real calendars and deletes
 	// them. That is a lot to do to somebody's account for one question,
 	// so it is asked for rather than assumed.

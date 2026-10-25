@@ -376,7 +376,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 	if len(refs) > s.Cfg.MaxCalendars {
 		return render.Schedule{}, gapi.Errf(gapi.ClassInvalid,
 			"asked for %d calendars; this server reads at most %d in one call "+
-				"(GCAL_MAX_CALENDARS). Split the request", len(refs), s.Cfg.MaxCalendars)
+				"("+config.EnvPrefix+"MAX_CALENDARS). Split the request", len(refs), s.Cfg.MaxCalendars)
 	}
 
 	cals := make([]model.Calendar, 0, len(refs))
@@ -878,7 +878,7 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders),
 	}
 	if !s.Cfg.Sharing {
-		out.Note = "Sharing tools are off in this server (GCAL_SHARING=off), so the sharing list was not read."
+		out.Note = "Sharing tools are off in this server (" + config.EnvPrefix + "SHARING=off), so the sharing list was not read."
 		return out, nil
 	}
 	rules, err := s.sharingRules(ctx, c.ID)
@@ -1233,7 +1233,7 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 	if len(refs) > config.MaxFreeBusyCalendars {
 		return render.AvailabilityReport{}, gapi.Errf(gapi.ClassInvalid,
 			"asked about %d calendars; this server answers for at most %d in one availability call. "+
-				"That is not GCAL_MAX_CALENDARS, which bounds the reads that cost a request per calendar: "+
+				"That is not "+config.EnvPrefix+"MAX_CALENDARS, which bounds the reads that cost a request per calendar: "+
 				"free/busy answers for %d calendars per request (§2.10). Split the request",
 			len(refs), config.MaxFreeBusyCalendars, FreeBusyBatch)
 	}

@@ -141,6 +141,9 @@ type Var struct {
 	Switch bool
 	// Removed marks a setting a release took out, read only to refuse it.
 	Removed bool
+	// Secret marks a credential. A bundle field that sets one is
+	// sensitive, so a host keeps the value out of sight.
+	Secret bool
 }
 
 // The variables read outside Define. internal/userconfig reads the
@@ -153,7 +156,7 @@ const (
 )
 
 // envOnly is every variable read outside Define, for Vars.
-var envOnly = []string{EnvConfigDir, EnvRefreshToken}
+var envOnly = []Var{{Name: EnvConfigDir}, {Name: EnvRefreshToken, Secret: true}}
 
 // DefaultProfile is the profile used when none is named.
 const DefaultProfile = "default"
@@ -245,10 +248,7 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 // recorded rather than listed, so they cannot fall behind. The bundle
 // and staleness gates derive what they hold from these.
 func Vars() []Var {
-	vars := defined()
-	for _, name := range envOnly {
-		vars = append(vars, Var{Name: name})
-	}
+	vars := append(defined(), envOnly...)
 	slices.SortFunc(vars, func(a, b Var) int { return strings.Compare(a.Name, b.Name) })
 	return vars
 }

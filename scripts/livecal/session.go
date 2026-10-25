@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
 // session drives the built binary over stdio, the way a client does.
@@ -57,11 +59,11 @@ func startServer(ctx context.Context, bin, profile string) (*session, error) {
 	// SKIPPED rather than called — because a tool call naming no
 	// calendar resolves to the account's primary one.
 	cmd.Env = append(cmd.Environ(),
-		"GCAL_LOG_LEVEL=error", "GCAL_PROFILE="+profile, "GCAL_ENABLE_DESTRUCTIVE=true",
+		config.EnvPrefix+"LOG_LEVEL=error", config.EnvPrefix+"PROFILE="+profile, config.EnvPrefix+"ENABLE_DESTRUCTIVE=true",
 		// Registers create_event_declining_all, which the driver calls
 		// only on the scratch calendar, where it is refused: the guard
 		// keeps it off the primary calendar like every other write.
-		"GCAL_ENABLE_DECLINE_ALL=true")
+		config.EnvPrefix+"ENABLE_DECLINE_ALL=true")
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

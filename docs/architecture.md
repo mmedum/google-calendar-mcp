@@ -56,11 +56,10 @@ owner's approval for what it touches (§15, probes Q to T):
   item 7).
 
 Also owed: an inside `share_calendar` share driven live, which needs a
-real address inside an organization, and phase 8's list below. And
-`make leaks-history` fails on two shapes that are not deployer data: the
-tagger's address on the seven annotated tags, and GitHub's support
-address in Dependabot's sign-off. Teaching the gate either is an argued
-exemption (§9.1), so it is the maintainer's.
+real address inside an organization, and phase 8's list below.
+`make leaks-history` passes: the two shapes it failed on, the tagger's
+address on the annotated tags and GitHub's support address in
+Dependabot's sign-off, are argued exemptions now (§9.1, §18 row 116).
 
 **v3.1.0 (2026-10-09) was released and verified from outside:** checksums,
 the cosign signature and the provenance attestation, each also against a tampered
@@ -1566,7 +1565,12 @@ own generated fields cannot take — an `@` with a dot-suffixed domain, a
 known URL prefix, a literal keyword before an id — per the standard's
 warning about a four-character fixture value colliding with a timestamp.
 The gate's exemption list is asserted, so a third entry is an argued
-decision rather than a quiet widening.
+decision rather than a quiet widening. The history scan reads every
+blob, commit message and annotated tag. Two shapes there are allowed,
+each argued where it is written and each with a test that fails without
+it: GitHub's support address alone, which Dependabot's sign-off
+carries, and an annotated tag's tagger line, which git writes from the
+tagger's own identity. A tag's message is still read (§18 row 116).
 
 **Logging.** Method, tool, outcome, duration, a truncated calendar id.
 Never: an email address, an event title, description or location, a
@@ -1813,13 +1817,17 @@ nothing to register, and sharing off takes the destructive switch's two
 shares, so those fields say so. The manifest names Google's privacy
 policy (§18 row 111).
 
-**What `gates mcpb` holds, derived rather than typed.** The gate and
-the packer start from one function, `committedManifest`, which reads
-and decodes the committed manifest once and runs every check over it,
-so the release packs no manifest the gate would refuse. A key an object
-repeats is refused first, naming its path: the decode merges a repeated
-object, while the schema, the packer and the host keep the last, so the
-checks would read another document than the one shipped. The checks are
+**What `gates mcpb` holds, derived rather than typed.** The gate, the
+packer and the registry entry start from one function,
+`committedManifest`, which reads and decodes the committed manifest
+once and runs every check over it, so the release packs and describes
+no manifest the gate would refuse. A key an object repeats, or gives
+twice in two cases, is refused first, naming its path, with a key that
+holds a dot or a bracket quoted: the decode merges a repeated object and
+matches a key in any case, while the schema, the packer and the host
+keep each key as written, so the checks would read another document
+than the one shipped (§18 row 114). A document whose keys cannot be
+walked is refused rather than passed. The checks are
 the placeholder version, the no-login sentence, the `$schema`
 declaration and the vendored schema, the staged names, what the bundle
 says it is, the settings, and the launcher, `go.mod` and `LICENSE`, read
@@ -1831,7 +1839,9 @@ name, a binary, the family's Claude Desktop floor, a privacy policy, and
 exactly the platforms the packer stages an entry point for, so dropping
 a platform together with its override is refused. The launcher's
 install hint is held to the module `modulePath` reads from `go.mod`,
-which the release's tag check reads too. The keys come from
+which the release's tag check and the registry entry read too; it takes
+a tab or spaces after `module`, a quoted path, a trailing comment and
+CRLF. The keys come from
 `config.Vars`, which records every variable Define reads, the removed
 ones included, and names the two read outside it, the config directory
 and the refresh token, by constants config owns, so the gate imports no
@@ -1847,7 +1857,13 @@ unknown variable in `env`, and a key that is no setting's are each
 refused. A config test holds that every `GCAL_` name the server's code
 and `scripts/` spell, as a literal or a `+` chain read in order, is in
 that registry, less the live driver's own `GCAL_LIVE_` variables, which
-the server never reads. `entry_point` and every command name a staged
+the server never reads; a run of literals that another operand follows,
+as in `EnvPrefix + "ENABLE_" + kind`, ends in a prefix rather than a
+name. Outside `internal/config` a name is spelled from config's
+constants, `EnvPrefix` joined to the key or a constant such as
+`EnvConfigDir`, never typed whole in a literal, and no code calls
+`os.Getenv` or `os.LookupEnv` with one, so every reader goes through
+`config.Lookup`. `entry_point` and every command name a staged
 program, never `LICENSE` or `README.md`, and `entry_point` is what the
 default command runs; a command starts with `${__dirname}/` (§18 row 112);
 each claimed platform spawns the file staged for it; and an override
@@ -1855,10 +1871,16 @@ for a platform the bundle does not claim is refused. `mcp_config.args`
 is present and `[]`, and an override's `env` or `args`, present but
 empty included, is refused, since the host substitutes an override for
 the base rather than merging (§18 row 113). A switch is asked as a
-boolean. The defaults are started through `config.Load`, from the
-environment the reference host builds from them and from none, and any
-difference is refused, naming the fields; a default that is a list or
-an object is reported rather than guessed at. Every set of the switches
+boolean. A field that sets a credential, which `config.Var.Secret`
+marks, is sensitive, with a floor on the credentials marked; the
+refresh token is the one today, and the bundle leaves it out. No
+default holds a `${...}`, which a host may substitute and the gate reads
+as written (§18 row 115). The defaults are started through
+`config.Load`, from the environment the reference host builds from them
+and from none, and any difference is refused, naming the fields, an
+unexported one included and compared as `reflect.DeepEqual` would,
+pointers by what they point to; a default that is a list or an object
+is reported rather than guessed at. Every set of the switches
 is started over the defaults, each switch in a set turned from its
 default, so sharing off and the others on, and the sets the server
 refuses are held to `bundleRefused`, both ways; each key in a
@@ -1868,7 +1890,8 @@ field states `config.ProfileRule`, which Build's refusal states too,
 with a floor: a bundle that stops asking for the profile is refused
 rather than passing in silence. The staleness gate holds the
 configuration page to name every variable as a whole word and to state
-the same rule.
+the same rule: a letter of either case, a digit or `_` on either side
+makes a longer word, and a name followed by `*` is a pattern.
 
 The procedure a tag actually follows is `docs/release.md`, including the
 three steps no rehearsal reaches and the recovery for each.
@@ -3315,6 +3338,84 @@ Written down, not changed:
   operator setting naming the organization's domains, or Google's own
   evidence of a Workspace account, which needs a scope.
 
+**The family's second round** (2026-10-25). The sibling servers'
+reviews of 2026-10-24 found these in code they share with this one.
+Each fix has a test that failed with its code broken:
+
+27. **`fieldDiff` hid a differing unexported slice or map beside a
+    named field, and compared pointers by address.** An unexported
+    field whose type does not compare by value is compared as
+    `reflect.DeepEqual` would, and reported whatever else differs.
+28. **The repeated-key refusal missed keys equal but for case,** which
+    Go's decode matches and the host keeps apart (§18 row 114). It
+    refuses them, quotes a key holding a dot or a bracket, and refuses
+    a document its walk cannot read.
+29. **The name scan read `EnvPrefix + "ENABLE_" + kind` as a variable
+    named `GCAL_ENABLE_`.** A run that another operand follows ends in
+    a prefix.
+30. **Variable names were typed whole outside `internal/config`:** two
+    refusals in `internal/plan`, three service messages, two tool
+    descriptions, the live driver's environment and a spike's note.
+    Each is spelled from `config.EnvPrefix`, in the same words. A scan
+    refuses a name typed whole, and a read of a server variable with
+    `os.Getenv` or `os.LookupEnv`. The live driver's `-profile`
+    defaults to `config.DefaultProfile`.
+31. **A default holding `${...}` was read as written,** where a host may
+    substitute it (§18 row 115). It is refused, naming the key.
+32. **A credential's field was not held to `sensitive`.**
+    `config.Var.Secret` marks the refresh token, with a floor; the
+    bundle leaves it out, so the rule holds a field added later.
+33. **`modulePath` missed a tab after `module`, a quoted path and a
+    trailing comment.**
+34. **The registry entry decoded the manifest again,** past the
+    repeated-key refusal. It reads through `committedManifest`.
+35. **The configuration page counted `GCAL_NAMEs` or `xGCAL_NAME` as
+    documenting `GCAL_NAME`.** A name is a whole word on both sides,
+    and one followed by `*` is a pattern.
+36. **`make leaks-history` failed on Dependabot's sign-off and on the
+    tagger line of every annotated tag** (§18 row 116). Both are argued
+    exemptions now, and it passes.
+
+Not applicable here: the bundle has no manifest-stamping command whose
+output could carry a problem, since the packer writes the stamped
+manifest into the archive and reports problems as its error; and
+`internal/userconfig` has used `config.DefaultProfile` since 5.0.0.
+Nothing a person running the server sees changes: every message reads
+the same words, and the schema diff is empty.
+
+The code review of this round found four more, fixed in it:
+
+37. **The configuration page read a name in bold or italics as a
+    pattern,** since a `*` followed it. A `*` on both sides is Markdown.
+38. **The name scan dropped a whole name that another operand
+    followed,** as in `EnvPrefix + "WHOLE" + suffix`, where it meant to
+    drop only a prefix such as `ENABLE_`. A name now ends in a capital
+    or a digit, so a prefix is not one, and every run is read whole.
+39. **The `${` refusal quoted Go's rendering of the default** rather
+    than the manifest's text. It quotes the manifest.
+40. **The repeated-key refusal said the gate's decode merges keys in
+    any case,** which a map such as `env` does not. It says the readers
+    differ, which is true of both.
+
+Written down, not changed:
+
+- §9.1 says the leak gate's exemption list is asserted, and no test
+  counts it. A test that counted it would only detect a change; each
+  new exemption has a test that fails without it.
+- The `os.Getenv` scan sees a call on the identifier `os`. An aliased
+  import or a function value goes unseen; resolving them needs type
+  information, for a read nobody writes.
+- That scan has no exemption for the live driver's own `GCAL_LIVE_`
+  names, and the history scan knows a tag object only as a tag's tip.
+  Both fail closed: a driver name joined inline, or a tag of a tag, is
+  refused rather than passed.
+- The tagger line is stripped whatever its identity, as no commit's
+  author or committer line is scanned either: the history scan reads
+  what people wrote, and git's identity headers are not that.
+- The `sensitive` check has no field to read in the committed bundle,
+  which leaves the one secret out by design. Its unit test holds the
+  rule for a field added later.
+
 ## 17. Open decisions
 
 1. **Incremental sync.** `syncToken` is designed for a client with a
@@ -3653,6 +3754,9 @@ what §15 exists to settle, and they are marked.
 | 111 | `privacy_policies` is optional for a bundle | Read 2026-10-23: anthropics/mcpb, MANIFEST.md: "Required when the extension connects to external services (first- or third-party) that process user data"; added in manifest_version 0.2, and enforced by neither the schema nor `mcpb validate` | **Refuted (the specification).** The manifest names https://policies.google.com/privacy, which answered 200 on 2026-10-24, and `gates mcpb` refuses an empty list |
 | 112 | Any `command` the specification shows runs from the bundle | Read 2026-10-24: anthropics/mcpb v2.1.2, MANIFEST.md L497 and L510-515 give a binary the command `server/my-server`, and L532 says `${__dirname}` "is replaced with the absolute path to the extension's directory"; `src/shared/config.ts` L118, L133 and L173-176 substitute variables in `command` and resolve no path | **Refined (the specification and the reference host; Claude Desktop not probed).** The specification shows a relative command once and never says what it is resolved against, and the reference host passes it to the spawn as written. `${__dirname}` is the one form whose meaning the specification fixes. `gates mcpb` requires every command to start with `${__dirname}/` and to name a staged program, as the committed manifest's do, and refuses a relative or absolute one; 4.1.0's gate stripped a leading `/` and passed `/server/x`. A probe of Claude Desktop's working directory would settle the relative form |
 | 113 | A platform override's `env` and `args` are merged into `mcp_config`'s | Read 2026-10-24: anthropics/mcpb v2.1.2 `src/shared/config.ts` L118-120, `result.args = platformConfig.args \|\| result.args` and `result.env = platformConfig.env \|\| result.env`, and L173-176 substitute `${user_config.x}` into the whole configuration, `args` included | **Refuted (the reference host; Claude Desktop not probed).** An override's `env` or `args`, an empty one included, replaces the base's, so the settings would not reach that platform, and an argument such as `-enable-destructive=true` would reach the server past every check on `env`. `gates mcpb` refuses any `env` or `args` on an override and an argument in `mcp_config.args`, and keeps the base's `"args": []`, refusing it missing or null: only the reference host was read |
+| 114 | Every reader of the manifest reads a key's case the same way | Probed 2026-10-25 with Go 1.27.3 on `{"command": "a", "Command": "b"}`, the same reversed, and `{"k": 1, "\u212a": 2}`, and with Node 26.8.1 on the first and the last | **Refuted (tier 1, a probe; Claude Desktop not probed).** Go's decode into a struct, the gate's, matches a key whatever its case and keeps the last match: `b`, and reversed `a`; the Kelvin sign matches `k` too. Its decode into `map[string]any`, which the schema validator and the packer's stamp read, and Node's `JSON.parse`, the reference host's, keep the two spellings apart. The `mcpb` gate refuses two keys in one object that are equal under Unicode case folding, as `strings.EqualFold` has it |
+| 115 | A host leaves a `user_config` default as written | Tier 2: a sibling server's evidence log, read there 2026-10-24 from anthropics/mcpb v2.1.2 `src/shared/config.ts`, L132-170 and `replaceVariables` L18-41 | **Refined (tier 2; Claude Desktop not probed).** The reference host substitutes in one pass over its variables: `__dirname`, `pathSeparator`, `/` and the system directories first, then each `user_config.x`, from its default or the person's value, into the text already substituted. So a `${user_config.y}` in a default is substituted when `y` comes later in the manifest, and a host variable stays as written. Either way the server can start with a value other than the default the gate reads, so the `mcpb` gate refuses a default that holds `${` |
+| 116 | `leaks-history` passes on this repository | Run 2026-10-25 over every blob, commit message and annotated tag | **Refuted, then fixed.** It failed on 17 findings of two shapes: GitHub's support address in the `Signed-off-by` trailer of seven Dependabot commits, and the tagger line of the ten annotated tags. Neither is deployer data: one is a vendor's support desk on a bot's trailer, the other git's record of who tagged, which every published tag carries. Both are allowed exactly, argued as §9.1 requires, each with a test that fails without it; any other address at github.com, and a tag's message, are still findings |
 
 ### Deviations from the shared Go MCP server standard
 

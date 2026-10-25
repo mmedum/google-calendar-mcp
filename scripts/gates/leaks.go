@@ -116,6 +116,16 @@ func leakRules() []leakRule {
 				// above, and it says nothing about a deployer, an
 				// organization or a person's calendar.
 				regexp.MustCompile(`^noreply@anthropic\.com$`),
+				// The Signed-off-by trailer Dependabot writes on every
+				// version bump it opens: `dependabot[bot]
+				// <support@github.com>`. `leaks-history` failed on each.
+				//
+				// Argued rather than widened (§9.1): exactly this
+				// address, GitHub's own support desk, which a bot's
+				// trailer carries and which says nothing about a
+				// deployer, an organization or a person's calendar.
+				// Any other address at github.com is still a finding.
+				regexp.MustCompile(`^support@github\.com$`),
 			},
 		},
 		{
@@ -220,6 +230,20 @@ func isExecutable(info os.FileInfo) bool { return info.Mode().Perm()&0o111 != 0 
 func scanHistory(rules []leakRule) ([]string, error) {
 	var out []string
 
+	// An annotated tag is an object of its own, listed by its name below.
+	// Its tagger line is git's record of who tagged, the maintainer's own
+	// identity, which every published tag carries by construction.
+	tagRefs, err := exec.Command("git", "for-each-ref", "--format=%(objectname) %(objecttype)", "refs/tags").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list tags: %w", err)
+	}
+	tags := map[string]bool{}
+	for _, line := range strings.Split(string(tagRefs), "\n") {
+		if sha, kind, _ := strings.Cut(strings.TrimSpace(line), " "); kind == "tag" {
+			tags[sha] = true
+		}
+	}
+
 	msgs, err := exec.Command("git", "log", "--all", "--format=%H%n%B").Output()
 	if err != nil {
 		return nil, fmt.Errorf("read commit messages: %w", err)
@@ -241,10 +265,29 @@ func scanHistory(rules []leakRule) ([]string, error) {
 			continue
 		}
 		seen++
+		if tags[fields[0]] {
+			out = append(out, scanOne("tag "+fields[1], withoutTagger(string(content)), rules)...)
+			continue
+		}
 		out = append(out, scanOne("blob "+fields[1], string(content), rules)...)
 	}
 	if seen == 0 {
 		return nil, fmt.Errorf("history scan read no blobs; that is not a real repository")
 	}
 	return out, nil
+}
+
+// withoutTagger is an annotated tag as git cat-file prints it, less the
+// tagger line of its header, which git writes from the tagger's own
+// identity. The rest of the header and the whole message are scanned:
+// a tag's message is written by a person, like a commit's.
+func withoutTagger(tag string) string {
+	header, message, _ := strings.Cut(tag, "\n\n")
+	var kept []string
+	for _, line := range strings.Split(header, "\n") {
+		if !strings.HasPrefix(line, "tagger ") {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n") + "\n\n" + message
 }
