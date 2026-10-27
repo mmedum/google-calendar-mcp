@@ -18,17 +18,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/fileperm"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/fileperm"
 )
 
 // AppDir is the directory name under the user's config directory.
 const AppDir = "google-calendar-mcp"
-
-// EnvDir overrides the base directory.
-const EnvDir = "GCAL_CONFIG_DIR"
-
-// DefaultProfile is the profile used when none is named.
-const DefaultProfile = "default"
 
 // ErrNotFound means this profile has no config file yet.
 var ErrNotFound = errors.New("userconfig: no config file for this profile; run `google-calendar-mcp login`")
@@ -42,9 +37,11 @@ type Config struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// BaseDir returns the application config directory.
+// BaseDir returns the application config directory: config.EnvConfigDir,
+// read through config.Lookup as every setting is, or the user's config
+// directory when that is unset.
 func BaseDir() (string, error) {
-	if v := os.Getenv(EnvDir); v != "" {
+	if v := config.Lookup(os.Getenv, config.EnvConfigDir); v != "" {
 		return v, nil
 	}
 	d, err := os.UserConfigDir()
@@ -60,7 +57,7 @@ func ProfileDir(profile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if profile == "" || profile == DefaultProfile {
+	if profile == "" || profile == config.DefaultProfile {
 		return base, nil
 	}
 	return filepath.Join(base, "profiles", profile), nil
@@ -166,7 +163,7 @@ func Profiles() ([]string, error) {
 	}
 	var out []string
 	if _, err := os.Stat(filepath.Join(base, "config.json")); err == nil {
-		out = append(out, DefaultProfile)
+		out = append(out, config.DefaultProfile)
 	}
 	entries, err := os.ReadDir(filepath.Join(base, "profiles"))
 	if err != nil {

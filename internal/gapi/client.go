@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
 )
 
 // BaseURL is the API root. A var so caltest can point it at a fake.

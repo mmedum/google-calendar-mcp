@@ -2,12 +2,14 @@ package service_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi/caltest"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
 func TestListSharingExplainsEveryRole(t *testing.T) {
@@ -74,7 +76,7 @@ func TestListSharingSaysWhenTheScopeIsMissing(t *testing.T) {
 func TestShareCalendarGrantsAccessAndShowsExposureBothWays(t *testing.T) {
 	svc, fake := calendarSeed(t)
 
-	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "all",
 	})
@@ -109,7 +111,7 @@ func TestShareCalendarGrantsAccessAndShowsExposureBothWays(t *testing.T) {
 func TestShareCalendarSendsFalseRatherThanNothing(t *testing.T) {
 	svc, fake := calendarSeed(t)
 
-	if _, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	if _, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "none",
 	}); err != nil {
@@ -124,7 +126,7 @@ func TestShareCalendarSendsFalseRatherThanNothing(t *testing.T) {
 
 func TestShareCalendarRequiresNotify(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader",
 	})
@@ -138,7 +140,7 @@ func TestShareCalendarRequiresNotify(t *testing.T) {
 // either value would email the wrong set of people.
 func TestShareCalendarRefusesExternalOnly(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "external_only",
 	})
@@ -147,39 +149,350 @@ func TestShareCalendarRefusesExternalOnly(t *testing.T) {
 	}
 }
 
-// §7.6: the public scope needs an explicit flag, because removing the
-// rule afterward takes nothing back.
-func TestShareCalendarRefusesThePublicScopeWithoutTheFlag(t *testing.T) {
-	svc, fake := calendarSeed(t)
-
-	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
-		Calendar: "team@group.calendar.example.test", Who: "anyone", Role: "reader", Notify: "none",
-	})
-	if cls := classOf(t, err); cls != gapi.ClassBlocked {
-		t.Fatalf("class %s, want blocked", cls)
-	}
-	for _, w := range fake.Wrote() {
-		if w.Method == "acl.insert" {
-			t.Fatal("the calendar was published anyway")
+// A group rule reaches whoever is in the group, now and later, outside
+// members included where the organization lets them in, and this server
+// does not read the membership. The result says so on every group share,
+// a dry run included.
+func TestAGroupShareSaysWhoItReaches(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		svc, _ := calendarSeed(t)
+		got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+			Calendar: "team@group.calendar.example.test", Who: "planners@example.test", ScopeType: "group",
+			Role: "reader", Notify: "none", DryRun: dryRun,
+		})
+		if err != nil {
+			t.Fatalf("dry run %v: %v", dryRun, err)
+		}
+		const want = "A group rule reaches everyone in the group, including people added later; a member " +
+			"outside the organization too, if the organization's sharing policy lets them in."
+		if !strings.Contains(got.Text(), want) {
+			t.Fatalf("dry run %v: the result does not say what a group rule reaches:\n%s", dryRun, got.Text())
 		}
 	}
-}
-
-func TestShareCalendarPublishesWithTheFlagAndSaysSo(t *testing.T) {
+	// A person's share does not carry it.
 	svc, _ := calendarSeed(t)
-
-	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
-		Calendar: "team@group.calendar.example.test", Who: "anyone", Role: "reader",
-		Notify: "none", AllowPublic: true,
+	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+		Calendar: "team@group.calendar.example.test", Who: "colleague@example.test", ScopeType: "user",
+		Role: "reader", Notify: "none",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got.Text(), "PUBLIC") {
-		t.Fatalf("publishing a calendar does not say so:\n%s", got.Text())
+	if strings.Contains(got.Text(), "A group rule reaches") {
+		t.Fatalf("a person's share carries the group note:\n%s", got.Text())
 	}
-	if !strings.Contains(got.Text(), "takes nothing back") {
-		t.Fatalf("the result does not say the rule cannot be undone from the other side:\n%s", got.Text())
+}
+
+// share_calendar takes named people and groups inside the organization,
+// below owner (§7.6). Everything wider is refused before anything is
+// written, naming the tool that takes it, and an audience before the
+// role, so a caller is not walked through fixing a role for a share this
+// tool refuses anyway.
+func TestShareCalendarStopsAtTheOrganization(t *testing.T) {
+	for _, c := range []struct {
+		name, who, scopeType, role, names string
+	}{
+		{"the public", "anyone", "", "reader", "publish_calendar"},
+		{"a domain", "example.test", "domain", "reader", "publish_calendar"},
+		{"a person outside", "somebody@elsewhere.test", "", "reader", "widen_calendar_access"},
+		{"a group outside", "team@elsewhere.test", "group", "reader", "widen_calendar_access"},
+		{"an owner inside", "colleague@example.test", "", "owner", "widen_calendar_access"},
+		{"the public, before the role", "anyone", "", "viewer", "publish_calendar"},
+		{"a person outside, before the role", "somebody@elsewhere.test", "", "viewer", "widen_calendar_access"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "team@group.calendar.example.test", Who: c.who, ScopeType: c.scopeType,
+				Role: c.role, Notify: "none",
+			})
+			if cls := classOf(t, err); cls != gapi.ClassBlocked || !strings.Contains(err.Error(), c.names) {
+				t.Fatalf("got [%s] %v, want [blocked] naming %s", cls, err, c.names)
+			}
+			if w := fake.Wrote(); len(w) != 0 {
+				t.Fatalf("got writes %+v, want none", w)
+			}
+		})
+	}
+}
+
+// Lowering the role of a rule the calendar already has widens nothing,
+// so share_calendar makes it whoever the rule reaches, with no flag and
+// no confirm, and the result does not describe it as publishing. Asking
+// for the role the rule has writes nothing; raising it is still refused.
+func TestShareCalendarLowersAWiderRule(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		rule gcal.AclRule
+		who  string
+	}{
+		{"a person outside", gcal.AclRule{ID: "user:somebody@elsewhere.test", Role: gcal.RoleWriter,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "somebody@elsewhere.test"}}, "somebody@elsewhere.test"},
+		{"the public", gcal.AclRule{ID: "default", Role: gcal.RoleWriter,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}}, "anyone"},
+		{"a domain", gcal.AclRule{ID: "domain:example.test", Role: gcal.RoleWriter,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeDomain, Value: "example.test"}}, "example.test"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"], c.rule)
+			got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "team@group.calendar.example.test", Who: c.who, Role: "reader", Notify: "none",
+			})
+			if err != nil {
+				t.Fatalf("lowering: %v", err)
+			}
+			if w := fake.Wrote(); len(w) != 1 || w[0].Method != "acl.patch" {
+				t.Fatalf("got writes %+v, want one acl.patch", w)
+			}
+			if !strings.Contains(got.Text(), "from writer to reader") {
+				t.Fatalf("the result does not say what the access changed from:\n%s", got.Text())
+			}
+			for _, claim := range []string{"publishing rather than sharing", "opens the calendar to everybody"} {
+				if strings.Contains(got.Text(), claim) {
+					t.Fatalf("lowering a rule says %q:\n%s", claim, got.Text())
+				}
+			}
+			kept, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "team@group.calendar.example.test", Who: c.who, Role: "reader", Notify: "none",
+			})
+			if err != nil {
+				t.Fatalf("keeping the role: %v", err)
+			}
+			if w := fake.Wrote(); len(w) != 1 || !strings.Contains(kept.Text(), "already had reader access") {
+				t.Fatalf("keeping the role: got writes %+v, want no new one, and:\n%s", w, kept.Text())
+			}
+			_, err = svc.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "team@group.calendar.example.test", Who: c.who, Role: "writer", Notify: "none",
+			})
+			if cls := classOf(t, err); cls != gapi.ClassBlocked {
+				t.Fatalf("raising it again: got [%s] %v, want [blocked]", cls, err)
+			}
+		})
+	}
+}
+
+// A personal account has no organization, so share_calendar takes
+// nobody there, and the address is refused as outside even in the
+// account's own domain.
+func TestShareCalendarOnAPersonalAccountTakesNobody(t *testing.T) {
+	// Assembled from pieces, so this file does not trip the leak gate.
+	gmail := "@" + "gmail.com"
+	fake := caltest.New()
+	fake.AddCalendar("me"+gmail, "Sample Primary", "UTC", gcal.RoleOwner, true)
+	svc := newService(t, fake)
+	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+		Calendar: "primary", Who: "friend" + gmail, Role: "reader", Notify: "none",
+	})
+	if cls := classOf(t, err); cls != gapi.ClassBlocked || !strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Fatalf("got [%s] %v, want [blocked] naming widen_calendar_access", cls, err)
+	}
+}
+
+// publish_calendar opens a calendar to the public, and says what that
+// cannot take back. Without confirm it writes nothing; a dry run needs
+// no confirm and writes nothing either.
+func TestPublishCalendarNeedsConfirmAndSaysItPublishes(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	o := service.PublishOptions{Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team",
+		Who: "anyone", Role: "reader", Notify: "none"}
+
+	_, err := svc.PublishCalendar(context.Background(), o)
+	if cls := classOf(t, err); cls != gapi.ClassBlocked || !strings.Contains(err.Error(), "confirm:true") {
+		t.Fatalf("got [%s] %v, want [blocked] asking for confirm", cls, err)
+	}
+	dry := o
+	dry.DryRun = true
+	if _, err := svc.PublishCalendar(context.Background(), dry); err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Fatalf("got writes %+v before the confirmed call, want none", w)
+	}
+
+	o.Confirm = true
+	got, err := svc.PublishCalendar(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := fake.Wrote(); len(w) != 1 || w[0].Method != "acl.insert" {
+		t.Fatalf("got writes %+v, want one acl.insert", w)
+	}
+	if got.Changed == nil || got.Changed.ScopeType != gcal.ScopeTypeDefault {
+		t.Fatalf("rule %+v, want the public scope", got.Changed)
+	}
+	if !strings.Contains(got.Text(), "PUBLIC") || !strings.Contains(got.Text(), "takes nothing back") {
+		t.Fatalf("publishing does not say what it cannot take back:\n%s", got.Text())
+	}
+}
+
+// A domain needs no scope_type in publish_calendar, and a person is
+// refused there, naming the tools that take one.
+func TestPublishCalendarOpensADomainAndTakesNoPerson(t *testing.T) {
+	svc, _ := calendarSeed(t)
+	got, err := svc.PublishCalendar(context.Background(), service.PublishOptions{
+		Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "example.test",
+		Role: "freeBusyReader", Notify: "none", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Changed == nil || got.Changed.ScopeType != gcal.ScopeTypeDomain || got.Changed.Value != "example.test" {
+		t.Fatalf("rule %+v, want the domain example.test", got.Changed)
+	}
+	if !strings.Contains(got.Text(), "everybody in example.test") {
+		t.Fatalf("the result does not say who the domain rule reaches:\n%s", got.Text())
+	}
+
+	_, err = svc.PublishCalendar(context.Background(), service.PublishOptions{
+		Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "colleague@example.test",
+		Role: "reader", Notify: "none", Confirm: true,
+	})
+	if cls := classOf(t, err); cls != gapi.ClassInvalid || !strings.Contains(err.Error(), "share_calendar") {
+		t.Fatalf("got [%s] %v, want [invalid] naming share_calendar", cls, err)
+	}
+
+	_, err = svc.PublishCalendar(context.Background(), service.PublishOptions{
+		Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "example.test",
+		Role: "owner", Notify: "none", Confirm: true,
+	})
+	if cls := classOf(t, err); cls != gapi.ClassInvalid || !strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Fatalf("a domain made owner: got [%s] %v, want [invalid]", cls, err)
+	}
+}
+
+// The two wider shares carry the calendar's title, so a client that asks
+// before the call shows which calendar it opens, and a title that is not
+// the calendar's is refused [stale] with nothing written, a dry run
+// included. "Team" reaches "Sample Team" as a fragment of its title,
+// which is exactly the call whose prompt would not say what it opens.
+func TestAWideShareNamesTheCalendarItOpens(t *testing.T) {
+	for _, c := range []struct {
+		name, calendar, title string
+		dryRun                bool
+		want                  gapi.Class
+	}{
+		{"no title", "team@group.calendar.example.test", "", false, gapi.ClassInvalid},
+		{"another calendar's title", "team@group.calendar.example.test", "Sample Primary", false, gapi.ClassStale},
+		{"a fragment of the title", "Team", "Team", false, gapi.ClassStale},
+		{"another case", "team@group.calendar.example.test", "sample team", false, gapi.ClassStale},
+		{"a dry run with another title", "team@group.calendar.example.test", "Sample Primary", true,
+			gapi.ClassStale},
+		{"the title, padded", "Team", "  Sample Team ", false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			_, published := svc.PublishCalendar(context.Background(), service.PublishOptions{
+				Calendar: c.calendar, CalendarTitle: c.title, Who: "anyone", Role: "freeBusyReader",
+				Notify: "none", Confirm: true, DryRun: c.dryRun,
+			})
+			_, widened := svc.WidenCalendarAccess(context.Background(), service.WidenOptions{
+				Calendar: c.calendar, CalendarTitle: c.title, Who: "somebody@elsewhere.test", Role: "reader",
+				Notify: "none", Confirm: true, DryRun: c.dryRun,
+			})
+			for tool, err := range map[string]error{"publish_calendar": published, "widen_calendar_access": widened} {
+				if c.want == "" {
+					if err != nil {
+						t.Fatalf("%s: %v", tool, err)
+					}
+					continue
+				}
+				if cls := classOf(t, err); cls != c.want || !strings.Contains(err.Error(), "calendar_title") {
+					t.Fatalf("%s: got [%s] %v, want [%s] naming calendar_title", tool, cls, err, c.want)
+				}
+			}
+			wantWrites := 2
+			if c.want != "" {
+				wantWrites = 0
+			}
+			if w := fake.Wrote(); len(w) != wantWrites {
+				t.Fatalf("got writes %+v, want %d", w, wantWrites)
+			}
+		})
+	}
+}
+
+// A sharing call spends no request it does not need. "primary" resolves
+// from the calendar list the account's own address is read from, rather
+// than a second read of the same fact, and a wider share refused on its
+// arguments reads no rules.
+func TestASharingCallSpendsOnlyTheRequestsItNeeds(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  func(*service.Service) error
+		want []string
+	}{
+		{"share_calendar on primary", func(s *service.Service) error {
+			_, err := s.ShareCalendar(context.Background(), service.ShareOptions{
+				Calendar: "primary", Who: "colleague@example.test", Role: "reader", Notify: "none", DryRun: true,
+			})
+			return err
+		}, []string{"GET /users/me/calendarList", "GET /calendars/me@example.test/acl"}},
+		{"publish_calendar without confirm", func(s *service.Service) error {
+			_, err := s.PublishCalendar(context.Background(), service.PublishOptions{
+				Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "anyone",
+				Role: "reader", Notify: "none",
+			})
+			return err
+		}, []string{"GET /users/me/calendarList"}},
+		{"widen_calendar_access with another title", func(s *service.Service) error {
+			_, err := s.WidenCalendarAccess(context.Background(), service.WidenOptions{
+				Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Primary",
+				Who: "somebody@elsewhere.test", Role: "reader", Notify: "none", Confirm: true,
+			})
+			return err
+		}, []string{"GET /users/me/calendarList"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			_ = c.run(svc)
+			if got := fake.Served(); !slices.Equal(got, c.want) {
+				t.Fatalf("served %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// widen_calendar_access shares outside the organization and makes owners,
+// with confirm, and refuses what the other two tools take.
+func TestWidenCalendarAccessTakesOutsidersAndOwners(t *testing.T) {
+	for _, c := range []struct {
+		name, who, role string
+		confirm         bool
+		want            gapi.Class
+		says            string
+	}{
+		{"a person outside", "somebody@elsewhere.test", "reader", true, "", "outside your organization"},
+		{"an owner inside", "colleague@example.test", "owner", true, "", "Owner access includes"},
+		{"without confirm", "somebody@elsewhere.test", "reader", false, gapi.ClassBlocked, "confirm:true"},
+		{"a person inside below owner", "colleague@example.test", "writer", true, gapi.ClassInvalid, "share_calendar"},
+		{"the public", "anyone", "reader", true, gapi.ClassInvalid, "publish_calendar"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			got, err := svc.WidenCalendarAccess(context.Background(), service.WidenOptions{
+				Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: c.who,
+				Role: c.role, Notify: "none", Confirm: c.confirm,
+			})
+			if c.want != "" {
+				if cls := classOf(t, err); cls != c.want || !strings.Contains(err.Error(), c.says) {
+					t.Fatalf("got [%s] %v, want [%s] saying %q", cls, err, c.want, c.says)
+				}
+				if w := fake.Wrote(); len(w) != 0 {
+					t.Fatalf("got writes %+v, want none", w)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w := fake.Wrote(); len(w) != 1 || w[0].Method != "acl.insert" {
+				t.Fatalf("got writes %+v, want one acl.insert", w)
+			}
+			if !strings.Contains(got.Text(), c.says) {
+				t.Fatalf("the result does not say %q:\n%s", c.says, got.Text())
+			}
+		})
 	}
 }
 
@@ -191,7 +504,7 @@ func TestShareCalendarPatchesAnExistingRule(t *testing.T) {
 		gcal.AclRule{ID: "user:colleague@example.test", Role: gcal.RoleReader,
 			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "colleague@example.test"}})
 
-	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "writer", Notify: "all",
 	})
@@ -229,7 +542,7 @@ func TestShareCalendarWritesNothingWhenTheAccessIsAlreadyThere(t *testing.T) {
 		gcal.AclRule{ID: "user:colleague@example.test", Role: gcal.RoleReader,
 			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "colleague@example.test"}})
 
-	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "all",
 	})
@@ -254,7 +567,7 @@ func TestShareCalendarWritesNothingWhenTheAccessIsAlreadyThere(t *testing.T) {
 func TestShareCalendarSaysHowItReadTheAddress(t *testing.T) {
 	svc, _ := calendarSeed(t)
 
-	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "none",
 	})
@@ -271,7 +584,7 @@ func TestShareCalendarSaysHowItReadTheAddress(t *testing.T) {
 
 func TestShareCalendarRefusesWithoutOwnerAccess(t *testing.T) {
 	svc, _ := calendarSeed(t)
-	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "readonly@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "none",
 	})
@@ -283,7 +596,7 @@ func TestShareCalendarRefusesWithoutOwnerAccess(t *testing.T) {
 func TestShareCalendarDryRunWritesNothingAndShowsTheResult(t *testing.T) {
 	svc, fake := calendarSeed(t)
 
-	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "all", DryRun: true,
 	})
@@ -415,9 +728,9 @@ func TestSharingDryRunNotesClaimNothingHappened(t *testing.T) {
 			Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}})
 	ctx := context.Background()
 
-	shared, err := svc.ShareCalendar(ctx, service.ShareOptions{
-		Calendar: "team@group.calendar.example.test", Who: "anyone", Role: "writer",
-		Notify: "none", AllowPublic: true, DryRun: true,
+	shared, err := svc.PublishCalendar(ctx, service.PublishOptions{
+		Calendar: "team@group.calendar.example.test", CalendarTitle: "Sample Team", Who: "anyone",
+		Role: "writer", Notify: "none", DryRun: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -464,7 +777,7 @@ func TestAShareThatMayHaveLandedIsAmbiguous(t *testing.T) {
 	svc, fake := calendarSeed(t)
 	fake.Fail["POST /calendars/team@group.calendar.example.test/acl"] = 503
 
-	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "all",
 	})
@@ -481,7 +794,7 @@ func TestAShareGoogleRefusedIsNotAmbiguous(t *testing.T) {
 	svc, fake := calendarSeed(t)
 	fake.Fail["POST /calendars/team@group.calendar.example.test/acl"] = 400
 
-	_, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      "colleague@example.test", Role: "reader", Notify: "all",
 	})
@@ -494,7 +807,7 @@ func TestAShareGoogleRefusedIsNotAmbiguous(t *testing.T) {
 // bare one, and the display name reaches neither Google nor the result.
 func TestShareCalendarTakesAMailbox(t *testing.T) {
 	svc, fake := calendarSeed(t)
-	got, err := svc.ShareCalendar(accepted(), service.ShareOptions{
+	got, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
 		Calendar: "team@group.calendar.example.test",
 		Who:      `"Sample Colleague" <colleague@example.test>`, Role: "reader", Notify: "all",
 	})

@@ -6,8 +6,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/auth"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
 // spikeG answers §15's question: does acl.list really need its own
@@ -55,7 +56,7 @@ func spikeG(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	switch {
 	case hasACLScope && err == nil:
 		return pass, "acl.list works with the acls scope granted (the positive half; " +
-			"the negative half needs a profile with GCAL_SHARING=off)"
+			"the negative half needs a profile with " + config.EnvPrefix + "SHARING=off)"
 	case hasACLScope && err != nil:
 		return fail, "acl.list failed even though the acls scope was granted: " + err.Error()
 	case !hasACLScope && err == nil:

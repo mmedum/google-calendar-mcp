@@ -3,9 +3,11 @@ package plan
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
 )
 
 // The sharing half of the plan package (§7.6).
@@ -159,22 +161,150 @@ func looksLikeDomain(v string) bool {
 	return !strings.HasPrefix(v, ".") && !strings.HasSuffix(v, ".")
 }
 
-// AllowPublic refuses a public share that was not explicitly asked for
-// (§7.6).
-//
-// The refusal is not about taste. scope.type "default" grants the whole
-// internet, signed in or not, and it is the one ACL value whose effect
-// cannot be taken back from the other side: anybody who read the
-// calendar while it was public keeps what they read, and a search engine
-// that indexed it keeps that too. Removing the rule stops new readers
-// and undoes nothing.
-func AllowPublic(a Audience, allow bool) error {
-	if !a.Scope.IsPublic() || allow {
+// The three sharing tools split one act by how far it reaches (§7.6).
+// share_calendar takes named people and groups inside the organization,
+// below owner; publish_calendar the public and whole domains; and
+// widen_calendar_access people and groups outside the organization, and
+// owners. A client remembers an approval per tool, never per argument, so
+// each wider form is a tool of its own, registered only with the
+// destructive flag, rather than a value an always-allowed share carries
+// unseen.
+
+// gatedTool names a wider tool and the flag it needs, which is the
+// operator's to set, never the caller's.
+func gatedTool(name string) string {
+	return name + ", which is registered only when the server runs with " + config.EnvPrefix + "ENABLE_DESTRUCTIVE=true; that " +
+		"is for the person running it to decide"
+}
+
+// consumerDomains are the domains of personal Google accounts. They name
+// no organization.
+var consumerDomains = map[string]bool{"gmail.com": true, "googlemail.com": true}
+
+// GroupReach is what a group rule reaches, said on every group share and
+// in share_calendar's description. Google's own help says access follows
+// membership, later members included, and that a member outside the
+// organization gets in unless its sharing policy forbids it (§7.6).
+const GroupReach = "A group rule reaches everyone in the group, including people added later; a member " +
+	"outside the organization too, if the organization's sharing policy lets them in."
+
+// Outside reports whether a person's or a group's address is outside the
+// organization of account, the signed-in account's own address. The
+// organization is taken as the account's domain. A personal account has
+// none, so every address is outside it, and so is every address when
+// the account is unknown. A secondary domain of the same organization
+// counts as outside too, and so does a domain with a character past
+// ASCII, which Unicode case folding can make equal to the account's
+// while Google is sent it unchanged: each errs toward one refusal too
+// many, never one share too many.
+func Outside(address, account string) bool {
+	theirs, mine := domainOf(address), domainOf(account)
+	return theirs == "" || mine == "" || consumerDomains[mine] || theirs != mine ||
+		!ascii(address[strings.LastIndex(address, "@")+1:])
+}
+
+// ascii reports whether s holds only ASCII characters.
+func ascii(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+// OrdinaryAudience refuses, in share_calendar, an audience past named
+// people and groups inside the organization, naming the tool that takes
+// it. outside is Outside for the audience's address.
+func OrdinaryAudience(a Audience, outside bool) error {
+	switch {
+	case a.Scope.IsPublic():
+		return fmt.Errorf("%w: share_calendar shares with named people and groups inside your organization. "+
+			"Sharing with anyone publishes the calendar to the whole internet, signed in or not, and "+
+			"removing the rule later takes nothing back from whoever already looked. That is %s. To take a "+
+			"public rule away, use unshare_calendar", ErrBlocked, gatedTool("publish_calendar"))
+	case a.Scope.Type == gcal.ScopeTypeDomain:
+		return fmt.Errorf("%w: share_calendar shares with named people and groups inside your organization. "+
+			"A domain rule opens the calendar to everybody in %s, which is %s. To take a domain rule away, "+
+			"use unshare_calendar", ErrBlocked, a.Scope.Value, gatedTool("publish_calendar"))
+	case outside:
+		return fmt.Errorf("%w: %s is outside your organization as far as this server can tell: an address "+
+			"is inside only when its domain is your account's own, and a personal Google account has no "+
+			"organization. share_calendar shares inside it; sharing outside is %s", ErrBlocked,
+			Describe(a), gatedTool("widen_calendar_access"))
+	}
+	return nil
+}
+
+// OrdinaryRole refuses, in share_calendar, the owner role, naming the
+// tool that grants it.
+func OrdinaryRole(role string) error {
+	if role != gcal.RoleOwner {
 		return nil
 	}
-	return fmt.Errorf("%w: this would publish the calendar to anybody at all, signed in or not. Removing "+
-		"the rule afterward stops new readers and takes nothing back from whoever already looked. Pass "+
-		"allow_public:true on this call if that is genuinely what you mean", ErrBlocked)
+	return fmt.Errorf("%w: owner access includes changing who else can see the calendar, and removing you. "+
+		"share_calendar grants access below owner; making somebody an owner is %s", ErrBlocked,
+		gatedTool("widen_calendar_access"))
+}
+
+// WithinRule reports whether a share keeps or lowers the role of a rule
+// the calendar already has. That takes nothing past where the rule
+// already reaches, so share_calendar makes it whatever the rule's reach:
+// it needs neither the destructive flag nor confirm.
+func WithinRule(existing []model.Sharing, a Audience, role string) bool {
+	rule, had := FindRule(existing, a)
+	return had && gcal.AtLeast(rule.Role, role)
+}
+
+// PublicRole refuses owner on a public or a domain rule. Everybody in a
+// domain, or the internet, able to change who else can see the calendar
+// and to remove its owner is not a share this server makes; an owner is a
+// named person, through widen_calendar_access.
+func PublicRole(role string) error {
+	if role != gcal.RoleOwner {
+		return nil
+	}
+	return fmt.Errorf("%w: owner access lets whoever holds it change who else can see the calendar and remove "+
+		"you, and publish_calendar does not give it to a domain or to anyone. Pass freeBusyReader, reader, "+
+		"writerWithoutPrivateAccess or writer; an owner is one named person, through widen_calendar_access",
+		ErrInvalid)
+}
+
+// ParsePublic reads publish_calendar's `who`: "anyone" for the public,
+// or a domain for everybody in it. A domain needs no scope_type here,
+// because nothing else this tool takes looks like one.
+func ParsePublic(who string) (Audience, error) {
+	who = strings.TrimSpace(who)
+	switch {
+	case isPublicWord(who):
+		return Audience{Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}, Source: SourcePublic}, nil
+	case looksLikeDomain(who):
+		return Audience{Scope: gcal.AclScope{Type: gcal.ScopeTypeDomain, Value: strings.ToLower(who)},
+			Source: SourceGiven}, nil
+	case who == "":
+		return Audience{}, fmt.Errorf("%w: who is required: \"anyone\" for the public internet, or a domain "+
+			"such as example.com for everybody in it", ErrInvalid)
+	}
+	return Audience{}, fmt.Errorf("%w: publish_calendar takes \"anyone\" or a domain, such as example.com. "+
+		"A person or a group is share_calendar inside your organization below owner, and "+
+		"widen_calendar_access otherwise", ErrInvalid)
+}
+
+// WideAudience refuses, in widen_calendar_access, what one of the other
+// two tools takes: the public or a domain, and a person or group inside
+// the organization below owner. outside is Outside for the audience's
+// address.
+func WideAudience(a Audience, role string, outside bool) error {
+	switch {
+	case a.Scope.IsPublic() || a.Scope.Type == gcal.ScopeTypeDomain:
+		return fmt.Errorf("%w: widen_calendar_access shares with a person or a group. The public and a whole "+
+			"domain are publish_calendar's", ErrInvalid)
+	case !outside && role != gcal.RoleOwner:
+		return fmt.Errorf("%w: %s is inside your organization and %s is below owner, which is "+
+			"share_calendar's to share. widen_calendar_access is for somebody outside your organization, or "+
+			"for an owner", ErrInvalid, Describe(a), role)
+	}
+	return nil
 }
 
 // ParseRole reads the access level a share grants.

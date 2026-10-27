@@ -33,8 +33,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 func main() {
@@ -50,7 +51,7 @@ func main() {
 	// granted WITHOUT the ACL scopes, so the driver has to be able to
 	// point at one — hardcoding the default profile made that half
 	// unanswerable and would have wasted a login to find out.
-	profile := flag.String("profile", "default", "the configuration profile to drive")
+	profile := flag.String("profile", config.DefaultProfile, "the configuration profile to drive")
 	// Spike I's readable half creates 51 real calendars and deletes
 	// them. That is a lot to do to somebody's account for one question,
 	// so it is asked for rather than assumed.
@@ -63,6 +64,11 @@ func main() {
 	// accident.
 	notify := flag.Bool("spike-notify", false,
 		"spikes A and B: send REAL invitations to the configured guests")
+	// The guests come from the environment, where a shell profile can
+	// leave them set. -spike-notify is refused unless this names every
+	// one of them, so whoever arms a run types who it mails.
+	invitees := flag.String("spike-invitees", "",
+		"with -spike-notify: every guest address the run may invite, comma-separated, exactly the configured ones")
 	// Spike A and B events are kept for a person to read. Removing them
 	// cancels them properly, which mails the guests — so it is asked for.
 	sweep := flag.Bool("sweep-spikes", false,
@@ -81,6 +87,12 @@ func main() {
 	showFilter = *show
 
 	out := redact.New(os.Stderr)
+	named, err := armNotify(spikeNotify, *invitees, guestsFromEnv())
+	if err != nil {
+		out.Printf("%s\n", redact.String(err.Error()))
+		os.Exit(2)
+	}
+	reach.arm(named, clearSpikeEvents)
 	switch *status {
 	case "outOfOffice", "focusTime", "workingLocation":
 		statusKind = *status
@@ -88,11 +100,12 @@ func main() {
 		out.Printf("-status-type is outOfOffice, focusTime or workingLocation, not %q\n", *status)
 		os.Exit(2)
 	}
-	// Ctrl-C or SIGTERM stops the steps rather than the process, so the
-	// deferred cleanup still deletes the status event on the primary
-	// calendar and the calendars this run made (§9.1). A second signal
-	// exits at once, after the first has said what that leaves behind.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Ctrl-C, SIGTERM or a closed terminal stops the steps rather than
+	// the process, so the deferred cleanup still deletes the status event
+	// on the primary calendar and the calendars this run made (§9.1). A
+	// second signal exits at once, after the first has said what that
+	// leaves behind.
+	ctx, stop := stopOnSignal(context.Background())
 	finished := make(chan struct{})
 	go func() {
 		<-ctx.Done()
@@ -112,6 +125,19 @@ func main() {
 	os.Exit(code)
 }
 
+// stopSignals stop the steps, not the cleanup. SIGHUP is how a closed
+// terminal stops a run.
+var stopSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+
+// stopOnSignal returns a context the first stop signal ends. SIGPIPE is
+// ignored: the hangup that ends a run can also close the pipe its
+// transcript goes through, and a print into that pipe must fail rather
+// than kill the driver before its cleanup.
+func stopOnSignal(parent context.Context) (context.Context, context.CancelFunc) {
+	signal.Ignore(syscall.SIGPIPE)
+	return signal.NotifyContext(parent, stopSignals...)
+}
+
 func run(ctx context.Context, out *redact.Printer, bin, profile string, keep bool) int {
 	out.Printf("livecal: driving %s as profile %q\n\n", bin, profile)
 
@@ -122,7 +148,17 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		return 2
 	}
 
-	scratch, created, err := api.ensureScratchCalendar(ctx, scratchTitle)
+	// The account's own address, before anything is written: adoption
+	// and both guards turn on it.
+	self, err := api.primaryAddress(ctx)
+	if err != nil {
+		out.Printf("could not read this account's own address: %v\n", redact.String(err.Error()))
+		return 2
+	}
+	primaryCal.setSelf(self)
+	reach.setSelf(self)
+
+	scratch, created, kept, err := api.ensureScratchCalendar(ctx, scratchTitle, self)
 	if err != nil {
 		out.Printf("could not create the scratch calendar: %v\n", redact.String(err.Error()))
 		// The one failure here that is not a bug and not a setup
@@ -142,6 +178,9 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		out.Printf("scratch calendar %s created\n", redact.ID(scratch))
 	} else {
 		out.Printf("scratch calendar %s adopted and emptied; no calendar quota spent\n", redact.ID(scratch))
+	}
+	if kept > 0 {
+		out.Printf("%d event(s) with other guests left on it; -sweep-spikes cancels them to their guests\n", kept)
 	}
 	// Only a calendar this run created is deleted. One left by an earlier
 	// `-keep` is somebody's deliberate choice, and removing it would
@@ -168,7 +207,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 
 	// The write path needs two things the read path did not: somewhere
 	// to move an event to, and an invitation this account can answer.
-	dest, destCreated, destNote := destinationCalendar(ctx, api)
+	dest, destCreated, destNote := destinationCalendar(ctx, api, self)
 	out.Printf("%s\n", destNote)
 	if destCreated && !keep {
 		defer func() {
@@ -185,12 +224,6 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		out.Printf("could not fill the scratch calendar: %v\n", err)
 		return 2
 	}
-	self, err := api.primaryAddress(ctx)
-	if err != nil {
-		out.Printf("could not read this account's own address: %v\n", redact.String(err.Error()))
-		return 2
-	}
-	primaryCal.setSelf(self)
 	if err := api.seedRSVP(ctx, scratch, self); err != nil {
 		out.Printf("could not seed the invitation to answer: %v\n", redact.String(err.Error()))
 		return 2
@@ -212,8 +245,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	out.Printf("filled with %d invented events; the occurrence on %s was canceled\n\n",
 		len(seedEvents()), canceled)
 
-	asked := &person{out: out}
-	sess, err := startServer(ctx, bin, profile, asked)
+	sess, err := startServer(ctx, bin, profile)
 	if err != nil {
 		out.Printf("could not start the server: %v\n", err)
 		return 2
@@ -331,7 +363,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}
 	}
 
-	out.Printf("\n%d question(s) put to the person, %d declined\n", asked.asked, asked.declined)
+	out.Printf("\n%d question(s) put to the person; the server asks nobody (§9a)\n", sess.asked)
 	out.Printf("\n%d steps, %d failed, %d undetermined\n", r.total, r.failed, r.undetermined)
 	if ctx.Err() != nil {
 		out.Printf("\nThe run was interrupted, so this count is not a result.\n")
@@ -368,8 +400,9 @@ var spikeCeiling bool
 // can reach another person.
 var spikeNotify bool
 
-// clearSpikeEvents lets the cleanup remove the spike events it normally
-// preserves, canceling them to their guests on the way out.
+// clearSpikeEvents lets the emptying of an adopted calendar remove the
+// events with other guests it normally keeps, the spike events among
+// them, canceling them to their guests on the way out.
 var clearSpikeEvents bool
 
 // sinceToken is the sync token the read by updated_since handed back. A
@@ -471,10 +504,8 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 		}
 	}
 	args := st.reads()
-	before := s.person.asked
-	s.person.next = st.answer
+	before := s.asked
 	res, err := s.callFor(ctx, st, st.arguments())
-	s.person.next = ""
 	if err != nil && ctx.Err() != nil {
 		// Cut short by the interrupt rather than failed by the server:
 		// what it would have answered is not known.
@@ -488,8 +519,8 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 		return
 	}
 	verdict, note := st.check(res)
-	if st.answer != "" && s.person.asked == before {
-		verdict, note = fail, "the server did not ask the person, and this step answers "+st.answer
+	if s.asked != before {
+		verdict, note = fail, "the server asked the person, and it asks nobody (§9a); the question was declined"
 	}
 	switch verdict {
 	case pass:
@@ -543,9 +574,6 @@ type step struct {
 	// chain rather than the first.
 	skip  func() string
 	check func(callResult) (verdict, string)
-	// answer is what the person answers the server's question on this
-	// step, which must then be asked; empty accepts any question.
-	answer string
 }
 
 // reads is what the §9.1 print decision is made from: the calendars

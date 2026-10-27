@@ -48,7 +48,7 @@ body:
     id: flags
     attributes:
       label: Feature flags in effect
-      description: "GCAL_READONLY, GCAL_SHARING, GCAL_ENABLE_DESTRUCTIVE, and any other GCAL_* you set"
+      description: "GCAL_READ_ONLY, GCAL_SHARING, GCAL_ENABLE_DESTRUCTIVE, and any other GCAL_* you set"
       render: text
   - type: textarea
     id: what

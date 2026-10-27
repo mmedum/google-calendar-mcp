@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
 )
 
 // TestEventDateTimeIsAUnion: date and dateTime are mutually exclusive on

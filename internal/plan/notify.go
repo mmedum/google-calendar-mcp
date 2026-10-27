@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
 )
 
 // Notify is the caller's notification choice (§4.3).
@@ -209,7 +209,7 @@ func Notification(v string, r Reach) (Decision, error) {
 				" warned about. Such a guest may have no Google Calendar for the event to appear in, so email is"+
 				" the only way they can learn of it — the event would exist with them attached and they could not"+
 				" find it. Pass notify:external_only to reach exactly them, or notify:all",
-			ErrBlocked, r.External, r.Guests, IsAre(r.External))
+			ErrBlocked, r.External, r.Guests, isAre(r.External))
 	}
 	return Decision{Notify: choice, Asked: true, Reach: r}, nil
 }
@@ -258,20 +258,6 @@ func (d Decision) SendUpdatesFor() string {
 	return d.Notify.SendUpdates()
 }
 
-// Emails reports whether this decision asks Google to email at least
-// one guest.
-func (d Decision) Emails() bool {
-	switch {
-	case !d.Asked:
-		return false
-	case d.Notify == NotifyAll:
-		return d.Reach.Guests > 0
-	case d.Notify == NotifyExternalOnly:
-		return d.Reach.External > 0
-	}
-	return false
-}
-
 // Report is what a result says about notification (§4.9).
 //
 // It says what the server ASKED FOR. It never says what arrived: `none`
@@ -311,8 +297,8 @@ func People(n int) string {
 	return "guests"
 }
 
-// IsAre is "is" or "are". Exported for the same reason as People.
-func IsAre(n int) string {
+// isAre is "is" or "are".
+func isAre(n int) string {
 	if n == 1 {
 		return "is"
 	}

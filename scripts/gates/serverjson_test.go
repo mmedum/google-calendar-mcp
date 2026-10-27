@@ -19,13 +19,13 @@ func TestGithubRepoStripsTheMajorVersion(t *testing.T) {
 		// Go requires the /vN from v2 onward and it is not part of the
 		// repository name. Refusing it would fail the release at the
 		// tag, in public, the day this module goes to v2.
-		{module: "github.com/mmedum/google-calendar-mcp/v3", owner: "mmedum", repo: "google-calendar-mcp"},
+		{module: "github.com/mmedum/google-calendar-mcp/v4", owner: "mmedum", repo: "google-calendar-mcp"},
 		{module: "github.com/mmedum/google-calendar-mcp/v17", owner: "mmedum", repo: "google-calendar-mcp"},
 		// /v1 is not a thing a module path carries, so it is a path
 		// segment like any other and the shape is wrong.
 		{module: "github.com/mmedum/google-calendar-mcp/v1", wantErr: true},
 		// Only one suffix comes off, and only a major version.
-		{module: "github.com/mmedum/google-calendar-mcp/v3/v2", wantErr: true},
+		{module: "github.com/mmedum/google-calendar-mcp/v4/v2", wantErr: true},
 		{module: "github.com/mmedum/google-calendar-mcp/internal", wantErr: true},
 		{module: "example.invalid/mmedum/thing", wantErr: true},
 		{module: "github.com/mmedum", wantErr: true},
@@ -117,7 +117,7 @@ func TestTheTagMajorMustBeTheModules(t *testing.T) {
 // the entry refuses a tag whose major is not go.mod's on its own.
 func TestTheEntryRefusesATagOfAnotherMajor(t *testing.T) {
 	t.Chdir("../..")
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestTheBundleRowMustBeExactlyOne(t *testing.T) {
 func TestTheRegistryEntryIsBuiltFromTheRepository(t *testing.T) {
 	t.Chdir("../..")
 
-	module, err := modulePath()
+	module, err := modulePath(".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,19 +232,53 @@ func TestTheRegistryEntryIsBuiltFromTheRepository(t *testing.T) {
 	}
 }
 
+// The entry reads the manifest the gate and the packer hold, through
+// committedManifest, so a key repeated in another case, which a decode
+// of its own would take, is refused and no entry is written.
+func TestTheRegistryEntryReadsTheVettedManifest(t *testing.T) {
+	root := copiedRoot(t)
+	body := string(repoFile(t, manifestPath))
+	const old = `  "description": `
+	if !strings.Contains(body, old) {
+		t.Fatalf("the manifest does not say %q", old)
+	}
+	put(t, root, manifestPath, strings.Replace(body, old, `  "Description": "Another description.",`+"\n"+old, 1))
+	path := checksums(t, oneBundle)
+	t.Chdir(root)
+	module, err := modulePath(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err = serverJSON(fmt.Sprintf("v%d.0.0", moduleMajor(module)), path, &out)
+	if err == nil || !strings.Contains(err.Error(), "the bundle manifest is refused, so no entry describes it:\n"+
+		"  the manifest has description more than once, or in another case") {
+		t.Errorf("a description given twice gave %v", err)
+	}
+	if out.Len() > 0 {
+		t.Errorf("a refused manifest still wrote an entry: %s", out.String())
+	}
+}
+
 // A version with no v is the same release as one with it.
 func TestTheVersionMayCarryItsVOrNot(t *testing.T) {
 	t.Chdir("../..")
 	path := checksums(t, oneBundle)
-
-	var withV, without bytes.Buffer
-	if err := serverJSON("v3.2.1", path, &withV); err != nil {
+	module, err := modulePath(".")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := serverJSON("3.2.1", path, &without); err != nil {
+	// The release's major is go.mod's, or serverJSON refuses it.
+	version := fmt.Sprintf("%d.2.1", moduleMajor(module))
+
+	var withV, without bytes.Buffer
+	if err := serverJSON("v"+version, path, &withV); err != nil {
+		t.Fatal(err)
+	}
+	if err := serverJSON(version, path, &without); err != nil {
 		t.Fatal(err)
 	}
 	if withV.String() != without.String() {
-		t.Fatalf("v3.2.1 and 3.2.1 produced different entries:\n%s\n%s", withV.String(), without.String())
+		t.Fatalf("v%s and %s produced different entries:\n%s\n%s", version, version, withV.String(), without.String())
 	}
 }

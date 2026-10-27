@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The bundle and configuration gates read the manifest and the docs more strictly: a key repeated in another case, a `${` default, a name spelled outside `internal/config`, an `os.Getenv` of a server variable, and a name in bold on the configuration page are each held. Nothing a person running the server sees changes.
+- `make leaks-history` passes on the existing history. It allows Dependabot's sign-off by the whole address, and a tag's tagger line.
+
+## [5.0.0] - 2026-10-24
+
+### Changed
+
+- **Breaking:** the module path is `github.com/mmedum/google-calendar-mcp/v5`; install with `go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest`.
+- The Claude Desktop bundle says that its OAuth client field may be left empty to use the client `google-calendar-mcp login` recorded for the profile, as before, and that a file picked there must be that same client, since the refresh token belongs to it.
+- The Claude Desktop bundle's profile field says what a profile name may be: up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit, with capitals read as lowercase. The server's refusal of another name states the same rule.
+
+### Removed
+
+- **Breaking:** `GCAL_READONLY`, the read-only switch's name before 4.1.0. Unset or off (`false`, `0`, `no`, `off` or empty), it starts the server and does nothing. Set on, or to anything that is not a boolean, the server refuses to start and names `GCAL_READ_ONLY`, which is the one to set.
+
+### Fixed
+
+- A profile name with a character that Unicode lowercases into a to z, such as the Kelvin sign (U+212A), is refused rather than read as another profile's name.
+- A variable set to spaces alone is unset, as an empty one is, `GCAL_CONFIG_DIR` and `GCAL_REFRESH_TOKEN` included, and the spaces around either are dropped; a bundle field cleared to a space no longer stops the server.
+
+## [4.1.0] - 2026-10-24
+
+### Added
+
+- The Claude Desktop bundle asks for the destructive switch and `enable_decline_all` as well as the client file, the profile, read-only and sharing, each as an unconfigured server has it unless you change it, names Google's privacy policy, and carries `LICENSE` and the README beside the binaries.
+
+### Changed
+
+- The read-only switch is `GCAL_READ_ONLY`, the name the sibling servers and the bundle use. `GCAL_READONLY` still works and logs a warning; set both and they must agree, or the server refuses to start.
+- The bundle asks for sharing as a checkbox, on by default as before, where 4.0.0 asked for the text `on` or `off`. If you turned it off in the 4.0.0 bundle, check that it is still off after updating.
+- The bundle stages its Linux binaries as `server/google-calendar-mcp-linux-amd64` and `server/google-calendar-mcp-linux-arm64`, and its Linux launcher names the `go install` command for an architecture the bundle does not carry.
+
+### Fixed
+
+- The bundle's OAuth client file defaults to empty, which the server reads as unset. It had no default, and the reference host passes `${user_config.client_secret}` through as written when you leave the field blank; the server then read that as the client file's path in place of the one your login stored, and every call answered `[auth]`.
+
+## [4.0.0] - 2026-10-23
+
+### Changed
+
+- **Breaking:** the module path is `github.com/mmedum/google-calendar-mcp/v4`; install with `go install github.com/mmedum/google-calendar-mcp/v4/cmd/google-calendar-mcp@latest`.
+- **Breaking:** The server no longer asks you before a write. It asked before `delete_calendar`, `clear_calendar`, a `share_calendar` that published a calendar, opened it to a domain or made an owner, a `cancel_event` that emailed a guest, and a status event that declined every meeting it overlapped. Your client's own approval now decides each call: claude.ai and Codex prompt for the tools marked destructive, VS Code for every tool that writes, and in Claude Code you list the calls to approve under `permissions.ask`, as the README shows. What held before still holds: the destructive flag, `confirm: true` on the deletes, the required `notify` and `scope`, the etag a write is made under, and `dry_run`.
+- **Breaking:** `delete_calendar` and `clear_calendar` carry Claude Code's `requiresUserInteraction` for every client, so Claude Code prompts on every call whatever your rules say, and refuses them where it cannot prompt, as with `-p`. 3.1.0 told you to put both on the allow list; that no longer skips the prompt.
+- **Breaking:** `create_event` refuses `auto_decline: all`, `[blocked]`, naming `create_event_declining_all`. `none` and `new` are unchanged.
+- **Breaking:** `share_calendar` takes only named people and groups inside your organization, below owner. An address is inside when its domain is your account's own, and a personal Google account has no organization, so every address is outside it. The public, a whole domain, an address outside and the owner role are refused, `[blocked]`, naming the tool that takes them, except that keeping or lowering the role of a rule the calendar already has is made whoever it reaches. Its `allow_public` input is gone.
+- `share_calendar` says what a group rule reaches, in its description and in every group share's result: everyone in the group, including people added later, and a member outside the organization too if the organization's sharing policy lets them in.
+
+### Added
+
+- `publish_calendar` publishes a calendar to "anyone" or opens it to everybody in a domain, or changes the access such a rule gives, never as owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, needs `confirm: true` and the calendar's title as read on the call, and Claude Code prompts on every call to it.
+- `widen_calendar_access` shares a calendar with a person or a group outside your organization, or makes somebody an owner. It is registered only with `GCAL_ENABLE_DESTRUCTIVE=true` and sharing on, and needs `confirm: true` and the calendar's title as read on the call.
+- `create_event_declining_all` makes an out-of-office or focus-time event on your primary calendar that declines every meeting it overlaps, the ones you already accepted included. It is registered only with the new `GCAL_ENABLE_DECLINE_ALL=true`, off by default.
+
+### Removed
+
+- **Breaking:** `GCAL_REQUIRE_PROMPT` and `-require-prompt`. Set to anything but off, the server now refuses to start, since ignoring it would allow what it was set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` and `GCAL_ENABLE_DECLINE_ALL` off for a client that runs with nobody watching.
+
+### Security
+
+- Built with Go 1.27.3, which fixes GO-2026-6809 in `crypto/x509`, which `govulncheck` found reachable: intermediate certificates known to be compromised are no longer trusted.
+
 ## [3.1.0] - 2026-10-09
 
 ### Added
@@ -991,7 +1054,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v5.0.0...HEAD
+[5.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.1.0...v5.0.0
+[4.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.0.0...v4.1.0
+[4.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...v4.0.0
 [3.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/mmedum/google-calendar-mcp/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v2.0.0...v3.0.0

@@ -1,7 +1,7 @@
 // Package credentials stores and resolves the OAuth refresh token.
 //
 // Resolution order:
-//  1. GCAL_REFRESH_TOKEN in the environment (CI, automation).
+//  1. config.EnvRefreshToken in the environment (CI, automation).
 //  2. The OS keyring — Secret Service on Linux, Keychain on macOS,
 //     Credential Manager on Windows — keyed by the profile name.
 //  3. A 0600 file under the profile directory, written only when the
@@ -23,14 +23,12 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/fileperm"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/fileperm"
 )
 
 // ServiceName is the keyring service identifier.
 const ServiceName = "google-calendar-mcp"
-
-// EnvVar is the environment override.
-const EnvVar = "GCAL_REFRESH_TOKEN"
 
 // Source identifies where a token came from.
 type Source string
@@ -122,9 +120,10 @@ func (s *Store) env(k string) string {
 	return os.Getenv(k)
 }
 
-// Resolve returns the refresh token and where it came from.
+// Resolve returns the refresh token and where it came from. The
+// environment's is read through config.Lookup, as every setting is.
 func (s *Store) Resolve() (string, Source, error) {
-	if v := s.env(EnvVar); v != "" {
+	if v := config.Lookup(s.env, config.EnvRefreshToken); v != "" {
 		return v, SourceEnv, nil
 	}
 	return s.ResolveStored()

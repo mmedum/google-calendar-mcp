@@ -13,9 +13,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/tools"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/tools"
 )
 
 // Name is the MCP server name.
@@ -45,10 +45,11 @@ const instructions = "Google Calendar tools. This server answers *when*: calenda
 	"Never answer \"are they free\" from a list of events: events you cannot see the details of are still busy, " +
 	"and an event marked free is not. That is what check_availability is for, and it reports a calendar it could " +
 	"not read as unknown rather than as free. " +
-	"Before deleting or clearing a calendar, publishing one, opening one to a whole domain, making somebody an " +
-	"owner, canceling an event in a way that emails its guests, or making a status event that declines every " +
-	"meeting it overlaps or making one cover more time, the server also asks the person through the client " +
-	"when it can; a call they did not confirm is [blocked], and is not made again unless they ask."
+	"share_calendar shares with people and groups inside your organization, and lowers the access of any rule a " +
+	"calendar already has, a public one included. Publishing a calendar, sharing it " +
+	"outside the organization or with a new owner, and an out-of-office or focus-time event that declines every " +
+	"meeting it overlaps are tools of their own, present only when the person running this server turned them on; " +
+	"a refusal names the tool."
 
 // Deps are what the server needs.
 type Deps struct {
@@ -71,7 +72,7 @@ func New(d Deps) *mcp.Server {
 	if d.Logger != nil {
 		s.AddReceivingMiddleware(logCalls(d.Logger))
 	}
-	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config, Logger: d.Logger})
+	tools.Register(s, tools.Deps{Service: d.Service, Config: d.Config})
 	return s
 }
 

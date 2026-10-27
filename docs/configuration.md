@@ -2,7 +2,9 @@
 
 Every setting is an environment variable with a `GCAL_` prefix and a
 command-line flag with the same name. A flag given explicitly beats the
-environment; the environment beats the built-in default.
+environment; the environment beats the built-in default. A variable set
+to spaces alone is unset, as an empty one is, and the spaces around a
+value are dropped.
 
 Environment variables are the ones that matter in practice: every MCP
 client passes command, args and env to a stdio server, and nothing else.
@@ -11,19 +13,33 @@ client passes command, args and env to a stdio server, and nothing else.
 
 | Variable | Flag | Default | What it does |
 |---|---|---|---|
-| `GCAL_PROFILE` | `-profile` | `default` | Named configuration profile. Separate profiles keep separate tokens. |
+| `GCAL_PROFILE` | `-profile` | `default` | Named configuration profile. Separate profiles keep separate tokens. A name is up to 64 characters from a to z, 0 to 9, - and _, starting with a letter or digit; capitals are read as lowercase, and any other name stops the server at start. |
 | `GCAL_LOG_LEVEL` | `-log-level` | `info` | `debug`, `info`, `warn`, `error`. Logs go to stderr. |
 | `GCAL_LOG_FORMAT` | `-log-format` | `text` | `text` or `json`. |
-| `GCAL_READONLY` | `-read-only` | `false` | Register only read tools, and request only read scopes so the API itself refuses a write. |
-| `GCAL_ENABLE_DESTRUCTIVE` | `-enable-destructive` | `false` | Register `delete_calendar` and `clear_calendar`. Each still needs `confirm` on the call. |
-| `GCAL_SHARING` | `-sharing` | `on` | `on` or `off`. Off removes the calendar sharing tools entirely. |
-| `GCAL_REQUIRE_PROMPT` | `-require-prompt` | `false` | Refuse the writes that ask the person when the client cannot ask them, instead of letting the call's own arguments stand in. |
+| `GCAL_READ_ONLY` | `-read-only` | `false` | Register only read tools, and request only read scopes so the API itself refuses a write. |
+| `GCAL_ENABLE_DESTRUCTIVE` | `-enable-destructive` | `false` | Register `delete_calendar` and `clear_calendar`, and with sharing on `publish_calendar` and `widen_calendar_access`. Each still needs `confirm` on the call. |
+| `GCAL_ENABLE_DECLINE_ALL` | `-enable-decline-all` | `false` | Register `create_event_declining_all`: an out-of-office or focus-time event that declines every meeting it overlaps, the ones already accepted too. `create_event` refuses that whatever this says. |
+| `GCAL_SHARING` | `-sharing` | `on` | `on` or `off`. Off removes the calendar sharing tools entirely, the wider ones included. |
 | `GCAL_MAX_EVENTS` | `-max-events` | `250` | Default event budget for one read. The result says when it truncated. |
 | `GCAL_MAX_CALENDARS` | `-max-calendars` | `25` | How many calendars one call may fan out across, for the reads that cost one request per calendar: `list_events` and `search_events`. Maximum 50. |
 | `GCAL_CONCURRENCY` | `-concurrency` | `4` | Requests in flight during a fan-out. |
 | `GCAL_HTTP_TIMEOUT` | `-http-timeout` | `60s` | Per-attempt timeout for a read. |
 | `GCAL_WRITE_TIMEOUT` | `-write-timeout` | `120s` | Timeout for a write. |
-| `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. |
+| `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. Unset or empty, the server uses the client `login` recorded for the profile. |
+
+`GCAL_READ_ONLY` was `GCAL_READONLY` until 4.1.0, and took the name
+the sibling servers and the Claude Desktop bundle use. 5.0.0 removed the
+old name. Unset or off (`false`, `0`, `no`, `off` or empty, in any case)
+it starts the server and does nothing. On, or a value that is not a
+boolean, is refused at start, naming `GCAL_READ_ONLY`: use that instead.
+
+`GCAL_REQUIRE_PROMPT` and `-require-prompt` were removed with the
+server's question: the server asks the person nothing, and your client's
+own approval decides each call. A configuration that still turns it on
+is refused at start, since ignoring it would quietly allow what it was
+set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` and
+`GCAL_ENABLE_DECLINE_ALL` off for a client that runs with nobody
+watching.
 
 `check_availability` is the exception to `GCAL_MAX_CALENDARS`: it asks
 about at most 100 calendars per call, because free/busy answers for 50

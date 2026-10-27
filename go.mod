@@ -1,13 +1,13 @@
-module github.com/mmedum/google-calendar-mcp/v3
+module github.com/mmedum/google-calendar-mcp/v5
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/oauth2 v0.37.0
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

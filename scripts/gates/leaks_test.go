@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -23,6 +25,8 @@ func TestLeakRulesCatchTheirShapeAndAllowTheReserved(t *testing.T) {
 		{"email address", "pat" + at + "acme-sample.com", "pat" + at + "example.test"},
 		{"email address", "pat" + at + "corp.test.com", "pat" + at + "example.com"},
 		{"email address", "pat" + at + "example.dk", "team" + at + "group.calendar.example.test"},
+		// Dependabot's sign-off is allowed, and no other address there.
+		{"email address", "pat" + at + "github.com", "Signed-off-by: dependabot[bot] <support" + at + "github.com>"},
 		{"OAuth client id",
 			"1234567890-" + strings.Repeat("a1", 16) + ".apps.googleusercontent.com",
 			"1234567890-" + strings.Repeat("a1", 9) + ".apps.googleusercontent.com"},
@@ -116,5 +120,42 @@ func TestLeakGateFailsOnAFinding(t *testing.T) {
 	t.Chdir(dir)
 	if err := leakGate(false); err == nil {
 		t.Fatal("a tree with a real-looking address passed")
+	}
+}
+
+// The history scan reads an annotated tag, its message included, less
+// the tagger line, which git writes from the tagger's own identity.
+func TestTheHistoryScanReadsATagButNotItsTagger(t *testing.T) {
+	at := "@"
+	dir := t.TempDir()
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(global, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "user.name=Pat", "-c", "user.email=pat" + at + "acme-sample.com"},
+			args...)...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+global, "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("nothing here\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "f.txt")
+	git("commit", "-q", "-m", "first")
+	git("tag", "-a", "v0.1.0", "-m", "a release")
+	t.Chdir(dir)
+	if got, err := scanHistory(leakRules()); err != nil || len(got) != 0 {
+		t.Errorf("a tag's tagger line was read: %q, %v", got, err)
+	}
+	git("tag", "-a", "v0.2.0", "-m", "for carol"+at+"acme-sample.com")
+	want := []string{`tag v0.2.0: email address "caro*************.com"`}
+	if got, err := scanHistory(leakRules()); err != nil || !slices.Equal(got, want) {
+		t.Errorf("a tag's message gave %q, %v; want %q", got, err, want)
 	}
 }

@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // Rendered is the contract every tool result satisfies.

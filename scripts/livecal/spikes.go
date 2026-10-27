@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/redact"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
 // spikeC answers §15's daylight-saving question, and it is the half

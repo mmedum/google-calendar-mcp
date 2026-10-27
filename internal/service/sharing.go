@@ -2,19 +2,20 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/plan"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/plan"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/render"
 )
 
 // The sharing tools (§7.6): list_sharing, share_calendar,
-// unshare_calendar.
+// publish_calendar, widen_calendar_access and unshare_calendar.
 //
-// Every one of them reads the rules first, and the read is not
+// Every one of them reads the rules before it writes, and the read is not
 // incidental: §7.6 requires a share to show who could see the calendar
 // before and who can see it now, and "shared with somebody" is not an
 // answer to "who can see this". The same read decides the scope type of
@@ -137,28 +138,128 @@ func (s *Service) ListSharing(ctx context.Context, ref string) (render.SharingRe
 type ShareOptions struct {
 	Calendar string
 	Who      string
-	// ScopeType is user, group, domain or default. Optional: the server
-	// works it out from the address and says how it did.
-	ScopeType   string
-	Role        string
-	Notify      string
-	AllowPublic bool
-	DryRun      bool
+	// ScopeType is user or group. Optional: the server works it out from
+	// the address and says how it did.
+	ScopeType string
+	Role      string
+	Notify    string
+	DryRun    bool
 }
 
-// ShareCalendar grants access to a calendar (§7.6).
+// ShareCalendar grants a person or a group inside the organization
+// access below owner (§7.6). The public, a domain, somebody outside and
+// an owner are refused, naming publish_calendar or widen_calendar_access.
 func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.SharingReport, error) {
-	ctx, cal, err := s.openCalendar(ctx, o.Calendar)
+	ctx, cal, before, err := s.openSharing(ctx, o.Calendar)
 	if err != nil {
 		return render.SharingReport{}, err
 	}
-	// Changing who can see a calendar is the owner's to do, and Google
-	// refuses anybody else. Refused here when the role is known, so the
-	// caller gets the sentence rather than a 403.
-	if err := needRole(cal, gcal.RoleOwner, "changing who a calendar is shared with"); err != nil {
+	audience, err := plan.ParseAudience(o.Who, o.ScopeType, before)
+	if err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	// A share past the organization is refused, naming the tool that
+	// takes it, before the role or notify is asked of the call. The one
+	// exception is a rule the calendar already has, which this tool may
+	// keep or lower whatever it reaches, since that widens nothing.
+	wider := plan.OrdinaryAudience(audience, s.outside(ctx, audience))
+	if _, had := plan.FindRule(before, audience); !had && wider != nil {
+		return render.SharingReport{}, classifyPlan(wider)
+	}
+	role, err := plan.ParseRole(o.Role)
+	if err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	if !plan.WithinRule(before, audience, role) {
+		if wider != nil {
+			return render.SharingReport{}, classifyPlan(wider)
+		}
+		if err := plan.OrdinaryRole(role); err != nil {
+			return render.SharingReport{}, classifyPlan(err)
+		}
+	}
+	notify, err := plan.ShareNotify(o.Notify)
+	if err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, nil)
+}
+
+// PublishOptions is what publish_calendar takes.
+type PublishOptions struct {
+	Calendar string
+	// CalendarTitle is the calendar's title as the caller read it
+	// (openWide).
+	CalendarTitle string
+	// Who is "anyone", or a domain.
+	Who     string
+	Role    string
+	Notify  string
+	Confirm bool
+	DryRun  bool
+}
+
+// PublishCalendar opens a calendar to the public or to everybody in a
+// domain, or changes the access such a rule gives (§7.6). Registered only
+// with the destructive flag, and it needs confirm.
+func (s *Service) PublishCalendar(ctx context.Context, o PublishOptions) (render.SharingReport, error) {
+	ctx, cal, err := s.openWide(ctx, o.Calendar, o.CalendarTitle)
+	if err != nil {
 		return render.SharingReport{}, err
 	}
+	audience, err := plan.ParsePublic(o.Who)
+	if err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	role, err := plan.ParseRole(o.Role)
+	if err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	if err := plan.PublicRole(role); err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	notify, err := plan.ShareNotify(o.Notify)
+	if err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	// A dry run writes nothing, so it needs no confirm, as a delete's
+	// does not.
+	what := fmt.Sprintf("this opens %q to %s", cal.Title, plan.Describe(audience))
+	if audience.Scope.IsPublic() {
+		what += ", and removing the rule later takes nothing back from whoever already looked"
+	}
+	if err := plan.Confirm(o.Confirm || o.DryRun, what); err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	// Read only now: nothing above needs the rules, and a refusal there
+	// spends no request on them.
+	before, err := s.sharingRules(ctx, cal.ID)
+	if err != nil {
+		return render.SharingReport{}, err
+	}
+	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, nil)
+}
 
+// WidenOptions is what widen_calendar_access takes.
+type WidenOptions struct {
+	Calendar      string
+	CalendarTitle string
+	Who           string
+	ScopeType     string
+	Role          string
+	Notify        string
+	Confirm       bool
+	DryRun        bool
+}
+
+// WidenCalendarAccess shares a calendar with a person or a group outside
+// the organization, or makes somebody an owner (§7.6). Registered only
+// with the destructive flag, and it needs confirm.
+func (s *Service) WidenCalendarAccess(ctx context.Context, o WidenOptions) (render.SharingReport, error) {
+	ctx, cal, err := s.openWide(ctx, o.Calendar, o.CalendarTitle)
+	if err != nil {
+		return render.SharingReport{}, err
+	}
 	before, err := s.sharingRules(ctx, cal.ID)
 	if err != nil {
 		return render.SharingReport{}, err
@@ -167,29 +268,135 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
-	if err := plan.AllowPublic(audience, o.AllowPublic); err != nil {
-		return render.SharingReport{}, classifyPlan(err)
-	}
 	role, err := plan.ParseRole(o.Role)
 	if err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	outside := s.outside(ctx, audience)
+	if err := plan.WideAudience(audience, role, outside); err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
 	notify, err := plan.ShareNotify(o.Notify)
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
-
-	report := render.SharingReport{
-		Verb: render.VerbShare, DryRun: o.DryRun,
-		CalendarID: cal.ID, Title: cal.Title, Before: before,
-		Notify: plan.ShareReport(plan.ShareGranted, notify, audience),
+	what := fmt.Sprintf("this makes %s an owner of %q", plan.Describe(audience), cal.Title)
+	if outside {
+		what = fmt.Sprintf("this gives %s %s access to %q, outside your organization", plan.Describe(audience),
+			role, cal.Title)
 	}
-	if audience.Source != plan.SourceGiven {
+	if err := plan.Confirm(o.Confirm || o.DryRun, what); err != nil {
+		return render.SharingReport{}, classifyPlan(err)
+	}
+	var notes []string
+	if outside {
+		// Tense-neutral, because a dry run prints it too.
+		notes = append(notes, plan.Describe(audience)+" is outside your organization as far as this server "+
+			"can tell, so this rule reaches past it.")
+	}
+	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, notes)
+}
+
+// ownCalendar opens a calendar for a sharing change.
+//
+// Changing who can see a calendar is the owner's to do, and Google
+// refuses anybody else. Refused here when the role is known, so the
+// caller gets the sentence rather than a 403. The account's own address
+// is read first, as prepare does: it fills the calendar-list cache, so
+// resolving "primary" and asking who is outside cost one request, not
+// two.
+func (s *Service) ownCalendar(ctx context.Context, ref string) (context.Context, model.Calendar, error) {
+	ctx = gapi.WithCounter(ctx)
+	s.primaryID(ctx)
+	ctx, cal, err := s.openCalendar(ctx, ref)
+	if err != nil {
+		return ctx, model.Calendar{}, err
+	}
+	if err := needRole(cal, gcal.RoleOwner, "changing who a calendar is shared with"); err != nil {
+		return ctx, model.Calendar{}, err
+	}
+	return ctx, cal, nil
+}
+
+// openSharing is ownCalendar with the calendar's rules.
+func (s *Service) openSharing(ctx context.Context, ref string) (context.Context, model.Calendar, []model.Sharing, error) {
+	ctx, cal, err := s.ownCalendar(ctx, ref)
+	if err != nil {
+		return ctx, model.Calendar{}, nil, err
+	}
+	before, err := s.sharingRules(ctx, cal.ID)
+	if err != nil {
+		return ctx, model.Calendar{}, nil, err
+	}
+	return ctx, cal, before, nil
+}
+
+// openWide is ownCalendar for the two wider shares, with the calendar's
+// title held to the one the caller gave. The title is the name a person
+// knows the calendar by, so a client that asks before the call shows
+// which calendar it opens, where an id or a fragment of a title would
+// not (§7.6). It is checked before any other argument, so no refusal
+// supplies it.
+func (s *Service) openWide(ctx context.Context, ref, title string) (context.Context, model.Calendar, error) {
+	ctx, cal, err := s.ownCalendar(ctx, ref)
+	if err != nil {
+		return ctx, model.Calendar{}, err
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ctx, model.Calendar{}, gapi.Errf(gapi.ClassInvalid, "calendar_title is required: the title "+
+			"list_calendars shows for this calendar, so the call names the calendar it opens; nothing was sent")
+	}
+	if title != strings.TrimSpace(cal.Title) {
+		return ctx, model.Calendar{}, gapi.Errf(gapi.ClassStale, "calendar_title %q is not the title of "+
+			"calendar %s; nothing was sent. Read list_calendars again and pass the title it shows, after "+
+			"checking it is the calendar to open", title, cal.ID)
+	}
+	return ctx, cal, nil
+}
+
+// outside reports whether an audience's address is outside the
+// signed-in account's organization. A public or a domain rule has no
+// address and is not asked about. The account's address is the primary
+// calendar's id, read from the cached calendar list; unread, every
+// address counts as outside.
+func (s *Service) outside(ctx context.Context, a plan.Audience) bool {
+	if a.Scope.Value == "" || a.Scope.Type == gcal.ScopeTypeDomain {
+		return false
+	}
+	return plan.Outside(a.Scope.Value, s.primaryID(ctx))
+}
+
+// grant writes a sharing rule, or says it is already there, with the
+// exposure before and after (§7.6). notes come first in the result, as
+// the reason the share was taken by the tool that took it.
+func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.Sharing, audience plan.Audience,
+	role string, notify, dryRun bool, notes []string,
+) (render.SharingReport, error) {
+	report := render.SharingReport{
+		Verb: render.VerbShare, DryRun: dryRun,
+		CalendarID: cal.ID, Title: cal.Title, Before: before,
+		Notify: plan.ShareReport(plan.ShareGranted, notify, audience), Notes: notes,
+	}
+	if audience.Scope.Type == gcal.ScopeTypeGroup {
+		// This server does not read a group's members or settings, so
+		// the rule's reach is said rather than counted (§7.6, §17 item 7).
+		report.Notes = append(report.Notes, plan.GroupReach)
+	}
+	if audience.Source != plan.SourceGiven && audience.Source != plan.SourcePublic {
 		report.Notes = append(report.Notes, "Read as "+gcal.ScopeMeans(audience.Scope.Type)+
 			" — the scope type was "+string(audience.Source)+
 			". Pass scope_type if that is not what you meant; a group address and a person's look the same.")
 	}
-	if audience.Scope.IsPublic() {
+	// What a public or a domain rule reaches is said when a call adds or
+	// raises one, never when it keeps or lowers it: share_calendar does
+	// that, and it publishes nothing.
+	within := plan.WithinRule(before, audience, role)
+	if audience.Scope.Type == gcal.ScopeTypeDomain && !within {
+		report.Notes = append(report.Notes, "This rule opens the calendar to everybody in "+audience.Scope.Value+
+			", now and whoever joins it later.")
+	}
+	if audience.Scope.IsPublic() && !within {
 		// Tense-neutral, because this same note prints under a dry run.
 		// "This calendar is now PUBLIC" beneath the words "nothing was
 		// written" is the contradiction phase 2 found on a cancellation,
@@ -222,7 +429,7 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 			"This rule changes their access from "+existing.Role+" to "+role+".")
 	}
 
-	if o.DryRun {
+	if dryRun {
 		// Changed is set here as well as on the real path, and that is
 		// not decoration: the result renders exposure before and after
 		// only when it knows which rule the write was about, so a dry run
@@ -239,14 +446,10 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 		return report, nil
 	}
 
-	previous := ""
-	if had {
-		previous = existing.Role
-	}
-	if err := askShare(ctx, cal, audience, role, previous, notify); err != nil {
-		return render.SharingReport{}, err
-	}
-	var written *gcal.AclRule
+	var (
+		written *gcal.AclRule
+		err     error
+	)
 	if had {
 		written, err = s.API.PatchACL(ctx, cal.ID, existing.RuleID, &gcal.AclPatch{Role: &role},
 			notify, existing.ETag)
@@ -300,14 +503,7 @@ type UnshareOptions struct {
 // Nobody is told; they find it gone. The result says that rather than
 // leaving a caller to assume a mail went out.
 func (s *Service) UnshareCalendar(ctx context.Context, o UnshareOptions) (render.SharingReport, error) {
-	ctx, cal, err := s.openCalendar(ctx, o.Calendar)
-	if err != nil {
-		return render.SharingReport{}, err
-	}
-	if err := needRole(cal, gcal.RoleOwner, "changing who a calendar is shared with"); err != nil {
-		return render.SharingReport{}, err
-	}
-	before, err := s.sharingRules(ctx, cal.ID)
+	ctx, cal, before, err := s.openSharing(ctx, o.Calendar)
 	if err != nil {
 		return render.SharingReport{}, err
 	}
@@ -399,23 +595,4 @@ func withoutRule(before []model.Sharing, ruleID string) []model.Sharing {
 
 func sameAudience(a, b model.Sharing) bool {
 	return gcal.SameScope(a.Scope(), b.Scope())
-}
-
-// askShare asks the person before a grant that reaches past one named
-// person: the public internet, a whole domain, or a new owner (§9a). A
-// grant to a named person or group below owner asks nothing.
-func askShare(ctx context.Context, cal model.Calendar, audience plan.Audience, role, previous string, notify bool) error {
-	public := audience.Scope.IsPublic()
-	domain := audience.Scope.Type == gcal.ScopeTypeDomain
-	if !public && !domain && role != gcal.RoleOwner {
-		return nil
-	}
-	return ask(ctx, render.AskShare(render.Share{
-		CalendarID: cal.ID, Title: cal.Title,
-		Public: public, Domain: domain, Who: audience.Scope.Value, ScopeType: audience.Scope.Type,
-		Previous: previous,
-		// Google emails a person or a group it names; nobody is emailed
-		// about a public or a domain rule.
-		Role: role, Emails: notify && !public && !domain,
-	}))
 }

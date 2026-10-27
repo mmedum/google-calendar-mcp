@@ -152,13 +152,13 @@ EventBirthdayProperties	type	out	as Event.birthdayProperties: immutable, and onl
 EventDateTime	date	modeled	an all-day event's date, which never becomes an instant (§4.1)
 EventDateTime	dateTime	modeled	a timed event's instant
 EventDateTime	timeZone	modeled	the zone a recurring event needs (§2.2), sent on every timed write
-EventFocusTimeProperties	autoDeclineMode	modeled	auto_decline none, new or all; required on create, with no default, and all asks the person (§7.4, §9a)
+EventFocusTimeProperties	autoDeclineMode	modeled	auto_decline none, new or all; required on create, with no default; create_event refuses all, which create_event_declining_all makes (§7.4)
 EventFocusTimeProperties	chatStatus	modeled	chat_status available or do_not_disturb (§7.4)
 EventFocusTimeProperties	declineMessage	modeled	decline_message, the account's own text: shown, never logged (§7.4, §9)
 EventLabel	backgroundColor	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
 EventLabel	id	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
 EventLabel	name	out	as Calendar.labelProperties: a label vocabulary is not a scheduling job (§1)
-EventOutOfOfficeProperties	autoDeclineMode	modeled	auto_decline none, new or all; required on create, with no default, and all asks the person (§7.4, §9a)
+EventOutOfOfficeProperties	autoDeclineMode	modeled	auto_decline none, new or all; required on create, with no default; create_event refuses all, which create_event_declining_all makes (§7.4)
 EventOutOfOfficeProperties	declineMessage	modeled	decline_message, the account's own text: shown, never logged (§7.4, §9)
 EventReminder	method	modeled	a reminder's channel, popup or email, carried as Event.reminders and CalendarListEntry.defaultReminders are
 EventReminder	minutes	modeled	how long before a reminder fires, carried with its method

@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/render"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/render"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 func zone(t *testing.T, name string) when.Zone {

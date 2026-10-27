@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 func TestParseRule(t *testing.T) {

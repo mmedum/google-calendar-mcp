@@ -15,13 +15,12 @@ package tools
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/config"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gapi"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/service"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
 // Kind says which world a tool touches.
@@ -39,12 +38,18 @@ const (
 	IdempotentWrite
 	// Sharing changes who can see a calendar. It is its own Kind rather
 	// than a Write because GCAL_SHARING=off removes exactly these, and
-	// because widening access is the one act here whose blast radius
-	// leaves the account.
+	// because sharing is the one act here whose blast radius leaves the
+	// account.
 	Sharing
+	// WideSharing widens who can see a calendar past the ordinary share:
+	// the public, a whole domain, somebody outside the organization, or a
+	// new owner (§7.6). It registers only when sharing is on and the
+	// destructive flag is set, because widening access is never there by
+	// default, and its annotation says destructive.
+	WideSharing
 	// SharingRead reads who can see a calendar. It changes nothing, so
 	// its annotations say read-only — but GCAL_SHARING=off removes it
-	// with the other two, because a deployment that has turned sharing
+	// with the sharing writes, because a deployment that has turned sharing
 	// off has turned off the surface, not merely the writes.
 	//
 	// Read-only mode drops it as well. §8 registers the nine read tools
@@ -65,31 +70,32 @@ const (
 	// a client deciding whether to confirm with a person deserves the
 	// truthful hint, and "this may destroy something" is the truth.
 	Canceling
+	// DecliningAll makes an out-of-office or focus-time event that
+	// declines every meeting it overlaps, the accepted ones too, with
+	// each organizer told (§7.4). It registers only with
+	// GCAL_ENABLE_DECLINE_ALL, a flag of its own: a flag people set to get
+	// out-of-office must not arm clear_calendar as well, which is §9's
+	// argument for leaving cancel_event ungated.
+	DecliningAll
 	// Destructive removes something Calendar cannot bring back. Not
 	// registered at all unless the destructive flag is set, and still
 	// needs confirm on the call. The two are delete_calendar and
 	// clear_calendar; cancel_event is Canceling above, and §9 argues
 	// the difference.
 	Destructive
+
+	// kindCount follows the last kind, so a test can range over them all.
+	kindCount
 )
 
 // Deps are what the tools need.
 type Deps struct {
 	Service *service.Service
 	Config  config.Config
-	Logger  *slog.Logger
-
-	// asking is this server's way to the person, made by Register.
-	asking *asking
 }
 
 // Register adds every tool the configuration allows.
 func Register(s *mcp.Server, d Deps) {
-	if d.Logger == nil {
-		d.Logger = slog.New(slog.DiscardHandler)
-	}
-	d.asking = newAsking(d.Logger)
-	s.AddReceivingMiddleware(askFailures(d.asking), interactionHint(d.asking))
 	registerRead(s, d)
 	registerWrite(s, d)
 	registerCalendars(s, d)
@@ -105,13 +111,19 @@ type Def[In any, Out service.Rendered] struct {
 	Name        string
 	Description string
 	Kind        Kind
-	// Asks, when set, puts the write to the person through the client
-	// before it is made, when the service reaches its question (§9a). It
-	// says when, as the description's closing sentence reads it: "before
-	// the write", or the writes that ask.
-	Asks   string
-	Handle func(ctx contextContext, in In) (Out, error)
+	// PromptEveryCall marks a write whose prompt is itself the point: a
+	// delete of a whole calendar or of everything on one, which Calendar
+	// cannot bring back, or a public or domain-wide share (§9a). The tool
+	// carries Claude Code's requiresUserInteraction, so Claude Code
+	// prompts on every call whatever the operator's rules say. Only a
+	// Destructive or WideSharing tool may set it, and add refuses it on
+	// any other.
+	PromptEveryCall bool
+	Handle          func(ctx contextContext, in In) (Out, error)
 }
+
+// promptKey is the _meta key Claude Code prompts on every call for.
+const promptKey = "anthropic/requiresUserInteraction"
 
 // contextContext is context.Context; aliased so the import list above
 // stays short in a file that otherwise needs no context.
@@ -127,42 +139,19 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 		Description: def.Description,
 		Annotations: annotationsFor(def.Kind),
 	}
-	if def.Kind == Destructive {
-		// A signal a client MAY act on, never a control. The standard is
-		// explicit: a host in auto-approve runs an annotated tool without
-		// prompting, so the real gate is that this tool is unregistered
-		// unless the flag is set.
-		tool.Meta = mcp.Meta{interactionKey: true}
-	}
-	if def.Asks != "" {
-		d.asking.markAsks(def.Name)
-		tool.Description += asksNote(def.Asks)
-		// Every destructive tool that asks, asks before every write, so
-		// the server's question can stand in for the mark.
-		if def.Kind == Destructive {
-			d.asking.markAlways(def.Name)
+	if def.PromptEveryCall {
+		// A mark no other client reads, so never a control: the control
+		// is that the tool is unregistered unless the flag is set (§9a).
+		if def.Kind != Destructive && def.Kind != WideSharing {
+			panic("tools: " + def.Name + " prompts on every call and is neither Destructive nor WideSharing")
 		}
+		tool.Meta = mcp.Meta{promptKey: true}
 	}
-	mcp.AddTool(s, tool, func(ctx contextContext, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
+	mcp.AddTool(s, tool, func(ctx contextContext, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		var zero Out
-		var p *person
-		if def.Asks != "" {
-			var err error
-			if ctx, p, err = d.asking.begin(ctx, req, def.Name, in, d.Config.RequirePrompt); err != nil {
-				return nil, zero, fail(err)
-			}
-		}
 		out, err := def.Handle(ctx, in)
-		if p != nil && p.asked != nil {
-			// The service stopped before its write; the question goes out.
-			setStage(ctx, stageWaiting)
-			return p.inputRequest(), zero, nil
-		}
 		if err != nil {
 			return nil, zero, fail(err)
-		}
-		if stageOf(ctx) == stageWriting {
-			setStage(ctx, stageWritten)
 		}
 		// Content is set here, always. Left unset, the SDK fills it with
 		// the JSON of the output — the same bytes twice, and the one
@@ -184,6 +173,7 @@ func FullSurface(cfg config.Config) config.Config {
 	cfg.ReadOnly = false
 	cfg.EnableDestructive = true
 	cfg.Sharing = true
+	cfg.EnableDeclineAll = true
 	return cfg
 }
 
@@ -197,6 +187,10 @@ func allowed(k Kind, cfg config.Config) bool {
 		return cfg.EnableDestructive && !cfg.ReadOnly
 	case Sharing, SharingRead:
 		return cfg.Sharing && !cfg.ReadOnly
+	case WideSharing:
+		return cfg.Sharing && cfg.EnableDestructive && !cfg.ReadOnly
+	case DecliningAll:
+		return cfg.EnableDeclineAll && !cfg.ReadOnly
 	default:
 		return !cfg.ReadOnly
 	}
@@ -211,26 +205,26 @@ func annotationsFor(k Kind) *mcp.ToolAnnotations {
 		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: no, OpenWorldHint: no}
 	case Canceling:
 		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: yes, OpenWorldHint: no}
-	case Destructive:
+	case DecliningAll, Destructive:
+		// A decline-all event is destructive too: the decline reaches
+		// every overlapping meeting's organizer and is not taken back by
+		// deleting the event.
 		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: no}
 	case Sharing:
-		// OpenWorldHint is true here and nowhere else: sharing is the one
-		// act whose effect leaves this account.
+		// OpenWorldHint is true on the two sharing kinds and nowhere
+		// else: sharing is the one act whose effect leaves this account.
 		return &mcp.ToolAnnotations{DestructiveHint: no, OpenWorldHint: yes}
+	case WideSharing:
+		// Destructive, so a client that prompts by the hint, as claude.ai
+		// and Codex do, prompts for it: what the public or an outsider
+		// has read is not taken back by removing the rule.
+		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: yes}
 	default:
 		return &mcp.ToolAnnotations{DestructiveHint: no, OpenWorldHint: no}
 	}
 }
 
 func ptr[T any](v T) *T { return &v }
-
-// asksNote closes the description of every tool that asks the person,
-// saying when it asks: a tool that asks only before some of its writes
-// says which, so a model does not expect a question on the others.
-func asksNote(when string) string {
-	return " When the client can, the server also asks the person " + when + "; a call they do not " +
-		"confirm is [blocked], and is not made again unless they ask."
-}
 
 // fail turns an error into the tool result the standard specifies:
 // "[class] actionable message", never a protocol error.

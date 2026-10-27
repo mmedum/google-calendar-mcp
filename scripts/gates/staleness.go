@@ -3,12 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
 // staleness holds the documentation against the code.
@@ -22,9 +26,11 @@ import (
 // What it holds:
 //
 //  1. every tool the binary publishes appears in the README's table,
-//     and every tool named there exists;
-//  2. every GCAL_* setting the code defines is documented, and every
-//     setting documented exists;
+//     every tool named there exists, and every Claude Code permission
+//     rule the README gives names a tool the binary publishes;
+//  2. every GCAL_* variable the server reads is documented by name, a
+//     removed one included, no other is, and the configuration page
+//     states the profile rule;
 //  3. every repository path the docs name still exists;
 //  4. no version number is written in prose in the README — a badge
 //     cannot go stale, a copy of a fact can.
@@ -90,14 +96,22 @@ func checkTools(bin string) ([]string, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	text := string(readme)
+	var names []string
+	for _, t := range dump.Tools {
+		names = append(names, t.Name)
+	}
+	return readmeToolProblems(string(readme), names), len(dump.Tools), nil
+}
 
+// readmeToolProblems holds the README against the tools the binary
+// publishes, both ways, and holds its permission rules to them.
+func readmeToolProblems(text string, tools []string) []string {
 	var problems []string
 	published := map[string]bool{}
-	for _, t := range dump.Tools {
-		published[t.Name] = true
-		if !strings.Contains(text, "`"+t.Name+"`") {
-			problems = append(problems, fmt.Sprintf("README does not mention the tool %s", t.Name))
+	for _, name := range tools {
+		published[name] = true
+		if !strings.Contains(text, "`"+name+"`") {
+			problems = append(problems, fmt.Sprintf("README does not mention the tool %s", name))
 		}
 	}
 	// And the other direction: a tool the README names that no longer
@@ -114,14 +128,25 @@ func checkTools(bin string) ([]string, int, error) {
 			problems = append(problems, fmt.Sprintf("README names %s, which the binary does not publish", name))
 		}
 	}
-	return problems, len(dump.Tools), nil
+	// A permission rule for a tool that does not exist matches nothing,
+	// so the person it was meant to ask is never asked.
+	for _, m := range permissionRuleRe.FindAllStringSubmatch(text, -1) {
+		if !published[m[1]] {
+			problems = append(problems, fmt.Sprintf("README gives a permission rule for %s, which the binary does not publish", m[1]))
+		}
+	}
+	return problems
 }
+
+// permissionRuleRe is a Claude Code permission rule for one of this
+// server's tools, under the server name the README configures.
+var permissionRuleRe = regexp.MustCompile(`mcp__google-calendar__([a-z0-9_]+)`)
 
 // looksLikeToolName keeps the reverse check from firing on every
 // snake_case word in the prose. It is a verb_noun shape.
 func looksLikeToolName(s string) bool {
 	verbs := []string{"list_", "get_", "search_", "create_", "update_", "cancel_", "move_",
-		"respond_", "manage_", "share_", "unshare_", "delete_", "clear_", "check_"}
+		"respond_", "manage_", "share_", "unshare_", "publish_", "widen_", "delete_", "clear_", "check_"}
 	for _, v := range verbs {
 		if strings.HasPrefix(s, v) {
 			return true
@@ -130,41 +155,67 @@ func looksLikeToolName(s string) bool {
 	return false
 }
 
-var defRe = regexp.MustCompile(`def\(&s\.\w+,\s*"[^"]+",\s*"([A-Z_0-9]+)"`)
+// configDocPath is the page every setting is documented on.
+const configDocPath = "docs/configuration.md"
 
 func checkSettings() ([]string, int, error) {
-	src, err := os.ReadFile("internal/config/config.go")
+	docs, err := os.ReadFile(configDocPath)
 	if err != nil {
 		return nil, 0, err
 	}
-	docs, err := os.ReadFile("docs/configuration.md")
-	if err != nil {
-		return nil, 0, err
-	}
-	text := string(docs)
+	vars := config.Vars()
+	return configDocProblems(vars, string(docs)), len(vars), nil
+}
 
+// configDocProblems holds the configuration page, text, to the variables
+// the server reads, vars, both ways. It names every one as a whole word,
+// a removed one it refuses and the two read outside Define included,
+// names no other, and says what a profile name is in the words the
+// server refuses one with.
+func configDocProblems(vars []config.Var, text string) []string {
 	var problems []string
-	defined := map[string]bool{}
-	for _, m := range defRe.FindAllSubmatch(src, -1) {
-		name := "GCAL_" + string(m[1])
-		defined[name] = true
-		if !strings.Contains(text, name) {
-			problems = append(problems, fmt.Sprintf("docs/configuration.md does not document %s", name))
+	documented := map[string]bool{}
+	for _, name := range settingNames(text) {
+		documented[name] = true
+	}
+	known := map[string]bool{}
+	for _, v := range vars {
+		known[v.Name] = true
+		if !documented[v.Name] {
+			problems = append(problems, fmt.Sprintf("%s does not document %s", configDocPath, v.Name))
 		}
 	}
-	// Settings the docs invent.
-	for _, m := range regexp.MustCompile(`GCAL_[A-Z_0-9]+`).FindAllString(text, -1) {
-		switch m {
-		// Not flag-bound: these are read directly, and are documented
-		// deliberately.
-		case "GCAL_CONFIG_DIR", "GCAL_REFRESH_TOKEN":
-			continue
-		}
-		if !defined[m] {
-			problems = append(problems, fmt.Sprintf("docs/configuration.md documents %s, which the code does not define", m))
+	// Settings the page invents.
+	for _, name := range slices.Sorted(maps.Keys(documented)) {
+		if !known[name] {
+			problems = append(problems, fmt.Sprintf("%s documents %s, which the code does not read", configDocPath, name))
 		}
 	}
-	return problems, len(defined), nil
+	if !strings.Contains(text, config.ProfileRule) {
+		problems = append(problems, fmt.Sprintf("%s does not say a profile name is %q", configDocPath, config.ProfileRule))
+	}
+	return problems
+}
+
+// settingWord is a setting's name standing as a word of its own, all of
+// it: a letter of either case, a digit or _ on either side makes it part
+// of a longer word, so GCAL_READ_ONLY_X, GCAL_READ_ONLYs and
+// xGCAL_READ_ONLY are not GCAL_READ_ONLY. A name ends in a capital or a
+// digit, so GCAL_LIVE_ is a prefix rather than a name.
+var settingWord = regexp.MustCompile(`\b` + config.EnvPrefix + `[A-Z0-9_]*[A-Z0-9]\b`)
+
+// settingNames is every variable text names, each a whole word. One
+// followed by * is a pattern, such as GCAL_LIVE*, and not a variable,
+// unless a * comes before it too, as Markdown's bold and italics do.
+func settingNames(text string) []string {
+	var names []string
+	for _, at := range settingWord.FindAllStringIndex(text, -1) {
+		pattern := strings.HasPrefix(text[at[1]:], "*") && !strings.HasSuffix(text[:at[0]], "*")
+		if !pattern {
+			names = append(names, text[at[0]:at[1]])
+		}
+	}
+	return names
 }
 
 // pathRe finds anything shaped like a repository path in prose.

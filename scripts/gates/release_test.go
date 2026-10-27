@@ -255,7 +255,7 @@ func TestTheWaysTheReleaseWiringBreaks(t *testing.T) {
 		{
 			name: "a glob that hardcodes goreleaser's variant suffix",
 			breaks: func(_ *goreleaserConfig, files *[]staged, _ *string, _ *string) {
-				setGlob(files, "server/google-calendar-mcp-linux-x64", "dist/*linux_amd64_v1/google-calendar-mcp")
+				setGlob(files, "server/google-calendar-mcp-linux-amd64", "dist/*linux_amd64_v1/google-calendar-mcp")
 			},
 			want: "matches no directory",
 		},

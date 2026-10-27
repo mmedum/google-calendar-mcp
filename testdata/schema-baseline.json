@@ -1,11 +1,11 @@
 {
   "server": "google-calendar-mcp",
-  "version": "v3.1.0",
+  "version": "v5.0.0",
   "sdk_version": "v1.8.0",
   "tools": [
     {
       "name": "cancel_event",
-      "description": "Cancel an event, or one occurrence of a repeating one. A whole event is deleted; one occurrence is marked canceled, which is how a single date leaves a series — the result says which of the two happened. Google keeps the record either way, and list_events with show_canceled still shows it. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. With `this_and_following` the series simply ends before this occurrence, which is one call rather than the two an update takes. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Read that rule twice here: canceling with no notification removes the meeting from YOUR calendar and leaves it on your guests'. They will still turn up. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before a cancellation that emails a guest; a call they do not confirm is [blocked], and is not made again unless they ask.",
+      "description": "Cancel an event, or one occurrence of a repeating one. A whole event is deleted; one occurrence is marked canceled, which is how a single date leaves a series — the result says which of the two happened. Google keeps the record either way, and list_events with show_canceled still shows it. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. With `this_and_following` the series simply ends before this occurrence, which is one call rather than the two an update takes. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Read that rule twice here: canceling with no notification removes the meeting from YOUR calendar and leaves it on your guests'. They will still turn up. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -624,7 +624,7 @@
     },
     {
       "name": "clear_calendar",
-      "description": "Delete EVERY event on this account's own primary calendar: past, future, and every meeting it organizes. This is the most destructive call the Calendar API offers and it cannot be undone. Guests are not notified, and the meetings stay on their calendars. It needs `confirm: true` on the call, and the server has to have been started with the destructive tools enabled. It works only on the primary calendar, which is what Google documents it for; another calendar is refused, and delete_calendar removes one of those whole. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before the write; a call they do not confirm is [blocked], and is not made again unless they ask.",
+      "description": "Delete EVERY event on this account's own primary calendar: past, future, and every meeting it organizes. This is the most destructive call the Calendar API offers and it cannot be undone. Guests are not notified, and the meetings stay on their calendars. It needs `confirm: true` on the call, and the server has to have been started with the destructive tools enabled. It works only on the primary calendar, which is what Google documents it for; another calendar is refused, and delete_calendar removes one of those whole. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -1002,12 +1002,12 @@
     },
     {
       "name": "create_event",
-      "description": "Create an event. `start` and `end` are either two yyyy-mm-dd dates for an all-day event, where `end` is the LAST day and is included, or two RFC3339 timestamps for a timed one — never one of each, because a date is not a time. Times are written in `time_zone` if you pass one, otherwise the calendar's own zone; the result says which it used, and the zone is always sent alongside the timestamp so a repeating event keeps its wall-clock time across a daylight-saving change. `recurrence` takes RFC 5545 lines such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10. `conference: true` asks Google for a Meet link. The link normally comes back with the event, but Google may still be making it — the result says which, and when it says the link is still being made, read the event again to get it rather than promising anybody a link. update_event's `add_conference` adds one to an event later. `optional_guests` invites people as optional; they are emailed like any guest, so they make notify required too. A room cannot be optional. An address may be bare or a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e, the way a mail server hands one over; only the address is used, and one entry holds one address. `popup_reminders` and `email_reminders` are minutes before the start, 0 to 40320, at most five in all. Either one replaces the whole set, so pass both to keep both kinds, and an empty list given alone means no reminders. `default_reminders: true` goes back to the calendar's own. Reminders are yours alone: Google keeps them per person, so they never notify a guest. `visibility` is default, public or private: private shows the details only to the guests, and public to everybody who can see the calendar. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do. `event_type` makes a status event, which only your primary calendar can hold: outOfOffice, focusTime or workingLocation. Out of office and focus time are timed, never all day, and always show you busy. `auto_decline` is REQUIRED for them, with no default: none declines nothing, new declines invitations that arrive for that time, and all also declines the meetings you already accepted. Google shows each organizer the decline, with `decline_message` if you give one. Focus time takes `chat_status`: available or do_not_disturb. A working location takes `working_location` (home, office or custom) and `working_location_label` for the office or place; it is timed or exactly one whole day, always public, and shows you free. A status event takes no guests, rooms or Meet link. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before it makes an out-of-office or focus-time event with auto_decline all; a call they do not confirm is [blocked], and is not made again unless they ask.",
+      "description": "Create an event. `start` and `end` are either two yyyy-mm-dd dates for an all-day event, where `end` is the LAST day and is included, or two RFC3339 timestamps for a timed one — never one of each, because a date is not a time. Times are written in `time_zone` if you pass one, otherwise the calendar's own zone; the result says which it used, and the zone is always sent alongside the timestamp so a repeating event keeps its wall-clock time across a daylight-saving change. `recurrence` takes RFC 5545 lines such as RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10. `conference: true` asks Google for a Meet link. The link normally comes back with the event, but Google may still be making it — the result says which, and when it says the link is still being made, read the event again to get it rather than promising anybody a link. update_event's `add_conference` adds one to an event later. `optional_guests` invites people as optional; they are emailed like any guest, so they make notify required too. A room cannot be optional. An address may be bare or a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e, the way a mail server hands one over; only the address is used, and one entry holds one address. `popup_reminders` and `email_reminders` are minutes before the start, 0 to 40320, at most five in all. Either one replaces the whole set, so pass both to keep both kinds, and an empty list given alone means no reminders. `default_reminders: true` goes back to the calendar's own. Reminders are yours alone: Google keeps them per person, so they never notify a guest. `visibility` is default, public or private: private shows the details only to the guests, and public to everybody who can see the calendar. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do. `event_type` makes a status event, which only your primary calendar can hold: outOfOffice, focusTime or workingLocation. Out of office and focus time are timed, never all day, and always show you busy. `auto_decline` is REQUIRED for them, with no default: none declines nothing, and new declines invitations that arrive for that time. Google shows each organizer the decline, with `decline_message` if you give one. all, which also declines the meetings you already accepted, is refused here: it is create_event_declining_all, registered only when the server runs with GCAL_ENABLE_DECLINE_ALL=true. Focus time takes `chat_status`: available or do_not_disturb. A working location takes `working_location` (home, office or custom) and `working_location_label` for the office or place; it is timed or exactly one whole day, always public, and shows you free. A status event takes no guests, rooms or Meet link. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
           "auto_decline": {
-            "description": "Required for outOfOffice and focusTime, with no default: none, new (invitations that arrive for that time) or all (also the meetings you already accepted, which asks the person first).",
+            "description": "Required for outOfOffice and focusTime, with no default: none, or new (invitations that arrive for that time). all is refused here; it is create_event_declining_all.",
             "type": "string"
           },
           "calendar": {
@@ -1543,8 +1543,444 @@
       }
     },
     {
+      "name": "create_event_declining_all",
+      "description": "Create an out-of-office or focus-time event on your primary calendar that declines every meeting it overlaps: the ones you already accepted, and every invitation that arrives for that time while it stands. Google shows each organizer the decline, with `decline_message` if you give one, and deleting the event later does not take a decline back. This is create_event's auto_decline all, which create_event refuses; it exists only when the server was started with GCAL_ENABLE_DECLINE_ALL=true. To decline only the invitations that arrive later, use create_event with auto_decline new. `event_type` is outOfOffice or focusTime. `start` and `end` are RFC3339 timestamps, never dates: neither can be all day. Focus time takes `chat_status`: available or do_not_disturb. `recurrence` takes RFC 5545 lines, and the event declines on every occurrence. It takes no guests, so nobody is invited and there is no `notify`. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "Your primary calendar, which is the default; no other calendar can hold a status event.",
+            "type": "string"
+          },
+          "chat_status": {
+            "description": "focusTime only: available or do_not_disturb, what Google Chat shows during it.",
+            "type": "string"
+          },
+          "decline_message": {
+            "description": "The message each organizer gets with a decline.",
+            "type": "string"
+          },
+          "description": {
+            "description": "Longer text on the event.",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "Report what would be created and what it declines, without writing.",
+            "type": "boolean"
+          },
+          "end": {
+            "description": "End, an RFC3339 timestamp. Required.",
+            "type": "string"
+          },
+          "event_type": {
+            "description": "outOfOffice or focusTime. Required.",
+            "type": "string"
+          },
+          "recurrence": {
+            "description": "RFC 5545 lines, such as RRULE:FREQ=WEEKLY;BYDAY=FR;COUNT=4.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "start": {
+            "description": "Start, an RFC3339 timestamp. Required.",
+            "type": "string"
+          },
+          "time_zone": {
+            "description": "IANA zone the times are written in, such as Europe/Copenhagen. Defaults to the calendar's own.",
+            "type": "string"
+          },
+          "title": {
+            "description": "What the event is called. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "start",
+          "end",
+          "event_type"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "before": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "calendar": {
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "from",
+                "to"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "etag": {
+            "type": "string"
+          },
+          "event": {
+            "additionalProperties": false,
+            "properties": {
+              "all_day": {
+                "type": "boolean"
+              },
+              "attachment_count": {
+                "type": "integer"
+              },
+              "auto_decline": {
+                "type": "string"
+              },
+              "calendar_id": {
+                "type": "string"
+              },
+              "chat_status": {
+                "type": "string"
+              },
+              "conference_status": {
+                "type": "string"
+              },
+              "conference_uri": {
+                "type": "string"
+              },
+              "decline_message": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "end": {
+                "type": "string"
+              },
+              "end_date": {
+                "type": "string"
+              },
+              "etag": {
+                "type": "string"
+              },
+              "event_type": {
+                "type": "string"
+              },
+              "free_not_busy": {
+                "type": "boolean"
+              },
+              "guest_count": {
+                "type": "integer"
+              },
+              "guest_list_truncated": {
+                "type": "boolean"
+              },
+              "id": {
+                "type": "string"
+              },
+              "link": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "organizer": {
+                "type": "string"
+              },
+              "recurrence": {
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "recurrence_means": {
+                "type": "string"
+              },
+              "reminders": {
+                "additionalProperties": false,
+                "properties": {
+                  "default": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  },
+                  "popup": {
+                    "items": {
+                      "type": "integer"
+                    },
+                    "type": [
+                      "null",
+                      "array"
+                    ]
+                  }
+                },
+                "required": [
+                  "default"
+                ],
+                "type": [
+                  "null",
+                  "object"
+                ]
+              },
+              "series_id": {
+                "type": "string"
+              },
+              "start": {
+                "type": "string"
+              },
+              "start_date": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "visibility": {
+                "type": "string"
+              },
+              "working_location": {
+                "type": "string"
+              },
+              "working_location_label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "calendar_id",
+              "title",
+              "all_day"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "time_zone_source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "calendar",
+          "notification",
+          "time_zone",
+          "time_zone_source",
+          "api_requests"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "delete_calendar",
-      "description": "Delete a calendar and every event on it, for everybody it is shared with. This cannot be undone. It needs `confirm: true` on the call, and the server it runs in has to have been started with the destructive tools enabled. Only a calendar you own, and never your own primary calendar — Google has no way to delete that one. To empty a calendar and keep it, use clear_calendar; to remove it from your list without deleting it, use manage_calendar with unsubscribe. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before the write; a call they do not confirm is [blocked], and is not made again unless they ask.",
+      "description": "Delete a calendar and every event on it, for everybody it is shared with. This cannot be undone. It needs `confirm: true` on the call, and the server it runs in has to have been started with the destructive tools enabled. Only a calendar you own, and never your own primary calendar — Google has no way to delete that one. To empty a calendar and keep it, use clear_calendar; to remove it from your list without deleting it, use manage_calendar with unsubscribe. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -3949,6 +4385,209 @@
       }
     },
     {
+      "name": "publish_calendar",
+      "description": "Publish a calendar to the whole internet, or open it to everybody in a domain, or change the access such a rule gives. `who` is \"anyone\" for the public, signed in or not, or a domain such as example.com for everybody in it, now and later. Removing the rule later with unshare_calendar stops new readers and takes nothing back from whoever already looked, so this is publishing rather than sharing. `role` is what they may do: freeBusyReader, which shows only when you are busy, reader, writerWithoutPrivateAccess or writer; never owner. `calendar_title` is the calendar's title as list_calendars shows it, so the call names the calendar it opens; a title that is not this calendar's is refused [stale]. It needs `confirm: true` on the call, and the server it runs in has to have been started with the destructive tools enabled. To share with named people inside your organization use share_calendar, and outside it or as an owner, widen_calendar_access. `notify` is REQUIRED and has no default: `all` asks Google to email about the change, `none` asks it not to. Google's own default here is to EMAIL — the opposite of its default on an event — which is why this server asks rather than inheriting either. `external_only` has no meaning on a sharing change and is refused: Google's switch is on or off, with no internal/external split. Whatever you pass, the result says what was ASKED FOR; the API reports nothing about what arrived. The result lists who could see the calendar before and who can see it now, because \"shared with somebody\" is not an answer to \"who can see this\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar to publish. You must own it.",
+            "type": "string"
+          },
+          "calendar_title": {
+            "description": "The calendar's title exactly as list_calendars shows it. Required; refused [stale] when it is not this calendar's title.",
+            "type": "string"
+          },
+          "confirm": {
+            "description": "Must be true. Without it the call is refused.",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "description": "Report who would gain access, without writing. Needs no confirm.",
+            "type": "boolean"
+          },
+          "notify": {
+            "description": "Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email.",
+            "type": "string"
+          },
+          "role": {
+            "description": "What they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. Required.",
+            "type": "string"
+          },
+          "who": {
+            "description": "\"anyone\" for the public internet, or a domain such as example.com for everybody in it. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar",
+          "calendar_title",
+          "who",
+          "role"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendar_id": {
+            "type": "string"
+          },
+          "changed": {
+            "additionalProperties": false,
+            "properties": {
+              "public": {
+                "type": "boolean"
+              },
+              "role": {
+                "type": "string"
+              },
+              "role_means": {
+                "type": "string"
+              },
+              "rule_id": {
+                "type": "string"
+              },
+              "scope_type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "who": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "who",
+              "scope_type",
+              "role",
+              "role_means"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "sharing_before": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "calendar_id",
+          "sharing",
+          "public",
+          "api_requests"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      }
+    },
+    {
       "name": "respond_to_event",
       "description": "Answer an invitation: accepted, declined or tentative, with an optional comment. This changes only THIS account's response and nothing else on the event — which is why it is a separate tool rather than an update. Do not RSVP by patching the guest list; that overwrites everybody else's answer. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is not available here: answering some occurrences and not others would mean rewriting somebody else's series. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
       "input_schema": {
@@ -4669,14 +5308,10 @@
     },
     {
       "name": "share_calendar",
-      "description": "Give somebody access to a calendar, or change the access they already have. `who` is an email address, a group address, a domain, or \"anyone\" for the public internet. An address is read as one person unless this calendar already has a rule for it — pass `scope_type` to be sure, because a group address and a person's look identical. `role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. The result explains the one it set. Sharing with \"anyone\" publishes the calendar to the whole internet and needs `allow_public: true`: removing the rule later stops new readers and takes nothing back from whoever already looked. `notify` is REQUIRED and has no default: `all` asks Google to email about the change, `none` asks it not to. Google's own default here is to EMAIL — the opposite of its default on an event — which is why this server asks rather than inheriting either. `external_only` has no meaning on a sharing change and is refused: Google's switch is on or off, with no internal/external split. Whatever you pass, the result says what was ASKED FOR; the API reports nothing about what arrived. The result lists who could see the calendar before and who can see it now, because \"shared with somebody\" is not an answer to \"who can see this\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. When the client can, the server also asks the person before a share that publishes the calendar, opens it to a whole domain, or makes somebody an owner; a call they do not confirm is [blocked], and is not made again unless they ask.",
+      "description": "Give a person or a group inside your organization access to a calendar, or change the access they have, below owner. `who` is an email address or a group address. It is read as one person unless this calendar already has a rule for it — pass `scope_type` to be sure, because a group address and a person's look identical. A group rule reaches everyone in the group, including people added later; a member outside the organization too, if the organization's sharing policy lets them in. `role` is what they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. The result explains the one it set. Keeping or lowering the role of a rule the calendar already has is made here whoever the rule reaches, since it widens nothing. An address is inside your organization when its domain is your account's own; a personal Google account has no organization, so every address is outside it. The wider shares are refused here, each naming its own tool: publish_calendar for \"anyone\" or a whole domain, and widen_calendar_access for somebody outside your organization or an owner. Both exist only when the server was started with the destructive tools enabled. `notify` is REQUIRED and has no default: `all` asks Google to email about the change, `none` asks it not to. Google's own default here is to EMAIL — the opposite of its default on an event — which is why this server asks rather than inheriting either. `external_only` has no meaning on a sharing change and is refused: Google's switch is on or off, with no internal/external split. Whatever you pass, the result says what was ASKED FOR; the API reports nothing about what arrived. The result lists who could see the calendar before and who can see it now, because \"shared with somebody\" is not an answer to \"who can see this\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
-          "allow_public": {
-            "description": "Required to share with \"anyone\", which publishes the calendar to the whole internet.",
-            "type": "boolean"
-          },
           "calendar": {
             "description": "The calendar to share. You must own it.",
             "type": "string"
@@ -4690,15 +5325,15 @@
             "type": "string"
           },
           "role": {
-            "description": "What they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Required.",
+            "description": "What they may do: freeBusyReader, reader, writerWithoutPrivateAccess or writer. Required.",
             "type": "string"
           },
           "scope_type": {
-            "description": "user, group, domain or default. Optional: an address is read as one person unless a rule for it already exists.",
+            "description": "user or group. Optional: an address is read as one person unless a rule for it already exists.",
             "type": "string"
           },
           "who": {
-            "description": "An email address, a group address, a domain, or \"anyone\" for the public internet. An address may be a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e; only the address is used. Required.",
+            "description": "An email address or a group address inside your organization. An address may be a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e; only the address is used. Required.",
             "type": "string"
           }
         },
@@ -5060,7 +5695,7 @@
     },
     {
       "name": "update_event",
-      "description": "Change an event. Only the fields you pass are touched; everything else is left exactly as it is, so this can never drop a guest list or flatten a series the way a whole-resource write does. Guests are added and removed one at a time with `add_guests` and `remove_guests`, optional guests added with `add_optional_guests`, and rooms booked with `add_rooms`, applied to the list as it is read, so somebody else's RSVP arriving in between is reported rather than overwritten. An address already on the event keeps the role it has, and the result names it: this server does not make a guest optional or required, and a call that would add nothing else is refused as having nothing to change. An address may be bare or a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e, the way a mail server hands one over; only the address is used, and one entry holds one address. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is two calls: the original series is ended before this occurrence and a NEW series starts at it with a new id, and any exception after this occurrence is reset. The result says so. `popup_reminders` and `email_reminders` are minutes before the start, 0 to 40320, at most five in all. Either one replaces the whole set, so pass both to keep both kinds, and an empty list given alone means no reminders. `default_reminders: true` goes back to the calendar's own. Reminders are yours alone: Google keeps them per person, so they never notify a guest. A write that changes only reminders needs no `notify`, except with `this_and_following`, whose new series reaches the guests. `visibility` is default, public or private: private shows the details only to the guests, and public to everybody who can see the calendar. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do. On one occurrence, Google ignores a less restrictive visibility, so it is refused, and applies a more restrictive one to the whole series, which the result says. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. `add_conference: true` asks Google for a Meet link on an event that has no conference; one that has a conference is refused, because Google would replace it, and the result says whether the link came back or is still being made. It cannot go with `this_and_following`. A status event takes no guests, rooms or Meet link, and a change to one that Google's rules for it refuse is refused before anything is written. An out-of-office or focus-time event that declines every overlapping meeting declines in the time a change adds to it: moved, made longer or repeated more. A change that only shortens it adds no time. With `this_and_following`, such a series starts a new series that declines them too. Use respond_to_event to answer an invitation and move_event to change which calendar it is on. When the client can, the server also asks the person before an out-of-office or focus-time event that declines every meeting it overlaps is moved, made longer, repeated more or split with this_and_following; a call they do not confirm is [blocked], and is not made again unless they ask.",
+      "description": "Change an event. Only the fields you pass are touched; everything else is left exactly as it is, so this can never drop a guest list or flatten a series the way a whole-resource write does. Guests are added and removed one at a time with `add_guests` and `remove_guests`, optional guests added with `add_optional_guests`, and rooms booked with `add_rooms`, applied to the list as it is read, so somebody else's RSVP arriving in between is reported rather than overwritten. An address already on the event keeps the role it has, and the result names it: this server does not make a guest optional or required, and a call that would add nothing else is refused as having nothing to change. An address may be bare or a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e, the way a mail server hands one over; only the address is used, and one entry holds one address. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is two calls: the original series is ended before this occurrence and a NEW series starts at it with a new id, and any exception after this occurrence is reset. The result says so. `popup_reminders` and `email_reminders` are minutes before the start, 0 to 40320, at most five in all. Either one replaces the whole set, so pass both to keep both kinds, and an empty list given alone means no reminders. `default_reminders: true` goes back to the calendar's own. Reminders are yours alone: Google keeps them per person, so they never notify a guest. A write that changes only reminders needs no `notify`, except with `this_and_following`, whose new series reaches the guests. `visibility` is default, public or private: private shows the details only to the guests, and public to everybody who can see the calendar. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do. On one occurrence, Google ignores a less restrictive visibility, so it is refused, and applies a more restrictive one to the whole series, which the result says. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. `add_conference: true` asks Google for a Meet link on an event that has no conference; one that has a conference is refused, because Google would replace it, and the result says whether the link came back or is still being made. It cannot go with `this_and_following`. A status event takes no guests, rooms or Meet link, and a change to one that Google's rules for it refuse is refused before anything is written. An out-of-office or focus-time event that declines every overlapping meeting declines in the time a change adds to it: moved, made longer or repeated more. A change that only shortens it adds no time. With `this_and_following`, such a series starts a new series that declines them too. Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -5617,6 +6252,213 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "widen_calendar_access",
+      "description": "Share a calendar with a person or a group outside your organization, or make somebody an owner, or change the access such a rule gives. `who` is an email address or a group address; pass `scope_type` to be sure which. An address is outside your organization unless its domain is your account's own, and every address is outside a personal Google account. `role` is freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Owner access includes changing who else can see the calendar, and removing you. `calendar_title` is the calendar's title as list_calendars shows it, so the call names the calendar it opens; a title that is not this calendar's is refused [stale]. It needs `confirm: true` on the call, and the server it runs in has to have been started with the destructive tools enabled. Inside your organization and below owner, use share_calendar; for \"anyone\" or a whole domain, publish_calendar. `notify` is REQUIRED and has no default: `all` asks Google to email about the change, `none` asks it not to. Google's own default here is to EMAIL — the opposite of its default on an event — which is why this server asks rather than inheriting either. `external_only` has no meaning on a sharing change and is refused: Google's switch is on or off, with no internal/external split. Whatever you pass, the result says what was ASKED FOR; the API reports nothing about what arrived. The result lists who could see the calendar before and who can see it now, because \"shared with somebody\" is not an answer to \"who can see this\". `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "calendar": {
+            "description": "The calendar to share. You must own it.",
+            "type": "string"
+          },
+          "calendar_title": {
+            "description": "The calendar's title exactly as list_calendars shows it. Required; refused [stale] when it is not this calendar's title.",
+            "type": "string"
+          },
+          "confirm": {
+            "description": "Must be true. Without it the call is refused.",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "description": "Report who would gain access, without writing. Needs no confirm.",
+            "type": "boolean"
+          },
+          "notify": {
+            "description": "Whether Google emails about the change: all or none. Required; there is no default, and Google's own is to email.",
+            "type": "string"
+          },
+          "role": {
+            "description": "What they may do: freeBusyReader, reader, writerWithoutPrivateAccess, writer or owner. Required.",
+            "type": "string"
+          },
+          "scope_type": {
+            "description": "user or group. Optional: an address is read as one person unless a rule for it already exists.",
+            "type": "string"
+          },
+          "who": {
+            "description": "An email address or a group address, outside your organization or to be an owner. An address may be a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e; only the address is used. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "calendar",
+          "calendar_title",
+          "who",
+          "role"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "api_requests": {
+            "type": "integer"
+          },
+          "calendar_id": {
+            "type": "string"
+          },
+          "changed": {
+            "additionalProperties": false,
+            "properties": {
+              "public": {
+                "type": "boolean"
+              },
+              "role": {
+                "type": "string"
+              },
+              "role_means": {
+                "type": "string"
+              },
+              "rule_id": {
+                "type": "string"
+              },
+              "scope_type": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              },
+              "who": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "who",
+              "scope_type",
+              "role",
+              "role_means"
+            ],
+            "type": [
+              "null",
+              "object"
+            ]
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "notification": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "sharing": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          },
+          "sharing_before": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "public": {
+                  "type": "boolean"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "role_means": {
+                  "type": "string"
+                },
+                "rule_id": {
+                  "type": "string"
+                },
+                "scope_type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "who": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "who",
+                "scope_type",
+                "role",
+                "role_means"
+              ],
+              "type": "object"
+            },
+            "type": [
+              "null",
+              "array"
+            ]
+          }
+        },
+        "required": [
+          "calendar_id",
+          "sharing",
+          "public",
+          "api_requests"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       }
     }

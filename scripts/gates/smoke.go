@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
 // smoke drives the built binary over stdio without credentials, in TWO
@@ -43,9 +45,9 @@ func smoke(bin string) error {
 // first-run user's machine looks. Discovery must work there.
 func smokeEnv(cmd *exec.Cmd) {
 	cmd.Env = append(cmd.Environ(),
-		"GCAL_CONFIG_DIR=no-such-directory-for-the-smoke-test",
-		"GCAL_REFRESH_TOKEN=",
-		"GCAL_LOG_LEVEL=error",
+		config.EnvConfigDir+"=no-such-directory-for-the-smoke-test",
+		config.EnvRefreshToken+"=",
+		config.EnvPrefix+"LOG_LEVEL=error",
 	)
 }
 

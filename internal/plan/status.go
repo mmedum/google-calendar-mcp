@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v3/internal/gcal"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/model"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/recur"
-	"github.com/mmedum/google-calendar-mcp/v3/internal/when"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/recur"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
 // Status asks for a status event (§7.4): out of office, focus time or a
@@ -40,6 +41,22 @@ type Status struct {
 	// OnPrimary is whether the event goes on the account's primary
 	// calendar, the only one that can hold a status event.
 	OnPrimary bool
+	// DeclineAll is set by create_event_declining_all, the one tool that
+	// may make an event declining every meeting it overlaps. Anywhere
+	// else auto_decline all is refused (§7.4).
+	DeclineAll bool
+}
+
+// Declines reports whether an event type is one that declines meetings:
+// out of office or focus time, by the caller's word in any case.
+func Declines(eventType string) bool {
+	return declining(statusTypes[strings.ToLower(strings.TrimSpace(eventType))])
+}
+
+// declining reports whether a type, as Google spells it, declines
+// meetings.
+func declining(kind string) bool {
+	return kind == gcal.EventTypeOutOfOffice || kind == gcal.EventTypeFocusTime
 }
 
 // statusTypes are the types create_event makes, by the caller's word in
@@ -87,6 +104,11 @@ func (s Status) apply(e *gcal.Event, d Draft) error {
 		return nil
 	}
 	what := statusNames[kind]
+	// Said before the calendar is checked, so the refusal that names the
+	// tool is the one met wherever the call was aimed.
+	if err := s.declinesAllHere(kind, what); err != nil {
+		return err
+	}
 	// "Secondary calendars can't have status events."
 	if !s.OnPrimary {
 		return fmt.Errorf("%w: %s can only go on your primary calendar; Google does not allow one on any "+
@@ -106,6 +128,31 @@ func (s Status) apply(e *gcal.Event, d Draft) error {
 		return s.working(e)
 	}
 	return s.away(e, kind, what)
+}
+
+// decliningTool names the tool that makes an event declining every
+// meeting it overlaps, and the flag it needs, which is the operator's to
+// set. create_event refuses all, so its refusals offer this, never the
+// word, or a caller meets a second refusal.
+const decliningTool = "create_event_declining_all, which is registered only when the server runs with " +
+	config.EnvPrefix + "ENABLE_DECLINE_ALL=true; that is for the person running it to decide"
+
+// declinesAllHere refuses auto_decline all on an out-of-office or focus
+// time event made by any tool but create_event_declining_all. A client
+// remembers an approval per tool, never per argument, so an always
+// allowed create_event would otherwise decline every accepted meeting in
+// the window unseen, with each organizer told. A word that is not an
+// auto_decline is left for away to refuse.
+func (s Status) declinesAllHere(kind, what string) error {
+	if s.DeclineAll || !declining(kind) {
+		return nil
+	}
+	if mode, _ := model.AutoDeclineWords.Wire(strings.TrimSpace(s.AutoDecline)); mode != gcal.AutoDeclineAll {
+		return nil
+	}
+	return fmt.Errorf("%w: auto_decline all makes %s decline every meeting it overlaps, the ones you already "+
+		"accepted included, and each organizer sees the decline. create_event takes none or new. all is %s",
+		ErrBlocked, what, decliningTool)
 }
 
 // statusGuests refuses guests, rooms and a Meet link on a status event of
@@ -194,8 +241,9 @@ func statusPatch(before gcal.Event, p gcal.EventPatch) error {
 // focus-time event declining every meeting it overlaps over time it did
 // not before: moved, made longer, repeated more, or newly set to decline
 // all. Google may decline the meetings in that time, the accepted ones
-// too, so the person is asked (§9a). A write that only shrinks the time
-// asks nothing. A change this cannot show to shrink counts as more.
+// too, and the result says so. Whether such a write is refused waits on
+// the live probe of §18 row 102. A write that only shrinks the time
+// counts as no more. A change this cannot show to shrink counts as more.
 func DeclinesMore(before, after gcal.Event) bool {
 	switch {
 	case !declinesAll(after):
@@ -212,8 +260,7 @@ func DeclinesMore(before, after gcal.Event) bool {
 // declinesAll reports whether an event, as it stands, declines every
 // meeting it overlaps.
 func declinesAll(e gcal.Event) bool {
-	if e.Status == gcal.StatusCanceled ||
-		(e.EventType != gcal.EventTypeOutOfOffice && e.EventType != gcal.EventTypeFocusTime) {
+	if e.Status == gcal.StatusCanceled || !declining(e.EventType) {
 		return false
 	}
 	var p struct {
@@ -319,20 +366,23 @@ func (s Status) away(e *gcal.Event, kind, what string) error {
 		return fmt.Errorf("%w: working_location and working_location_label belong to a working location, "+
 			"not to %s", ErrInvalid, what)
 	}
+	// all is not offered in these refusals: only create_event reaches
+	// them, and it refuses all (decliningTool).
 	if strings.TrimSpace(s.AutoDecline) == "" {
 		return fmt.Errorf("%w: auto_decline is required for %s, and there is no default. none declines "+
-			"nothing; new declines invitations that arrive for this time while it stands; all also declines "+
-			"the meetings you already accepted. Each organizer sees the decline",
-			ErrInvalid, what)
+			"nothing; new declines invitations that arrive for this time while it stands, and each organizer "+
+			"sees the decline. Declining the meetings you already accepted as well is %s", ErrInvalid, what,
+			decliningTool)
 	}
 	mode, ok := model.AutoDeclineWords.Wire(strings.TrimSpace(s.AutoDecline))
 	if !ok {
-		return fmt.Errorf("%w: %q is not an auto_decline. Pass %s", ErrInvalid, s.AutoDecline,
-			model.AutoDeclineWords.List())
+		return fmt.Errorf("%w: %q is not an auto_decline. Pass none or new. Declining the meetings you already "+
+			"accepted as well is %s", ErrInvalid, s.AutoDecline, decliningTool)
 	}
 	if s.DeclineMessage != "" && mode == gcal.AutoDeclineNone {
 		return fmt.Errorf("%w: decline_message goes with a decline, and auto_decline none declines nothing. "+
-			"Leave it out, or pass new or all", ErrInvalid)
+			"Leave it out, or pass new. Declining the meetings you already accepted as well is %s", ErrInvalid,
+			decliningTool)
 	}
 	e.Transparency = gcal.TransparencyOpaque
 	if kind == gcal.EventTypeOutOfOffice {
