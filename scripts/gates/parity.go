@@ -42,7 +42,7 @@ func parityGate() error {
 	}
 	var ciOnly []string
 	for t := range ciSteps {
-		if !contains(targets, t) {
+		if !contains(targets, t) && prOnly[t] == "" {
 			ciOnly = append(ciOnly, t)
 		}
 	}
@@ -50,6 +50,7 @@ func parityGate() error {
 	for _, t := range ciOnly {
 		problems = append(problems, fmt.Sprintf("CI runs `make %s` and `make check` does not", t))
 	}
+	problems = append(problems, prOnlyProblems(targets, ciSteps)...)
 
 	// The specific divergence that leaves build-tagged files compiling
 	// only on a maintainer's laptop.
@@ -75,6 +76,28 @@ func parityGate() error {
 	}
 	fmt.Printf("  %d targets in `make check`, all run by CI; %d vet tag(s) covered\n", len(targets), len(vetTags))
 	return nil
+}
+
+// prOnly is each target only pull-request CI runs, with the reason it
+// cannot be in `make check`.
+var prOnly = map[string]string{
+	"schema-ack": "it measures a pull request from its merge-base, which only a pull request has",
+}
+
+// prOnlyProblems holds each pull-request target to a CI step and keeps it
+// out of `make check`. Without it, deleting the step leaves every gate
+// green.
+func prOnlyProblems(targets []string, ciSteps map[string]bool) []string {
+	var problems []string
+	for _, t := range sortedKeys(prOnly) {
+		if !ciSteps[t] {
+			problems = append(problems, fmt.Sprintf("CI does not run `make %s`, which only a pull request can: %s", t, prOnly[t]))
+		}
+		if contains(targets, t) {
+			problems = append(problems, fmt.Sprintf("`make check` runs %q, which only a pull request can: %s", t, prOnly[t]))
+		}
+	}
+	return problems
 }
 
 var (
@@ -123,15 +146,49 @@ func ciRunSteps() (map[string]bool, map[string]bool, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	run := runText(string(data))
 	steps := map[string]bool{}
-	for _, m := range makeRe.FindAllSubmatch(data, -1) {
-		steps[string(m[1])] = true
+	for _, m := range makeRe.FindAllStringSubmatch(run, -1) {
+		steps[m[1]] = true
 	}
 	tags := map[string]bool{}
-	for _, m := range vetTagRe.FindAllSubmatch(data, -1) {
-		tags[string(m[1])] = true
+	for _, m := range vetTagRe.FindAllStringSubmatch(run, -1) {
+		tags[m[1]] = true
 	}
 	return steps, tags, nil
+}
+
+// runText is every command a workflow's `run:` steps carry, a one-line
+// `run:` and the lines of a `run: |` block alike, without comments. Only
+// a `run:` step runs anything: a comment naming a target does not.
+func runText(ci string) string {
+	var out []string
+	block := -1 // the indentation of the `run:` whose block we are in
+	for _, line := range strings.Split(ci, "\n") {
+		trimmed := strings.TrimSpace(line)
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		if block >= 0 {
+			if trimmed == "" || indent > block {
+				if !strings.HasPrefix(trimmed, "#") {
+					out = append(out, trimmed)
+				}
+				continue
+			}
+			block = -1
+		}
+		step := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+		cmd, ok := strings.CutPrefix(step, "run:")
+		if !ok {
+			continue
+		}
+		cmd = strings.TrimSpace(cmd)
+		if strings.HasPrefix(cmd, "|") || strings.HasPrefix(cmd, ">") {
+			block = indent + len(trimmed) - len(step)
+			continue
+		}
+		out = append(out, cmd)
+	}
+	return strings.Join(out, "\n")
 }
 
 func contains(ss []string, want string) bool {

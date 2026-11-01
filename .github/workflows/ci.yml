@@ -47,6 +47,28 @@ jobs:
       - name: staleness
         run: make staleness
 
+  # A pull request is measured from the merge-base of its head and the
+  # base branch. github.event.pull_request.base.sha is fixed when the
+  # event fires and goes stale in a stack of pull requests.
+  pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      PR_BASE_REF: origin/${{ github.base_ref }}
+      # The head commit, not the merge commit the checkout sits on.
+      PR_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: schema change acknowledged
+        run: make schema-ack
+
   gates:
     name: gates
     runs-on: ubuntu-latest

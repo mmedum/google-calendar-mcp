@@ -50,6 +50,11 @@ it, or `out` with why this server does not call it.
 topic branch and write a message that says what and why. Cutting a tag is
 the maintainer's, and `docs/release.md` is what it involves.
 
+If a pull request changes the tool surface, end one of its commits with
+a `SCHEMA-CHANGE:` footer that says what changed. Annotations such as
+`destructiveHint` count. A break needs `BREAKING CHANGE:` instead. CI
+checks this with `schema-ack`.
+
 ## Reporting a bug
 
 Use the issue template. It asks for `doctor` output, a version and a

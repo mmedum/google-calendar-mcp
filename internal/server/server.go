@@ -122,26 +122,55 @@ type SchemaDump struct {
 	Resources []SchemaResource `json:"resources,omitempty"`
 }
 
-// SchemaResource is one resource or resource template in a dump.
+// SchemaResource is one resource or resource template in a dump: every
+// field a client is told, TestTheDumpCarriesEveryField holds that.
 type SchemaResource struct {
-	Name string `json:"name"`
+	Name  string `json:"name"`
+	Title string `json:"title,omitempty"`
 	// URI is set on a fixed resource, URITemplate on a templated one.
 	// Exactly one of them, which is what tells the two apart in a diff.
-	URI         string `json:"uri,omitempty"`
-	URITemplate string `json:"uri_template,omitempty"`
-	MIMEType    string `json:"mime_type,omitempty"`
-	Description string `json:"description,omitempty"`
+	URI         string          `json:"uri,omitempty"`
+	URITemplate string          `json:"uri_template,omitempty"`
+	MIMEType    string          `json:"mime_type,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Size        int64           `json:"size,omitempty"`
+	Annotations json.RawMessage `json:"annotations,omitempty"`
+	Icons       json.RawMessage `json:"icons,omitempty"`
+	Meta        json.RawMessage `json:"_meta,omitempty"`
 }
 
-// SchemaTool is one tool in a dump.
+// SchemaTool is one tool in a dump: every field a client is told,
+// TestTheDumpCarriesEveryField holds that. _meta carries Claude Code's
+// mark for a tool it asks the person about on every call, which is as
+// much a change to what a person sees as a flipped annotation.
 type SchemaTool struct {
 	Name        string          `json:"name"`
+	Title       string          `json:"title,omitempty"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
 	// OutputSchema is half the contract: a caller reads the fields it
 	// names, so dropping one breaks it as surely as dropping an input.
 	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
 	Annotations  json.RawMessage `json:"annotations,omitempty"`
+	Icons        json.RawMessage `json:"icons,omitempty"`
+	Meta         json.RawMessage `json:"_meta,omitempty"`
+}
+
+// rawJSON marshals v, or nothing when v is nil. The first error it meets
+// is kept in *err, so a field that will not marshal fails the dump
+// rather than vanish from it.
+func rawJSON(v any, err *error) json.RawMessage {
+	b, e := json.Marshal(v)
+	if e != nil {
+		if *err == nil {
+			*err = e
+		}
+		return nil
+	}
+	if string(b) == "null" {
+		return nil
+	}
+	return b
 }
 
 // DumpSchemas lists every tool under the full surface.
@@ -174,24 +203,13 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 	}
 
 	dump := SchemaDump{Server: Name, Version: d.Version, SDKVersion: SDKVersion}
+	var merr error
 	for _, t := range res.Tools {
-		st := SchemaTool{Name: t.Name, Description: t.Description}
-		if t.InputSchema != nil {
-			if b, err := json.Marshal(t.InputSchema); err == nil {
-				st.InputSchema = b
-			}
-		}
-		if t.OutputSchema != nil {
-			if b, err := json.Marshal(t.OutputSchema); err == nil {
-				st.OutputSchema = b
-			}
-		}
-		if t.Annotations != nil {
-			if b, err := json.Marshal(t.Annotations); err == nil {
-				st.Annotations = b
-			}
-		}
-		dump.Tools = append(dump.Tools, st)
+		dump.Tools = append(dump.Tools, SchemaTool{
+			Name: t.Name, Title: t.Title, Description: t.Description,
+			InputSchema: rawJSON(t.InputSchema, &merr), OutputSchema: rawJSON(t.OutputSchema, &merr),
+			Annotations: rawJSON(t.Annotations, &merr), Icons: rawJSON(t.Icons, &merr), Meta: rawJSON(t.Meta, &merr),
+		})
 	}
 	sort.Slice(dump.Tools, func(i, j int) bool { return dump.Tools[i].Name < dump.Tools[j].Name })
 
@@ -201,7 +219,8 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 	}
 	for _, r := range rs.Resources {
 		dump.Resources = append(dump.Resources, SchemaResource{
-			Name: r.Name, URI: r.URI, MIMEType: r.MIMEType, Description: r.Description,
+			Name: r.Name, Title: r.Title, URI: r.URI, MIMEType: r.MIMEType, Description: r.Description, Size: r.Size,
+			Annotations: rawJSON(r.Annotations, &merr), Icons: rawJSON(r.Icons, &merr), Meta: rawJSON(r.Meta, &merr),
 		})
 	}
 	tmpl, err := cs.ListResourceTemplates(ctx, nil)
@@ -210,10 +229,14 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 	}
 	for _, r := range tmpl.ResourceTemplates {
 		dump.Resources = append(dump.Resources, SchemaResource{
-			Name: r.Name, URITemplate: r.URITemplate, MIMEType: r.MIMEType, Description: r.Description,
+			Name: r.Name, Title: r.Title, URITemplate: r.URITemplate, MIMEType: r.MIMEType, Description: r.Description,
+			Annotations: rawJSON(r.Annotations, &merr), Icons: rawJSON(r.Icons, &merr), Meta: rawJSON(r.Meta, &merr),
 		})
 	}
 	sort.Slice(dump.Resources, func(i, j int) bool { return dump.Resources[i].key() < dump.Resources[j].key() })
+	if merr != nil {
+		return fmt.Errorf("server: dump: %w", merr)
+	}
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
