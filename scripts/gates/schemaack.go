@@ -3,19 +3,22 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 )
 
 // schemaAck fails a pull request whose tool surface differs from its
-// merge-base's, unless a commit it adds says so. Annotations count: a
-// flipped destructiveHint changes whether a client asks the person.
-// Both sides are built from commits, the merge-base and the head, never
-// from the checkout, which in CI is the merge commit.
+// merge-base's, unless the commits it adds name every item that changed
+// in a footer. Annotations count: a flipped destructiveHint changes
+// whether a client asks the person. Both sides are built from commits,
+// the merge-base and the head, never from the checkout, which in CI is
+// the merge commit.
 func schemaAck(baseRef, head string) error {
 	base, err := gitOutput("merge-base", baseRef, head)
 	if err != nil {
@@ -32,77 +35,193 @@ func schemaAck(baseRef, head string) error {
 		}
 	}
 	short := base[:min(12, len(base))]
-	changes := compareSurfaces(os.Stdout, sides[0], sides[1], "the merge-base "+short)
+	c := compareSurfaces(sides[0], sides[1])
+	if len(c.breaking) > 0 {
+		released, err := releasedBreaks(baseRef, sides[1])
+		if err != nil {
+			return err
+		}
+		c = releaseBreaksOnly(c, released)
+	}
 	log, err := gitOutput("log", "--format=%B%x00", base+".."+head)
 	if err != nil {
 		return err
 	}
-	return checkAck(changes, strings.Split(log, "\x00"), short)
+	return checkAck(os.Stdout, c, strings.Split(log, "\x00"), short)
 }
 
-// addTheFooter is how to fix a pull request schema-ack fails.
-const addTheFooter = "add an empty commit (git commit --allow-empty) whose message carries it, never an amend"
-
-// checkAck is the rule, over what changed and the commit messages, so a
-// test can hand it both.
-func checkAck(c surfaceChanges, messages []string, base string) error {
-	if c.empty() {
-		fmt.Printf("  the tool surface is unchanged since %s\n", base)
-		return nil
+// releasedBreaks is what head breaks of the newest release's surface: the
+// baseline the base branch records, not the head's, which a branch cut
+// before the last release would leave behind. Before the first release
+// there is no baseline, and nothing is a break.
+func releasedBreaks(baseRef string, head surface) ([]change, error) {
+	listed, err := gitOutput("ls-tree", "--name-only", baseRef, "--", baselineFile)
+	if err != nil || listed == "" {
+		return nil, err
 	}
-	var acked, ackedBreak bool
-	for _, message := range messages {
-		for _, line := range footers(message) {
-			if m := ackFooter.FindStringSubmatch(line); m != nil {
-				acked = true
-				ackedBreak = ackedBreak || m[1] != "SCHEMA-CHANGE"
-			}
+	data, err := gitOutput("show", baseRef+":"+baselineFile)
+	if err != nil {
+		return nil, err
+	}
+	release, err := readSurface([]byte(data))
+	if err != nil {
+		return nil, fmt.Errorf("%s on %s: %w", baselineFile, baseRef, err)
+	}
+	return compareSurfaces(release, head).breaking, nil
+}
+
+// releaseBreaksOnly keeps as breaks only those the head also makes
+// against the released surface. Any other break narrows something no
+// release shipped, so it breaks no caller and is a plain change. A break
+// is matched by its item and field, never its text, which can differ
+// between the two comparisons: a type change names the type it was.
+func releaseBreaksOnly(c surfaceChanges, released []change) surfaceChanges {
+	type spot struct{ item, field string }
+	inRelease := map[spot]bool{}
+	for _, b := range released {
+		inRelease[spot{b.item, b.field}] = true
+	}
+	var breaking []change
+	for _, b := range c.breaking {
+		if inRelease[spot{b.item, b.field}] {
+			breaking = append(breaking, b)
+		} else {
+			c.changed = append(c.changed, b)
 		}
 	}
-	switch {
-	case len(c.breaking) > 0 && !ackedBreak:
-		return fmt.Errorf("the pull request breaks the tool surface and no commit since %s says BREAKING CHANGE:; %s", base, addTheFooter)
-	case !acked:
-		return fmt.Errorf("the pull request changes the tool surface and no commit since %s says SCHEMA-CHANGE: or BREAKING CHANGE:; %s",
-			base, addTheFooter)
+	c.breaking = breaking
+	return c
+}
+
+// checkAck is the rule, over the changes and the commit messages, so a
+// test can hand it both. Every added or changed item must be named in an
+// acknowledging footer, and every break in a BREAKING CHANGE: one. It
+// reports the changes on w.
+func checkAck(w io.Writer, c surfaceChanges, messages []string, base string) error {
+	if c.empty() {
+		_, _ = fmt.Fprintf(w, "  the tool surface is unchanged since %s\n", base)
+		return nil
 	}
-	fmt.Printf("  the change since %s is acknowledged\n", base)
+	c.write(w, "the merge-base "+base)
+	named, breaks := acknowledged(messages)
+	var problems []string
+	if items := unnamed(c.breaking, breaks); len(items) > 0 {
+		problems = append(problems, "no BREAKING CHANGE: footer names "+strings.Join(items, ", "))
+	}
+	if items := unnamed(slices.Concat(c.added, c.changed), named); len(items) > 0 {
+		problems = append(problems, "no footer names "+strings.Join(items, ", "))
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("the tool surface changed since %s, and %s. Add an empty commit (git commit --allow-empty) "+
+			"whose message ends with a footer naming them, such as `SCHEMA-CHANGE: create_event: destructiveHint true`; "+
+			"never amend", base, strings.Join(problems, ", and "))
+	}
+	_, _ = fmt.Fprintf(w, "  the change since %s is acknowledged\n", base)
 	return nil
 }
 
-// ackFooter is a footer that acknowledges a change to the tool surface:
-// SCHEMA-CHANGE: for any change, BREAKING CHANGE: for one that breaks a
-// caller, or BREAKING-CHANGE:, which Conventional Commits makes its
-// synonym. The text after the colon says what changed.
-var ackFooter = regexp.MustCompile(`^(SCHEMA-CHANGE|BREAKING[ -]CHANGE):`)
+// unnamed is each item of cs that names does not hold, sorted, once.
+func unnamed(cs []change, names map[string]bool) []string {
+	var out []string
+	for _, c := range cs {
+		if !names[c.item] {
+			out = append(out, c.item)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
 
 // footerToken is a footer line: a token, a colon, a space and a value,
 // as Co-Authored-By: is. continuation is a line that starts with white
 // space and continues the footer above it.
 var (
-	footerToken  = regexp.MustCompile(`^(BREAKING CHANGE|[A-Za-z][A-Za-z0-9-]*):[ \t]+\S`)
+	footerToken  = regexp.MustCompile(`^(BREAKING CHANGE|[A-Za-z][A-Za-z0-9-]*):[ \t]+(\S.*)$`)
 	continuation = regexp.MustCompile(`^[ \t]+\S`)
 )
 
 // paragraphBreak is a blank line, which ends a paragraph.
 var paragraphBreak = regexp.MustCompile(`\n[ \t]*\n`)
 
+// A footer is one Token: value of a commit message, its continuation
+// lines joined onto its value.
+type footer struct{ token, text string }
+
 // footers is a commit message's footer block: the paragraphs at its end
-// in which every line is a footer, never the subject. A line of prose
-// that happens to start "BREAKING CHANGE:" is not a footer.
-func footers(message string) []string {
+// in which every line is a footer or continues one, never the subject. A
+// line of prose that happens to start "BREAKING CHANGE:" is not a footer.
+func footers(message string) []footer {
 	paras := paragraphBreak.Split(strings.TrimSpace(strings.ReplaceAll(message, "\r\n", "\n")), -1)
-	var out []string
+	var out []footer
 	for i := len(paras) - 1; i > 0; i-- {
-		lines := strings.Split(strings.Trim(paras[i], "\n"), "\n")
-		for j, l := range lines {
-			if !footerToken.MatchString(l) && (j == 0 || !continuation.MatchString(l)) {
+		var block []footer
+		for _, l := range strings.Split(strings.Trim(paras[i], "\n"), "\n") {
+			switch m := footerToken.FindStringSubmatch(l); {
+			case m != nil:
+				block = append(block, footer{m[1], m[2]})
+			case len(block) > 0 && continuation.MatchString(l):
+				block[len(block)-1].text += " " + strings.TrimSpace(l)
+			default:
 				return out
 			}
 		}
-		out = append(lines, out...)
+		out = append(block, out...)
 	}
 	return out
+}
+
+// ackToken says whether a footer's token acknowledges a change to the
+// tool surface, and whether a break of a release. Conventional Commits
+// reads a token in any case but BREAKING CHANGE, which must be
+// uppercase, and BREAKING-CHANGE is its synonym.
+func ackToken(token string) (isBreak, ok bool) {
+	switch {
+	case token == "BREAKING CHANGE" || token == "BREAKING-CHANGE":
+		return true, true
+	case strings.EqualFold(token, "SCHEMA-CHANGE"):
+		return false, true
+	}
+	return false, false
+}
+
+// nameSeparator is what separates the names in a footer's text.
+var nameSeparator = regexp.MustCompile("[\\s,;()'\"]+")
+
+// footerNames is every name a footer's text may carry, each a whole
+// token. A colon and a full stop are trimmed from a name rather than
+// split on, since a URI holds both; a name in backticks is taken whole,
+// so a URI with a comma in it can be named.
+func footerNames(text string) []string {
+	var out []string
+	for _, n := range append(codeSpans(text), nameSeparator.Split(codeSpanRe.ReplaceAllString(text, " "), -1)...) {
+		if n = strings.TrimRight(n, ":."); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// acknowledged reads every message's footers for the items they name:
+// named holds each one a SCHEMA-CHANGE: or BREAKING CHANGE: footer
+// names, breaks each one a BREAKING CHANGE: footer names. A name is a
+// whole token, so create_event does not name create_events.
+func acknowledged(messages []string) (named, breaks map[string]bool) {
+	named, breaks = map[string]bool{}, map[string]bool{}
+	for _, message := range messages {
+		for _, f := range footers(message) {
+			isBreak, ok := ackToken(f.token)
+			if !ok {
+				continue
+			}
+			for _, n := range footerNames(f.text) {
+				named[n] = true
+				if isBreak {
+					breaks[n] = true
+				}
+			}
+		}
+	}
+	return named, breaks
 }
 
 // dumpAt builds the server as it was at a revision, trimmed and without

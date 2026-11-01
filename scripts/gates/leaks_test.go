@@ -123,18 +123,17 @@ func TestLeakGateFailsOnAFinding(t *testing.T) {
 	}
 }
 
-// The history scan reads an annotated tag, its message included, less
-// the tagger line, which git writes from the tagger's own identity.
-func TestTheHistoryScanReadsATagButNotItsTagger(t *testing.T) {
-	at := "@"
-	dir := t.TempDir()
+// gitIn runs git in dir as Pat, with no global or system configuration,
+// so a person's hooks, signing or default branch never reach a test.
+func gitIn(t *testing.T, dir string) func(args ...string) {
+	t.Helper()
 	global := filepath.Join(t.TempDir(), "gitconfig")
 	if err := os.WriteFile(global, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	git := func(args ...string) {
+	return func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-c", "user.name=Pat", "-c", "user.email=pat" + at + "acme-sample.com"},
+		cmd := exec.Command("git", append([]string{"-c", "user.name=Pat", "-c", "user.email=pat" + "@" + "acme-sample.com"},
 			args...)...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+global, "GIT_CONFIG_NOSYSTEM=1")
@@ -142,6 +141,14 @@ func TestTheHistoryScanReadsATagButNotItsTagger(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
+}
+
+// The history scan reads an annotated tag, its message included, less
+// the tagger line, which git writes from the tagger's own identity.
+func TestTheHistoryScanReadsATagButNotItsTagger(t *testing.T) {
+	at := "@"
+	dir := t.TempDir()
+	git := gitIn(t, dir)
 	git("init", "-q")
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("nothing here\n"), 0o600); err != nil {
 		t.Fatal(err)

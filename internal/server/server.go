@@ -113,13 +113,19 @@ type SchemaDump struct {
 	Server string `json:"server"`
 	// Version is the build's, which is how the schema diff tells which
 	// release a recorded baseline holds.
-	Version    string       `json:"version"`
-	SDKVersion string       `json:"sdk_version"`
-	Tools      []SchemaTool `json:"tools"`
+	Version    string `json:"version"`
+	SDKVersion string `json:"sdk_version"`
+	// Instructions are what a client is told before any tool, so a
+	// change to them is a change to the surface.
+	Instructions string       `json:"instructions,omitempty"`
+	Tools        []SchemaTool `json:"tools"`
 	// Resources are part of the surface a client sees, so they are part
 	// of what a diff has to notice. A resource removed is as breaking as
 	// a tool removed, and nothing else would have reported it.
 	Resources []SchemaResource `json:"resources,omitempty"`
+	// Prompts are the SDK's own type: each of its field names is already
+	// the dump's, and a field the SDK adds is carried with no change here.
+	Prompts []*mcp.Prompt `json:"prompts,omitempty"`
 }
 
 // SchemaResource is one resource or resource template in a dump: every
@@ -173,7 +179,8 @@ func rawJSON(v any, err *error) json.RawMessage {
 	return b
 }
 
-// DumpSchemas lists every tool under the full surface.
+// DumpSchemas lists every tool, resource and prompt under the full
+// surface, and the instructions.
 //
 // It connects a real in-memory client rather than reading a registry,
 // so the dump is what a client would actually be told — including
@@ -181,8 +188,11 @@ func rawJSON(v any, err *error) json.RawMessage {
 func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 	d.Config = tools.FullSurface(d.Config)
 	d.Logger = slog.New(slog.DiscardHandler)
-	srv := New(d)
+	return dumpServer(ctx, w, New(d), d.Version)
+}
 
+// dumpServer dumps what a client of srv is told.
+func dumpServer(ctx context.Context, w io.Writer, srv *mcp.Server, version string) error {
 	ct, st := mcp.NewInMemoryTransports()
 	ss, err := srv.Connect(ctx, st, nil)
 	if err != nil {
@@ -202,7 +212,7 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 		return fmt.Errorf("server: list tools: %w", err)
 	}
 
-	dump := SchemaDump{Server: Name, Version: d.Version, SDKVersion: SDKVersion}
+	dump := SchemaDump{Server: Name, Version: version, SDKVersion: SDKVersion, Instructions: cs.InitializeResult().Instructions}
 	var merr error
 	for _, t := range res.Tools {
 		dump.Tools = append(dump.Tools, SchemaTool{
@@ -234,6 +244,12 @@ func DumpSchemas(ctx context.Context, w io.Writer, d Deps) error {
 		})
 	}
 	sort.Slice(dump.Resources, func(i, j int) bool { return dump.Resources[i].key() < dump.Resources[j].key() })
+	ps, err := cs.ListPrompts(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("server: list prompts: %w", err)
+	}
+	dump.Prompts = ps.Prompts
+	sort.Slice(dump.Prompts, func(i, j int) bool { return dump.Prompts[i].Name < dump.Prompts[j].Name })
 	if merr != nil {
 		return fmt.Errorf("server: dump: %w", merr)
 	}

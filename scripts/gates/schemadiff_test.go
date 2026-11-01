@@ -1,11 +1,19 @@
 package main
 
 import (
-	"io"
 	"slices"
 	"strings"
 	"testing"
 )
+
+// texts is each change's text, as the report shows it.
+func texts(cs []change) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.text
+	}
+	return out
+}
 
 // A tool kept by name breaks a caller when it loses a field it took or
 // returned, at any depth, when a field changes type, or when an input is
@@ -32,7 +40,7 @@ func TestBrokenFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := brokenFields(old, cur)
+	got := texts(brokenFields(old, cur))
 	want := []string{
 		`get_event: input field time_zone removed`,
 		`get_event: output field guests removed`,
@@ -93,7 +101,7 @@ func TestSameSurface(t *testing.T) {
 		{"a _meta mark", strings.Replace(a, `"description":"d",`, `"description":"d","_meta":{"anthropic/requiresUserInteraction":true},`, 1), false},
 		{"a key the dump gained", strings.Replace(a, `"tools":`, `"prompts":[{"name":"p"}],"tools":`, 1), false},
 	} {
-		if got := compareSurfaces(io.Discard, readTest(t, a), readTest(t, tc.b), "base").empty(); got != tc.same {
+		if got := compareSurfaces(readTest(t, a), readTest(t, tc.b)).empty(); got != tc.same {
 			t.Errorf("%s: no change = %v, want %v", tc.name, got, tc.same)
 		}
 	}
@@ -115,8 +123,8 @@ func TestCompareSurfacesNamesThePart(t *testing.T) {
 		"resources":[{"uri":"gcal://calendars","name":"calendars"}]}`)
 	cur := readTest(t, `{"version":"v1.0.1","tools":[{"name":"get_event","annotations":{"destructiveHint":true}}],
 		"resources":[{"uri":"gcal://calendars","name":"calendars"}],"instructions":"new"}`)
-	want := []string{"get_event (annotations.destructiveHint)", "instructions"}
-	if got := compareSurfaces(io.Discard, base, cur, "base").changed; !slices.Equal(got, want) {
+	want := []change{{item: "get_event", text: "get_event (annotations.destructiveHint)"}, {item: "instructions", text: "instructions"}}
+	if got := compareSurfaces(base, cur).changed; !slices.Equal(got, want) {
 		t.Errorf("changed = %v, want %v", got, want)
 	}
 }
@@ -131,11 +139,11 @@ func TestCompareSurfacesReportsABreakOnce(t *testing.T) {
 	cur := readTest(t, `{"tools":[{"name":"get_event","description":"d","annotations":{"destructiveHint":true},
 		"input_schema":{"type":"object","properties":{}}}],
 		"prompts":[]}`)
-	c := compareSurfaces(io.Discard, base, cur, "base")
-	if want := []string{"prompts summarize", "get_event: input field calendar removed"}; !slices.Equal(c.breaking, want) {
+	c := compareSurfaces(base, cur)
+	if want := []change{{"summarize", "prompts summarize removed", ""}, {"get_event", "get_event: input field calendar removed", "input calendar"}}; !slices.Equal(c.breaking, want) {
 		t.Errorf("breaking = %v, want %v", c.breaking, want)
 	}
-	if want := []string{"get_event (annotations.destructiveHint)"}; !slices.Equal(c.changed, want) {
+	if want := []change{{item: "get_event", text: "get_event (annotations.destructiveHint)"}}; !slices.Equal(c.changed, want) {
 		t.Errorf("changed = %v, want %v", c.changed, want)
 	}
 }
@@ -189,7 +197,7 @@ func TestATypeChangeBreaksOneWay(t *testing.T) {
 		if c.side == "output" {
 			was, now = dumpOf(t, empty, field(c.was)), dumpOf(t, empty, field(c.now))
 		}
-		got := strings.Join(brokenFields(was, now), "\n")
+		got := strings.Join(texts(brokenFields(was, now)), "\n")
 		if got != c.want {
 			t.Errorf("%s %s to %s: got %q, want %q", c.side, c.was, c.now, got, c.want)
 		}
@@ -210,7 +218,7 @@ func TestAnOutputNoLongerRequiredBreaks(t *testing.T) {
 		"link":{"type":"string"},
 		"start":{"type":"object","properties":{"at":{"type":"string"}}}},
 		"required":["id","start","link"]}`)
-	got := brokenFields(was, now)
+	got := texts(brokenFields(was, now))
 	want := []string{
 		`get_event: output field etag removed`,
 		`get_event: output field start.at no longer required`,
@@ -236,7 +244,7 @@ func TestAnInputThatLosesAValueBreaks(t *testing.T) {
 		"notify":{"type":"string","enum":["none","external_only","all"]},
 		"order":{"type":"string"},
 		"event_types":{"type":"array","items":{"type":"string","enum":["focusTime"]}}}}`, output)
-	got := brokenFields(was, now)
+	got := texts(brokenFields(was, now))
 	want := []string{
 		`get_event: input field event_types[] no longer takes "default"`,
 		`get_event: input field scope no longer takes "this_and_following"`,
@@ -264,7 +272,7 @@ func TestValuesThatMayBreakAreReported(t *testing.T) {
 		"status":{"type":"string","enum":["confirmed","tentative","cancelled"]},
 		"kind":{"type":"string"},
 		"response":{"type":"string","enum":["accepted"]}}}`)
-	if b := brokenFields(was, now); !slices.Equal(b, []string{"get_event: output field visibility removed"}) {
+	if b := texts(brokenFields(was, now)); !slices.Equal(b, []string{"get_event: output field visibility removed"}) {
 		t.Fatalf("got breaks %q, want only the field removed", b)
 	}
 	got := valueNotes(was, now)
@@ -303,7 +311,7 @@ func TestBooleanSchemas(t *testing.T) {
 		{"an output widening to any value", [2]string{`{}`, `{"type":"string"}`}, [2]string{`{}`, `true`}, 1},
 		{"an input that takes nothing now", [2]string{`{"type":"string"}`, `{}`}, [2]string{`false`, `{}`}, 1},
 	} {
-		got := brokenFields(dump(c.was[0], c.was[1]), dump(c.now[0], c.now[1]))
+		got := texts(brokenFields(dump(c.was[0], c.was[1]), dump(c.now[0], c.now[1])))
 		if len(got) != c.wantBreakCount {
 			t.Errorf("%s: %q, want %d break(s)", c.name, got, c.wantBreakCount)
 		}
@@ -314,8 +322,9 @@ func TestBooleanSchemas(t *testing.T) {
 // names its tool in backticks: named elsewhere, or only under a release
 // already made, it is not declared.
 func TestUndeclaredBreaks(t *testing.T) {
-	breaking := []string{"share_calendar: input field allow_public removed", "old_tool",
-		resourceKey("gcal://calendars/{+calendar_id}")}
+	breaking := []change{{item: "share_calendar", text: "share_calendar: input field allow_public removed"},
+		{item: "old_tool", text: "old_tool removed"},
+		{item: "gcal://calendars/{+calendar_id}", text: resourceKey("gcal://calendars/{+calendar_id}") + " removed"}}
 	released := "\n## [3.1.0] - 2026-10-09\n\n- **Breaking:** `share_calendar`, `old_tool` and `gcal://calendars/{+calendar_id}`.\n"
 	for _, c := range []struct {
 		name, changelog string
@@ -324,10 +333,10 @@ func TestUndeclaredBreaks(t *testing.T) {
 		{"every one declared", "## [Unreleased]\n\n- **Breaking:** `share_calendar` loses `allow_public`; `old_tool` " +
 			"and `gcal://calendars/{+calendar_id}` are gone.\n" + released, nil},
 		{"two not named", "## [Unreleased]\n\n- **Breaking:** `share_calendar` loses `allow_public`.\n" + released,
-			[]string{"old_tool", resourceKey("gcal://calendars/{+calendar_id}")}},
+			[]string{"old_tool removed", resourceKey("gcal://calendars/{+calendar_id}") + " removed"}},
 		{"named outside a Breaking entry", "## [Unreleased]\n\n- `share_calendar` and `old_tool` changed.\n" + released,
-			breaking},
-		{"declared only in a release made", "## [Unreleased]\n" + released, breaking},
+			texts(breaking)},
+		{"declared only in a release made", "## [Unreleased]\n" + released, texts(breaking)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := undeclaredBreaks(breaking, "# Changelog\n\n"+c.changelog); !slices.Equal(got, c.want) {
