@@ -123,18 +123,9 @@ type SchemaDump struct {
 	// of what a diff has to notice. A resource removed is as breaking as
 	// a tool removed, and nothing else would have reported it.
 	Resources []SchemaResource `json:"resources,omitempty"`
-	Prompts   []SchemaPrompt   `json:"prompts,omitempty"`
-}
-
-// SchemaPrompt is one prompt in a dump: every field a client is told,
-// TestTheDumpCarriesEveryField holds that.
-type SchemaPrompt struct {
-	Name        string          `json:"name"`
-	Title       string          `json:"title,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Arguments   json.RawMessage `json:"arguments,omitempty"`
-	Icons       json.RawMessage `json:"icons,omitempty"`
-	Meta        json.RawMessage `json:"_meta,omitempty"`
+	// Prompts are the SDK's own type: each of its field names is already
+	// the dump's, and a field the SDK adds is carried with no change here.
+	Prompts []*mcp.Prompt `json:"prompts,omitempty"`
 }
 
 // SchemaResource is one resource or resource template in a dump: every
@@ -257,12 +248,7 @@ func dumpServer(ctx context.Context, w io.Writer, srv *mcp.Server, version strin
 	if err != nil {
 		return fmt.Errorf("server: list prompts: %w", err)
 	}
-	for _, p := range ps.Prompts {
-		dump.Prompts = append(dump.Prompts, SchemaPrompt{
-			Name: p.Name, Title: p.Title, Description: p.Description,
-			Arguments: rawJSON(p.Arguments, &merr), Icons: rawJSON(p.Icons, &merr), Meta: rawJSON(p.Meta, &merr),
-		})
-	}
+	dump.Prompts = ps.Prompts
 	sort.Slice(dump.Prompts, func(i, j int) bool { return dump.Prompts[i].Name < dump.Prompts[j].Name })
 	if merr != nil {
 		return fmt.Errorf("server: dump: %w", merr)

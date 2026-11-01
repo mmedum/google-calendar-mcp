@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,14 +34,15 @@ func schemaAck(baseRef, head string) error {
 		}
 	}
 	short := base[:min(12, len(base))]
-	c := compareSurfaces(os.Stdout, sides[0], sides[1], "the merge-base "+short)
+	c := compareSurfaces(sides[0], sides[1])
 	if len(c.breaking) > 0 {
 		released, err := releasedBreaks(baseRef, sides[1])
 		if err != nil {
 			return err
 		}
-		c = releaseBreaksOnly(os.Stdout, c, released)
+		c = releaseBreaksOnly(c, released)
 	}
+	c.write(os.Stdout, "the merge-base "+short)
 	log, err := gitOutput("log", "--format=%B%x00", base+".."+head)
 	if err != nil {
 		return err
@@ -67,20 +67,25 @@ func releasedBreaks(baseRef string, head surface) ([]change, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s on %s: %w", baselineFile, baseRef, err)
 	}
-	return compareSurfaces(io.Discard, release, head, baselineFile).breaking, nil
+	return compareSurfaces(release, head).breaking, nil
 }
 
-// releaseBreaksOnly keeps as breaks only the changes the head also makes
-// against the released surface. Any other break narrows something no
-// release shipped, so it breaks no caller and is a plain change, which
-// it says on w, since the report above it called it a break.
-func releaseBreaksOnly(w io.Writer, c surfaceChanges, released []change) surfaceChanges {
+// releaseBreaksOnly keeps as breaks only those of an item the head also
+// breaks against the released surface. Any other break narrows
+// something no release shipped, so it breaks no caller and is a plain
+// change. A break is matched by its item, which is what a footer names:
+// its text can differ between the two comparisons, as a type change
+// names the type it was.
+func releaseBreaksOnly(c surfaceChanges, released []change) surfaceChanges {
+	inRelease := map[string]bool{}
+	for _, b := range released {
+		inRelease[b.item] = true
+	}
 	var breaking []change
 	for _, b := range c.breaking {
-		if slices.Contains(released, b) {
+		if inRelease[b.item] {
 			breaking = append(breaking, b)
 		} else {
-			_, _ = fmt.Fprintf(w, "    %s breaks nothing a release shipped, so it is a change\n", b.text)
 			c.changed = append(c.changed, b)
 		}
 	}
@@ -136,21 +141,24 @@ var (
 // paragraphBreak is a blank line, which ends a paragraph.
 var paragraphBreak = regexp.MustCompile(`\n[ \t]*\n`)
 
-// footers is a commit message's footer block, one string per footer
-// with its continuation lines joined on: the paragraphs at its end in
-// which every line is a footer, never the subject. A line of prose that
-// happens to start "BREAKING CHANGE:" is not a footer.
-func footers(message string) []string {
+// A footer is one Token: value of a commit message, its continuation
+// lines joined onto its value.
+type footer struct{ token, text string }
+
+// footers is a commit message's footer block: the paragraphs at its end
+// in which every line is a footer or continues one, never the subject. A
+// line of prose that happens to start "BREAKING CHANGE:" is not a footer.
+func footers(message string) []footer {
 	paras := paragraphBreak.Split(strings.TrimSpace(strings.ReplaceAll(message, "\r\n", "\n")), -1)
-	var out []string
+	var out []footer
 	for i := len(paras) - 1; i > 0; i-- {
-		var block []string
-		for j, l := range strings.Split(strings.Trim(paras[i], "\n"), "\n") {
-			switch {
-			case footerToken.MatchString(l):
-				block = append(block, l)
-			case j > 0 && continuation.MatchString(l):
-				block[len(block)-1] += " " + strings.TrimSpace(l)
+		var block []footer
+		for _, l := range strings.Split(strings.Trim(paras[i], "\n"), "\n") {
+			switch m := footerToken.FindStringSubmatch(l); {
+			case m != nil:
+				block = append(block, footer{m[1], m[2]})
+			case len(block) > 0 && continuation.MatchString(l):
+				block[len(block)-1].text += " " + strings.TrimSpace(l)
 			default:
 				return out
 			}
@@ -165,11 +173,22 @@ func footers(message string) []string {
 // BREAKING-CHANGE: is the synonym Conventional Commits defines.
 var ackTokens = map[string]bool{"SCHEMA-CHANGE": false, "BREAKING CHANGE": true, "BREAKING-CHANGE": true}
 
-// nameSeparator splits a footer's text into the names it may carry. A
-// colon and a full stop are trimmed from a name rather than split on,
-// since a URI holds both; a name in backticks is taken whole, so a URI
-// with a comma in it can be named.
+// nameSeparator is what separates the names in a footer's text.
 var nameSeparator = regexp.MustCompile("[\\s,;()'\"]+")
+
+// footerNames is every name a footer's text may carry, each a whole
+// token. A colon and a full stop are trimmed from a name rather than
+// split on, since a URI holds both; a name in backticks is taken whole,
+// so a URI with a comma in it can be named.
+func footerNames(text string) []string {
+	var out []string
+	for _, n := range append(codeSpans(text), nameSeparator.Split(codeSpanRe.ReplaceAllString(text, " "), -1)...) {
+		if n = strings.TrimRight(n, ":."); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
 
 // acknowledged reads every message's footers for the items they name:
 // named holds each one a SCHEMA-CHANGE: or BREAKING CHANGE: footer
@@ -179,21 +198,14 @@ func acknowledged(messages []string) (named, breaks map[string]bool) {
 	named, breaks = map[string]bool{}, map[string]bool{}
 	for _, message := range messages {
 		for _, f := range footers(message) {
-			m := footerToken.FindStringSubmatch(f)
-			isBreak, ok := ackTokens[m[1]]
+			isBreak, ok := ackTokens[f.token]
 			if !ok {
 				continue
 			}
-			text := m[2]
-			var names []string
-			for _, span := range codeSpanRe.FindAllStringSubmatch(text, -1) {
-				names = append(names, span[1])
-			}
-			names = append(names, nameSeparator.Split(codeSpanRe.ReplaceAllString(text, " "), -1)...)
-			for _, n := range names {
-				if n = strings.TrimRight(n, ":."); n != "" {
-					named[n] = true
-					breaks[n] = breaks[n] || isBreak
+			for _, n := range footerNames(f.text) {
+				named[n] = true
+				if isBreak {
+					breaks[n] = true
 				}
 			}
 		}

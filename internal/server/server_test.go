@@ -144,7 +144,6 @@ func TestTheDumpCarriesEveryField(t *testing.T) {
 		{mcp.Tool{}, server.SchemaTool{}},
 		{mcp.Resource{}, server.SchemaResource{}},
 		{mcp.ResourceTemplate{}, server.SchemaResource{}},
-		{mcp.Prompt{}, server.SchemaPrompt{}},
 	} {
 		have := map[string]bool{}
 		for _, name := range jsonNames(reflect.TypeOf(tc.dump)) {
@@ -226,15 +225,14 @@ func TestTheDumpCopiesTheFields(t *testing.T) {
 	}
 }
 
-// This server registers no prompt, so the dump is held to copy one from
+// This server registers no prompt, so the dump is held to carry one from
 // a server that does: a prompt added later is part of the surface the
 // day it lands.
-func TestTheDumpCopiesAPrompt(t *testing.T) {
+func TestTheDumpCarriesAPrompt(t *testing.T) {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0"}, nil)
 	srv.AddPrompt(&mcp.Prompt{
 		Name: "plan_week", Title: "Plan the week", Description: "Lays out the week.",
 		Arguments: []*mcp.PromptArgument{{Name: "calendar_id", Required: true}},
-		Icons:     []mcp.Icon{{Source: "https://example.com/icon.png"}},
 		Meta:      mcp.Meta{"example/mark": true},
 	}, func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		return &mcp.GetPromptResult{}, nil
@@ -243,29 +241,20 @@ func TestTheDumpCopiesAPrompt(t *testing.T) {
 	if err := server.DumpServer(context.Background(), &buf, srv, "test"); err != nil {
 		t.Fatal(err)
 	}
-	var dump server.SchemaDump
+	var dump struct {
+		Prompts json.RawMessage `json:"prompts"`
+	}
 	if err := json.Unmarshal(buf.Bytes(), &dump); err != nil {
 		t.Fatal(err)
 	}
-	want := server.SchemaPrompt{
-		Name: "plan_week", Title: "Plan the week", Description: "Lays out the week.",
-		Arguments: json.RawMessage(`[{"name":"calendar_id","required":true}]`),
-		Icons:     json.RawMessage(`[{"src":"https://example.com/icon.png"}]`),
-		Meta:      json.RawMessage(`{"example/mark":true}`),
+	var got bytes.Buffer
+	if err := json.Compact(&got, dump.Prompts); err != nil {
+		t.Fatal(err)
 	}
-	if len(dump.Prompts) != 1 {
-		t.Fatalf("the dump has %d prompts, want 1", len(dump.Prompts))
-	}
-	got := dump.Prompts[0]
-	for _, raw := range []*json.RawMessage{&got.Arguments, &got.Icons, &got.Meta} {
-		var compact bytes.Buffer
-		if err := json.Compact(&compact, *raw); err != nil {
-			t.Fatal(err)
-		}
-		*raw = compact.Bytes()
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("the dumped prompt is\n%+v\nwant\n%+v", got, want)
+	want := `[{"_meta":{"example/mark":true},"arguments":[{"name":"calendar_id","required":true}],` +
+		`"description":"Lays out the week.","name":"plan_week","title":"Plan the week"}]`
+	if got.String() != want {
+		t.Errorf("the dump's prompts are\n%s\nwant\n%s", got.String(), want)
 	}
 }
 
