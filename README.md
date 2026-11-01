@@ -56,9 +56,10 @@ You need your own Google Cloud project and OAuth client. Nothing
 deployer-specific is baked into this repository.
 
 1. Create a project and enable the **Google Calendar API**.
-2. Configure the OAuth consent screen and add the scopes
-   `docs/gcp-setup.md` lists. That file is generated from the code, so it
-   cannot fall behind the tool surface.
+2. Configure the OAuth consent screen and, on an External app, add the
+   scopes `docs/gcp-setup.md` lists; an Internal app needs no list. A gate
+   checks that file against the code, so it cannot fall behind what
+   `login` asks for.
 3. Create an OAuth client of type **Desktop app** and download the JSON.
 4. Sign in:
 
@@ -253,11 +254,10 @@ none.
   construction.
 
 Your MCP client approves each call; the server does not ask you itself.
-claude.ai and Codex prompt for the tools marked destructive,
-`cancel_event`, `create_event_declining_all`, `publish_calendar`,
-`widen_calendar_access`, `delete_calendar` and `clear_calendar`, and VS
-Code prompts for every tool not marked read-only, which is every tool
-that writes. In Claude Code, `delete_calendar`, `clear_calendar` and
+claude.ai and Codex prompt for the tools marked destructive, which is
+every write but `create_calendar` and `create_event`, and VS Code
+prompts for every tool not marked read-only, which is every tool that
+writes. In Claude Code, `delete_calendar`, `clear_calendar` and
 `publish_calendar` ask on every call whatever your rules say: the first
 two delete a whole calendar's events, which Calendar cannot bring back,
 and the third opens a calendar to the internet or a domain, which

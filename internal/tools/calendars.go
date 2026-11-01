@@ -42,7 +42,7 @@ func registerCalendars(s *mcp.Server, d Deps) {
 			"read against it. " +
 			"Creating a calendar is quota-counted by Google and deleting one does not give the quota back, " +
 			"so do not create one per task. " + dryRunHelp,
-		Kind: Write,
+		Kind: Adding,
 		Handle: func(ctx context.Context, in createCalendarIn) (service.CalendarWriteResult, error) {
 			out, err := d.Service.CreateCalendar(ctx, service.CreateCalendarOptions{
 				Title: in.Title, Description: in.Description, Location: in.Location,

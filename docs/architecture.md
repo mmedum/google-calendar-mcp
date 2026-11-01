@@ -1,6 +1,16 @@
 # Architecture — google-calendar-mcp
 
-**Status: 5.0.0 (2026-10-24), built with Go 1.27.3:** `GCAL_READONLY` is
+**Status: 5.1.0 (2026-11-01), built with Go 1.27.3:** every write says
+`destructiveHint: true` unless its kind is `Adding` (`create_calendar`,
+`create_event`), as the MCP schema reads `false` as only additive; six
+ungated writes flip and stay ungated, and `Canceling` folds into
+`IdempotentWrite` (§18 row 117). The staleness gate checks
+`docs/gcp-setup.md`'s scope blocks against `auth.Scopes` (row 119), and
+the scope list is asked for on External apps only (row 118). Unproven
+again since 5.0.0: the hints a client prompts by, and the setup page a
+person pastes from. `/simplify` and `/code-review medium`; a live run of
+138 steps, 0 failed, its nine undetermined the steps that mail a real
+person. 5.0.0 (2026-10-24): `GCAL_READONLY` is
 removed: unset or off it starts, and on it is refused at start, naming
 `GCAL_READ_ONLY`. The module path is `/v5`. The bundle gate holds the
 family's rules (standard §10b): the settings derived from the server's
@@ -1653,10 +1663,10 @@ What stays is what holds on every client:
 4. **`dry_run`** on every write.
 5. **Annotations.** `readOnlyHint` is on the read tools and
    `list_sharing` alone, so VS Code, which prompts on every tool without
-   it, prompts on every write. `destructiveHint` is true on
-   `cancel_event`, `create_event_declining_all`, the two wider shares
-   and the two deletes, so a client
-   that prompts by it, as claude.ai and Codex do, prompts for them.
+   it, prompts on every write. `destructiveHint` is true on every write
+   but `create_calendar` and `create_event`, which only add (§18, row
+   117), so a client that prompts by it, as claude.ai and Codex do,
+   prompts for every write that changes or removes what is there.
 6. **The mark.** `delete_calendar`, `clear_calendar` and
    `publish_calendar` carry Claude Code's
    `anthropic/requiresUserInteraction` for every client. The first two
@@ -1707,9 +1717,10 @@ fallback and a warning. `--no-browser` prints the URL, and the README
 carries the SSH port-forwarding section, verified against the binary's
 own output.
 
-**Scopes**, generated from the code and gated (the standard's rule that a
-scope list a person must paste into a consent screen is an input, not a
-description):
+**Scopes** (the list to paste is `docs/gcp-setup.md`'s, which the
+staleness gate checks against the code under the standard's rule that a
+scope list a person pastes into an External app's consent screen is an
+input, not a description; this summary is not checked):
 
 - Read-only: `calendar.readonly`, `calendar.settings.readonly`,
   `calendar.acls.readonly`. The third is separate because §2.15 —
@@ -2517,7 +2528,10 @@ both sides for the first time.
   `GCAL_ENABLE_DESTRUCTIVE` — §9's argument stands — but its annotation
   says destructive, because a client deciding whether to ask a person
   deserves the truthful hint. The flag and the hint are different
-  questions and the code now treats them that way.
+  questions and the code now treats them that way. *(Since 2026-10-31, §18
+  row 117: every write but an `Adding` one says destructive, so
+  `cancel_event` is an `IdempotentWrite` and the kind is gone; it is
+  still ungated.)*
 - **The insert is ambiguous only when the answer is.** A 400 or a 403
   definitely did not land. A transport failure or a 5xx may have, so
   those become `[ambiguous_outcome]` naming the id to read. A
@@ -2845,7 +2859,9 @@ itself had introduced:
 - **Splitting `tools.Kind` into an effect and a gate.** The enum encodes
   both what a tool does to the world, which decides its annotations, and
   which flag it registers behind — and two of its seven values exist only
-  because those disagree (`Canceling`, `SharingRead`). `Def{Effect,
+  because those disagree (`Canceling`, `SharingRead`). *(Since
+  2026-10-31, §18 row 117: `Canceling` is gone, every write but an
+  `Adding` one says destructive, and `SharingRead` is the one left.)* `Def{Effect,
   Gate}` would remove the vocabulary, and the argument for doing it now
   rather than at three values is a fair one. Not in this phase: it
   restructures phase 0's registration at the end of a long phase, and the
@@ -3757,6 +3773,10 @@ what §15 exists to settle, and they are marked.
 | 114 | Every reader of the manifest reads a key's case the same way | Probed 2026-10-25 with Go 1.27.3 on `{"command": "a", "Command": "b"}`, the same reversed, and `{"k": 1, "\u212a": 2}`, and with Node 26.8.1 on the first and the last | **Refuted (tier 1, a probe; Claude Desktop not probed).** Go's decode into a struct, the gate's, matches a key whatever its case and keeps the last match: `b`, and reversed `a`; the Kelvin sign matches `k` too. Its decode into `map[string]any`, which the schema validator and the packer's stamp read, and Node's `JSON.parse`, the reference host's, keep the two spellings apart. The `mcpb` gate refuses two keys in one object that are equal under Unicode case folding, as `strings.EqualFold` has it |
 | 115 | A host leaves a `user_config` default as written | Tier 2: a sibling server's evidence log, read there 2026-10-24 from anthropics/mcpb v2.1.2 `src/shared/config.ts`, L132-170 and `replaceVariables` L18-41 | **Refined (tier 2; Claude Desktop not probed).** The reference host substitutes in one pass over its variables: `__dirname`, `pathSeparator`, `/` and the system directories first, then each `user_config.x`, from its default or the person's value, into the text already substituted. So a `${user_config.y}` in a default is substituted when `y` comes later in the manifest, and a host variable stays as written. Either way the server can start with a value other than the default the gate reads, so the `mcpb` gate refuses a default that holds `${` |
 | 116 | `leaks-history` passes on this repository | Run 2026-10-25 over every blob, commit message and annotated tag | **Refuted, then fixed.** It failed on 17 findings of two shapes: GitHub's support address in the `Signed-off-by` trailer of seven Dependabot commits, and the tagger line of the ten annotated tags. Neither is deployer data: one is a vendor's support desk on a bot's trailer, the other git's record of who tagged, which every published tag carries. Both are allowed exactly, argued as §9.1 requires, each with a test that fails without it; any other address at github.com, and a tag's message, are still findings |
+| 117 | `destructiveHint: false` fits a write that changes what is there but can be done again or set back | The MCP schema (2025-11-25), `ToolAnnotations`: "If false, the tool performs only additive updates", and the default is true. Read 2026-10-31 | **Refuted.** An edit, a move, an answer to an invitation, a calendar's settings and a sharing rule all change what is there. `Write`, `IdempotentWrite` and `Sharing` say true; the new `Adding` kind, for `create_calendar` and `create_event`, is the one that says false, so a new write errs toward a prompt. None of the six that flip moves behind a flag, and `Canceling`, which existed so `cancel_event` could say destructive while ungated, folds into `IdempotentWrite`. `create_event` stays false with `auto_decline: new`, which declines only invitations that arrive later. `TestOnlyToolsThatAddSayTheyAreNotDestructive` holds it |
+| 118 | A scope must be on the consent screen to be granted | Google's configure-oauth-consent guide (updated 2026-09-03): "you only need to list scopes for apps used by people outside your Google Workspace organization", and for internal apps "scopes aren't listed on the consent screen". Confirmed live 2026-10-31 on an Internal app, whose token held scopes its Data Access page does not list | **Refined.** The README and `docs/gcp-setup.md` ask for the scope list on External apps only |
+| 119 | `docs/gcp-setup.md` is generated from `auth.Scopes` and gated | Read 2026-10-31: nothing generated it and no gate read it, though the README, the page and `auth.go` said both | **Refuted, and now half true.** The staleness gate checks each of the page's scope blocks against `auth.Scopes` in its mode, both ways, and its rule for sharing off; the page stays hand-written, and the three places say so |
+| 120 | Google writes a time it does not have as the Unix epoch, so the epoch should read as no time | Seen live from Google Chat's API on 2026-10-31. Not seen from Calendar | **Not applied here.** An event's start and end are the calendar's content, and an event in 1970 is a real event, so blanking the epoch could hide one. The times Google writes about an event, `created` and `updated`, are not shown |
 
 ### Deviations from the shared Go MCP server standard
 

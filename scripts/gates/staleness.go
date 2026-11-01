@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
@@ -33,7 +34,10 @@ import (
 //     states the profile rule;
 //  3. every repository path the docs name still exists;
 //  4. no version number is written in prose in the README — a badge
-//     cannot go stale, a copy of a fact can.
+//     cannot go stale, a copy of a fact can;
+//  5. docs/gcp-setup.md's Read-only and Read-write blocks each list,
+//     one to a line, exactly the scopes login asks for in that mode, and
+//     no scope line sits outside them.
 func staleness(bin string) error {
 	var problems []string
 
@@ -57,6 +61,12 @@ func staleness(bin string) error {
 
 	problems = append(problems, checkNoVersionInProse()...)
 
+	scopeProblems, scopes, err := checkSetupScopes()
+	if err != nil {
+		return err
+	}
+	problems = append(problems, scopeProblems...)
+
 	// Floors.
 	if tools < 5 {
 		return fmt.Errorf("the binary published %d tools; that is not the phase 0 surface", tools)
@@ -74,7 +84,7 @@ func staleness(bin string) error {
 	if len(problems) > 0 {
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
 	}
-	fmt.Printf("  %d tools, %d settings, %d documented paths: all current\n", tools, settings, paths)
+	fmt.Printf("  %d tools, %d settings, %d documented paths, %d setup scopes: all current\n", tools, settings, paths, scopes)
 	return nil
 }
 
@@ -354,6 +364,103 @@ func checkNoVersionInProse() []string {
 				"README.md:%d writes a version in prose; use the release badge, which cannot go stale: %q",
 				i+1, trimmed))
 		}
+	}
+	return problems
+}
+
+// setupDocPath is the page a person pastes the consent screen's scopes
+// from. A scope missing there is a 403 from one tool weeks after a
+// working setup, on an External app; a scope listed there that login
+// never asks for is one a person grants for nothing.
+const setupDocPath = "docs/gcp-setup.md"
+
+// setupBlocks are the scope blocks setupDocPath carries, each a fenced
+// block under a heading that starts with these words, and the access it
+// is for. Sharing is on in both; the page says in prose to drop the acls
+// scopes with it off, which checkSetupScopes holds against the code.
+var setupBlocks = []struct {
+	heading string
+	access  auth.Access
+}{
+	{"Read-only", auth.Access{ReadOnly: true, Sharing: true}},
+	{"Read-write", auth.Access{Sharing: true}},
+}
+
+// checkSetupScopes holds setupDocPath's scope blocks against auth.Scopes.
+func checkSetupScopes() ([]string, int, error) {
+	raw, err := os.ReadFile(setupDocPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("reading %s: %w", setupDocPath, err)
+	}
+	problems := setupScopeProblems(string(raw))
+	n := 0
+	for _, b := range setupBlocks {
+		on := auth.Scopes(b.access)
+		n += len(on)
+		// The page's sharing-off rule: the same block, less its acls
+		// scopes, and nothing else.
+		var wantOff []string
+		for _, s := range on {
+			if !strings.Contains(s, ".acls") {
+				wantOff = append(wantOff, s)
+			}
+		}
+		off := b.access
+		off.Sharing = false
+		got := auth.Scopes(off)
+		if len(auth.MissingScopes(got, wantOff)) > 0 || len(auth.MissingScopes(wantOff, got)) > 0 {
+			problems = append(problems, fmt.Sprintf("%s says to drop the acls scopes with %sSHARING=off, and login's %s set without sharing is %v",
+				setupDocPath, config.EnvPrefix, b.heading, got))
+		}
+	}
+	return problems, n, nil
+}
+
+// setupScopeProblems compares each of text's scope blocks with what login
+// asks for under its access, both ways, and refuses a scope line that
+// sits in neither block.
+func setupScopeProblems(text string) []string {
+	blocks := map[string][]string{}
+	var stray []string
+	heading, fenced := "", false
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "```"):
+			fenced = !fenced
+		case !fenced && strings.HasPrefix(line, "#"):
+			heading = strings.TrimSpace(strings.TrimLeft(line, "#"))
+		case strings.HasPrefix(line, "https://www.googleapis.com/auth/"):
+			block := ""
+			for _, b := range setupBlocks {
+				if strings.HasPrefix(heading, b.heading) {
+					block = b.heading
+				}
+			}
+			if fenced && block != "" {
+				blocks[block] = append(blocks[block], line)
+			} else {
+				stray = append(stray, line)
+			}
+		}
+	}
+	var problems []string
+	for _, b := range setupBlocks {
+		got, ok := blocks[b.heading]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%s has no %s scope block", setupDocPath, b.heading))
+			continue
+		}
+		want := auth.Scopes(b.access)
+		for _, s := range auth.MissingScopes(got, want) {
+			problems = append(problems, fmt.Sprintf("%s: the %s block does not list %s, which login asks for there", setupDocPath, b.heading, s))
+		}
+		for _, s := range auth.MissingScopes(want, got) {
+			problems = append(problems, fmt.Sprintf("%s: the %s block lists %s, which login does not ask for there", setupDocPath, b.heading, s))
+		}
+	}
+	for _, s := range stray {
+		problems = append(problems, fmt.Sprintf("%s lists %s outside the scope blocks", setupDocPath, s))
 	}
 	return problems
 }

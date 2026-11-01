@@ -1,10 +1,11 @@
 # Google Cloud setup
 
-What a person must paste into the Cloud console. **This page is an input,
-not a description** — the scope list below is generated from
-`internal/auth/auth.go`, so it cannot fall behind the tool surface. A
-scope missing from your consent screen is not a stale document, it is a
-403 from one tool weeks after a working setup.
+What a person pastes into the Cloud console. **This page is an input,
+not a description.** It is written by hand, and the staleness gate
+checks each scope block below against `internal/auth/auth.go`, so it
+cannot fall behind what `login` asks for. On an External app, a scope missing from your consent screen
+is not a stale document, it is a 403 from one tool weeks after a working
+setup.
 
 ## 1. Project and API
 
@@ -17,7 +18,11 @@ in it. This is the most common first-run failure, and
 Configure the consent screen. If your account is not in a Workspace
 organization, choose **External** and add yourself as a test user.
 
-Add these scopes. The set depends on how you run the server:
+On an External app, add these scopes. Google asks for the list only from
+apps used by people outside your Workspace organization: for an
+**Internal** app, "scopes aren't listed on the consent screen" (Google's
+configure-oauth-consent guide, updated 2026-09-03), so an Internal app
+can skip this step. The set depends on how you run the server:
 
 ### Read-only (`GCAL_READ_ONLY=true`)
 

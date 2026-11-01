@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-11-01
+
 ### Changed
 
 - The bundle and configuration gates read the manifest and the docs more strictly: a key repeated in another case, a `${` default, a name spelled outside `internal/config`, an `os.Getenv` of a server variable, and a name in bold on the configuration page are each held. Nothing a person running the server sees changes.
 - `make leaks-history` passes on the existing history. It allows Dependabot's sign-off by the whole address, and a tag's tagger line.
+- Every write that changes or removes what is there now says `destructiveHint: true`, as the MCP spec reads `false` as "only additive updates": `update_event`, `move_event`, `respond_to_event`, `manage_calendar`, `share_calendar` and `unshare_calendar` join the six that said it already. Only `create_calendar` and `create_event` say false. claude.ai and Codex may now ask before these; if you run them unattended there, allow them again. They still need no `GCAL_ENABLE_DESTRUCTIVE` and no `confirm`.
+
+### Fixed
+
+- The README and `docs/gcp-setup.md` said every app must list its scopes on the consent screen. Google asks for that list only from External apps, so an Internal app can skip the step.
+- `docs/gcp-setup.md` was said to be generated from the code and checked by a gate, and neither was true. The staleness gate now checks each of its scope blocks against what `login` asks for in that mode, both ways, and the page says it is written by hand and checked.
 
 ## [5.0.0] - 2026-10-24
 

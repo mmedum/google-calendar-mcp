@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -224,24 +225,24 @@ func TestReadToolsAreAnnotatedReadOnly(t *testing.T) {
 	}
 }
 
-// An annotation a client uses to decide whether to ask a person has to
-// be true. cancel_event is not behind the destructive FLAG — §9 argues
-// that a gate everybody turns on protects nobody — but it is still the
-// one write here that removes a meeting, and the hint says so.
-func TestCancelEventIsAnnotatedDestructiveWithoutBeingGated(t *testing.T) {
-	got := names(listTools(t, baseConfig()))
-	cancel, ok := got["cancel_event"]
-	if !ok {
-		t.Fatal("cancel_event must register without GCAL_ENABLE_DESTRUCTIVE (§9)")
-	}
-	if cancel.Annotations.DestructiveHint == nil || !*cancel.Annotations.DestructiveHint {
-		t.Fatal("cancel_event removes a meeting and must be annotated destructive")
-	}
-	for _, name := range []string{"create_event", "update_event", "respond_to_event", "move_event"} {
-		a := got[name].Annotations
-		if a.DestructiveHint != nil && *a.DestructiveHint {
-			t.Fatalf("%s is annotated destructive and is not", name)
+// destructiveHint false means "the tool performs only additive updates"
+// (MCP schema, ToolAnnotations), so only the two writes that add say it:
+// a new calendar, a new event. Every other write says true, gated or
+// not; cancel_event, an edit, a move and an answer to an invitation
+// register without the destructive flag all the same (§9).
+// create_event's auto_decline new declines only invitations that arrive
+// later, which adds a rule rather than changing anything there.
+func TestOnlyToolsThatAddSayTheyAreNotDestructive(t *testing.T) {
+	var adds []string
+	for name, tool := range names(listTools(t, tools.FullSurface(baseConfig()))) {
+		a := tool.Annotations
+		if !a.ReadOnlyHint && (a.DestructiveHint == nil || !*a.DestructiveHint) {
+			adds = append(adds, name)
 		}
+	}
+	slices.Sort(adds)
+	if want := []string{"create_calendar", "create_event"}; !slices.Equal(adds, want) {
+		t.Errorf("writes not annotated destructive: %v, want %v", adds, want)
 	}
 }
 
@@ -441,6 +442,8 @@ func TestGatesAreServerSide(t *testing.T) {
 		{tools.Write, true, false, true, false},
 		{tools.IdempotentWrite, false, false, true, true},
 		{tools.IdempotentWrite, true, false, true, false},
+		{tools.Adding, false, false, true, true},
+		{tools.Adding, true, false, true, false},
 
 		{tools.Sharing, false, false, true, true},
 		{tools.Sharing, false, false, false, false},
@@ -533,7 +536,7 @@ func TestAnnotationsMatchTheKind(t *testing.T) {
 	if declining.DestructiveHint == nil || !*declining.DestructiveHint || declining.ReadOnlyHint {
 		t.Fatalf("an event that declines every meeting is not annotated destructive: %+v", declining)
 	}
-	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.DecliningAll, tools.Destructive} {
+	for _, k := range []tools.Kind{tools.Read, tools.Write, tools.IdempotentWrite, tools.DecliningAll, tools.Destructive, tools.Adding} {
 		a := tools.AnnotationsFor(k)
 		if a.OpenWorldHint == nil || *a.OpenWorldHint {
 			t.Fatalf("kind %d claims an open world; only sharing reaches outside the account", k)
