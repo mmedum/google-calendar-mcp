@@ -145,8 +145,8 @@ and the three steps no rehearsal reaches.
    with no live step is the one nobody remembers to drive: the fake
    answers it, every test passes, and the first real call is a user's.
 5. Look at `make schema-diff` for anything breaking, and end a commit
-   with a `SCHEMA-CHANGE:` footer naming the tool, which `schema-ack`
-   asks for.
+   with a footer naming each changed item, which `schema-ack` asks for:
+   `SCHEMA-CHANGE:`, or `BREAKING CHANGE:` for a break of a release.
 
 ## Adding an API call
 

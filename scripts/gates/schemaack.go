@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,12 +43,11 @@ func schemaAck(baseRef, head string) error {
 		}
 		c = releaseBreaksOnly(c, released)
 	}
-	c.write(os.Stdout, "the merge-base "+short)
 	log, err := gitOutput("log", "--format=%B%x00", base+".."+head)
 	if err != nil {
 		return err
 	}
-	return checkAck(c, strings.Split(log, "\x00"), short)
+	return checkAck(os.Stdout, c, strings.Split(log, "\x00"), short)
 }
 
 // releasedBreaks is what head breaks of the newest release's surface: the
@@ -70,20 +70,20 @@ func releasedBreaks(baseRef string, head surface) ([]change, error) {
 	return compareSurfaces(release, head).breaking, nil
 }
 
-// releaseBreaksOnly keeps as breaks only those of an item the head also
-// breaks against the released surface. Any other break narrows
-// something no release shipped, so it breaks no caller and is a plain
-// change. A break is matched by its item, which is what a footer names:
-// its text can differ between the two comparisons, as a type change
-// names the type it was.
+// releaseBreaksOnly keeps as breaks only those the head also makes
+// against the released surface. Any other break narrows something no
+// release shipped, so it breaks no caller and is a plain change. A break
+// is matched by its item and field, never its text, which can differ
+// between the two comparisons: a type change names the type it was.
 func releaseBreaksOnly(c surfaceChanges, released []change) surfaceChanges {
-	inRelease := map[string]bool{}
+	type spot struct{ item, field string }
+	inRelease := map[spot]bool{}
 	for _, b := range released {
-		inRelease[b.item] = true
+		inRelease[spot{b.item, b.field}] = true
 	}
 	var breaking []change
 	for _, b := range c.breaking {
-		if inRelease[b.item] {
+		if inRelease[spot{b.item, b.field}] {
 			breaking = append(breaking, b)
 		} else {
 			c.changed = append(c.changed, b)
@@ -95,12 +95,14 @@ func releaseBreaksOnly(c surfaceChanges, released []change) surfaceChanges {
 
 // checkAck is the rule, over the changes and the commit messages, so a
 // test can hand it both. Every added or changed item must be named in an
-// acknowledging footer, and every break in a BREAKING CHANGE: one.
-func checkAck(c surfaceChanges, messages []string, base string) error {
+// acknowledging footer, and every break in a BREAKING CHANGE: one. It
+// reports the changes on w.
+func checkAck(w io.Writer, c surfaceChanges, messages []string, base string) error {
 	if c.empty() {
-		fmt.Printf("  the tool surface is unchanged since %s\n", base)
+		_, _ = fmt.Fprintf(w, "  the tool surface is unchanged since %s\n", base)
 		return nil
 	}
+	c.write(w, "the merge-base "+base)
 	named, breaks := acknowledged(messages)
 	var problems []string
 	if items := unnamed(c.breaking, breaks); len(items) > 0 {
@@ -114,7 +116,7 @@ func checkAck(c surfaceChanges, messages []string, base string) error {
 			"whose message ends with a footer naming them, such as `SCHEMA-CHANGE: create_event: destructiveHint true`; "+
 			"never amend", base, strings.Join(problems, ", and "))
 	}
-	fmt.Printf("  the change since %s is acknowledged\n", base)
+	_, _ = fmt.Fprintf(w, "  the change since %s is acknowledged\n", base)
 	return nil
 }
 
@@ -168,10 +170,19 @@ func footers(message string) []footer {
 	return out
 }
 
-// ackTokens are the footers that acknowledge a change to the tool
-// surface, each saying whether it acknowledges a break of a release.
-// BREAKING-CHANGE: is the synonym Conventional Commits defines.
-var ackTokens = map[string]bool{"SCHEMA-CHANGE": false, "BREAKING CHANGE": true, "BREAKING-CHANGE": true}
+// ackToken says whether a footer's token acknowledges a change to the
+// tool surface, and whether a break of a release. Conventional Commits
+// reads a token in any case but BREAKING CHANGE, which must be
+// uppercase, and BREAKING-CHANGE is its synonym.
+func ackToken(token string) (isBreak, ok bool) {
+	switch {
+	case token == "BREAKING CHANGE" || token == "BREAKING-CHANGE":
+		return true, true
+	case strings.EqualFold(token, "SCHEMA-CHANGE"):
+		return false, true
+	}
+	return false, false
+}
 
 // nameSeparator is what separates the names in a footer's text.
 var nameSeparator = regexp.MustCompile("[\\s,;()'\"]+")
@@ -198,7 +209,7 @@ func acknowledged(messages []string) (named, breaks map[string]bool) {
 	named, breaks = map[string]bool{}, map[string]bool{}
 	for _, message := range messages {
 		for _, f := range footers(message) {
-			isBreak, ok := ackTokens[f.token]
+			isBreak, ok := ackToken(f.token)
 			if !ok {
 				continue
 			}

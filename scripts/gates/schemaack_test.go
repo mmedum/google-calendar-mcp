@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -22,7 +23,7 @@ var (
 )
 
 // renameBreak is the break renamed makes of plain.
-var renameBreak = []change{{"create_event", "create_event: input field calendar removed"}}
+var renameBreak = []change{{"create_event", "create_event: input field calendar removed", "input calendar"}}
 
 // schema-ack fails a pull request unless its commits name every changed
 // item in a footer, and every break of a release in a BREAKING CHANGE:
@@ -58,12 +59,14 @@ func TestSchemaAckNeedsEveryItemNamed(t *testing.T) {
 		{"a break named only as a change", renamed, "Rename the field\n\nSCHEMA-CHANGE: create_event: calendar is cal", wantUnnamedBreak},
 		{"BREAKING CHANGE: acknowledges a break", renamed, "Rename the field\n\nBREAKING CHANGE: create_event: calendar is cal", ""},
 		{"BREAKING-CHANGE: is its synonym", renamed, "Rename the field\n\nBREAKING-CHANGE: create_event: calendar is cal", ""},
+		{"SCHEMA-CHANGE: in any case", flipped, "Mark it\n\nSchema-Change: create_event: destructiveHint true", ""},
+		{"BREAKING CHANGE: only in uppercase", renamed, "Rename the field\n\nBreaking-Change: create_event: calendar is cal", wantUnnamedBreak},
 		{"a removed template needs BREAKING CHANGE:", withoutTemplate, "Drop it\n\nSCHEMA-CHANGE: gcal://calendars/{+calendar_id}: gone",
 			"no BREAKING CHANGE: footer names gcal://calendars/{+calendar_id}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := compareSurfaces(readTest(t, plain), readTest(t, tc.built))
-			err := checkAck(c, []string{"Tidy the docs", tc.message}, "base")
+			err := checkAck(io.Discard, c, []string{"Tidy the docs", tc.message}, "base")
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Errorf("checkAck = %v, want it to pass", err)
@@ -81,10 +84,10 @@ func TestAFooterCanNameAURIWithACommaInBackticks(t *testing.T) {
 	was := strings.Replace(plain, `"gcal://calendars/{+calendar_id}"`, `"`+tmpl+`"`, 1)
 	now := strings.Replace(was, `"name":"calendar"`, `"name":"cal"`, 1)
 	c := compareSurfaces(readTest(t, was), readTest(t, now))
-	if err := checkAck(c, []string{"Rename\n\nSCHEMA-CHANGE: `" + tmpl + "`: renamed"}, "base"); err != nil {
+	if err := checkAck(io.Discard, c, []string{"Rename\n\nSCHEMA-CHANGE: `" + tmpl + "`: renamed"}, "base"); err != nil {
 		t.Errorf("checkAck = %v, want the backticked URI to name the template", err)
 	}
-	if err := checkAck(c, []string{"Rename\n\nSCHEMA-CHANGE: " + tmpl + ": renamed"}, "base"); err == nil {
+	if err := checkAck(io.Discard, c, []string{"Rename\n\nSCHEMA-CHANGE: " + tmpl + ": renamed"}, "base"); err == nil {
 		t.Error("checkAck passed with the URI split on its comma, which names nothing")
 	}
 }
@@ -100,28 +103,44 @@ func TestABreakIsABreakOfARelease(t *testing.T) {
 	if !slices.Equal(c.breaking, renameBreak) {
 		t.Errorf("breaking = %v, want %v", c.breaking, renameBreak)
 	}
-	if want := []change{{"draft_tool", "draft_tool removed"}}; !slices.Equal(c.changed, want) {
+	if want := []change{{item: "draft_tool", text: "draft_tool removed"}}; !slices.Equal(c.changed, want) {
 		t.Errorf("changed = %v, want %v", c.changed, want)
 	}
 	var report strings.Builder
-	c.write(&report, "base")
-	want := "  against base: 0 added, 1 changed, 1 breaking\n" +
+	footer := "Drop and rename\n\nSCHEMA-CHANGE: draft_tool: never released\nBREAKING CHANGE: create_event: calendar is cal"
+	if err := checkAck(&report, c, []string{footer}, "base"); err != nil {
+		t.Errorf("checkAck = %v, want both acknowledged", err)
+	}
+	want := "  against the merge-base base: 0 added, 1 changed, 1 breaking\n" +
 		"    ~ draft_tool removed\n" +
-		"    ! create_event: input field calendar removed  BREAKING\n"
+		"    ! create_event: input field calendar removed  BREAKING\n" +
+		"  the change since base is acknowledged\n"
 	if report.String() != want {
 		t.Errorf("the report is\n%s\nwant\n%s", report.String(), want)
 	}
-	footer := "Drop and rename\n\nSCHEMA-CHANGE: draft_tool: never released\nBREAKING CHANGE: create_event: calendar is cal"
-	if err := checkAck(c, []string{footer}, "base"); err != nil {
-		t.Errorf("checkAck = %v, want both acknowledged", err)
+}
+
+// A tool the base branch already broke since the release, in one field,
+// does not make a pull request's break of another field, one no release
+// shipped, a break of the release.
+func TestABreakOfTheReleaseIsMatchedByItsField(t *testing.T) {
+	withInputs := func(props string) string {
+		return strings.Replace(plain, `"properties":{"calendar":{"type":"string"}}`, `"properties":{`+props+`}`, 1)
+	}
+	release := readTest(t, withInputs(`"calendar":{"type":"string"},"note":{"type":"string"}`))
+	base := readTest(t, withInputs(`"calendar":{"type":"string"},"draft":{"type":"string"}`))
+	head := readTest(t, withInputs(`"calendar":{"type":"string"}`))
+	c := releaseBreaksOnly(compareSurfaces(base, head), compareSurfaces(release, head).breaking)
+	if len(c.breaking) != 0 {
+		t.Errorf("breaking = %v, want draft, which no release shipped, as a change", c.breaking)
 	}
 }
 
-// A break of the release is matched by its item, not its text. Here the
+// A break of the release is matched by its field, not its text. Here the
 // release takes a string, the merge-base widened that to an integer as
 // well, and the head takes only an integer: the two breaks read
 // differently, and both break the same tool.
-func TestABreakOfTheReleaseIsMatchedByItsItem(t *testing.T) {
+func TestABreakOfTheReleaseIsNotMatchedByItsText(t *testing.T) {
 	typed := func(typ string) surface {
 		return readTest(t, strings.Replace(plain, `"properties":{"calendar":{"type":"string"}}`,
 			`"properties":{"calendar":{"type":`+typ+`}}`, 1))

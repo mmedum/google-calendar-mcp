@@ -172,9 +172,10 @@ func readSurface(data []byte) (surface, error) {
 // A change is one difference between two dumps: the item it is to, which
 // is what a footer or a **Breaking:** entry names, and how the report
 // shows it. The item is a tool's name, a resource's URI, a list item's
-// name, or a top-level key such as instructions.
+// name, or a top-level key such as instructions. field is, on the break
+// of a tool still there, the field it breaks, such as "input calendar".
 type change struct {
-	item, text string
+	item, text, field string
 }
 
 // surfaceChanges is what differs between two surfaces. breaking is what
@@ -208,9 +209,9 @@ func compareSurfaces(base, cur surface) surfaceChanges {
 		name := itemName(key)
 		switch {
 		case !inCur:
-			removed = append(removed, change{name, key + " removed"})
+			removed = append(removed, change{item: name, text: key + " removed"})
 		case !inBase:
-			c.added = append(c.added, change{name, key})
+			c.added = append(c.added, change{item: name, text: key})
 		default:
 			parts := changedParts(was, now)
 			if broken[key] {
@@ -219,13 +220,13 @@ func compareSurfaces(base, cur surface) surfaceChanges {
 				})
 			}
 			if len(parts) > 0 {
-				c.changed = append(c.changed, change{name, key + " (" + strings.Join(parts, ", ") + ")"})
+				c.changed = append(c.changed, change{item: name, text: key + " (" + strings.Join(parts, ", ") + ")"})
 			}
 		}
 	}
 	for _, part := range changedParts(base.rest, cur.rest) {
 		top, _, _ := strings.Cut(part, ".")
-		c.changed = append(c.changed, change{top, part})
+		c.changed = append(c.changed, change{item: top, text: part})
 	}
 	c.breaking = slices.Concat(removed, fields)
 	c.notes = valueNotes(base.fields, cur.fields)
@@ -423,8 +424,8 @@ func fieldsOf(data []byte) (map[string]toolFields, error) {
 // removed tool is the caller's to report.
 func brokenFields(prev, cur map[string]toolFields) []change {
 	var out []change
-	broke := func(name, format string, args ...any) {
-		out = append(out, change{name, name + ": " + fmt.Sprintf(format, args...)})
+	broke := func(name, side, field, format string, args ...any) {
+		out = append(out, change{name, name + ": " + fmt.Sprintf(format, args...), side + " " + field})
 	}
 	for _, name := range sortedKeys(prev) {
 		now, kept := cur[name]
@@ -442,24 +443,24 @@ func brokenFields(prev, cur map[string]toolFields) []change {
 				n, still := side.now.fields[f]
 				if !still {
 					if _, parentKept := side.now.fields[parentPath(f)]; parentPath(f) == "" || parentKept {
-						broke(name, "%s field %s removed", side.what, f)
+						broke(name, side.what, f, "%s field %s removed", side.what, f)
 					}
 					continue
 				}
 				if typeBreaks(w.typ, n.typ, side.input) {
-					broke(name, "%s field %s changed type from %s to %s", side.what, f, typeWord(w.typ), typeWord(n.typ))
+					broke(name, side.what, f, "%s field %s changed type from %s to %s", side.what, f, typeWord(w.typ), typeWord(n.typ))
 				}
 				// A caller sent this value, and it is refused now.
 				if side.input && n.enum != nil {
 					for _, v := range w.enum {
 						if !slices.Contains(n.enum, v) {
-							broke(name, "input field %s no longer takes %s", f, v)
+							broke(name, "input", f, "input field %s no longer takes %s", f, v)
 						}
 					}
 				}
 				// A caller read this field as always there.
 				if !side.input && side.was.required[f] && !side.now.required[f] {
-					broke(name, "output field %s no longer required", f)
+					broke(name, "output", f, "output field %s no longer required", f)
 				}
 			}
 		}
@@ -470,7 +471,7 @@ func brokenFields(prev, cur map[string]toolFields) []change {
 			parent := parentPath(f)
 			_, parentWas := was.inputs.fields[parent]
 			if !was.inputs.required[f] && (parent == "" || parentWas) {
-				broke(name, "input field %s newly required", f)
+				broke(name, "input", f, "input field %s newly required", f)
 			}
 		}
 	}

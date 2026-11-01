@@ -123,7 +123,7 @@ func TestCompareSurfacesNamesThePart(t *testing.T) {
 		"resources":[{"uri":"gcal://calendars","name":"calendars"}]}`)
 	cur := readTest(t, `{"version":"v1.0.1","tools":[{"name":"get_event","annotations":{"destructiveHint":true}}],
 		"resources":[{"uri":"gcal://calendars","name":"calendars"}],"instructions":"new"}`)
-	want := []change{{"get_event", "get_event (annotations.destructiveHint)"}, {"instructions", "instructions"}}
+	want := []change{{item: "get_event", text: "get_event (annotations.destructiveHint)"}, {item: "instructions", text: "instructions"}}
 	if got := compareSurfaces(base, cur).changed; !slices.Equal(got, want) {
 		t.Errorf("changed = %v, want %v", got, want)
 	}
@@ -140,10 +140,10 @@ func TestCompareSurfacesReportsABreakOnce(t *testing.T) {
 		"input_schema":{"type":"object","properties":{}}}],
 		"prompts":[]}`)
 	c := compareSurfaces(base, cur)
-	if want := []change{{"summarize", "prompts summarize removed"}, {"get_event", "get_event: input field calendar removed"}}; !slices.Equal(c.breaking, want) {
+	if want := []change{{"summarize", "prompts summarize removed", ""}, {"get_event", "get_event: input field calendar removed", "input calendar"}}; !slices.Equal(c.breaking, want) {
 		t.Errorf("breaking = %v, want %v", c.breaking, want)
 	}
-	if want := []change{{"get_event", "get_event (annotations.destructiveHint)"}}; !slices.Equal(c.changed, want) {
+	if want := []change{{item: "get_event", text: "get_event (annotations.destructiveHint)"}}; !slices.Equal(c.changed, want) {
 		t.Errorf("changed = %v, want %v", c.changed, want)
 	}
 }
@@ -322,8 +322,9 @@ func TestBooleanSchemas(t *testing.T) {
 // names its tool in backticks: named elsewhere, or only under a release
 // already made, it is not declared.
 func TestUndeclaredBreaks(t *testing.T) {
-	breaking := []change{{"share_calendar", "share_calendar: input field allow_public removed"}, {"old_tool", "old_tool removed"},
-		{"gcal://calendars/{+calendar_id}", resourceKey("gcal://calendars/{+calendar_id}") + " removed"}}
+	breaking := []change{{item: "share_calendar", text: "share_calendar: input field allow_public removed"},
+		{item: "old_tool", text: "old_tool removed"},
+		{item: "gcal://calendars/{+calendar_id}", text: resourceKey("gcal://calendars/{+calendar_id}") + " removed"}}
 	released := "\n## [3.1.0] - 2026-10-09\n\n- **Breaking:** `share_calendar`, `old_tool` and `gcal://calendars/{+calendar_id}`.\n"
 	for _, c := range []struct {
 		name, changelog string
