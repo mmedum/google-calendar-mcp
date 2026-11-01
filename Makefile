@@ -137,7 +137,7 @@ schema-diff: build gates ## Diff the tool schemas against the newest release's r
 	@$(GATES) schema-diff $(BIN)
 
 .PHONY: schema-ack
-schema-ack: gates ## Check a tool-surface change since the merge-base carries a SCHEMA-CHANGE: footer
+schema-ack: gates ## Check every tool-surface change since the merge-base is named in a commit footer
 	@$(GATES) schema-ack $(PR_BASE_REF) $(PR_HEAD)
 
 .PHONY: schema-baseline

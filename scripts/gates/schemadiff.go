@@ -105,7 +105,7 @@ func schemaDiff(bin string) error {
 // **Breaking:** entry under [Unreleased] names in backticks. A break is
 // "name: what" for a field, or the bare name of a tool or resource
 // removed.
-func undeclaredBreaks(breaking []string, changelog string) []string {
+func undeclaredBreaks(breaking []change, changelog string) []string {
 	named := map[string]bool{}
 	for _, line := range strings.Split(sectionFor(changelog, "Unreleased"), "\n") {
 		if !strings.Contains(line, "**Breaking:**") {
@@ -117,12 +117,8 @@ func undeclaredBreaks(breaking []string, changelog string) []string {
 	}
 	var out []string
 	for _, b := range breaking {
-		subject, _, _ := strings.Cut(b, ": ")
-		// A resource removed is keyed "resource <uri>"; an entry names
-		// the URI.
-		subject = strings.TrimPrefix(subject, resourcePrefix)
-		if !named[subject] {
-			out = append(out, b)
+		if !named[b.item] {
+			out = append(out, b.text)
 		}
 	}
 	return out
@@ -165,39 +161,54 @@ func readSurface(data []byte) (surface, error) {
 	return surface{version: head.Version, fields: fields, items: items, rest: rest}, nil
 }
 
+// A change is one difference between two dumps: the item it is to, which
+// is what a footer or a **Breaking:** entry names, and how the report
+// shows it. The item is a tool's name, a resource's URI, a list item's
+// name, or a top-level key such as instructions.
+type change struct {
+	item, text string
+}
+
+func texts(cs []change) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.text
+	}
+	return out
+}
+
 // surfaceChanges is what differs between two surfaces. breaking is what
 // breaks a caller; changed is every other difference, an annotation or a
 // _meta mark included, named by the part that moved.
 type surfaceChanges struct {
-	added, changed, breaking []string
+	added, changed, breaking []change
 }
 
 func (c surfaceChanges) empty() bool {
 	return len(c.added) == 0 && len(c.changed) == 0 && len(c.breaking) == 0
 }
 
-// compareSurfaces prints to w what changed from base to cur, saying what
-// base is, and returns it. An item gone breaks a caller, and so does a
-// tool still there that broke at any depth (brokenFields). A tool that
-// broke lists its other changes, such as a flipped hint, but not its
-// schemas again, which the break already names.
+// compareSurfaces prints to w what changed from base to cur, under a
+// header naming against, and returns it. An item gone breaks a caller,
+// and so does a tool still there that broke at any depth (brokenFields).
+// A tool that broke lists its other changes, such as a flipped hint, but
+// not its schemas again, which the break already names.
 func compareSurfaces(w io.Writer, base, cur surface, against string) surfaceChanges {
 	var c surfaceChanges
-	var removed []string
+	var removed []change
 	fields := brokenFields(base.fields, cur.fields)
 	broken := map[string]bool{}
 	for _, b := range fields {
-		name, _, _ := strings.Cut(b, ": ")
-		broken[name] = true
+		broken[b.item] = true
 	}
 	for _, key := range sortedUnion(base.items, cur.items) {
 		was, inBase := base.items[key]
 		now, inCur := cur.items[key]
 		switch {
 		case !inCur:
-			removed = append(removed, key)
+			removed = append(removed, change{itemName(key), key})
 		case !inBase:
-			c.added = append(c.added, key)
+			c.added = append(c.added, change{itemName(key), key})
 		default:
 			parts := changedParts(was, now)
 			if broken[key] {
@@ -206,28 +217,31 @@ func compareSurfaces(w io.Writer, base, cur surface, against string) surfaceChan
 				})
 			}
 			if len(parts) > 0 {
-				c.changed = append(c.changed, key+" ("+strings.Join(parts, ", ")+")")
+				c.changed = append(c.changed, change{itemName(key), key + " (" + strings.Join(parts, ", ") + ")"})
 			}
 		}
 	}
-	c.changed = append(c.changed, changedParts(base.rest, cur.rest)...)
-	c.breaking = append(removed, fields...)
+	for _, part := range changedParts(base.rest, cur.rest) {
+		top, _, _ := strings.Cut(part, ".")
+		c.changed = append(c.changed, change{top, part})
+	}
+	c.breaking = slices.Concat(removed, fields)
 
 	_, _ = fmt.Fprintf(w, "  against %s: %d added, %d changed, %d removed\n", against, len(c.added), len(c.changed), len(removed))
 	for _, n := range c.added {
-		_, _ = fmt.Fprintf(w, "    + %s\n", n)
+		_, _ = fmt.Fprintf(w, "    + %s\n", n.text)
 	}
 	for _, n := range c.changed {
-		_, _ = fmt.Fprintf(w, "    ~ %s\n", n)
+		_, _ = fmt.Fprintf(w, "    ~ %s\n", n.text)
 	}
 	for _, n := range removed {
-		_, _ = fmt.Fprintf(w, "    - %s  BREAKING\n", n)
+		_, _ = fmt.Fprintf(w, "    - %s  BREAKING\n", n.text)
 	}
 	for _, n := range valueNotes(base.fields, cur.fields) {
 		_, _ = fmt.Fprintf(w, "    ~ %s\n", n)
 	}
 	for _, b := range fields {
-		_, _ = fmt.Fprintf(w, "    ! %s  BREAKING\n", b)
+		_, _ = fmt.Fprintf(w, "    ! %s  BREAKING\n", b.text)
 	}
 	return c
 }
@@ -398,13 +412,17 @@ func fieldsOf(data []byte) (map[string]toolFields, error) {
 	return out, nil
 }
 
-// brokenFields lists what a tool kept by name lost: an input or output
+// brokenFields lists, as changes to each tool, what a tool kept by name
+// lost: an input or output
 // field removed, an input that takes fewer types or values, an output
 // that may return more types or may now be missing, or an input newly
 // required. A field inside one that was removed is not listed again. A
 // removed tool is the caller's to report.
-func brokenFields(prev, cur map[string]toolFields) []string {
-	var out []string
+func brokenFields(prev, cur map[string]toolFields) []change {
+	var out []change
+	broke := func(name, format string, args ...any) {
+		out = append(out, change{name, name + ": " + fmt.Sprintf(format, args...)})
+	}
 	for _, name := range sortedKeys(prev) {
 		now, kept := cur[name]
 		if !kept {
@@ -421,25 +439,24 @@ func brokenFields(prev, cur map[string]toolFields) []string {
 				n, still := side.now.fields[f]
 				if !still {
 					if _, parentKept := side.now.fields[parentPath(f)]; parentPath(f) == "" || parentKept {
-						out = append(out, fmt.Sprintf("%s: %s field %s removed", name, side.what, f))
+						broke(name, "%s field %s removed", side.what, f)
 					}
 					continue
 				}
 				if typeBreaks(w.typ, n.typ, side.input) {
-					out = append(out, fmt.Sprintf("%s: %s field %s changed type from %s to %s",
-						name, side.what, f, typeWord(w.typ), typeWord(n.typ)))
+					broke(name, "%s field %s changed type from %s to %s", side.what, f, typeWord(w.typ), typeWord(n.typ))
 				}
 				// A caller sent this value, and it is refused now.
 				if side.input && n.enum != nil {
 					for _, v := range w.enum {
 						if !slices.Contains(n.enum, v) {
-							out = append(out, fmt.Sprintf("%s: input field %s no longer takes %s", name, f, v))
+							broke(name, "input field %s no longer takes %s", f, v)
 						}
 					}
 				}
 				// A caller read this field as always there.
 				if !side.input && side.was.required[f] && !side.now.required[f] {
-					out = append(out, fmt.Sprintf("%s: output field %s no longer required", name, f))
+					broke(name, "output field %s no longer required", f)
 				}
 			}
 		}
@@ -450,7 +467,7 @@ func brokenFields(prev, cur map[string]toolFields) []string {
 			parent := parentPath(f)
 			_, parentWas := was.inputs.fields[parent]
 			if !was.inputs.required[f] && (parent == "" || parentWas) {
-				out = append(out, fmt.Sprintf("%s: input field %s newly required", name, f))
+				broke(name, "input field %s newly required", f)
 			}
 		}
 	}
@@ -655,6 +672,19 @@ func itemKey(list string, item map[string]any) string {
 		return resourceKey(id)
 	}
 	return list + " " + id
+}
+
+// itemName is what a footer or a **Breaking:** entry names an item by,
+// from its key in the surface: a tool's name, a resource's URI without
+// its prefix, an item of another list without its list's name.
+func itemName(key string) string {
+	if uri, ok := strings.CutPrefix(key, resourcePrefix); ok {
+		return uri
+	}
+	if _, name, ok := strings.Cut(key, " "); ok {
+		return name
+	}
+	return key
 }
 
 // resourcePrefix distinguishes a resource from a tool in the one map

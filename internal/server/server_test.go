@@ -88,22 +88,12 @@ func TestDumpSchemasUsesTheFullSurface(t *testing.T) {
 }
 
 func TestInstructionsNameTheTraps(t *testing.T) {
-	d := deps(t)
-	srv := server.New(d)
-	if srv == nil {
-		t.Fatal("New returned nil")
-	}
 	// The instructions are the model's orientation. The three defects
 	// this server exists to avoid have to be in them, or a model will
 	// walk into the same ones.
-	var buf bytes.Buffer
-	if err := server.DumpSchemas(context.Background(), &buf, d); err != nil {
-		t.Fatal(err)
-	}
-	// Instructions are not in the dump, so assert against the constant
-	// through a session instead.
+	got := strings.ToLower(instructionsOf(t, deps(t)))
 	for _, want := range []string{"all-day", "expand", "check_availability"} {
-		if !strings.Contains(strings.ToLower(instructionsOf(t, d)), want) {
+		if !strings.Contains(got, want) {
 			t.Fatalf("the server instructions do not mention %q", want)
 		}
 	}
@@ -154,6 +144,7 @@ func TestTheDumpCarriesEveryField(t *testing.T) {
 		{mcp.Tool{}, server.SchemaTool{}},
 		{mcp.Resource{}, server.SchemaResource{}},
 		{mcp.ResourceTemplate{}, server.SchemaResource{}},
+		{mcp.Prompt{}, server.SchemaPrompt{}},
 	} {
 		have := map[string]bool{}
 		for _, name := range jsonNames(reflect.TypeOf(tc.dump)) {
@@ -194,9 +185,10 @@ func jsonNames(typ reflect.Type) []string {
 	return names
 }
 
-// The dump copies what it declares: the marked tools carry their _meta,
-// every tool its annotations, and every resource its title. A field
-// declared and never set would pass the test above and still vanish.
+// The dump copies what it declares: the instructions, the marked tools
+// their _meta, every tool its annotations, and every resource its title.
+// A field declared and never set would pass the test above and still
+// vanish.
 func TestTheDumpCopiesTheFields(t *testing.T) {
 	var buf bytes.Buffer
 	if err := server.DumpSchemas(context.Background(), &buf, deps(t)); err != nil {
@@ -205,6 +197,9 @@ func TestTheDumpCopiesTheFields(t *testing.T) {
 	var dump server.SchemaDump
 	if err := json.Unmarshal(buf.Bytes(), &dump); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.HasPrefix(dump.Instructions, "Google Calendar tools.") {
+		t.Errorf("the dump's instructions are %q, want the server's", dump.Instructions)
 	}
 	marked := map[string]bool{}
 	for _, tool := range dump.Tools {
@@ -228,6 +223,49 @@ func TestTheDumpCopiesTheFields(t *testing.T) {
 		if r.Title == "" {
 			t.Errorf("%s: no title in the dump", r.Name)
 		}
+	}
+}
+
+// This server registers no prompt, so the dump is held to copy one from
+// a server that does: a prompt added later is part of the surface the
+// day it lands.
+func TestTheDumpCopiesAPrompt(t *testing.T) {
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0"}, nil)
+	srv.AddPrompt(&mcp.Prompt{
+		Name: "plan_week", Title: "Plan the week", Description: "Lays out the week.",
+		Arguments: []*mcp.PromptArgument{{Name: "calendar_id", Required: true}},
+		Icons:     []mcp.Icon{{Source: "https://example.com/icon.png"}},
+		Meta:      mcp.Meta{"example/mark": true},
+	}, func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		return &mcp.GetPromptResult{}, nil
+	})
+	var buf bytes.Buffer
+	if err := server.DumpServer(context.Background(), &buf, srv, "test"); err != nil {
+		t.Fatal(err)
+	}
+	var dump server.SchemaDump
+	if err := json.Unmarshal(buf.Bytes(), &dump); err != nil {
+		t.Fatal(err)
+	}
+	want := server.SchemaPrompt{
+		Name: "plan_week", Title: "Plan the week", Description: "Lays out the week.",
+		Arguments: json.RawMessage(`[{"name":"calendar_id","required":true}]`),
+		Icons:     json.RawMessage(`[{"src":"https://example.com/icon.png"}]`),
+		Meta:      json.RawMessage(`{"example/mark":true}`),
+	}
+	if len(dump.Prompts) != 1 {
+		t.Fatalf("the dump has %d prompts, want 1", len(dump.Prompts))
+	}
+	got := dump.Prompts[0]
+	for _, raw := range []*json.RawMessage{&got.Arguments, &got.Icons, &got.Meta} {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, *raw); err != nil {
+			t.Fatal(err)
+		}
+		*raw = compact.Bytes()
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the dumped prompt is\n%+v\nwant\n%+v", got, want)
 	}
 }
 

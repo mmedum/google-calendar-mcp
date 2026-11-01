@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- For contributors: a pull request that changes the tool surface, an annotation or a `_meta` mark included, now fails CI unless one of its commits ends with a `SCHEMA-CHANGE:` footer saying what changed, or `BREAKING CHANGE:` for a break. `--dump-schemas` now carries every field a client is told, each tool's `_meta` and title and each resource's title, annotations and `_meta` among them, and the schema diff names each change by the part that moved.
+- For contributors:
+  - CI fails a pull request that changes the tool surface, an annotation or a `_meta` mark included, unless a commit footer names each changed item. A break of something a release shipped needs `BREAKING CHANGE:`.
+  - The schema diff names each change by the part that moved.
+  - `--dump-schemas` carries every field a client is told: each tool's `_meta` and title, each resource's title, annotations and `_meta`, and the server's instructions. It lists prompts once the server has any.
 
 ## [5.1.0] - 2026-11-01
 
