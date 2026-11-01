@@ -154,7 +154,8 @@ error-class gate, the leak scan, the transcript redaction gate, the live
 driver coverage gate, the bundle manifest gate, the eval scorers'
 self-check, the workflow pin check, a
 stdio smoke test, the schema diff, and the staleness gate over README,
-`docs/` and CHANGELOG. Plus tests for new behavior, `/simplify` and
+`docs/` and CHANGELOG. On a pull request, CI also runs `schema-ack`: a
+change to the tool surface needs a `SCHEMA-CHANGE:` footer. Plus tests for new behavior, `/simplify` and
 `/code-review high` with findings resolved or written down, and a look at
 the schema diff for anything breaking — which now covers the resources
 as well as the tools. The release workflow refuses a tag whose major

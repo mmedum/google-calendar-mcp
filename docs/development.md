@@ -7,7 +7,8 @@ make check
 ```
 
 That is what CI runs, and `make parity` asserts those two lists are the
-same rather than a comment claiming it. Three of the four servers in this
+same, apart from the pull-request-only targets, rather than a comment
+claiming it. Three of the four servers in this
 family had them diverged at one point, usually with the local one ahead —
 which means build-tagged files compile only on a maintainer's laptop.
 
@@ -29,12 +30,16 @@ which means build-tagged files compile only on a maintainer's laptop.
 | `make leaks` | no deployer-specific data in the tree |
 | `make pins` | actions pinned to SHAs, tools pinned to versions, and a tool run locally pinned to the version the release runs |
 | `make live-cover` | every published tool has a step in the live driver |
-| `make parity` | `make check` and `ci.yml` run the same things |
+| `make parity` | `make check` and `ci.yml` run the same things, apart from the pull-request-only targets |
 | `make schema-diff` | the tool surface against the newest release's recorded baseline; fails, at any depth, on a removed tool, resource or field, an input that takes fewer types or loses a listed value or is newly required, an output that may return another type or be missing where it was required, or a baseline that is not the newest release's; reports an output that may carry a new listed value |
 | `make smoke` | the binary over stdio, and a clean exit on disconnect |
 | `make mcpb` | the bundle manifest describes the bundle the packer stages |
 | `make release` | `.goreleaser.yaml` builds what the packer stages, and signs and uploads it; `release.yml` runs `gates release-tag` before goreleaser |
 | `make staleness` | README, `docs/` and the code agree |
+
+One runs only on a pull request, because it measures from the merge-base:
+`make schema-ack` fails when the tool surface changed and no commit
+carries a `SCHEMA-CHANGE:` footer, or `BREAKING CHANGE:` for a break.
 
 Two are manual because they need the network:
 
@@ -137,7 +142,8 @@ and the three steps no rehearsal reaches.
 4. Add a step to `scripts/livecal`, or `make live-cover` fails. A tool
    with no live step is the one nobody remembers to drive: the fake
    answers it, every test passes, and the first real call is a user's.
-5. Look at `make schema-diff` for anything breaking.
+5. Look at `make schema-diff` for anything breaking, and end a commit
+   with a `SCHEMA-CHANGE:` footer, which `schema-ack` asks for.
 
 ## Adding an API call
 

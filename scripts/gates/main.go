@@ -42,7 +42,7 @@ func main() {
 	if len(os.Args) < 2 {
 		fail("usage: gates coverage PROFILE MIN | classes | api-coverage | api-fields | api-diff | " +
 			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
-			"schema-baseline BIN | " +
+			"schema-baseline BIN | schema-ack BASE HEAD | " +
 			"staleness BIN | mcpb | mcpb-pack DIST VERSION OUT | release | " +
 			"release-notes VERSION [CHANGELOG] | release-tag TAG | server-json VERSION CHECKSUMS")
 	}
@@ -96,6 +96,11 @@ func main() {
 		check(mcpbGate(), "bundle manifest")
 	case "release":
 		check(releaseGate(), "release wiring")
+	case "schema-ack":
+		if len(os.Args) < 4 {
+			fail("usage: gates schema-ack BASE HEAD")
+		}
+		check(schemaAck(os.Args[2], os.Args[3]), "schema ack")
 	case "release-tag":
 		// Release only: it runs before goreleaser, and refuses a tag
 		// whose major version is not go.mod's.

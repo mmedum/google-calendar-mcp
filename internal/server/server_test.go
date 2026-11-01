@@ -5,8 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
+	"unicode"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
@@ -135,4 +139,106 @@ func TestLoggerOnlyAttachedAtDebug(t *testing.T) {
 	if strings.Contains(buf.String(), "server connecting") {
 		t.Fatal("the SDK logger was attached at info level")
 	}
+}
+
+// TestTheDumpCarriesEveryField holds the schema dump to what a client is
+// told. The dump is a projection with its own field names, and a field
+// it leaves out is one no schema gate can see change: it once dropped
+// _meta, which carries the mark that makes Claude Code ask the person on
+// every call. Every JSON field of the SDK's tool, resource and resource
+// template must have a counterpart, under the dump's snake_case name.
+func TestTheDumpCarriesEveryField(t *testing.T) {
+	for _, tc := range []struct {
+		sdk, dump any
+	}{
+		{mcp.Tool{}, server.SchemaTool{}},
+		{mcp.Resource{}, server.SchemaResource{}},
+		{mcp.ResourceTemplate{}, server.SchemaResource{}},
+	} {
+		have := map[string]bool{}
+		for _, name := range jsonNames(reflect.TypeOf(tc.dump)) {
+			have[name] = true
+		}
+		sdkNames := jsonNames(reflect.TypeOf(tc.sdk))
+		if len(sdkNames) < 5 {
+			t.Fatalf("%T has %d JSON fields; the test is not reading it", tc.sdk, len(sdkNames))
+		}
+		for _, name := range sdkNames {
+			if !have[snake(name)] {
+				t.Errorf("%T's field %q has no counterpart %q in %T", tc.sdk, name, snake(name), tc.dump)
+			}
+		}
+	}
+}
+
+// jsonNames is the JSON name of every field of a struct type, the fields
+// of an untagged embedded struct included, as encoding/json flattens
+// them.
+func jsonNames(typ reflect.Type) []string {
+	var names []string
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if f.Anonymous && name == "" && f.Type.Kind() == reflect.Struct {
+			names = append(names, jsonNames(f.Type)...)
+			continue
+		}
+		if name == "-" || !f.IsExported() {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// The dump copies what it declares: the marked tools carry their _meta,
+// every tool its annotations, and every resource its title. A field
+// declared and never set would pass the test above and still vanish.
+func TestTheDumpCopiesTheFields(t *testing.T) {
+	var buf bytes.Buffer
+	if err := server.DumpSchemas(context.Background(), &buf, deps(t)); err != nil {
+		t.Fatal(err)
+	}
+	var dump server.SchemaDump
+	if err := json.Unmarshal(buf.Bytes(), &dump); err != nil {
+		t.Fatal(err)
+	}
+	marked := map[string]bool{}
+	for _, tool := range dump.Tools {
+		if len(tool.Annotations) == 0 {
+			t.Errorf("%s: no annotations in the dump", tool.Name)
+		}
+		var meta map[string]any
+		if len(tool.Meta) > 0 && json.Unmarshal(tool.Meta, &meta) == nil && meta["anthropic/requiresUserInteraction"] == true {
+			marked[tool.Name] = true
+		}
+	}
+	for _, name := range []string{"clear_calendar", "delete_calendar", "publish_calendar"} {
+		if !marked[name] {
+			t.Errorf("%s: the dump does not carry its _meta mark", name)
+		}
+	}
+	if len(dump.Resources) < 3 {
+		t.Fatalf("the dump has %d resources, want at least 3", len(dump.Resources))
+	}
+	for _, r := range dump.Resources {
+		if r.Title == "" {
+			t.Errorf("%s: no title in the dump", r.Name)
+		}
+	}
+}
+
+// snake is the dump's name for an SDK field: inputSchema is input_schema.
+func snake(name string) string {
+	var b strings.Builder
+	for i, r := range name {
+		if i > 0 && unicode.IsUpper(r) {
+			b.WriteByte('_')
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
 }

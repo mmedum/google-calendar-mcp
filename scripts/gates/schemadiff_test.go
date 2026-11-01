@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -81,14 +82,69 @@ func TestNewMajor(t *testing.T) {
 // Two dumps of one surface are the same whatever their stamps and key
 // order; a changed description is not.
 func TestSameSurface(t *testing.T) {
-	a := []byte(`{"version":"v3.0.1","sdk_version":"v1.8.0","tools":[{"name":"t","description":"d","input_schema":{"type":"object","properties":{"a":{"type":"string"}}}}]}`)
-	b := []byte(`{"tools":[{"input_schema":{"properties":{"a":{"type":"string"}},"type":"object"},"description":"d","name":"t"}],"version":"dev","sdk_version":"v1.9.0"}`)
-	c := []byte(`{"version":"v3.0.1","tools":[{"name":"t","description":"changed","input_schema":{"type":"object","properties":{"a":{"type":"string"}}}}]}`)
-	if !sameSurface(a, b) {
-		t.Error("the same surface under other stamps and key order differs")
+	a := `{"version":"v3.0.1","sdk_version":"v1.8.0","tools":[{"name":"t","description":"d","input_schema":{"type":"object","properties":{"a":{"type":"string"}}}}]}`
+	for _, tc := range []struct {
+		name, b string
+		same    bool
+	}{
+		{"other stamps and key order", `{"tools":[{"input_schema":{"properties":{"a":{"type":"string"}},"type":"object"},"description":"d","name":"t"}],"version":"dev","sdk_version":"v1.9.0"}`, true},
+		{"a changed description", strings.Replace(a, `"description":"d"`, `"description":"changed"`, 1), false},
+		{"a changed annotation", strings.Replace(a, `"description":"d",`, `"description":"d","annotations":{"destructiveHint":true},`, 1), false},
+		{"a _meta mark", strings.Replace(a, `"description":"d",`, `"description":"d","_meta":{"anthropic/requiresUserInteraction":true},`, 1), false},
+		{"a key the dump gained", strings.Replace(a, `"tools":`, `"prompts":[{"name":"p"}],"tools":`, 1), false},
+	} {
+		if got := compareSurfaces(io.Discard, readTest(t, a), readTest(t, tc.b), "base").empty(); got != tc.same {
+			t.Errorf("%s: no change = %v, want %v", tc.name, got, tc.same)
+		}
 	}
-	if sameSurface(a, c) {
-		t.Error("a changed description is the same surface")
+}
+
+func readTest(t *testing.T, dump string) surface {
+	t.Helper()
+	s, err := readSurface([]byte(dump))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// schema-diff names an annotation that changed, down to the hint, and a
+// key outside the lists by its name.
+func TestCompareSurfacesNamesThePart(t *testing.T) {
+	base := readTest(t, `{"version":"v1.0.0","tools":[{"name":"get_event","annotations":{"destructiveHint":false}}],
+		"resources":[{"uri":"gcal://calendars","name":"calendars"}]}`)
+	cur := readTest(t, `{"version":"v1.0.1","tools":[{"name":"get_event","annotations":{"destructiveHint":true}}],
+		"resources":[{"uri":"gcal://calendars","name":"calendars"}],"instructions":"new"}`)
+	want := []string{"get_event (annotations.destructiveHint)", "instructions"}
+	if got := compareSurfaces(io.Discard, base, cur, "base").changed; !slices.Equal(got, want) {
+		t.Errorf("changed = %v, want %v", got, want)
+	}
+}
+
+// A tool that breaks is reported as the break, with its other changes
+// but not its schemas again, and an item gone from any list breaks a
+// caller.
+func TestCompareSurfacesReportsABreakOnce(t *testing.T) {
+	base := readTest(t, `{"tools":[{"name":"get_event","description":"d","annotations":{"destructiveHint":false},
+		"input_schema":{"type":"object","properties":{"calendar":{"type":"string"}}}}],
+		"prompts":[{"name":"summarize"}]}`)
+	cur := readTest(t, `{"tools":[{"name":"get_event","description":"d","annotations":{"destructiveHint":true},
+		"input_schema":{"type":"object","properties":{}}}],
+		"prompts":[]}`)
+	c := compareSurfaces(io.Discard, base, cur, "base")
+	if want := []string{"prompts summarize", "get_event: input field calendar removed"}; !slices.Equal(c.breaking, want) {
+		t.Errorf("breaking = %v, want %v", c.breaking, want)
+	}
+	if want := []string{"get_event (annotations.destructiveHint)"}; !slices.Equal(c.changed, want) {
+		t.Errorf("changed = %v, want %v", c.changed, want)
+	}
+}
+
+// A dump that names one item twice is refused rather than collapsed.
+func TestADumpNamingAnItemTwiceIsRefused(t *testing.T) {
+	_, err := readSurface([]byte(`{"tools":[{"name":"get_event"},{"name":"get_event"}]}`))
+	if err == nil || !strings.Contains(err.Error(), `names "get_event" twice`) {
+		t.Errorf("readSurface = %v, want it refused for naming get_event twice", err)
 	}
 }
 
