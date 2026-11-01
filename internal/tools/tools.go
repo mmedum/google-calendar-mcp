@@ -30,11 +30,15 @@ type Kind int
 const (
 	// Read changes nothing and is registered in read-only mode.
 	Read Kind = iota
-	// Write changes the calendar. Repeating it is not the same as doing
-	// it once.
+	// Write changes or removes what is already in the calendar.
+	// Repeating it is not the same as doing it once. It says
+	// destructiveHint true, the MCP schema's default, because the schema
+	// reads false as "the tool performs only additive updates"; only
+	// Adding below says false.
 	Write
 	// IdempotentWrite changes the calendar to a stated end state, so
-	// repeating it lands in the same place.
+	// repeating it lands in the same place. Setting a state replaces the
+	// one before, so it is destructive in the schema's sense.
 	IdempotentWrite
 	// Sharing changes who can see a calendar. It is its own Kind rather
 	// than a Write because GCAL_SHARING=off removes exactly these, and
@@ -45,7 +49,7 @@ const (
 	// the public, a whole domain, somebody outside the organization, or a
 	// new owner (§7.6). It registers only when sharing is on and the
 	// destructive flag is set, because widening access is never there by
-	// default, and its annotation says destructive.
+	// default.
 	WideSharing
 	// SharingRead reads who can see a calendar. It changes nothing, so
 	// its annotations say read-only — but GCAL_SHARING=off removes it
@@ -58,18 +62,6 @@ const (
 	// surface stays the list §8 names rather than the list minus a
 	// judgment call.
 	SharingRead
-	// Canceling removes a meeting. It is its own Kind for one reason:
-	// its annotation has to say DESTRUCTIVE while it still registers
-	// without the destructive flag.
-	//
-	// §9 argues both halves. Canceling a meeting is what a calendar is
-	// for and Google keeps the record, so gating it would put a flag
-	// between the model and the most ordinary write there is — training
-	// people to set GCAL_ENABLE_DESTRUCTIVE permanently, which would arm
-	// clear_calendar too. A gate everybody turns on protects nobody. But
-	// a client deciding whether to confirm with a person deserves the
-	// truthful hint, and "this may destroy something" is the truth.
-	Canceling
 	// DecliningAll makes an out-of-office or focus-time event that
 	// declines every meeting it overlaps, the accepted ones too, with
 	// each organizer told (§7.4). It registers only with
@@ -80,9 +72,13 @@ const (
 	// Destructive removes something Calendar cannot bring back. Not
 	// registered at all unless the destructive flag is set, and still
 	// needs confirm on the call. The two are delete_calendar and
-	// clear_calendar; cancel_event is Canceling above, and §9 argues
+	// clear_calendar; cancel_event is an IdempotentWrite, and §9 argues
 	// the difference.
 	Destructive
+	// Adding creates something new and changes nothing already there: a
+	// new calendar, a new event. It is the one write that says
+	// destructiveHint false. Repeating it creates another.
+	Adding
 
 	// kindCount follows the last kind, so a test can range over them all.
 	kindCount
@@ -196,31 +192,20 @@ func allowed(k Kind, cfg config.Config) bool {
 	}
 }
 
+// annotationsFor is a kind's annotations. A write says destructiveHint
+// true unless it only adds: the MCP schema reads false as "the tool
+// performs only additive updates". Sharing is the one act whose effect
+// leaves this account, so only the two sharing kinds say openWorldHint.
+// A decline-all event is destructive too: the decline reaches every
+// overlapping meeting's organizer and is not taken back by deleting it.
 func annotationsFor(k Kind) *mcp.ToolAnnotations {
-	no, yes := ptr(false), ptr(true)
-	switch k {
-	case Read, SharingRead:
-		return &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: no}
-	case IdempotentWrite:
-		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: no, OpenWorldHint: no}
-	case Canceling:
-		return &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: yes, OpenWorldHint: no}
-	case DecliningAll, Destructive:
-		// A decline-all event is destructive too: the decline reaches
-		// every overlapping meeting's organizer and is not taken back by
-		// deleting the event.
-		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: no}
-	case Sharing:
-		// OpenWorldHint is true on the two sharing kinds and nowhere
-		// else: sharing is the one act whose effect leaves this account.
-		return &mcp.ToolAnnotations{DestructiveHint: no, OpenWorldHint: yes}
-	case WideSharing:
-		// Destructive, so a client that prompts by the hint, as claude.ai
-		// and Codex do, prompts for it: what the public or an outsider
-		// has read is not taken back by removing the rule.
-		return &mcp.ToolAnnotations{DestructiveHint: yes, OpenWorldHint: yes}
-	default:
-		return &mcp.ToolAnnotations{DestructiveHint: no, OpenWorldHint: no}
+	if k == Read || k == SharingRead {
+		return &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: ptr(false)}
+	}
+	return &mcp.ToolAnnotations{
+		IdempotentHint:  k == IdempotentWrite,
+		DestructiveHint: ptr(k != Adding),
+		OpenWorldHint:   ptr(k == Sharing || k == WideSharing),
 	}
 }
 

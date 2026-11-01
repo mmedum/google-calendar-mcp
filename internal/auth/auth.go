@@ -65,8 +65,9 @@ const (
 type Access struct {
 	// ReadOnly asks only for the read scopes.
 	ReadOnly bool
-	// Sharing includes the ACL scopes. The read half is included even
-	// when sharing is off, because get_calendar shows exposure.
+	// Sharing includes the ACL scopes, read and write. With it off,
+	// get_calendar says it could not read the sharing list rather than
+	// showing an empty one.
 	Sharing bool
 }
 
@@ -74,10 +75,10 @@ type Access struct {
 // stable order so that two logins with the same access produce the same
 // consent screen and the same stored list.
 //
-// Generated from this function rather than written into the
-// documentation by hand: the standard's rule is that a scope list a
-// person must paste into a consent screen is an input, not a
-// description, so docs/gcp-setup.md is produced from here and gated.
+// The staleness gate holds docs/gcp-setup.md's scope blocks against this
+// function, in each mode and with sharing off: the standard's rule is
+// that a scope list a person pastes into an External app's consent
+// screen is an input, not a description.
 func Scopes(a Access) []string {
 	out := []string{ScopeReadonly, ScopeSettingsReadonly}
 	if a.Sharing {

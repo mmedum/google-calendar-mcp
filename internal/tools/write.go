@@ -75,7 +75,7 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"`optional_guests` invites people as optional; they are emailed like any guest, so they make " +
 			"notify required too. A room cannot be optional. " + addressHelp + " " +
 			remindersHelp + " " + visibilityHelp + " " + statusHelp + " " + notifyHelp + " " + dryRunHelp,
-		Kind: Write,
+		Kind: Adding,
 		Handle: func(ctx context.Context, in createEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CreateEvent(ctx, service.CreateOptions{
 				Calendar: in.Calendar, Title: in.Title, Start: in.Start, End: in.End,
@@ -183,7 +183,12 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"rather than the two an update takes. " + notifyHelp + " " +
 			"Read that rule twice here: canceling with no notification removes the meeting from YOUR " +
 			"calendar and leaves it on your guests'. They will still turn up. " + etagHelp + " " + dryRunHelp,
-		Kind: Canceling,
+		// Not behind the destructive flag, and §9 argues why: canceling a
+		// meeting is what a calendar is for and Google keeps the record,
+		// so gating it would train people to set GCAL_ENABLE_DESTRUCTIVE
+		// for good, which would arm clear_calendar too. Its hint still
+		// says destructive, as every write's does but an Adding one's.
+		Kind: IdempotentWrite,
 		Handle: func(ctx context.Context, in cancelEventIn) (service.WriteResult, error) {
 			out, err := d.Service.CancelEvent(ctx, service.CancelOptions{
 				Calendar: in.Calendar, EventID: in.EventID, OriginalStart: in.OriginalStart,
