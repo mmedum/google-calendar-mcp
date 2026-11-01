@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-11-01
+
 ### Changed
 
 - The bundle and configuration gates read the manifest and the docs more strictly: a key repeated in another case, a `${` default, a name spelled outside `internal/config`, an `os.Getenv` of a server variable, and a name in bold on the configuration page are each held. Nothing a person running the server sees changes.

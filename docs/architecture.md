@@ -1,6 +1,16 @@
 # Architecture — google-calendar-mcp
 
-**Status: 5.0.0 (2026-10-24), built with Go 1.27.3:** `GCAL_READONLY` is
+**Status: 5.1.0 (2026-11-01), built with Go 1.27.3:** every write says
+`destructiveHint: true` unless its kind is `Adding` (`create_calendar`,
+`create_event`), as the MCP schema reads `false` as only additive; six
+ungated writes flip and stay ungated, and `Canceling` folds into
+`IdempotentWrite` (§18 row 117). The staleness gate checks
+`docs/gcp-setup.md`'s scope blocks against `auth.Scopes` (row 119), and
+the scope list is asked for on External apps only (row 118). Unproven
+again since 5.0.0: the hints a client prompts by, and the setup page a
+person pastes from. `/simplify` and `/code-review medium`; a live run of
+138 steps, 0 failed, its nine undetermined the steps that mail a real
+person. 5.0.0 (2026-10-24): `GCAL_READONLY` is
 removed: unset or off it starts, and on it is refused at start, naming
 `GCAL_READ_ONLY`. The module path is `/v5`. The bundle gate holds the
 family's rules (standard §10b): the settings derived from the server's
