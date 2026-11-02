@@ -31,6 +31,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -100,7 +101,7 @@ func main() {
 		if len(os.Args) < 4 {
 			fail("usage: gates schema-ack BASE HEAD")
 		}
-		check(schemaAck(os.Args[2], os.Args[3]), "schema ack")
+		check(schemaAck(os.Stdout, os.Args[2], os.Args[3]), "schema ack")
 	case "release-tag":
 		// Release only: it runs before goreleaser, and refuses a tag
 		// whose major version is not go.mod's.
@@ -153,10 +154,27 @@ func binArg() string {
 	return os.Args[2]
 }
 
+// couldNotRun is a gate that could not reach a verdict, a failed build
+// or git call, rather than one that found a problem. It says so, and
+// exits 2 where a verdict exits 1: under `go run`, which exits 1 for
+// both, the message is what tells them apart.
+type couldNotRun struct{ err error }
+
+func (e couldNotRun) Error() string { return "could not run: " + e.err.Error() }
+func (e couldNotRun) Unwrap() error { return e.err }
+
+// exitCode is 2 for a gate that could not run and 1 for a verdict.
+func exitCode(err error) int {
+	if errors.As(err, new(couldNotRun)) {
+		return 2
+	}
+	return 1
+}
+
 func check(err error, what string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: FAIL\n%v\n", what, err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 	fmt.Printf("%s: ok\n", what)
 }

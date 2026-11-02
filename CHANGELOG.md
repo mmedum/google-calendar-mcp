@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - For contributors:
-  - CI fails a pull request that changes the tool surface, an annotation or a `_meta` mark included, unless a commit footer names each changed item. A break of something a release shipped needs `BREAKING CHANGE:`.
+  - CI fails a pull request that changes the tool surface, an annotation or a `_meta` mark included, unless a commit footer names each changed item. A break of something a release shipped needs `BREAKING CHANGE:`. Only the names before the first `: ` in a footer's value count. A footer's value may run on over several lines, and a `Closes #12` footer after it no longer drops it. A refusal prints the footer that fixes it, and a gate that could not run says so.
   - The schema diff names each change by the part that moved.
   - `--dump-schemas` carries every field a client is told: each tool's `_meta` and title, each resource's title, annotations and `_meta`, and the server's instructions. It lists prompts once the server has any.
 
