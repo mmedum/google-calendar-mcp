@@ -72,10 +72,16 @@ func TestSchemaAckNeedsEveryItemNamed(t *testing.T) {
 		{"the instructions by their key", reworded, "Reword them\n\nSCHEMA-CHANGE: instructions: reworded", ""},
 		{"the instructions unnamed", reworded, "Reword them", "no footer names instructions"},
 		{"a description word names nothing", flipped, "Mark it\n\nSCHEMA-CHANGE: get_event: create_event is destructive", wantUnnamed},
-		{"a tab after the colon starts the description too", flipped, "Mark it\n\nSCHEMA-CHANGE: get_event:\tcreate_event is destructive", wantUnnamed},
+		{"a tab after the colon starts the description too", flipped, "Mark it\n\nSCHEMA-CHANGE: get_event:\tdestructive, create_event", wantUnnamed},
 		{"a value with no description names its whole list", flipped, "Mark them\n\nSCHEMA-CHANGE: get_event, create_event", ""},
 		{"a value wrapped at the margin continues it", flipped, "Mark them\n\nSCHEMA-CHANGE: get_event,\ncreate_event: destructiveHint true", ""},
+		{"prose after a bare list names nothing", flipped, "Mark it\n\nSCHEMA-CHANGE: get_event\ncreate_event is destructive now", wantUnnamed},
+		{"a bare list ends at its line, and its name counts", flipped, "Mark it\n\nSCHEMA-CHANGE: create_event\nhints flipped", ""},
+		{"prose after a trailing comma names nothing", flipped, "Mark them\n\nSCHEMA-CHANGE: get_event,\nwhich create_event also reads", wantUnnamed},
+		{"a list is split on commas, not spaces", flipped, "Mark them\n\nSCHEMA-CHANGE: get_event create_event: hints", wantUnnamed},
 		{"a Token #value footer is a footer", flipped, "Mark it\n\nSCHEMA-CHANGE: create_event: hints\n\nCloses #12", ""},
+		{"a Token #value footer acknowledges nothing", flipped, "Mark it\n\nSCHEMA-CHANGE #create_event", wantUnnamed},
+		{"nor does a BREAKING CHANGE #value one", renamed, "Rename it\n\nBREAKING CHANGE #create_event", wantUnnamedBreak},
 		{"a footer ends the value before it", flipped, "Mark it\n\nSCHEMA-CHANGE: get_event,\nRefs #12, create_event", wantUnnamed},
 		{"three blank lines end one paragraph", flipped, "Mark it\n\nSCHEMA-CHANGE: create_event: hints\n\n\n\nCo-Authored-By: someone <x@example.com>", ""},
 		{"a break named only as a change", renamed, "Rename the field\n\nSCHEMA-CHANGE: create_event: calendar is cal", wantUnnamedBreak},
@@ -147,6 +153,15 @@ func TestSchemaAckTellsARefusalFromAFailure(t *testing.T) {
 	failed := schemaAck(io.Discard, "refs/heads/no-such-branch-for-a-test", "HEAD")
 	if failed == nil || !strings.HasPrefix(failed.Error(), "could not run: ") || exitCode(failed) != 2 {
 		t.Errorf("a gate that could not run (%v) exits %d, want 2 and a message saying so", failed, exitCode(failed))
+	}
+}
+
+// A break no footer names is asked for once, as a break: the BREAKING
+// CHANGE: footer that fixes it names it for both checks.
+func TestARefusalAsksForAnUnnamedBreakOnce(t *testing.T) {
+	err := checkAck(io.Discard, compareSurfaces(readTest(t, plain), readTest(t, renamed)), nil, "base")
+	if want := "the tool surface changed since base, and no BREAKING CHANGE: footer names create_event. "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("checkAck = %v, want it to start %q", err, want)
 	}
 }
 
