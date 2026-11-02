@@ -172,8 +172,10 @@ func readSurface(data []byte) (surface, error) {
 // A change is one difference between two dumps: the item it is to, which
 // is what a footer or a **Breaking:** entry names, and how the report
 // shows it. The item is a tool's name, a resource's URI, a list item's
-// name, or a top-level key such as instructions. field is, on the break
-// of a tool still there, the field it breaks, such as "input calendar".
+// name, or a top-level key such as instructions. field is what a break
+// is matched by across two comparisons: on a tool still there the field
+// it breaks, such as "input calendar", and on a removed item its whole
+// key, list included, so a removed prompt and a tool of one name differ.
 type change struct {
 	item, text, field string
 }
@@ -193,33 +195,24 @@ func (c surfaceChanges) empty() bool {
 
 // compareSurfaces is what changed from base to cur. An item gone breaks
 // a caller, and so does a tool still there that broke at any depth
-// (brokenFields). A tool that broke lists its other changes, such as a
-// flipped hint, but not its schemas again, which the break already names.
+// (brokenFields). A tool that broke still lists every part that moved,
+// its schemas included: the break names only the fields it broke, and an
+// output added beside it is a change a reviewer has to see.
 func compareSurfaces(base, cur surface) surfaceChanges {
 	var c surfaceChanges
 	var removed []change
 	fields := brokenFields(base.fields, cur.fields)
-	broken := map[string]bool{}
-	for _, b := range fields {
-		broken[b.item] = true
-	}
 	for _, key := range sortedUnion(base.items, cur.items) {
 		was, inBase := base.items[key]
 		now, inCur := cur.items[key]
 		name := itemName(key)
 		switch {
 		case !inCur:
-			removed = append(removed, change{item: name, text: key + " removed"})
+			removed = append(removed, change{item: name, text: key + " removed", field: key})
 		case !inBase:
 			c.added = append(c.added, change{item: name, text: key})
 		default:
-			parts := changedParts(was, now)
-			if broken[key] {
-				parts = slices.DeleteFunc(parts, func(p string) bool {
-					return strings.HasPrefix(p, "input_schema") || strings.HasPrefix(p, "output_schema")
-				})
-			}
-			if len(parts) > 0 {
+			if parts := changedParts(was, now); len(parts) > 0 {
 				c.changed = append(c.changed, change{item: name, text: key + " (" + strings.Join(parts, ", ") + ")"})
 			}
 		}
