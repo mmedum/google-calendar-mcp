@@ -47,10 +47,13 @@ const (
 	liveStepFloor = 50
 )
 
-// markdownRefFloor is the fewest links and code-span paths the Markdown
-// pass may check. The docs hold well over a hundred, so a pass below it
-// has stopped reading them.
-const markdownRefFloor = 75
+// The fewest links and code-span paths the Markdown pass may check, each
+// well under what the docs hold. A pass below its floor has stopped
+// reading what it checks.
+const (
+	linkFloor     = 15
+	spanPathFloor = 60
+)
 
 // A decision ID is D- and two or more digits, zero-padded.
 const decisionPattern = "D-NN"
@@ -92,6 +95,7 @@ var (
 	quotedName   = regexp.MustCompile(`"([^"]*)"`)
 	// YAML and TOML end a line with a comment after white space.
 	trailingComment = regexp.MustCompile(`\s#`)
+	tomlMultiline   = regexp.MustCompile(`'''|"""`)
 
 	mdLink = regexp.MustCompile(`\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)`)
 	// A footnote, [^label]:, is not a link definition, though its text may
@@ -100,8 +104,8 @@ var (
 	atxHeading = regexp.MustCompile(`^#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?$`)
 	// Go has no code spans or links for the path check to read, so a doc
 	// reference in a comment or a string is found by its shape: a relative
-	// path ending in .md, with an optional anchor. A URL never matches,
-	// since each of its segments follows a slash or a dot.
+	// path ending in .md, with an optional anchor. A match never starts
+	// right after a slash or a dot; one inside a URL is inURL's to drop.
 	goDocRef = regexp.MustCompile(`(?:^|[^\w/.-])(?:\./)?((?:[\w.-]+/)*[\w.-]+\.md)(?:#([\p{L}\p{N}_-]+))?`)
 	// The root documents are named in capitals. A lowercase name in a
 	// comment is a file the code writes, which need not exist here.
@@ -135,35 +139,30 @@ const unfollowable = "*?[]{}<>$…"
 // docsGate reports every problem, one to a line. A checkout git cannot
 // list is a gate that could not run.
 func docsGate() error {
-	g, err := readDocs()
+	files, err := checkoutFiles()
 	if err != nil {
 		return couldNotRun{err}
 	}
-	if len(g.problems) > 0 {
-		return errors.New(strings.Join(g.problems, "\n"))
-	}
-	fmt.Printf("  %d decisions, %d live steps, %d Markdown references and %d files: every reference resolves\n",
-		len(g.decisions), len(g.liveSteps), g.markdownRefs, len(g.files))
-	return nil
+	return newDocsCheck(files).verdict()
 }
 
-// readDocs runs every check over the checkout in the working directory.
+// verdict runs every check over the checkout and reports every problem.
 // Later checks need what earlier ones read: the test names, gates
 // commands and live steps from the Go pass, and the decisions the
 // citations resolve to.
-func readDocs() (*docsCheck, error) {
-	files, err := checkoutFiles()
-	if err != nil {
-		return nil, err
-	}
-	g := newDocsCheck(files)
+func (g *docsCheck) verdict() error {
 	g.readGo()
 	g.readVocabulary()
 	g.readDecisions()
 	g.readAllowlist()
 	g.checkCitations()
 	g.checkCodemap()
-	return g, nil
+	if len(g.problems) > 0 {
+		return errors.New(strings.Join(g.problems, "\n"))
+	}
+	fmt.Printf("  %d decisions, %d live steps, %d links, %d code-span paths and %d files: every reference resolves\n",
+		len(g.decisions), len(g.liveSteps), g.links, g.spanPaths, len(g.files))
+	return nil
 }
 
 // checkoutFiles is every file git tracks or would commit, as it is on
@@ -220,10 +219,16 @@ type docsCheck struct {
 	allowlist map[string]allowance
 	// bare counts each allowlisted file's bare section citations.
 	bare map[string]int
-	// markdownRefs counts the links and code-span paths the Markdown pass
-	// checked, for its floor.
-	markdownRefs int
+
+	// links and spanPaths count what the Markdown pass checked, each held
+	// to its floor.
+	links, spanPaths int
+	floors           docsFloors
 }
+
+// docsFloors are the fewest live steps the Go pass may read, and the
+// fewest links and code-span paths the Markdown pass may check.
+type docsFloors struct{ liveSteps, links, spanPaths int }
 
 // sourceLine is one line of a Go comment or string literal.
 type sourceLine struct {
@@ -245,6 +250,7 @@ func newDocsCheck(files []string) *docsCheck {
 		gatesCommands: map[string]bool{},
 		liveSteps:     map[string]bool{},
 		bare:          map[string]int{},
+		floors:        docsFloors{liveSteps: liveStepFloor, links: linkFloor, spanPaths: spanPathFloor},
 	}
 	for _, f := range files {
 		g.present[f] = true
@@ -446,8 +452,8 @@ func (g *docsCheck) readGo() {
 		g.at(gatesMainPath, 0, "no gates commands read: a Held by naming one would never match")
 	}
 	g.readLiveSteps(driver)
-	if n := len(g.liveSteps); n < liveStepFloor {
-		g.at(liveDriverPackage, 0, "%d live steps read, fewer than %d: the step tables are not being read", n, liveStepFloor)
+	if n := len(g.liveSteps); n < g.floors.liveSteps {
+		g.at(liveDriverPackage, 0, "%d live steps read, fewer than %d: the step tables are not being read", n, g.floors.liveSteps)
 	}
 }
 
@@ -984,9 +990,11 @@ func (g *docsCheck) checkCitations() {
 			}
 		}
 	}
-	if g.markdownRefs < markdownRefFloor {
-		g.fail("%d Markdown references checked, fewer than %d: the links and code-span paths are not being read",
-			g.markdownRefs, markdownRefFloor)
+	if g.links < g.floors.links {
+		g.fail("%d Markdown links checked, fewer than %d: the links are not being read", g.links, g.floors.links)
+	}
+	if g.spanPaths < g.floors.spanPaths {
+		g.fail("%d code-span paths checked, fewer than %d: the code spans are not being read", g.spanPaths, g.floors.spanPaths)
 	}
 	g.checkAllowlist()
 }
@@ -998,10 +1006,12 @@ func (g *docsCheck) checkComment(file string, n int, text string) {
 	g.checkGoDocRefs(file, n, text, true)
 }
 
-// isRecord reports whether a file is a hand-written TSV record, such as
-// the API coverage verdicts. It is read whole wherever it sits, testdata
-// included, since nothing generates it.
-func isRecord(file string) bool { return strings.HasSuffix(file, ".tsv") }
+// isRecord reports whether a file is a hand-written TSV record: the API
+// coverage and field verdicts. Each is read whole although it sits in
+// testdata, since nothing generates it; any other table there is a fixture.
+func isRecord(file string) bool {
+	return file == "testdata/api-coverage.tsv" || file == "testdata/api-fields.tsv"
+}
 
 // isConfigFile reports whether a file holds # comments the citation scan
 // reads as it reads a Go comment.
@@ -1018,11 +1028,16 @@ func hasTrailingComments(file string) bool {
 
 // configComments is each # comment in a config file, by line: a line that
 // starts with #, and in YAML or TOML the end of a line after white space
-// and #. A " #" in a quoted string is read too, which can only add a check.
+// and #. A " #" in a one-line quoted string is read too, which can only
+// add a check; a TOML multi-line string is left out, as its # is text.
 func configComments(file, raw string) []sourceLine {
 	var out []sourceLine
 	trailing := hasTrailingComments(file)
+	toml, open := strings.HasSuffix(file, ".toml"), ""
 	for i, line := range strings.Split(raw, "\n") {
+		if toml {
+			line, open = outsideTOMLStrings(line, open)
+		}
 		if text := strings.TrimLeft(line, " \t"); strings.HasPrefix(text, "#") {
 			out = append(out, sourceLine{i + 1, text})
 		} else if at := trailingComment.FindStringIndex(line); trailing && at != nil {
@@ -1032,12 +1047,37 @@ func configComments(file, raw string) []sourceLine {
 	return out
 }
 
+// outsideTOMLStrings is a TOML line less its multi-line strings, each
+// between three single or three double quotes
+// (https://toml.io/en/v1.0.0#string). open is the delimiter of the string
+// the line starts in, and the result's that of the one it leaves open. A
+// delimiter after a # is in a comment and opens nothing.
+func outsideTOMLStrings(line, open string) (string, string) {
+	var out strings.Builder
+	for {
+		if open != "" {
+			end := strings.Index(line, open)
+			if end < 0 {
+				return out.String(), open
+			}
+			line = line[end+len(open):]
+		}
+		start := tomlMultiline.FindStringIndex(line)
+		if start == nil || strings.Contains(line[:start[0]], "#") {
+			out.WriteString(line)
+			return out.String(), ""
+		}
+		out.WriteString(line[:start[0]])
+		line, open = line[start[1]:], line[start[0]:start[1]]
+	}
+}
+
 // checkLiveSteps holds each live step a file's comments name to one the
 // live driver defines. A name wraps across comment lines, so adjacent
 // lines are read as one text. A driver read below its floor is already
 // reported, and its names are not held to it.
 func (g *docsCheck) checkLiveSteps(file string, comments []sourceLine) {
-	if len(g.liveSteps) < liveStepFloor {
+	if len(g.liveSteps) < g.floors.liveSteps {
 		return
 	}
 	for start := 0; start < len(comments); {
@@ -1164,32 +1204,62 @@ func (g *docsCheck) checkAllowlist() {
 }
 
 // checkGoDocRefs resolves the docs a line of Go names. A string names one
-// only by docs/ path or anchor: a bare file name in a string is data.
+// only by docs/ path or anchor, from the root: a bare file name in a
+// string is data. A path inside a URL names nothing here.
 func (g *docsCheck) checkGoDocRefs(file string, n int, text string, inComment bool) {
 	if !strings.Contains(text, ".md") {
 		return
 	}
-	verb := "names"
-	if inComment {
-		verb = "cites"
-	}
-	for _, m := range goDocRef.FindAllStringSubmatch(text, -1) {
-		target, slug := m[1], m[2]
-		if strings.HasPrefix(target, "docs/") || slug != "" || inComment && g.citesDoc(target) {
-			g.checkTarget(file, n, verb, target, slug)
+	for _, m := range goDocRef.FindAllStringSubmatchIndex(text, -1) {
+		if inURL(text, m[2]) {
+			continue
+		}
+		target, slug := text[m[2]:m[3]], ""
+		if m[4] >= 0 {
+			slug = text[m[4]:m[5]]
+		}
+		switch {
+		case inComment:
+			if resolved, ok := g.commentDoc(file, target, slug); ok {
+				g.checkTarget(file, n, "cites", resolved, slug)
+			}
+		case strings.HasPrefix(target, "docs/") || slug != "":
+			g.checkTarget(file, n, "names", target, slug)
 		}
 	}
 }
 
-// citesDoc reports whether a .md name in a comment is a reference: a root
-// document, named in capitals, or a nested path that starts where
-// checkPath would hold a code span's path.
-func (g *docsCheck) citesDoc(target string) bool {
+// inURL reports whether text[at:] sits inside a URL or a query string: the
+// word it is in has :// or ? before it.
+func inURL(text string, at int) bool {
+	word := text[strings.LastIndexFunc(text[:at], unicode.IsSpace)+1 : at]
+	return strings.Contains(word, "://") || strings.Contains(word, "?")
+}
+
+// commentDoc is the file a .md path in a comment names, read from the
+// comment's directory first and then from the root, as a link is. A
+// missing file is still a reference when the path has an anchor, starts
+// at something in either place or has a path's shape, or is a root
+// document's name, in capitals. A path out of the checkout never is.
+func (g *docsCheck) commentDoc(file, target, slug string) (string, bool) {
+	dir := path.Dir(file)
+	local := path.Join(dir, target)
 	first, _, nested := strings.Cut(target, "/")
-	if !nested {
-		return rootDocName.MatchString(target)
+	switch {
+	case local == ".." || strings.HasPrefix(local, "../"):
+		return "", false
+	case g.exists(local):
+		return local, true
+	case g.exists(target):
+		return target, true
+	case nested && g.exists(path.Join(dir, first)):
+		return local, true
+	case slug != "":
+		return target, true
+	case !nested:
+		return target, rootDocName.MatchString(target)
 	}
-	return g.exists(first) || pathShape.MatchString(target)
+	return target, g.exists(first) || pathShape.MatchString(target)
 }
 
 // checkLinks resolves a Markdown link relative to the file it is in. A
@@ -1210,22 +1280,20 @@ func (g *docsCheck) checkLinks(file string, n int, text string) {
 
 func (g *docsCheck) checkLinkTarget(file string, n int, target string) {
 	p, slug, _ := strings.Cut(target, "#")
+	if strings.Contains(p, ":") {
+		return // A URL, which is not this gate's to fetch.
+	}
 	resolved := path.Join(path.Dir(file), p)
 	switch {
-	case strings.Contains(p, ":"):
-		// A URL, which is not this gate's to fetch.
 	case p == "":
-		g.markdownRefs++
-		g.checkSlug(file, n, "links to", file, slug)
+		resolved = file
 	case strings.HasPrefix(p, "/"):
-		g.markdownRefs++
-		g.checkTarget(file, n, "links to", strings.TrimPrefix(path.Clean(p), "/"), slug)
+		resolved = strings.TrimPrefix(path.Clean(p), "/")
 	case resolved == ".." || strings.HasPrefix(resolved, "../"):
-		// Out of the checkout, as GitHub's ../../issues/51 is: nothing here to check.
-	default:
-		g.markdownRefs++
-		g.checkTarget(file, n, "links to", resolved, slug)
+		return // Out of the checkout, as GitHub's ../../issues/51 is: nothing here to check.
 	}
+	g.links++
+	g.checkTarget(file, n, "links to", resolved, slug)
 }
 
 // checkTarget holds a reference to a file or directory of the checkout,
@@ -1263,48 +1331,67 @@ func (g *docsCheck) checkSpan(file string, n int, span string) {
 	}
 }
 
-// checkPath holds a token to the tree when it starts at a top-level entry
+// checkPath holds a word to the tree when it starts at a top-level entry
 // of the checkout, or has a path's shape. Anything else is a name, not a
 // path: a package, a function, a resource id. A glob or a placeholder is
-// not followable. Sentence punctuation after a token and a :line pointer
+// not followable. Sentence punctuation after a word and a :line pointer
 // are not part of the path.
-func (g *docsCheck) checkPath(file string, n int, token string) {
-	if strings.ContainsAny(token, unfollowable) || strings.Contains(token, "...") {
+func (g *docsCheck) checkPath(file string, n int, word string) {
+	if strings.ContainsAny(word, unfollowable) || strings.Contains(word, "...") {
 		return
 	}
-	token = strings.TrimRight(token, ".,;)")
-	p, slug, _ := strings.Cut(strings.TrimPrefix(token, "./"), "#")
+	word = strings.TrimRight(word, ".,;)")
+	p, slug, _ := strings.Cut(strings.TrimPrefix(word, "./"), "#")
 	if p = lineSuffix.ReplaceAllString(p, ""); p == "" {
 		return
 	}
 	if first, _, _ := strings.Cut(p, "/"); !g.exists(first) && !pathShape.MatchString(p) {
 		return
 	}
-	g.markdownRefs++
+	g.spanPaths++
 	clean := strings.TrimSuffix(p, "/")
+	target, ok := g.spanTarget(file, clean)
 	switch {
-	case strings.HasSuffix(p, "/") && g.present[clean]:
-		g.at(file, n, "names %s, which is not a directory", token)
-	case g.exists(clean):
-		g.checkSlug(file, n, "names", clean, slug)
-	case !strings.Contains(clean, "/") && g.present[path.Join(".github/workflows", clean)]:
-		// A workflow named the way a person says it: ci.yml.
-	case !g.dirs[goPackage(clean)]:
-		g.at(file, n, "names %s, which does not exist", token)
+	case !ok && !g.dirs[goPackage(clean)]:
+		g.at(file, n, "names %s, which does not exist", word)
+	case !ok:
+		// A Go name in a package that exists.
+	case strings.HasSuffix(p, "/") && g.present[target]:
+		g.at(file, n, "names %s, which is not a directory", word)
+	default:
+		g.checkSlug(file, n, "names", target, slug)
 	}
 }
 
-// goPackage is the package directory of a Go name written pkg/path.Ident:
-// everything before the first dot after the last slash, or empty. What
-// follows the dot has to be a Go identifier and not a file extension, so
-// a missing internal/gapi/caltest.go is not excused by its directory.
+// spanTarget is the file or directory a code span's path names. A bare
+// name is read as a link is, from the naming file's directory, then from
+// the root, then as a workflow named the way a person says it: ci.yml.
+func (g *docsCheck) spanTarget(file, p string) (string, bool) {
+	tries := []string{p}
+	if !strings.Contains(p, "/") {
+		tries = []string{path.Join(path.Dir(file), p), p, path.Join(".github/workflows", p)}
+	}
+	for _, t := range tries {
+		if g.exists(t) {
+			return t, true
+		}
+	}
+	return "", false
+}
+
+// goPackage is the package directory of a Go name written pkg/path.Ident
+// or pkg/path.Type.Method: everything before the first dot after the last
+// slash, or empty. The segment after that dot has to be a Go identifier
+// and not a file extension, so a missing internal/gapi/caltest.go is not
+// excused by its directory.
 func goPackage(p string) string {
 	slash := strings.LastIndex(p, "/")
 	dot := strings.Index(p[slash+1:], ".")
 	if slash < 0 || dot < 0 {
 		return ""
 	}
-	if name := p[slash+1+dot+1:]; !token.IsIdentifier(name) || fileExtensions[name] {
+	name, _, _ := strings.Cut(p[slash+1+dot+1:], ".")
+	if !token.IsIdentifier(name) || fileExtensions[name] {
 		return ""
 	}
 	return p[:slash+1+dot]
