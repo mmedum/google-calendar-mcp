@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.1.1] - 2026-11-03
+
 ### Changed
 
 - `--dump-schemas` carries every field a client is told: tool and resource titles, annotations, `_meta`, and the server's instructions.
@@ -1074,7 +1076,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v5.0.0...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v5.1.1...HEAD
+[5.1.1]: https://github.com/mmedum/google-calendar-mcp/compare/v5.1.0...v5.1.1
+[5.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.1.0...v5.0.0
 [4.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.0.0...v4.1.0
 [4.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v3.1.0...v4.0.0

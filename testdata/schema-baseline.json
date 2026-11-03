@@ -1,7 +1,8 @@
 {
   "server": "google-calendar-mcp",
-  "version": "v5.1.0",
+  "version": "v5.1.1",
   "sdk_version": "v1.8.0",
+  "instructions": "Google Calendar tools. This server answers *when*: calendars, the events on them, and who is free. What a meeting produces — a recording, a notes document, an attachment — belongs to the Drive and Docs servers. get_event lists the files attached to an event with each one's Drive file id, which is what those servers take; this server never opens a file. Start with list_calendars: every other tool takes a calendar, the ids come from there, and it reports each calendar's time zone, which is what times are read against. Time is the thing to be careful about here. An all-day event is a DATE and has no time of day; it is never midnight, and reading it as an instant puts it on the wrong day for anyone west of UTC. A timed event always carries an IANA zone, not just an offset, because an offset cannot expand a repeating event across a daylight-saving change. Every read states the absolute window it used, the zone it used, and where that zone came from — check those rather than assuming, and resolve relative dates like \"next Tuesday\" yourself before calling. list_events with expand=true gives each occurrence of a repeating event; with no_expand it gives the series once with its rule. Ask for what you mean: they answer different questions. search_events matches free text against the fields Google documents, such as the title, location and guests, with no field syntax. How it matches words is not documented, so an empty result means the search found nothing, not that nothing exists — fall back to list_events when you need certainty. Never answer \"are they free\" from a list of events: events you cannot see the details of are still busy, and an event marked free is not. That is what check_availability is for, and it reports a calendar it could not read as unknown rather than as free. share_calendar shares with people and groups inside your organization, and lowers the access of any rule a calendar already has, a public one included. Publishing a calendar, sharing it outside the organization or with a new owner, and an out-of-office or focus-time event that declines every meeting it overlaps are tools of their own, present only when the person running this server turned them on; a refusal names the tool.",
   "tools": [
     {
       "name": "cancel_event",
@@ -805,6 +806,9 @@
         "idempotentHint": false,
         "openWorldHint": false,
         "readOnlyHint": false
+      },
+      "_meta": {
+        "anthropic/requiresUserInteraction": true
       }
     },
     {
@@ -2161,6 +2165,9 @@
         "idempotentHint": false,
         "openWorldHint": false,
         "readOnlyHint": false
+      },
+      "_meta": {
+        "anthropic/requiresUserInteraction": true
       }
     },
     {
@@ -4585,6 +4592,9 @@
         "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
+      },
+      "_meta": {
+        "anthropic/requiresUserInteraction": true
       }
     },
     {
@@ -6466,18 +6476,21 @@
   "resources": [
     {
       "name": "calendars",
+      "title": "Calendars",
       "uri": "gcal://calendars",
       "mime_type": "text/plain",
       "description": "Every calendar this account can see, with each one's id, time zone and access level. The same content as the list_calendars tool."
     },
     {
       "name": "calendar",
+      "title": "One calendar",
       "uri_template": "gcal://calendars/{+calendar_id}",
       "mime_type": "text/plain",
       "description": "One calendar: its description, time zone, your access level and who else can see it. The same content as the get_calendar tool."
     },
     {
       "name": "event",
+      "title": "One event",
       "uri_template": "gcal://calendars/{+calendar_id}/events/{+event_id}",
       "mime_type": "text/plain",
       "description": "One event on one calendar, in the calendar's own time zone. The same content as the get_event tool."
