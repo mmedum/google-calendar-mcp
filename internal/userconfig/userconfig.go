@@ -146,7 +146,7 @@ func Save(profile string, c Config) error {
 	}
 	// Not a secret — this holds which profile, which scopes and which
 	// account — but it does hold the account's address, and the 0600
-	// above means nothing on Windows (§18 row 47). One rule, one owner,
+	// above means nothing on Windows. One rule, one owner,
 	// applied after the rename because that is where the file is.
 	return fileperm.RestrictToOwner(p)
 }

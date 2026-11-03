@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- For contributors:
-  - CI fails a pull request that changes the tool surface, an annotation or a `_meta` mark included, unless a commit footer names each changed item. A break of something a release shipped needs `BREAKING CHANGE:`. Only the names before the first colon followed by white space in a footer's value count, separated by commas. A footer's value may run on over several lines, and a footer beside it, such as `Closes #12`, does not drop it; a `Token #value` footer acknowledges nothing. A refusal prints the footer that fixes it, and a gate that could not run says so.
-  - The schema diff names each change by the part that moved. A tool that breaks also lists every part of it that moved, its schemas included.
-  - `--dump-schemas` carries every field a client is told: each tool's `_meta` and title, each resource's title, annotations and `_meta`, and the server's instructions. It lists prompts once the server has any.
+- `--dump-schemas` carries every field a client is told: tool and resource titles, annotations, `_meta`, and the server's instructions.
+- Refusal messages state their reason instead of pointing at a section of the design document.
+- For contributors: a pull request that changes the tool surface needs a commit footer naming each changed item; `CONTRIBUTING.md` gives the syntax.
+- For contributors: `make check` runs a docs gate. Decisions carry IDs in `docs/architecture.md`, and every citation must resolve.
+- For contributors: `google.golang.org/api` cannot be imported; the lint fails on it.
+
+### Fixed
+
+- A tool call that fails is logged as failed, with its error class, instead of as succeeded. The log still never carries the message.
 
 ## [5.1.0] - 2026-11-01
 

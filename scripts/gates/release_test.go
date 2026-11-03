@@ -11,9 +11,8 @@ import (
 // refused, for the same reason the bundle gate does it: a check nobody
 // has watched fail is a check nobody knows the shape of.
 //
-// The first case is not hypothetical. It is the glob phase 4 committed,
-// and every gate was green with it in the tree because the packer only
-// runs at release time and there was no release.
+// The first case matters most: the packer runs only at release time, so a
+// wrong glob passes every other gate.
 
 // goodWorkflow is a release workflow with nothing wrong with it, so a
 // case testing the config is not also failing on the workflow.
@@ -68,7 +67,7 @@ func TestTheCommittedReleaseConfigIsValid(t *testing.T) {
 	}
 }
 
-// The build matrix has to produce the six platform archives §12 claims,
+// The build matrix has to produce the six platform archives a release ships,
 // plus the universal binary the bundle's macOS slot is.
 func TestTheBuildMatrixIsTheOneDocumented(t *testing.T) {
 	targets := buildTargets(goodConfig(t))
@@ -101,7 +100,7 @@ func TestTheWaysTheReleaseWiringBreaks(t *testing.T) {
 		want   string
 	}{
 		{
-			// Phase 4's actual glob. goreleaser names the directory
+			// goreleaser names the directory
 			// <id>_darwin_all, so the id comes first.
 			name: "the universal glob written the obvious way round",
 			breaks: func(_ *goreleaserConfig, files *[]staged, _ *string, _ *string) {
@@ -310,7 +309,7 @@ func TestTheWaysTheReleaseWiringBreaks(t *testing.T) {
 					Goarch string `yaml:"goarch"`
 				}{Goos: "windows", Goarch: "arm64"})
 			},
-			want: "§12 says six archives",
+			want: "a release ships six archives",
 		},
 		{
 			name: "a workflow that lets goreleaser write the notes",

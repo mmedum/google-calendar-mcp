@@ -7,8 +7,8 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
-// TestResolveOrder holds §4.1's order: the call, then the calendar, then
-// the user's settings. Every case names which source should win.
+// TestResolveOrder holds the order: the call, then the calendar, then the
+// user's settings. Every case names which source should win.
 func TestResolveOrder(t *testing.T) {
 	cases := []struct {
 		name                     string
@@ -52,8 +52,8 @@ func TestResolveOrder(t *testing.T) {
 	}
 }
 
-// TestResolveRefusesRatherThanFallingBack is §3's last row: the server's
-// own zone is never a source.
+// TestResolveRefusesRatherThanFallingBack: the server's own zone is never
+// a source.
 func TestResolveRefusesRatherThanFallingBack(t *testing.T) {
 	_, err := when.Resolve("", "", "")
 	if err == nil {

@@ -202,10 +202,10 @@ func TestSplitOccurrenceID(t *testing.T) {
 	}
 }
 
-// §2.11: the id this server mints has to be one Google will accept, and
-// the rule is not obvious — w, x, y and z are out, and Google answers an
-// illegal id with "Invalid resource id value" naming neither the field
-// nor the constraint. That cost a live run (§18 row 21).
+// The id this server mints has to be one Google will accept, and the rule
+// is easy to miss: w, x, y and z are out, and Google answers an illegal
+// id with "Invalid resource id value", naming neither the field nor the
+// constraint.
 func TestNewEventIDIsAlwaysLegal(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 500; i++ {
@@ -224,7 +224,7 @@ func TestNewEventIDIsAlwaysLegal(t *testing.T) {
 }
 
 // An occurrence id has to round-trip through the grammar that reads one,
-// or the two are two opinions about the same shape (§6.2).
+// or the two are two opinions about the same shape.
 func TestOccurrenceIDRoundTrips(t *testing.T) {
 	for _, c := range []struct {
 		name   string

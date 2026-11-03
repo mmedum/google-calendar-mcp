@@ -152,6 +152,10 @@ smoke: build gates ## Drive the binary over stdio
 staleness: build gates ## The docs must match the code
 	@$(GATES) staleness $(BIN)
 
+.PHONY: docs
+docs: gates ## Every decision, citation, named path and live step resolves
+	@$(GATES) docs
+
 .PHONY: transcript
 transcript: gates ## The live driver prints only through its redactor
 	@$(GATES) transcript
@@ -197,7 +201,7 @@ live-cover: build gates ## Every published tool has a step in the live driver
 	@$(GATES) live-cover $(BIN)
 
 .PHONY: live
-live: build ## Drive the built binary against a real account (see docs/development.md)
+live: build ## Drive the built binary against a real account (see CONTRIBUTING.md#the-live-run)
 	$(GO) run -tags=live ./scripts/livecal -bin $(BIN)
 
 # Not in `check`, deliberately: it spends money and it is not
@@ -216,7 +220,7 @@ evals-check: ## The eval scorers discriminate, with no model and no key
 	@$(GO) run -tags=evals ./scripts/evals -self-check
 
 .PHONY: check
-check: fmt vet tidy lint cover vuln licenses secrets api-coverage api-fields classes evals-check leaks mcpb release transcript live-cover parity pins schema-diff smoke staleness ## Everything CI runs
+check: fmt vet tidy lint cover vuln licenses secrets api-coverage api-fields classes docs evals-check leaks mcpb release transcript live-cover parity pins schema-diff smoke staleness ## Everything CI runs
 
 .PHONY: clean
 clean:

@@ -9,13 +9,12 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/plan"
 )
 
-// The calendar and sharing results (§7.5, §7.6).
+// The calendar and sharing results.
 //
-// Both follow §4.9's rule for a write: what it looked like before, what
+// Both follow the rule for a write: what it looked like before, what
 // changed, what it looks like now, and who was told. The sharing one
-// adds the rule §7.6 exists for — exposure is shown BEFORE and AFTER,
-// because "shared with someone" is not an answer to "who can see this
-// now".
+// adds its own rule — exposure is shown BEFORE and AFTER, because
+// "shared with someone" is not an answer to "who can see this now".
 
 // CalendarReport is what a write to a calendar produced.
 type CalendarReport struct {
@@ -69,7 +68,7 @@ func (c CalendarReport) Text() string {
 	}
 	// No etag line, and it is not an omission. An event result prints one
 	// because update_event takes it back; no calendar or sharing tool
-	// has an `etag` parameter, deliberately (§7.5), so "pass it to the
+	// has an `etag` parameter, deliberately, so "pass it to the
 	// next write" would name something nothing accepts. What is true is
 	// said in the tool description instead: each patch is made under the
 	// etag of the read this call just did.
@@ -93,7 +92,8 @@ type SharingReport struct {
 	After  []model.Sharing
 	// Changed is the rule this write was about, absent on a read.
 	Changed *model.Sharing
-	// Notify is the sentence §4.3.3 requires: what was asked for.
+	// Notify is what Google was asked to send, never what anybody
+	// received.
 	Notify   string
 	Notes    []string
 	Requests int

@@ -13,7 +13,7 @@ import (
 )
 
 // Guest addresses come from the environment and never from this
-// repository (hard rule 1, §9.1). The leak gate's allow-list is
+// repository. The leak gate's allow-list is
 // example/test/invalid/localhost, so a real address committed anywhere
 // in the tree fails `make check` on the spot — which is the intended
 // way to find out, rather than a reviewer noticing.
@@ -34,13 +34,13 @@ type guests struct {
 	internal string
 	// external is outside the domain but still on Google Calendar, and is
 	// the guest `externalOnly` reaches: the axis is the organizer's
-	// Workspace domain, not the guest's calendar system, which took a
-	// live probe to establish against the documentation (§18 row 40).
+	// Workspace domain, not the guest's calendar system, whatever
+	// Google's description of externalOnly says.
 	external string
 	// nonGoogle is not on Google Calendar at all. It is out-of-domain too,
 	// so `externalOnly` should reach it as well; what it adds is a guest
-	// whose calendar is independent of Google's, which is what §2.7's
-	// "not syncing to external calendars" warning is about.
+	// whose calendar is independent of Google's, which is what Google's
+	// warning about events "not syncing to external calendars" is about.
 	nonGoogle string
 }
 
@@ -82,23 +82,23 @@ func (g guests) describe() string {
 	return strings.Join(parts, ", ")
 }
 
-// spikeA sets up §15's notification question. It cannot answer it.
+// spikeA sets up the notification question: whom does each
+// `sendUpdates` value mail? It cannot answer it.
 //
 // Who received mail is visible in an inbox and nowhere in any API
 // response, so this creates one event per `sendUpdates` value, says
-// exactly what to look for, and stops. The verdict is written into §18
-// by hand after the inboxes are read. A spike that returned `pass` here
-// would be scoring the insert, not the notification — which is the
-// failure §15 opens by naming.
+// exactly what to look for, and stops. The verdict is recorded by hand
+// after the inboxes are read. A spike that returned `pass` here would be
+// scoring the insert, not the notification.
 func spikeA(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
 	if !spikeNotify {
 		return undetermined, "not armed: this spike mails real people, so it needs -spike-notify. " +
-			"Its verdict is already recorded in §18 rows 40 and 41"
+			"Its verdict is recorded beside the notify rules in internal/plan/notify.go"
 	}
 	g := guestsFromEnv()
 	if !g.any() {
 		return undetermined, fmt.Sprintf("no guests configured; set %s, %s and %s to run it "+
-			"(addresses never enter this repository, §9.1)",
+			"(addresses never enter this repository)",
 			envGuestInternal, envGuestExternal, envGuestNonGoogle)
 	}
 	out.Printf("      guests: %s\n", g.describe())
@@ -143,17 +143,17 @@ func spikeA(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	}
 
 	note := "SET UP, not answered: three events exist, one per sendUpdates value. Read each guest's " +
-		"inbox AND calendar and record what arrived in §18. The two together are what distinguishes " +
+		"inbox AND calendar and record what arrived. The two together are what distinguishes " +
 		"a notification Google withheld from one that was filtered on the way"
 	if g.external == "" {
 		note += ". NOTE: no out-of-domain guest is configured, and that is the only one externalOnly " +
-			"reaches (§18 row 40), so that arm is untested"
+			"reaches, so that arm is untested"
 	}
 	return undetermined, note
 }
 
-// spikeB sets up §15's "none loses events" question, which decides
-// whether §4.3 must refuse `none` on insert outright.
+// spikeB sets up the question whether `none` loses events, which
+// decides whether the server must refuse `none` on insert outright.
 //
 // Also not answerable from a response: the failure is the event never
 // arriving in the guest's calendar, which only the guest can see. The
@@ -186,8 +186,8 @@ func spikeB(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		spikeBTitle+" "+runMark, len(g.attendees()))
 
 	note := "SET UP, not answered: the insert succeeded, which it does whether or not the guests ever " +
-		"see it. Check each guest's CALENDAR, not their mail: §2.7 warns of events not syncing or " +
-		"being lost altogether. If it reproduces, §4.3 refuses none on insert. Read it against the " +
+		"see it. Check each guest's CALENDAR, not their mail: Google warns of events not syncing or " +
+		"being lost altogether. If it reproduces, the server must refuse none on insert. Read it against the " +
 		"same guest's `all` event from spike A — an absence means nothing unless the control arrived"
 	if g.nonGoogle == "" {
 		note += ". NOTE: no non-Google guest is configured. A Google Calendar guest may only see the " +

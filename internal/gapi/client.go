@@ -1,8 +1,9 @@
 // Package gapi is the raw REST client for the Calendar API v3.
 //
-// Raw, because §4.8 forbids the generated client. Every request is built
-// here, every response is decoded into internal/gcal's hand-written
-// types, and every failure comes back as a classified *Error.
+// Raw rather than the generated client, for the reason internal/gcal
+// gives. Every request is built here, every response is decoded into
+// internal/gcal's hand-written types, and every failure comes back as a
+// classified *Error.
 package gapi
 
 import (
@@ -32,7 +33,7 @@ type Client struct {
 	Base string
 	// UserAgent identifies the server to Google.
 	UserAgent string
-	// MaxRetries bounds the truncated exponential backoff of §11.
+	// MaxRetries bounds the truncated exponential backoff.
 	MaxRetries int
 	// Sleep is the backoff sleep, injectable so tests do not wait.
 	Sleep func(context.Context, time.Duration) error
@@ -40,7 +41,7 @@ type Client struct {
 	Now func() time.Time
 }
 
-// New builds a Client with the defaults §11 fixes.
+// New builds a Client with the default retry budget.
 func New(hc *http.Client) *Client {
 	return &Client{HTTP: hc, MaxRetries: 4, UserAgent: "google-calendar-mcp"}
 }
@@ -57,6 +58,7 @@ const MaxBackoff = 32 * time.Second
 
 // backoff is min((2^n) + jitter, MaxBackoff), which is the algorithm
 // Google's quota guide publishes.
+// https://developers.google.com/workspace/calendar/api/guides/quota
 func backoff(attempt int) time.Duration {
 	d := time.Duration(1<<uint(attempt)) * time.Second
 	if d > MaxBackoff {
@@ -88,14 +90,18 @@ type request struct {
 	path   string
 	query  url.Values
 	body   any
-	// etag, when set, becomes If-Match. "*" forces the write through
-	// (§4.4) and is never the default.
+	// etag, when set, becomes If-Match (D-28), and Google refuses a write
+	// under a stale one with 412. "*" forces the write through and is
+	// never the default. Checked by the live step "stale etag refused".
+	// https://developers.google.com/workspace/calendar/api/guides/version-resources
 	etag string
 	// idempotent says this call may be retried after an ambiguous
 	// failure. It is set per call site rather than derived from the
-	// method, because §11 has exceptions in both directions:
+	// method, because the method misleads in both directions:
 	// freebusy.query is a POST that is safe, and events.move is a POST
-	// that is not.
+	// that is not. Google's own status codes say a 503 is "not always
+	// safe to retry" for a call that is not idempotent.
+	// https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
 	idempotent bool
 }
 
@@ -159,7 +165,7 @@ func (c *Client) once(ctx context.Context, r request, out any) error {
 	req, err := http.NewRequestWithContext(ctx, r.method, u, body)
 	if err != nil {
 		// Never fmt the error: it carries the URL, and the URL carries
-		// the query string (§9).
+		// the query string.
 		return Errf(ClassInvalid, "could not build the request: %s", stripURL(err))
 	}
 	if r.body != nil {
@@ -289,8 +295,12 @@ func (c *Client) GetCalendarListEntry(ctx context.Context, calendarID string) (*
 type EventsListOptions struct {
 	TimeMin string
 	TimeMax string
-	// SingleEvents expands a series into instances. §2.9: this changes
-	// what the method returns, and orderBy=startTime requires it.
+	// SingleEvents expands a series into instances. It is not a display
+	// preference: false returns each series once, with its recurrence
+	// and no instances; true returns the instances and no series. And
+	// orderBy=startTime requires it. Checked by the live steps
+	// "list_events expanded" and "list_events as series".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events/list
 	SingleEvents bool
 	OrderBy      string
 	Query        string
@@ -298,11 +308,15 @@ type EventsListOptions struct {
 	PageToken    string
 	ShowDeleted  bool
 	TimeZone     string
-	EventTypes   []string
-	ICalUID      string
-	UpdatedMin   string
-	// SyncToken asks for only what changed since the token was issued
-	// (§17.1). The discovery document forbids it alongside iCalUID,
+	// EventTypes is sent once per value. Unset returns every type, as the
+	// reference says. Checked by the live step "event_types keeps a kind
+	// out".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events/list
+	EventTypes []string
+	ICalUID    string
+	UpdatedMin string
+	// SyncToken asks for only what changed since the token was issued.
+	// The discovery document forbids it alongside iCalUID,
 	// orderBy, privateExtendedProperty, q, sharedExtendedProperty,
 	// timeMin, timeMax and updatedMin, and forbids showDeleted=false
 	// with it; the service refuses those combinations before the call
@@ -409,7 +423,7 @@ func (c *Client) ListInstances(ctx context.Context, calendarID, eventID string, 
 // ListACL returns the sharing rules on a calendar.
 //
 // Needs calendar.acls or calendar.acls.readonly; calendar.readonly does
-// NOT cover it (§2.15).
+// NOT cover it.
 func (c *Client) ListACL(ctx context.Context, calendarID, pageToken string) (*gcal.Acl, error) {
 	q := url.Values{}
 	q.Set("maxResults", "250")
@@ -428,9 +442,8 @@ func (c *Client) ListACL(ctx context.Context, calendarID, pageToken string) (*gc
 // QueryFreeBusy asks which intervals are busy.
 //
 // A POST that is retried, and the exception is deliberate: it creates
-// nothing and changes nothing, so §11's "repeatability follows the HTTP
-// method" rule is overridden here with the reason stated at the call
-// site, as that rule requires.
+// nothing and changes nothing, so the reason it may repeat is stated at
+// the call site rather than read off the HTTP method.
 func (c *Client) QueryFreeBusy(ctx context.Context, req *gcal.FreeBusyRequest) (*gcal.FreeBusyResponse, error) {
 	var out gcal.FreeBusyResponse
 	if err := c.do(ctx, request{
@@ -441,8 +454,8 @@ func (c *Client) QueryFreeBusy(ctx context.Context, req *gcal.FreeBusyRequest) (
 	return &out, nil
 }
 
-// ListSettings returns the user's settings, which is where §4.1's last
-// resort — the user's own time zone — lives.
+// ListSettings returns the user's settings, which is where the last
+// resort for a call's zone — the user's own time zone — lives.
 func (c *Client) ListSettings(ctx context.Context) (*gcal.Settings, error) {
 	q := url.Values{}
 	q.Set("maxResults", "250")
@@ -472,24 +485,26 @@ func (c *Client) GetColors(ctx context.Context) (*gcal.Colors, error) {
 // The four write methods share three rules, held at the call sites
 // below rather than in a comment on each:
 //
-//   - sendUpdates is sent only when the caller made a choice. §4.3.2
-//     says a write that reaches nobody has no notification decision to
-//     make, and inventing one would put this server's guess where
-//     Google's inconsistent default already is (§2.5).
+//   - sendUpdates is sent only when the caller made a choice. A write
+//     that reaches nobody has no notification decision to make, and
+//     inventing one would put this server's guess where Google's
+//     inconsistent default already is.
 //   - If-Match carries the etag from the read that produced the plan.
 //     A 412 becomes [stale] and is never retried: a retry applies the
 //     caller's intent to a resource somebody else has since changed.
-//   - Repeatability follows §11 and the exceptions are named. PATCH and
-//     DELETE are retried. events.insert and events.move are POSTs that
-//     are not.
+//   - Repeatability follows the HTTP method and the exceptions are
+//     named. PATCH and DELETE are retried. events.insert and
+//     events.move are POSTs that are not.
 
-// InsertEvent creates an event (§2.11).
+// InsertEvent creates an event.
 //
 // Never retried, and this is the one the rule exists for: a
 // client-supplied id makes the insert NEARLY idempotent, and Google
 // declines to guarantee the collision is caught, so a retry can
 // double-book. The service reports [ambiguous_outcome] with the id
-// instead, so a caller can look rather than guess.
+// instead, so a caller can look rather than guess. Checked by the live
+// step "spike F: duplicate insert".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/insert
 func (c *Client) InsertEvent(ctx context.Context, calendarID string, e *gcal.Event, sendUpdates string) (*gcal.Event, error) {
 	q := url.Values{}
 	if sendUpdates != "" {
@@ -501,7 +516,8 @@ func (c *Client) InsertEvent(ctx context.Context, calendarID string, e *gcal.Eve
 		// the default — "ignores conference data in the event's body".
 		// So it is set here, from the body, rather than passed in by
 		// each caller: a 200 with no meeting link and no error is
-		// exactly the failure this server is built to refuse.
+		// exactly the failure this server is built to refuse. Checked
+		// by the live step "spike M: conference creation".
 		q.Set("conferenceDataVersion", "1")
 	}
 	if e.HasAttachments() {
@@ -511,9 +527,10 @@ func (c *Client) InsertEvent(ctx context.Context, calendarID string, e *gcal.Eve
 		q.Set("supportsAttachments", "true")
 	}
 	if e.HasLabel() {
-		// And again for a label: the discovery document says version 0,
-		// the default, ignores eventLabelId and uses colorId, while
-		// version 1 reads the label. A split carries the parent's.
+		// And again for a label, which supersedes colorId: the discovery
+		// document says version 0, the default, ignores eventLabelId and
+		// uses colorId, while version 1 reads the label. A split carries
+		// the parent's.
 		q.Set("eventLabelVersion", "1")
 	}
 	var out gcal.Event
@@ -526,12 +543,16 @@ func (c *Client) InsertEvent(ctx context.Context, calendarID string, e *gcal.Eve
 	return &out, nil
 }
 
-// PatchEvent applies a partial update under If-Match (§4.4).
+// PatchEvent applies a partial update under If-Match.
 //
-// events.update is never called: it is a PUT, and omitting attendees
-// there deletes every guest and every RSVP. etag is required by the
-// caller's own discipline rather than by this signature — "*" forces the
-// write through and is an explicit choice, never a default.
+// events.update is never called (D-27): it is a PUT that replaces the
+// whole event, so omitting attendees there deletes every guest and every
+// RSVP, and omitting recurrence flattens the series.
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/update
+//
+// etag is required by the caller's own discipline rather than by this
+// signature — "*" forces the write through and is an explicit choice,
+// never a default.
 func (c *Client) PatchEvent(ctx context.Context, calendarID, eventID string,
 	p *gcal.EventPatch, sendUpdates, etag string,
 ) (*gcal.Event, error) {
@@ -575,16 +596,16 @@ func (c *Client) DeleteEvent(ctx context.Context, calendarID, eventID, sendUpdat
 
 // MoveEvent changes which calendar an event belongs to.
 //
-// A POST that is not idempotent and is not retried (§11): the second
-// call cannot tell "the move did not happen" from "the move happened and
-// the event is no longer here".
+// A POST that is not idempotent and is not retried: the second call
+// cannot tell "the move did not happen" from "the move happened and the
+// event is no longer here".
 //
-// It DOES carry If-Match. That is not obvious from anything Google
-// publishes — events.move is a POST with no body, and neither the
-// reference nor the discovery document says the header applies — so this
-// server sent none and told callers the protection was absent. Spike J
-// asked: a stale etag is refused with 412 (§18 row 49). §4.4 has no
-// exception after all.
+// It DOES carry If-Match, and Google honors it: a stale etag is refused
+// with 412. Nothing Google publishes says so — events.move is a POST
+// with no body, and neither the reference nor the discovery document
+// says the header applies. Checked by the live step "spike J: move under
+// If-Match".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/move
 func (c *Client) MoveEvent(ctx context.Context, calendarID, eventID, destination, sendUpdates, etag string) (*gcal.Event, error) {
 	q := url.Values{}
 	q.Set("destination", destination)
@@ -604,16 +625,17 @@ func (c *Client) MoveEvent(ctx context.Context, calendarID, eventID, destination
 
 // ------------------------------------------- calendars and the ACL
 
-// The calendar and sharing writes. Three rules run through them, and
-// only the third is new:
+// The calendar and sharing writes. Three rules run through them:
 //
 //   - If-Match carries the etag from the read that produced the plan,
-//     exactly as on an event. Whether Google honors it here is spike K:
-//     until that is answered, the result says the header was sent and
-//     does not claim it protected anything.
+//     exactly as on an event, and Google honors it: calendars.patch and
+//     acl.patch refuse a stale etag with 412. The reference says this
+//     of the API in general, not of these methods. Checked by the live
+//     step "spike L: calendar and acl If-Match".
+//     https://developers.google.com/workspace/calendar/api/guides/version-resources
 //   - sendNotifications is sent on EVERY acl.insert and acl.patch, true
-//     or false, never left out. Google's default is true (§2.5), so
-//     omitting it is a decision to email somebody.
+//     or false, never left out. Google's default is true, so omitting
+//     it is a decision to email somebody.
 //   - acl.delete takes no sendNotifications at all, and the discovery
 //     document says there are no notifications on access removal. The
 //     result says so rather than implying a choice existed.
@@ -635,7 +657,7 @@ func (c *Client) InsertCalendar(ctx context.Context, cal *gcal.Calendar) (*gcal.
 }
 
 // PatchCalendar changes the calendar itself: what everybody subscribed
-// to it sees. calendars.update is a PUT and is never called (§4.4).
+// to it sees. calendars.update is a PUT and is never called.
 func (c *Client) PatchCalendar(ctx context.Context, calendarID string, p *gcal.CalendarPatch, etag string) (*gcal.Calendar, error) {
 	var out gcal.Calendar
 	if err := c.do(ctx, request{
@@ -717,8 +739,10 @@ func (c *Client) DeleteCalendarListEntry(ctx context.Context, calendarID, etag s
 //
 // sendNotifications is always sent. Google documents its default as
 // true, which means a sharing change emails somebody unless this server
-// says otherwise — the opposite of the events default, from the same API
-// (§2.5). That inconsistency is why §4.3 makes the choice the caller's.
+// says otherwise — the opposite of the events default, from the same
+// API. That inconsistency is why the choice is the caller's, with no
+// default.
+// https://developers.google.com/workspace/calendar/api/v3/reference/acl/insert
 func (c *Client) InsertACL(ctx context.Context, calendarID string, rule *gcal.AclRule, sendNotifications bool) (*gcal.AclRule, error) {
 	q := url.Values{}
 	q.Set("sendNotifications", strconv.FormatBool(sendNotifications))
@@ -735,7 +759,7 @@ func (c *Client) InsertACL(ctx context.Context, calendarID string, rule *gcal.Ac
 // PatchACL changes an existing rule's role (acl.patch).
 //
 // acl.update is a PUT and would replace the rule, scope included, so it
-// is never called (§4.4).
+// is never called.
 func (c *Client) PatchACL(ctx context.Context, calendarID, ruleID string, p *gcal.AclPatch,
 	sendNotifications bool, etag string,
 ) (*gcal.AclRule, error) {
@@ -757,7 +781,9 @@ func (c *Client) PatchACL(ctx context.Context, calendarID, ruleID string, p *gca
 // It takes no sendNotifications, and that is not an omission here: the
 // method publishes no such parameter, and acl.patch's own description
 // says there are no notifications on access removal. Nobody is told they
-// lost access; they discover it.
+// lost access; they discover it. Checked by the live step
+// "unshare_calendar".
+// https://developers.google.com/workspace/calendar/api/v3/reference/acl/delete
 func (c *Client) DeleteACL(ctx context.Context, calendarID, ruleID, etag string) error {
 	return c.do(ctx, request{
 		method: http.MethodDelete,

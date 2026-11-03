@@ -14,14 +14,14 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
-// spikeE answers §15's "this and following" question, and it is the one
-// §4.2 makes a promise about: Google's guide says the two-call pattern
+// spikeE answers the "this and following" question, which the server's
+// result makes a promise about: Google's guide says the two-call pattern
 // "resets any exceptions happening after the target instance", and the
 // server's result says so in plain words. If the guide is wrong, the
 // server is telling every caller something untrue.
 //
 // The split itself comes from internal/recur, not from arithmetic
-// invented here, so this also holds phase 1's Split against Google:
+// invented here, so this also holds recur's Split against Google:
 // a spike that computes the answer its own way tests nothing the write
 // path will actually do.
 func spikeE(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
@@ -47,7 +47,8 @@ func spikeE(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	}
 
 	// The target is the fourth occurrence, and the exception is the
-	// sixth — AFTER the target, which is the only case §2.8 is about.
+	// sixth — AFTER the target, which is the only case the guide's reset
+	// is about.
 	const targetIdx, exceptionIdx = 3, 5
 	target, exception := rows[targetIdx], rows[exceptionIdx]
 
@@ -119,12 +120,12 @@ func spikeE(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		}
 		switch got := wallClock(r.Start.DateTime); got {
 		case scheduled:
-			return pass, "CONFIRMS §2.8: the exception after the target was RESET — the moved " +
-				"occurrence came back at " + got + ", its scheduled time. §4.2's warning is accurate " +
+			return pass, "CONFIRMS the guide: the exception after the target was RESET — the moved " +
+				"occurrence came back at " + got + ", its scheduled time. The server's warning is accurate " +
 				"and the write path must say so in its result"
 		case moved:
-			return fail, "REFUTES §2.8: the exception survived the split at " + got +
-				". §4.2 warns callers about a reset that does not happen, and the wording must change"
+			return fail, "REFUTES the guide: the exception survived the split at " + got +
+				". The server warns callers about a reset that does not happen, and the wording must change"
 		default:
 			return undetermined, "the occurrence on that date came back at " + got +
 				", which is neither its scheduled time nor where it was moved"
@@ -134,12 +135,13 @@ func spikeE(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		", so there is nothing to compare"
 }
 
-// spikeF answers §15's duplicate-insert question, which decides whether
-// `ambiguous_outcome` (§6.5) is the right class or an over-cautious one.
+// spikeF answers the duplicate-insert question, which decides whether
+// `ambiguous_outcome` is the right class or an over-cautious one.
 //
-// §2.11: "we cannot guarantee that ID collisions will be detected at
-// event creation time". Two inserts of the same client-generated id, at
-// the same time, is the case that sentence is about.
+// Google's reference: "we cannot guarantee that ID collisions will be
+// detected at event creation time". Two inserts of the same
+// client-generated id, at the same time, is the case that sentence is
+// about.
 func spikeF(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
 	body := func() map[string]any {
 		return map[string]any{
@@ -191,12 +193,12 @@ func spikeF(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 
 	switch {
 	case ok == 2:
-		return pass, "REPRODUCES §2.11: BOTH concurrent inserts of the same id were accepted, so a " +
+		return pass, "REPRODUCES the reference's warning: BOTH concurrent inserts of the same id were accepted, so a " +
 			"collision is not detected at creation time. A caller that retries cannot tell whether it " +
 			"created one event or two, which is exactly what `ambiguous_outcome` exists to say"
 	case ok == 1 && conflicts == 1:
 		return pass, "The collision WAS caught: one insert succeeded and the other got 409. That is " +
-			"the good case, and it does not retire `ambiguous_outcome` — §2.11 declines to guarantee " +
+			"the good case, and it does not retire `ambiguous_outcome` — Google declines to guarantee " +
 			"this, and the class is also for a retry after a transport failure, where the caller never " +
 			"saw the first answer at all"
 	case ok == 0:

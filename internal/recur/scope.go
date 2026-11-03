@@ -10,7 +10,7 @@ import (
 
 // Scope is which occurrences a write to a recurring event touches.
 //
-// There is no default and there is no inference (§4.2). "Move the 10:00
+// There is no default and there is no inference (D-18). "Move the 10:00
 // standup to 10:30" is three different operations, the API makes them
 // look like one, and the surveyed servers guess. A guess here rewrites
 // somebody's next six months.
@@ -23,8 +23,8 @@ const (
 	// ScopeSeries changes the parent, and so every occurrence that is
 	// not already an exception.
 	ScopeSeries Scope = "series"
-	// ScopeThisAndFollowing is the two-call pattern of §2.8: the
-	// original series is truncated and a new one starts at the target.
+	// ScopeThisAndFollowing is Google's two-call pattern: the original
+	// series is truncated and a new one starts at the target.
 	// It resets exceptions after the target, which no caller expects.
 	ScopeThisAndFollowing Scope = "this_and_following"
 )
@@ -83,9 +83,9 @@ func ChoiceList() string {
 	return b.String()
 }
 
-// Reach describes how far a series scope would carry, for the refusal
-// §4.2 requires: a caller choosing "series" should be told how many
-// occurrences that is before they choose it.
+// Reach describes how far a series scope would carry, for the refusal of
+// a write that names no scope: a caller choosing "series" should be told
+// how many occurrences that is before they choose it.
 func (s Set) Reach(start when.Zoned, limit int) string {
 	if s.Rule == nil {
 		return "this event does not repeat"
@@ -95,7 +95,7 @@ func (s Set) Reach(start when.Zoned, limit int) string {
 }
 
 // ReachDates is Reach for an all-day series, which has dates and no
-// instants (§4.1).
+// instants.
 func (s Set) ReachDates(start when.Date, limit int) string {
 	if s.Rule == nil {
 		return "this event does not repeat"
@@ -132,8 +132,8 @@ func lastOf(occ Occurrences) string {
 	return ""
 }
 
-// Split computes the two rules a this_and_following write needs (§2.8),
-// for a timed series.
+// Split computes the two rules a this_and_following write needs, for a
+// timed series.
 //
 // Google has no server-side "this and following": the pattern is to end
 // the original series before the target and insert a new one starting at
@@ -154,7 +154,7 @@ func (s Set) Split(start, target when.Zoned) (before, after string, err error) {
 }
 
 // SplitDates is Split for an all-day series, where the occurrences are
-// dates and there is no instant to compare (§4.1).
+// dates and there is no instant to compare.
 //
 // The two front-ends differ only in which expansion counts the head, so
 // the arithmetic — and the COUNT rule that was wrong twice — lives once
@@ -225,8 +225,8 @@ func (s Set) splitAt(target string, head func(Set) (Occurrences, error)) (before
 // preserving the order and the spelling of everything else.
 //
 // It edits the caller's string rather than composing a new rule from the
-// struct, for §6.4's reason: a round trip through a struct is where a
-// part this package does not model goes missing.
+// struct, because a round trip through a struct is where a part this
+// package does not model goes missing.
 func (r Rule) with(key, value, drop string) string {
 	prefix, body := "", r.Raw
 	if i := strings.Index(r.Raw, ":"); i >= 0 {

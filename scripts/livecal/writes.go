@@ -10,8 +10,8 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
 )
 
-// The write steps (§16, phase 2). This is the phase §16 says needs the
-// most live work and where the transcript matters most, for one reason:
+// The write steps. They need the most live work, and the transcript
+// matters most here, for one reason:
 // a write that reports success and did something else leaves a meeting
 // on somebody's calendar, and no gate against a fake can see it.
 //
@@ -23,8 +23,8 @@ import (
 //     spikes A and B are the only things in this driver that send, and
 //     they are behind -spike-notify.
 //   - Everything is on the scratch calendar this run created and emptied,
-//     or on the second one it created for move_event, so §9.1's promise
-//     about the transcript holds for the write path too.
+//     or on the second one it created for move_event, so the driver
+//     reads only what it made on the write path too.
 
 const (
 	writeTitle    = "Livecal write probe"
@@ -56,7 +56,7 @@ const outsideGuest = "livecal-nobody@example.test"
 // writeState carries what one write step made to the next.
 //
 // The ids do not exist when the step list is built — the server mints
-// them (§2.11) — so the steps that use them read this through argsFn
+// them — so the steps that use them read this through argsFn
 // instead of through a literal.
 type writeState struct {
 	created   string
@@ -116,7 +116,7 @@ func (w *writeState) needGuestEvent(id func() string) func() string {
 func (a *liveAPI) seedRSVP(ctx context.Context, cal, self string) error {
 	// Through insertEvent, which owns the sendUpdates=none rule and the
 	// id check. A second copy of "this driver never mails anybody" is
-	// one copy too many for the invariant §9.1 rests on.
+	// one copy too many for an invariant this driver rests on.
 	return a.insertEvent(ctx, cal, map[string]any{
 		"id": rsvpID, "summary": rsvpTitle,
 		// Deliberately OUTSIDE the read steps' window. It sat on
@@ -236,7 +236,7 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "the server minted an id Google should have refused: " + err.Error()
 				}
 				if w.etag == "" {
-					return fail, "the result does not report an etag for the next write (§4.9)"
+					return fail, "the result does not report an etag for the next write"
 				}
 				if !strings.Contains(r.text, "09:00-10:00") {
 					return fail, "the created event does not read back at 09:00-10:00"
@@ -245,7 +245,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §4.1 on the write path, which is the mirror of spike D:
+			// A date on the write path, the mirror of the all-day read:
 			// the caller names the LAST day and it must come back as one
 			// day, all day, on that date — not two, and never a time.
 			name: "create_event all-day",
@@ -273,7 +273,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §17.3. The link is made asynchronously, so this step
+			// The link is made asynchronously, so this step
 			// asserts what the answer SAYS rather than that a link
 			// arrived — a step that demanded a URI here would be
 			// asserting Google's timing.
@@ -339,8 +339,9 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §4.3.1. Refused before a request is built, so the address
-			// below is never sent anywhere.
+			// notify is required when the event has guests. Refused
+			// before a request is built, so the address below is never
+			// sent anywhere.
 			name: "notify required with guests",
 			tool: "create_event",
 			args: on(map[string]any{
@@ -362,8 +363,8 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §4.3.4 and spike B, as a guard: `none` is refused rather
-			// than warned about when a guest is outside the domain.
+			// `none` is refused rather than warned about when a guest is
+			// outside the domain.
 			name: "none refused outside domain",
 			tool: "create_event",
 			args: on(map[string]any{
@@ -382,9 +383,9 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §18 row 92: an optional guest is mailed like any guest, so
-			// notify is required. Refused before a request is built, so
-			// the address below is never sent anywhere.
+			// Nothing says Google mails an optional guest less, so notify is
+			// required. Refused before a request is built, so the address
+			// below is never sent anywhere.
 			name: "notify required with an optional guest",
 			tool: "create_event",
 			args: on(map[string]any{
@@ -403,9 +404,9 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §18 row 92: does Google keep optional: true? The only guest
-			// is this account, which reaches nobody, so none is allowed
-			// and nobody is mailed.
+			// Does Google keep optional: true? The only guest is this
+			// account, which reaches nobody, so none is allowed and nobody
+			// is mailed.
 			name: "create_event with an optional guest",
 			tool: "create_event",
 			argsFn: func() map[string]any {
@@ -449,7 +450,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §4.3.5: the blast radius, without the blast.
+			// The blast radius, without the blast.
 			name: "dry_run writes nothing",
 			tool: "create_event",
 			args: on(map[string]any{
@@ -498,7 +499,7 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
 				if !strings.Contains(r.text, "Room one") || !strings.Contains(r.text, "Room two") {
-					return fail, "the result does not show what it changed from and to (§4.9)"
+					return fail, "the result does not show what it changed from and to"
 				}
 				next := field(r.text, "etag: ")
 				if next == "" {
@@ -511,9 +512,9 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §18 row 91: the token a read by updated_since handed back,
-			// before any write, follows the calendar. The update above is
-			// a change made after it.
+			// The token a read by updated_since handed back, before any
+			// write, follows the calendar. The update above is a change made
+			// after it.
 			name: "list_changes from the updated_since token",
 			tool: "list_changes",
 			argsFn: func() map[string]any {
@@ -542,8 +543,8 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §18 row 95: q reads the location, among the fields Google
-			// documents. The update above set this one.
+			// q reads the location, among the fields Google documents. The
+			// update above set this one.
 			name: "search_events matches a location",
 			tool: "search_events",
 			args: map[string]any{
@@ -563,9 +564,9 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §4.3.2 and §18 row 86: a guest the write adds is reached by
-			// it, so adding one to an event with none asks. Refused before
-			// a request is built, so the address is never sent.
+			// A guest the write adds is reached by it, so adding one to an
+			// event with none asks. Refused before a request is built, so
+			// the address is never sent.
 			name: "notify required when an update adds a guest",
 			tool: "update_event",
 			argsFn: func() map[string]any {
@@ -582,8 +583,8 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §4.3.4 for the same write: none is refused for an outside
-			// guest the update adds.
+			// For the same write, none is refused for an outside guest the
+			// update adds.
 			name: "none refused when an update adds an outside guest",
 			tool: "update_event",
 			argsFn: func() map[string]any {
@@ -600,9 +601,9 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §18 row 93: a guest given as a mailbox, as a Gmail server
-			// hands one over, is its bare address. A dry run, so the
-			// address is never sent anywhere.
+			// A guest given as a mailbox, as a Gmail server hands one over,
+			// is its bare address. A dry run, so the address is never sent
+			// anywhere.
 			name: "a guest given as a mailbox",
 			tool: "update_event",
 			argsFn: func() map[string]any {
@@ -640,8 +641,8 @@ func writeSteps(scratch string, w *writeState) []step {
 				return pass, "refused with [invalid]"
 			},
 		},
-		// §18 row 97: a reminders patch replaces the whole set, by an
-		// overrides list sent in full or as null, and each is read back.
+		// A reminders patch replaces the whole set, by an overrides list
+		// sent in full or as null, and each is read back.
 		setReminders(on, w, "reminders set", map[string]any{
 			"popup_reminders": []int{30, 10}, "email_reminders": []int{1440},
 		}),
@@ -654,9 +655,9 @@ func writeSteps(scratch string, w *writeState) []step {
 		setReminders(on, w, "back to the calendar's", map[string]any{"default_reminders": true}),
 		readReminders(scratch, w, "the calendar's read back", "your reminders: the calendar's default ones"),
 		{
-			// §18 row 98: a patch can create a conference, under a
-			// request id that is not the event id. The probe event has
-			// no guest but this account, so nobody is reached.
+			// A patch can create a conference, under a request id that is
+			// not the event id. The probe event has no guest but this
+			// account, so nobody is reached.
 			name: "add_conference",
 			tool: "update_event",
 			argsFn: func() map[string]any {
@@ -730,8 +731,8 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §4.4: the etag the caller decided on is held to. The one
-			// captured above is now the previous version.
+			// The etag the caller decided on is held to. The one captured
+			// above is now the previous version.
 			name: "stale etag refused",
 			tool: "update_event",
 			argsFn: func() map[string]any {
@@ -750,8 +751,8 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §4.2: no scope, no write — and the refusal says how far
-			// each choice would reach.
+			// No scope, no write — and the refusal says how far each choice
+			// would reach.
 			name: "scope required on a series",
 			tool: "update_event",
 			args: on(map[string]any{"event_id": weeklyID, "location": "Room four"}),
@@ -774,7 +775,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §6.2: an occurrence addressed by the series id and the
+			// An occurrence addressed by the series id and the
 			// start it was SCHEDULED for.
 			// 17 March, the FIRST occurrence, deliberately: the seed
 			// cancels the second one, and a step that changed a
@@ -791,7 +792,7 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
 				if !strings.Contains(r.text, "Addressed the occurrence") {
-					return fail, "the result does not say which address it used (§6.2)"
+					return fail, "the result does not say which address it used"
 				}
 				if !strings.Contains(r.text, "Room five") {
 					return fail, "the occurrence was not changed"
@@ -800,7 +801,8 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §2.8 and spike E, through the tool this time. The series
+			// The two-call split, through the tool rather than spikeE's
+			// direct calls. The series
 			// has four occurrences from 17 March; splitting at the third
 			// leaves two behind and starts two anew.
 			name: "this_and_following splits",
@@ -815,7 +817,7 @@ func writeSteps(scratch string, w *writeState) []step {
 				}
 				w.splitFrom = field(r.text, "id: ")
 				if !strings.Contains(r.text, "RESET") {
-					return fail, "the result does not warn that later exceptions were reset (§4.2)"
+					return fail, "the result does not warn that later exceptions were reset"
 				}
 				if !strings.Contains(r.text, "COUNT=2") {
 					return fail, "the original series was not truncated to its first two occurrences: " +
@@ -826,16 +828,15 @@ func writeSteps(scratch string, w *writeState) []step {
 				// included — so it is six here, and asserting on "2 API
 				// requests" was asserting on the old dishonest count.
 				if !strings.Contains(r.text, "is two calls") {
-					return fail, "the result does not say it was two calls (§4.7)"
+					return fail, "the result does not say it was two calls"
 				}
 				return pass, "original truncated, new series started, reset stated"
 			},
 		},
 		{
-			// §4.2: the new series is the old one copied, fields the
-			// server does not model included. The seed put a private
-			// extended property on the series, and only a direct read
-			// can see it.
+			// The new series is the old one copied, fields the server does
+			// not model included. The seed put a private extended property
+			// on the series, and only a direct read can see it.
 			name: "the split keeps what the series carried",
 			tool: "get_event",
 			argsFn: func() map[string]any {
@@ -894,9 +895,9 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §18 row 97: Google applies a more restrictive visibility on
-			// one occurrence to the whole series. The result says so;
-			// the step after reads the series to see it is true.
+			// Google applies a more restrictive visibility on one occurrence
+			// to the whole series. The result says so; the step after reads
+			// the series to see it is true.
 			name: "a private occurrence",
 			tool: "update_event",
 			args: on(map[string]any{
@@ -943,7 +944,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §18 row 101: where default ranks is this server's belief.
+			// Where default ranks is this server's belief.
 			// The series is made public, one occurrence default, and the
 			// series read: Google applies default to the series only if it
 			// ranks default above public, as the server does.
@@ -984,14 +985,14 @@ func writeSteps(scratch string, w *writeState) []step {
 				}
 				if strings.Contains(r.text, "[public") || strings.Contains(r.text, "; public") {
 					return fail, "the series is still public: Google does not rank default above public, so " +
-						"the note the step before printed is false (§18 row 101)"
+						"the note the step before printed is false"
 				}
 				return pass, "a default occurrence made a public series default, as the server ranks it"
 			},
 		},
 		{
-			// §7.4: an occurrence is canceled with a status patch, not
-			// deleted, because that is how one date leaves a series.
+			// An occurrence is canceled with a status patch, not deleted,
+			// because that is how one date leaves a series.
 			name: "cancel one occurrence",
 			tool: "cancel_event",
 			args: on(map[string]any{
@@ -1003,7 +1004,7 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
 				if !strings.Contains(r.text, "rather than deleted") {
-					return fail, "the result does not say which of the two shapes it used (§7.4)"
+					return fail, "the result does not say which of the two shapes it used"
 				}
 				return pass, "one date removed with a status patch"
 			},
@@ -1047,7 +1048,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			tool: "move_event",
 			argsFn: func() map[string]any {
 				// Same rule: an empty destination would resolve to the
-				// operator's own primary calendar (§9.1).
+				// operator's own primary calendar.
 				to := w.dest
 				if to == "" {
 					to = scratch
@@ -1056,7 +1057,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 			check: func(r callResult) (verdict, string) {
 				if w.dest == "" {
-					return undetermined, "no destination calendar; the creation quota is spent (§18 row 36)"
+					return undetermined, "no destination calendar; the creation quota is spent"
 				}
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
@@ -1074,7 +1075,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			argsFn: func() map[string]any {
 				// Never an empty calendar: ResolveCalendar reads "" as
 				// "primary", which is the operator's OWN calendar, and
-				// §9.1 says this driver touches only what it created.
+				// this driver touches only what it created.
 				// The check below reports undetermined either way; what
 				// matters is that the request is not made at all.
 				from := w.dest
@@ -1092,10 +1093,10 @@ func writeSteps(scratch string, w *writeState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				// Google changes a just-moved event by itself, and the
-				// move back met that two runs in three (§18 row 103).
+				// Google changes a just-moved event by itself, moments after
+				// the move, so the move back can meet a 412 and plan again.
 				if strings.Contains(r.text, "the write was made against the fresh copy") {
-					return pass, "moved back on the second try, after Google changed the event (§18 row 103)"
+					return pass, "moved back on the second try, after Google changed the event"
 				}
 				return pass, "moved back on the first try, leaving the scratch calendar as it was"
 			},
@@ -1140,10 +1141,10 @@ func writeSteps(scratch string, w *writeState) []step {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
 				if !strings.Contains(r.text, "deletes the event") {
-					return fail, "the result does not say a whole event was deleted (§7.4)"
+					return fail, "the result does not say a whole event was deleted"
 				}
 				if !strings.Contains(r.text, "no guests") {
-					return fail, "the result does not say whether anybody else is holding it (§4.3.3)"
+					return fail, "the result does not say whether anybody else is holding it"
 				}
 				return pass, "deleted, and the result says who else has it"
 			},
@@ -1152,14 +1153,13 @@ func writeSteps(scratch string, w *writeState) []step {
 		// The steps that reach a real person. Everything above this line
 		// is written so that it cannot.
 		//
-		// §4.3 is the largest bet in this design and until now no live
-		// step had ever exercised it through the TOOLS with somebody on
-		// the other end: every write step above has no guests, and
-		// spikes A and B go through the driver's own REST calls rather
-		// than through the server. So the notification path a caller
-		// actually uses — notify required, the result reporting what was
-		// ASKED FOR rather than what arrived — was green offline and
-		// unproven live.
+		// The notify rules are the largest bet in this design, and only
+		// these steps drive them through the TOOLS with somebody on the
+		// other end: every write step above has no guests, and spikes A
+		// and B go through the driver's own REST calls rather than
+		// through the server. So these are what prove live the path a
+		// caller uses — notify required, and the result reporting what
+		// was ASKED FOR rather than what arrived.
 		{
 			name: "create_event with a real guest",
 			tool: "create_event",
@@ -1179,7 +1179,7 @@ func writeSteps(scratch string, w *writeState) []step {
 				if !strings.Contains(r.text, "1 guest") {
 					return fail, "the result does not report who it reaches"
 				}
-				// §4.3.3: what was asked for, never what arrived.
+				// What was asked for, never what arrived.
 				if !strings.Contains(r.text, "not what arrived") {
 					return fail, "the result claims a delivery the API never reports: " + truncate(r.text, 200)
 				}
@@ -1224,11 +1224,11 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			// §18 row 43, through the tool this time. This one LEAVES a
-			// meeting on a real person's calendar that this account can
-			// no longer withdraw — that is the finding, not a side
-			// effect — so it is armed with everything else that mails,
-			// and the run says so at the end.
+			// A delete with notify none leaves the event on the guests'
+			// calendars. This one LEAVES a meeting on a real person's
+			// calendar that this account cannot withdraw — that is the
+			// finding, not a side effect — so it is armed with everything
+			// else that mails, and the run says so at the end.
 			name: "create for the quiet cancel",
 			tool: "create_event",
 			argsFn: func() map[string]any {
@@ -1248,7 +1248,7 @@ func writeSteps(scratch string, w *writeState) []step {
 			},
 		},
 		{
-			name: "cancel_event quietly (§18 row 43)",
+			name: "cancel_event quietly",
 			tool: "cancel_event",
 			argsFn: func() map[string]any {
 				return on(map[string]any{"event_id": w.quietEvent, "notify": "none"})
@@ -1258,8 +1258,8 @@ func writeSteps(scratch string, w *writeState) []step {
 				if r.isError {
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
-				// The sentence §4.3.3 exists for, and the one a caller
-				// most needs: it is gone from yours and still on theirs.
+				// The sentence a caller most needs: it is gone from yours
+				// and still on theirs.
 				if !strings.Contains(r.text, "leaves it on theirs") {
 					return fail, "a quiet cancellation did not warn that the guest keeps the meeting: " +
 						truncate(r.text, 250)
@@ -1295,9 +1295,9 @@ func writeSteps(scratch string, w *writeState) []step {
 // what it cost.
 //
 // A failure here is not a failed run: the two move steps report
-// undetermined and everything else goes on. The quota this spends is the
-// one §18 row 36 is about, and a run that cannot have a second calendar
-// is still worth reading.
+// undetermined and everything else goes on. It spends a calendar from a
+// creation quota that a delete does not refund, and a run that cannot
+// have a second calendar is still worth reading.
 func destinationCalendar(ctx context.Context, api *liveAPI, self string) (id string, created bool, note string) {
 	id, created, kept, err := api.ensureScratchCalendar(ctx, destTitle, self)
 	if err != nil {

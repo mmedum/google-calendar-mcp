@@ -16,8 +16,8 @@ import (
 // spikeM — what does Google actually do with a conference create
 // request, and what does it do without conferenceDataVersion?
 //
-// §17.3 asked two things this probe can answer and one it cannot, and
-// saying which is which is the whole discipline of §15.
+// Of three questions about conference creation, this probe can answer
+// two and not the third, and it says which is which.
 //
 // Answerable, and both change the code:
 //

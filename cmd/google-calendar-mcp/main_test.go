@@ -184,11 +184,10 @@ func TestInvalidConfigurationFailsBeforeAnnouncingItself(t *testing.T) {
 	}
 }
 
-// TestIsDisconnect is the SDK trap the standard's §11 names:
-// errors.Is(err, io.EOF) does NOT catch the end of a stdio session,
-// because the SDK reports it as a JSON-RPC code with the EOF only in the
-// message text. Matching the text would break on an SDK reword; matching
-// the code does not.
+// TestIsDisconnect holds an SDK trap: errors.Is(err, io.EOF) does NOT
+// catch the end of a stdio session, because the SDK reports it as a
+// JSON-RPC code with the EOF only in the message text. Matching the text
+// would break on an SDK reword; matching the code does not.
 func TestIsDisconnect(t *testing.T) {
 	cases := []struct {
 		name string

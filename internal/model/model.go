@@ -30,7 +30,7 @@ type Calendar struct {
 	ColorID     string
 	Description string
 	// Conference is which conference types this calendar accepts, nil
-	// when Google said nothing about it — which is not a refusal (§17.3).
+	// when Google said nothing about it — which is not a refusal.
 	Conference *gcal.ConferenceProperties
 	// DefaultReminders are the reminders this account gets for an event
 	// on this calendar that uses the calendar's own. Nil when the
@@ -70,12 +70,11 @@ func FromCalendarList(e gcal.CalendarListEntry) Calendar {
 // FromCalendar converts the calendar RESOURCE, which is what a read by
 // id falls back to when the account is not subscribed to it.
 //
-// It exists because the hand-built literals it replaces were where a new
-// wire field went missing: `conferenceProperties` reached
-// FromCalendarList and not these, so a calendar resolved by id looked
-// like one that allows every conference type and the guard in §17.3
-// never fired for it. Two constructors, both here, is the shape that
-// makes the next field a one-line change rather than a hunt.
+// It exists so that a new wire field reaches every calendar. A
+// hand-built literal that misses `conferenceProperties` makes a calendar
+// look like one that allows every conference type, and the conference
+// guard never fires for it. Two constructors, both here, is the shape
+// that makes the next field a one-line change rather than a hunt.
 func FromCalendar(c gcal.Calendar) Calendar {
 	return Calendar{
 		ID: c.ID, Title: c.Summary, TimeZone: c.TimeZone,
@@ -89,8 +88,8 @@ func (c Calendar) CanWrite() bool {
 }
 
 // When is an event's start or end: a Date or a Zoned, never both, never
-// neither. It is the type that makes §4.1 structural rather than a
-// convention.
+// neither. It is the type that makes "a date is not a time" structural
+// rather than a convention.
 type When struct {
 	// AllDay says which half is set.
 	AllDay bool
@@ -130,7 +129,7 @@ func ParseWhen(e *gcal.EventDateTime, loc *when.Zone) (When, error) {
 	}
 	// A nil zone means "render in whatever offset the wire carried",
 	// which is only correct when the caller has no zone to impose. Every
-	// tool path resolves one first (§4.1); this branch exists for the
+	// tool path resolves one first; this branch exists for the
 	// renderer's own round-trip tests.
 	var target *time.Location
 	if loc != nil {
@@ -180,7 +179,7 @@ type Event struct {
 	GuestsCanInviteOthers   bool
 	GuestsCanSeeOtherGuests bool
 	// Conference is the event's video meeting, if it has one: the link
-	// to join, or the fact that Google is still making it (§17.3).
+	// to join, or the fact that Google is still making it.
 	Conference gcal.Conference
 	Attendees  []Attendee
 	// AttendeesTruncated is Google's attendeesOmitted.
@@ -195,7 +194,7 @@ type Event struct {
 	StatusDetails *StatusDetails
 }
 
-// StatusDetails are a status event's settings (§7.4), in the words
+// StatusDetails are a status event's settings, in the words
 // create_event takes them in. A field that does not belong to the
 // event's type is empty.
 type StatusDetails struct {
@@ -203,7 +202,7 @@ type StatusDetails struct {
 	// the event Google declines.
 	AutoDecline string
 	// DeclineMessage goes to each organizer whose invitation is
-	// declined. It is the account's own text: shown, never logged (§9).
+	// declined. It is the account's own text: shown, never logged.
 	DeclineMessage string
 	// ChatStatus is available or do_not_disturb, on focus time only.
 	ChatStatus string
@@ -313,8 +312,8 @@ func statusDetailsOf(e gcal.Event) *StatusDetails {
 // Attachment is one file on an event. The file belongs to the Drive
 // server, and FileID is what a caller hands it.
 type Attachment struct {
-	// Title is text somebody else wrote: content, shown and never logged
-	// (§9).
+	// Title is text somebody else wrote: content, shown and never
+	// logged.
 	Title    string
 	FileID   string
 	URL      string
@@ -361,19 +360,19 @@ func (e Event) IsSeries() bool { return len(e.Recurrence) > 0 }
 // IsInstance reports whether this is one occurrence of a series.
 func (e Event) IsInstance() bool { return e.SeriesID != "" }
 
-// IsRecurring reports whether a write here needs a scope (§4.2).
+// IsRecurring reports whether a write here needs a scope.
 func (e Event) IsRecurring() bool { return e.IsSeries() || e.IsInstance() }
 
-// Canceled reports whether the event is canceled (§2.13).
+// Canceled reports whether the event is canceled.
 func (e Event) Canceled() bool { return e.Status == gcal.StatusCanceled }
 
 // Moved reports whether this occurrence sits somewhere other than where
 // the series put it.
 //
-// The rule lives here rather than in the renderer and the result
-// builder, which each had their own copy: originalStartTime is the
-// instance's scheduled start and the difference between it and the
-// start is exactly an exception somebody made (§6.2).
+// The rule lives here so that the renderer and the result builder share
+// it: originalStartTime is the instance's scheduled start, and the
+// difference between it and the start is exactly an exception somebody
+// made.
 func (e Event) Moved() bool {
 	switch {
 	case e.OriginalStart.AllDay && e.Start.AllDay:
@@ -388,19 +387,17 @@ func (e Event) Moved() bool {
 // Guests are the attendees who are other people: not this account, and
 // not a room.
 //
-// This is the one definition of "who a write can reach", which is what
-// §4.3.2 hangs on — a write that reaches nobody does not have to ask
-// about notification.
+// This is the one definition of "who a write can reach" (D-22): a write
+// that reaches nobody does not have to ask about notification.
 //
 // account is the signed-in account's own address, and it is needed
-// because Google's `self` flag is NOT sufficient. The live driver put
-// the account on its own event, on a calendar the account owns, and the
-// attendee came back without `self` — so the caller counted as their own
-// guest and a write that reached nobody demanded a notification
-// decision. The flag appears to be relative to the calendar in the
-// request rather than to the authenticated user, and a secondary
-// calendar is not the user; that mechanism is a reading of one live
-// observation, so the fix does not depend on it being right.
+// because Google's `self` flag is NOT sufficient. On a secondary calendar
+// the account owns, the account's own attendee row comes back without
+// `self`, so the caller would count as their own guest. The reference
+// ties the flag to the calendar the copy appears on, not to the signed-in
+// user; the account is excluded by address whatever the flag says.
+// Checked by the live step "respond_to_event".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 //
 // An empty account falls back to the flag alone, which is what a
 // renderer has: it is describing an event, not deciding a refusal.
@@ -423,15 +420,16 @@ func (e Event) Guests(account string) []Attendee {
 }
 
 // GuestCount is how many people would be reached. The count goes in a
-// refusal; the addresses never do (§9).
+// refusal; the addresses never do.
 func (e Event) GuestCount(account string) int { return len(e.Guests(account)) }
 
 // roomDomain is where Google puts the address of every room and other
 // resource it makes. Google publishes no shape for that address
 // (`resourceEmail` is "generated"), so this is observed rather than
-// documented (§18), and both ways it could be wrong are safe: a room it
-// misses counts as a guest, as rooms did before; and only Google issues
-// addresses under google.com, so no person is taken for a room.
+// documented, and both ways it could be wrong are safe: a room it misses
+// counts as a guest; and only Google issues addresses under google.com,
+// so no person is taken for a room. No live step checks it.
+// https://developers.google.com/admin-sdk/directory/reference/rest/v1/resources.calendars
 const roomDomain = "resource.calendar.google.com"
 
 // IsRoom reports whether an address is a room's or another resource's.
@@ -502,7 +500,7 @@ func FromEvent(calendarID string, e gcal.Event, zone *when.Zone) (Event, error) 
 }
 
 // Sharing is one ACL rule as this server presents it: who can see a
-// calendar, and what they can see (§7.6).
+// calendar, and what they can see.
 //
 // One type, so that get_calendar's exposure block, list_sharing and the
 // before/after on a share are the same lines computed once. Two
@@ -574,9 +572,9 @@ type Busy struct {
 
 // Availability is one calendar's answer to a free/busy query.
 //
-// Unknown is the field that matters: §4.6 refuses to fold a calendar
-// that could not be read into "free", because a model that cannot tell
-// those apart will book over somebody.
+// Unknown is the field that matters: a calendar that could not be read
+// is never folded into "free", because a model that cannot tell those
+// apart will book over somebody.
 type Availability struct {
 	CalendarID string
 	Busy       []Busy
@@ -625,12 +623,12 @@ func Merge(busy []Busy) []Busy {
 // It is here rather than left to the caller because the question behind
 // "is this person free" is almost always "when can we meet", and a model
 // doing interval arithmetic over a list of busy blocks is how a meeting
-// gets booked at 02:00 (§7.3).
+// gets booked at 02:00.
 //
 // hours is the caller's working-hours mask, empty when they asked for
-// none: the API has no working-hours field, so this is the server's
-// (§17.2). min drops gaps shorter than a meeting worth having; a zero
-// min keeps them all.
+// none: the API has no working-hours field, so this is the server's.
+// min drops gaps shorter than a meeting worth having; a zero min keeps
+// them all.
 //
 // The order of the three steps is the whole reason they are one
 // function. Cut the busy time out, then apply the mask, then drop what

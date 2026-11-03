@@ -9,10 +9,10 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
-// TestParseScopeRefusesWithTheThreeChoices is §4.2 as a test: a missing
-// scope is refused, and the refusal names the three options and what
-// each would do. A caller who gets "scope is required" and nothing else
-// guesses, which is the thing this rule exists to prevent.
+// TestParseScopeRefusesWithTheThreeChoices: a missing scope is refused,
+// and the refusal names the three options and what each would do. A
+// caller who gets "scope is required" and nothing else guesses, which
+// is the thing this rule exists to prevent.
 func TestParseScopeRefusesWithTheThreeChoices(t *testing.T) {
 	for _, in := range []string{"", "   ", "all", "everything", "future"} {
 		t.Run("refuses "+in, func(t *testing.T) {
@@ -59,8 +59,8 @@ func TestParseScope(t *testing.T) {
 	}
 }
 
-// TestReach is the other half of §4.2's refusal: before a caller picks
-// "series", they are told how far it reaches.
+// TestReach is the other half of the missing-scope refusal: before a
+// caller picks "series", they are told how far it reaches.
 func TestReach(t *testing.T) {
 	loc := mustLoad(t, tzCopenhagen)
 	start := when.Wall(2026, time.March, 17, 9, 0, loc)
@@ -91,10 +91,10 @@ func TestReach(t *testing.T) {
 	}
 }
 
-// TestSplitCountedSeries is §2.8's arithmetic: "this and following" ends
-// the original series before the target and starts a new one at it. The
-// two counts have to add up to the original, or occurrences appear or
-// vanish.
+// TestSplitCountedSeries is the split's arithmetic: "this and
+// following" ends the original series before the target and starts a
+// new one at it. The two counts have to add up to the original, or
+// occurrences appear or vanish.
 func TestSplitCountedSeries(t *testing.T) {
 	loc := mustLoad(t, tzCopenhagen)
 	set := mustParse(t, "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=10")

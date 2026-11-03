@@ -184,6 +184,7 @@ type footer struct {
 // continues that value, wrapped at the margin or indented (item 10). A
 // paragraph whose first line is prose ends the block, so a line of prose
 // that happens to start "BREAKING CHANGE:" is not a footer.
+// https://www.conventionalcommits.org/en/v1.0.0/#specification
 func footers(message string) []footer {
 	paras := paragraphBreak.Split(strings.TrimSpace(strings.ReplaceAll(message, "\r\n", "\n")), -1)
 	var out []footer
@@ -207,7 +208,8 @@ func footers(message string) []footer {
 // ackToken says whether a footer's token acknowledges a change to the
 // tool surface, and whether a break of a release. Conventional Commits
 // reads a token in any case but BREAKING CHANGE, which must be
-// uppercase, and BREAKING-CHANGE is its synonym.
+// uppercase, and BREAKING-CHANGE is its synonym (items 15 and 16).
+// https://www.conventionalcommits.org/en/v1.0.0/#specification
 func ackToken(token string) (isBreak, ok bool) {
 	switch {
 	case token == "BREAKING CHANGE" || token == "BREAKING-CHANGE":

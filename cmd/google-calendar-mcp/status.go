@@ -161,9 +161,9 @@ func cmdDoctor(args []string, stdout io.Writer, env func(string) string) error {
 		report(true, "Calendar API reachable", "")
 	}
 
-	// 5. A zone can be resolved at all. §4.1 refuses rather than falling
-	//    back, so an account with no zone anywhere is a real problem and
-	//    is better found here than on the first read.
+	// 5. A zone can be resolved at all. The server never falls back to
+	//    UTC or the local zone, so an account with no zone anywhere is a
+	//    real problem, and is better found here than on the first read.
 	if settings, err := api.ListSettings(ctx); err == nil {
 		if tz, ok := settings.Lookup("timezone"); ok && tz != "" {
 			report(true, "account time zone", tz)

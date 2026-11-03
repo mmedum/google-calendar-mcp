@@ -10,8 +10,8 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/plan"
 )
 
-// §4.3's whole point is that there is no default, so the first thing to
-// hold is that an absent choice is a refusal rather than a value.
+// Notify has no default, so the first thing to hold is that an absent
+// choice is a refusal rather than a value.
 func TestNotifyIsRequiredWhenTheWriteReachesSomebody(t *testing.T) {
 	r := plan.ReachOfAddresses("me@example.test", []string{"a@example.test", "b@example.test"})
 	if r.Guests != 2 {
@@ -21,7 +21,7 @@ func TestNotifyIsRequiredWhenTheWriteReachesSomebody(t *testing.T) {
 	if !errors.Is(err, plan.ErrInvalid) {
 		t.Fatalf("an absent notify must be [invalid], got %v", err)
 	}
-	// The count goes in the refusal; the addresses never do (§9).
+	// The count goes in the refusal; the addresses never do.
 	if !strings.Contains(err.Error(), "2 guests") {
 		t.Errorf("the refusal must say how many people it would reach: %v", err)
 	}
@@ -38,8 +38,8 @@ func TestNotifyIsRequiredWhenTheWriteReachesSomebody(t *testing.T) {
 	}
 }
 
-// §4.3.2: a write that reaches nobody has no decision to make, and
-// demanding one is friction with no safety in it.
+// A write that reaches nobody has no decision to make, and demanding one
+// is friction with no safety in it.
 func TestNotifyIsNotAskedWhenNobodyIsReached(t *testing.T) {
 	d, err := plan.Notification("", plan.ReachOfAddresses("me@example.test", nil))
 	if err != nil {
@@ -61,9 +61,9 @@ func TestTheOrganizerIsNotAGuest(t *testing.T) {
 	}
 }
 
-// §4.3.4 and spike B: `none` is refused, not warned about, when a guest
-// is outside the organizer's domain. That guest may have no calendar for
-// the event to land in, so mail is the only channel there is.
+// `none` is refused, not warned about, when a guest is outside the
+// organizer's domain. That guest may have no calendar for the event to
+// land in, so mail is the only channel there is.
 func TestNoneIsRefusedForAnOutOfDomainGuest(t *testing.T) {
 	r := plan.ReachOfAddresses("me@example.test", []string{"inside@example.test", "outside@elsewhere.test"})
 	if r.External != 1 {
@@ -82,8 +82,8 @@ func TestNoneIsRefusedForAnOutOfDomainGuest(t *testing.T) {
 	}
 }
 
-// The same call with every guest inside the domain is allowed: §4.3.4 is
-// about the guest who cannot discover the event any other way.
+// The same call with every guest inside the domain is allowed: the
+// refusal is for the guest who cannot discover the event any other way.
 func TestNoneIsAllowedInsideTheDomain(t *testing.T) {
 	d, err := plan.Notification("none", plan.ReachOfAddresses("me@example.test", []string{"a@example.test"}))
 	if err != nil {
@@ -92,7 +92,7 @@ func TestNoneIsAllowedInsideTheDomain(t *testing.T) {
 	if d.Notify != plan.NotifyNone || d.SendUpdatesFor() != gcal.SendUpdatesNone {
 		t.Fatalf("got %q on the wire, want none", d.SendUpdatesFor())
 	}
-	// §4.3.3: never reported as silence.
+	// Never reported as silence.
 	if !strings.Contains(d.Report(), "not a promise of silence") {
 		t.Errorf("a `none` report must not promise silence, got %q", d.Report())
 	}
@@ -148,11 +148,10 @@ func TestReachOfEventIgnoresResourcesAndSelf(t *testing.T) {
 	}
 }
 
-// Google's `self` flag is not enough, and the live run is what
-// established it: the driver put the signed-in account on its own event,
-// on a calendar that account owns, and the attendee came back WITHOUT
-// self. The caller then counted as their own guest, and a write that
-// reached nobody demanded a notification decision (§4.3.2).
+// Google's `self` flag is not enough: the signed-in account, on its own
+// event on a calendar it owns, can come back WITHOUT self. Counted as its
+// own guest, it made a write that reached nobody demand a notification
+// decision.
 func TestTheAccountIsNeverItsOwnGuestEvenWithoutTheSelfFlag(t *testing.T) {
 	e := model.Event{Attendees: []model.Attendee{
 		// Exactly what Google returned live: no Self, the account's own
@@ -177,8 +176,8 @@ func TestTheAccountIsNeverItsOwnGuestEvenWithoutTheSelfFlag(t *testing.T) {
 	}
 }
 
-// §4.3.3: `all` is not delivery either. Spike A watched one invitation
-// reach one of two guests with nothing different in the request.
+// `all` is not delivery either: one invitation can reach one of two
+// guests with nothing different in the request.
 func TestAllIsReportedAsAskedForNotAsDelivered(t *testing.T) {
 	d, err := plan.Notification("all", plan.ReachOfAddresses("me@example.test", []string{"a@example.test"}))
 	if err != nil {
@@ -194,10 +193,9 @@ func TestAllIsReportedAsAskedForNotAsDelivered(t *testing.T) {
 }
 
 // A caller may pass notify on an event with no guests, and the report
-// must still say there was nobody. It used to read "Asked Google to
-// notify nobody, of 0 guests. Google says some mail may still be sent,
-// so this is not a promise of silence" — a warning about nothing, and an
-// invitation to wonder who the zero guests are.
+// must still say there was nobody, not "Asked Google to notify nobody,
+// of 0 guests" — a warning about nothing, and an invitation to wonder
+// who the zero guests are.
 func TestAChoiceOnAWriteThatReachesNobodyStillReportsNobody(t *testing.T) {
 	d, err := plan.Notification("none", plan.ReachOfAddresses("me@example.test", nil))
 	if err != nil {
@@ -242,7 +240,7 @@ func TestARoomIsNotAGuest(t *testing.T) {
 }
 
 // A write that adds guests reaches them: adding an outside guest to an
-// event with none must ask, and must refuse none (§4.3.2, §4.3.4).
+// event with none must ask, and must refuse none.
 // Somebody already on the event, the account, and a room add nobody.
 func TestReachOfEventCountsTheGuestsTheWriteAdds(t *testing.T) {
 	e := model.Event{Attendees: []model.Attendee{{Email: "colleague@example.test"}}}

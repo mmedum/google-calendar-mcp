@@ -12,7 +12,8 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
 )
 
-// TestSeedIsSynthetic is §9.1 held as a test rather than as a promise.
+// TestSeedIsSynthetic holds "fixtures are generated" as a test rather
+// than as a promise.
 //
 // Everything this fake returns must be invented. The check is on the
 // DOMAIN, because that is the one shape a recorded fixture cannot fake:
@@ -116,8 +117,8 @@ func TestAllDayHelperTakesNoZone(t *testing.T) {
 	}
 }
 
-// TestTimedHelperAlwaysCarriesAZone is §4.1: a timed event on the wire
-// carries its IANA zone alongside the offset.
+// TestTimedHelperAlwaysCarriesAZone: a timed event on the wire carries
+// its IANA zone alongside the offset.
 func TestTimedHelperAlwaysCarriesAZone(t *testing.T) {
 	e := caltest.Timed("id", "Title", "2026-03-16T09:00:00+01:00", "2026-03-16T10:00:00+01:00", "Europe/Copenhagen")
 	if e.Start.TimeZone != "Europe/Copenhagen" || e.End.TimeZone != "Europe/Copenhagen" {
@@ -140,7 +141,7 @@ func TestAddCalendarAndEvent(t *testing.T) {
 		t.Fatal("AddEvent did not store the event")
 	}
 	if s.Events["x@example.test"]["e"].ETag == "" {
-		t.Fatal("AddEvent stored an event with no etag; §4.4 writes need one")
+		t.Fatal("AddEvent stored an event with no etag; every write is made under one")
 	}
 }
 
@@ -156,7 +157,7 @@ func TestRecurringAndInstanceHelpers(t *testing.T) {
 		t.Fatalf("Instance did not point at its series: %+v", inst)
 	}
 	if inst.OriginalStartTime == nil {
-		t.Fatal("Instance has no originalStartTime; §6.2 addresses instances by it")
+		t.Fatal("Instance has no originalStartTime; an instance is addressed by it")
 	}
 }
 

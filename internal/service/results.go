@@ -48,7 +48,7 @@ type CalendarOut struct {
 	// No etag here, unlike an event: a calendar is two resources with
 	// two of them, no calendar tool takes one back, and publishing one
 	// on every list_calendars row would be offering a value with nothing
-	// to do (§7.5).
+	// to do.
 	ColorID string `json:"color_id,omitempty"`
 }
 
@@ -108,8 +108,8 @@ type CalendarResult struct {
 	// account's list, the only place Google keeps them.
 	DefaultReminders *DefaultRemindersOut `json:"default_reminders,omitempty"`
 	// Sharing is empty when the ACL scope was not granted, and Note says
-	// so rather than letting an empty list read as "shared with nobody"
-	// (§2.15).
+	// so rather than letting an empty list read as "shared with nobody":
+	// the ACL read needs a scope of its own.
 	Sharing []SharingOut `json:"sharing,omitempty"`
 	Note    string       `json:"note,omitempty"`
 }
@@ -195,7 +195,7 @@ type ScheduleResult struct {
 	text string
 }
 
-// WindowOut is the absolute window a read used (§4.5).
+// WindowOut is the absolute window a read used.
 type WindowOut struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -207,8 +207,8 @@ type EventOut struct {
 	CalendarID string `json:"calendar_id"`
 	Title      string `json:"title"`
 	// AllDay decides which of Date or Start/End is meaningful. The two
-	// are never both set, which is §4.1 carried into the wire format a
-	// client sees.
+	// are never both set: a date is not a time, in the wire format a
+	// client sees too.
 	AllDay    bool   `json:"all_day"`
 	StartDate string `json:"start_date,omitempty"`
 	EndDate   string `json:"end_date,omitempty"`
@@ -448,7 +448,7 @@ func NewEventResult(e model.Event, z when.Zone) EventResult {
 		fmt.Fprintf(&b, "\n%s\n", e.Description)
 	}
 	if n := plan.CrowdWarning(len(e.Attendees)); n != "" {
-		// The read path carries §17.5's warning too, and it is the one
+		// The read path carries the crowd warning too, and it is the one
 		// that matters most: this is the result that prints each guest's
 		// response, and above the limit those responses are not the ones
 		// on the event. A warning only on writes would leave the wrong
@@ -536,8 +536,8 @@ type InstancesResult struct {
 type OccurrenceOut struct {
 	EventOut
 	// OriginalStart is where this occurrence was scheduled before
-	// anybody moved it. It identifies the instance even after the move
-	// (§6.2), which is why it is reported rather than inferred.
+	// anybody moved it. It identifies the instance even after the move,
+	// which is why it is reported rather than inferred.
 	OriginalStart string `json:"original_start,omitempty"`
 	Moved         bool   `json:"moved,omitempty"`
 	Canceled      bool   `json:"canceled,omitempty"`
@@ -579,19 +579,19 @@ type AvailabilityResult struct {
 	ZoneSource string    `json:"time_zone_source"`
 	// Calendars carries one answer each, in the order asked. An answer
 	// is busy intervals or unknown — never an empty list standing in for
-	// a calendar that could not be read (§4.6).
+	// a calendar that could not be read.
 	Calendars []AvailabilityOut `json:"calendars"`
 	Free      []IntervalOut     `json:"free"`
 	// FreeFrom is how many calendars the free gaps were computed from.
 	// Zero means none could be read, and Free is empty rather than the
-	// whole window (§4.6).
+	// whole window.
 	FreeFrom int `json:"free_computed_from"`
 	// MinMinutes echoes the filter, so a caller can tell an empty Free
 	// from one their own filter emptied.
 	MinMinutes int `json:"min_minutes,omitempty"`
 	// WorkingHours echoes the mask for the same reason, and matters
 	// more: Free outside it was removed, so a caller reading Free as
-	// "every free minute" would be wrong about the evenings (§17.2).
+	// "every free minute" would be wrong about the evenings.
 	WorkingHours string `json:"working_hours,omitempty"`
 	// Unknown is how many calendars could not be read. A caller that
 	// reads Free without reading this is booking blind.
@@ -644,7 +644,7 @@ func NewAvailabilityResult(rep render.AvailabilityReport) AvailabilityResult {
 			ans.Busy = append(ans.Busy, interval(b.Start, b.End))
 		}
 		// An unknown calendar reports no busy list at all. An empty one
-		// would read as "free", which is the confusion §4.6 is about.
+		// would read as "free", which is the one thing unknown must not.
 		if ans.Busy == nil && !a.Unknown {
 			ans.Busy = []IntervalOut{}
 		}
@@ -663,7 +663,7 @@ func interval(start, end when.Zoned) IntervalOut {
 	}
 }
 
-// WriteResult is what every write tool returns (§4.9).
+// WriteResult is what every write tool returns.
 //
 // What the resource looked like before, what changed, what it looks like
 // now, what the server asked Google to send, and the new etag. A write
@@ -679,15 +679,15 @@ type WriteResult struct {
 	DryRun   bool   `json:"dry_run,omitempty"`
 	Calendar string `json:"calendar"`
 	// Scope is the recurrence decision, absent when the event does not
-	// repeat (§4.2).
+	// repeat.
 	Scope string `json:"scope,omitempty"`
 	// Before is absent on a create; Event is absent on a delete.
 	Before  *EventOut     `json:"before,omitempty"`
 	Event   *EventOut     `json:"event,omitempty"`
 	Changes []plan.Change `json:"changes,omitempty"`
-	// Notification says what was ASKED FOR. Never what arrived: §2.6
-	// says `none` is not silence, and spike A watched one invitation
-	// reach one of two guests with nothing different in the request.
+	// Notification says what was ASKED FOR. Never what arrived: `none`
+	// is not silence, and one invitation can reach one of two guests with
+	// nothing different in the request.
 	Notification string   `json:"notification"`
 	TimeZone     string   `json:"time_zone"`
 	ZoneSource   string   `json:"time_zone_source"`
@@ -713,7 +713,7 @@ func NewWriteResult(w render.WriteReport) WriteResult {
 	if n := w.Crowded(); n != "" {
 		// Both halves carry it, from the one RULE: a client that shows
 		// only the structured block would otherwise drop the sentence
-		// saying the RSVPs it lists are incomplete (§17.5).
+		// saying the RSVPs it lists are incomplete.
 		out.Notes = append(append([]string{}, out.Notes...), n)
 	}
 	if w.Before != nil {
@@ -728,11 +728,12 @@ func NewWriteResult(w render.WriteReport) WriteResult {
 }
 
 // CalendarWriteResult is what create_calendar, manage_calendar and the
-// two gated tools return (§4.9).
+// two gated tools return.
 //
 // Same shape as a write to an event: what it looked like before, what
 // changed, what it looks like now, and the notes that say what the write
-// did NOT do — because the mistakes §7.5 is about are all of that kind.
+// did NOT do — because the mistakes made with calendars are all of that
+// kind.
 // Unsubscribing deletes nothing; renaming a shared calendar renames it
 // for the team; a color is yours alone.
 type CalendarWriteResult struct {
@@ -770,8 +771,8 @@ func NewCalendarWriteResult(c render.CalendarReport) CalendarWriteResult {
 // unshare_calendar return.
 //
 // Sharing is the whole exposure, not the rule that changed, and Before
-// carries what it was: §7.6's rule is that a share result answers "who
-// can see this now", which a single changed rule does not.
+// carries what it was: a share result answers "who can see this now",
+// which a single changed rule does not.
 type SharingResult struct {
 	// Action is empty on list_sharing, which changes nothing.
 	Action     string       `json:"action,omitempty"`
@@ -814,7 +815,7 @@ func NewSharingResult(s render.SharingReport) SharingResult {
 	return out
 }
 
-// ChangesResult is what `list_changes` hands back (§17.1).
+// ChangesResult is what `list_changes` hands back.
 type ChangesResult struct {
 	CalendarID   string `json:"calendar_id"`
 	CalendarName string `json:"calendar_name,omitempty"`

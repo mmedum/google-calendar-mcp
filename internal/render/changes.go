@@ -8,7 +8,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
-// Changes is what `list_changes` answers with (§17.1).
+// Changes is what `list_changes` answers with.
 type Changes struct {
 	CalendarID   string
 	CalendarName string

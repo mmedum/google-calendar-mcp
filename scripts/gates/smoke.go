@@ -190,7 +190,7 @@ func smokeSession(bin string) error {
 			o.frames, smokeReplies, truncate(stderr.String(), 400))
 	}
 	if len(o.tools) < 5 {
-		return fmt.Errorf("tools/list returned %d tools; phase 0 registers six read tools", len(o.tools))
+		return fmt.Errorf("tools/list returned %d tools; that is not the surface", len(o.tools))
 	}
 	if !o.authSaid {
 		return errors.New("a tool call with no credentials did not come back saying so; " +

@@ -14,8 +14,8 @@ import (
 //
 // The score reads the CALENDAR, never the model's account of what it
 // did. A model that says "I've created the all-day event" and wrote a
-// timestamp has failed the task, and the whole point of §3's first row
-// is that nobody notices until a user in Los Angeles sees the wrong day.
+// timestamp has failed the task, and nobody notices until a user in Los
+// Angeles sees the wrong day.
 type task struct {
 	name   string
 	system string
@@ -25,7 +25,7 @@ type task struct {
 }
 
 // The account the fake calendar belongs to. Its domain is what makes a
-// guest internal or external (§4.3), and both are reserved by RFC 2606
+// guest internal or external, and both are reserved by RFC 2606
 // so neither can resolve.
 const (
 	selfAddress  = "me@example.test"
@@ -36,9 +36,9 @@ func tasks() []task {
 	return []task{allDayWestOfUTC(), weeklyAcrossDST(), invitationReachesGuest()}
 }
 
-// allDayWestOfUTC is §3's first row: an all-day event created by a user
-// west of UTC, which every surveyed server renders a day early because
-// it stored midnight somewhere else.
+// allDayWestOfUTC scores an all-day event created by a user west of UTC,
+// which a server that stores midnight somewhere else renders a day
+// early.
 //
 // The model is told the zone the way a user would say it, and the task
 // passes only if what lands on the calendar is a DATE. A dateTime here
@@ -62,7 +62,7 @@ func allDayWestOfUTC() task {
 				return false, "no event with that title was created"
 			}
 			if e.Start == nil || e.Start.Date == "" {
-				return false, "the event was written as an instant rather than a date — §3's first row"
+				return false, "the event was written as an instant rather than a date"
 			}
 			if e.Start.DateTime != "" {
 				return false, "the start carries both a date and a time"
@@ -81,14 +81,13 @@ func allDayWestOfUTC() task {
 	}
 }
 
-// weeklyAcrossDST is §3's second row: a weekly 09:00 that drifts to
-// 08:00 after the clocks change, because the series was written as a UTC
-// instant with no zone.
+// weeklyAcrossDST scores a weekly 09:00 that must not drift to 08:00
+// after the clocks change, as a series written as a UTC instant with no
+// zone does.
 //
-// Google refuses a recurrence with no zone outright (spike C), so the
-// failure this scores is subtler than the one the row describes: the
-// model has to give a zone, and the wall clock it gives has to be the
-// one the user said.
+// Google refuses a recurrence with no zone outright, so the failure this
+// scores is subtler: the model has to give a zone, and the wall clock it
+// gives has to be the one the user said.
 func weeklyAcrossDST() task {
 	return task{
 		name: "weekly across a DST change",
@@ -118,7 +117,7 @@ func weeklyAcrossDST() task {
 			}
 			// The zone is the whole point. An offset is not a zone: it
 			// places one instant and cannot carry a wall clock across a
-			// transition (§4.1).
+			// transition.
 			if e.Start.TimeZone == "" {
 				return false, "the series carries no IANA zone, so its wall clock cannot survive 29 March"
 			}
@@ -136,14 +135,14 @@ func weeklyAcrossDST() task {
 	}
 }
 
-// invitationReachesGuest is §3's third row: `sendUpdates` never set, so
-// an invitation that reported success reached nobody.
+// invitationReachesGuest scores an insert that never sets `sendUpdates`,
+// which reports success and reaches nobody.
 //
-// This server refuses the write until the caller chooses (§4.3), and
-// refuses `none` outright for a guest outside the organizer's domain
-// (spike B), so the task measures two things at once: whether the model
-// can read a refusal and recover, and whether what it then chose
-// actually mails the person it was asked to invite.
+// This server refuses the write until the caller chooses, and refuses
+// `none` outright for a guest outside the organizer's domain, so the
+// task measures two things at once: whether the model can read a refusal
+// and recover, and whether what it then chose actually mails the person
+// it was asked to invite.
 func invitationReachesGuest() task {
 	return task{
 		name: "invitation reaches a guest",
@@ -172,8 +171,8 @@ func invitationReachesGuest() task {
 			}
 			// The half that cannot be seen from the event: what the
 			// server was ASKED to send. An event with a guest and
-			// sendUpdates=none is the failure §3's third row describes,
-			// and it looks identical on the calendar.
+			// sendUpdates=none may never reach them, and it looks
+			// identical on the calendar.
 			for _, w := range s.Wrote() {
 				if w.Method != "insert" || w.EventID != e.ID {
 					continue
@@ -182,7 +181,7 @@ func invitationReachesGuest() task {
 				case "all", "externalOnly":
 					return true, "invited, and Google was asked to mail them (" + w.SendUpdates + ")"
 				case "":
-					return false, "the insert sent no sendUpdates at all — §3's third row exactly"
+					return false, "the insert sent no sendUpdates at all, so Google was asked to mail nobody"
 				default:
 					return false, "the guest was invited with sendUpdates=" + w.SendUpdates +
 						", so they may never learn of it"

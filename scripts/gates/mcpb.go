@@ -19,7 +19,10 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/server"
 )
 
-// The bundle gate and the packer (§12, and the standard's §10b).
+// The bundle gate and the packer. Every release ships a Claude Desktop
+// bundle beside its archives: opening it installs the server and asks
+// for the OAuth client file, where the alternative is a hand-edited
+// config file.
 //
 // They are two subcommands because the useful half needs no build. The
 // checks below are REFERENTIAL — they ask whether the manifest's names
@@ -170,7 +173,7 @@ func mcpbGate() error {
 // any case, and Windows matches an environment variable's name in any
 // case, while the schema validator, the packer's encode and the host
 // each keep the keys as written, so every other check would read a
-// document that is not the one shipped (§18 row 114). A document whose keys cannot be
+// document that is not the one shipped. A document whose keys cannot be
 // walked is refused too, rather than passed unread.
 func committedManifest(root string) (raw []byte, m manifest, problems []string, err error) {
 	raw, err = os.ReadFile(filepath.Join(root, manifestPath)) //nolint:gosec // a repository path from a constant
@@ -199,10 +202,16 @@ func committedManifest(root string) (raw []byte, m manifest, problems []string, 
 // once, each once, in document order: "server" at the top level,
 // "server.mcp_config.env.GCAL_PROFILE" inside, [i] for an element of a
 // list, and ["a.b"] for a key holding a dot or a bracket. Two keys equal
-// under Unicode case folding are the same key here, as they are to Go's
-// decode, which matches a field in any case; the later is named. A walk
-// that fails is an error rather than none, so the gate refuses what it
-// could not read.
+// under Unicode case folding are the same key here, and the later is
+// named. A walk that fails is an error rather than none, so the gate
+// refuses what it could not read.
+//
+// Go's decode into a struct matches a key in any case, the Kelvin sign
+// for k included, and keeps the last of two matches. Its decode into a
+// map, and Node's JSON.parse, keep the two spellings apart. Go's
+// documentation states the case-insensitive match and says nothing of a
+// key given twice; the rest is a probe on Go 1.27 and Node 26.
+// https://pkg.go.dev/encoding/json#Unmarshal
 func repeatedKeys(raw []byte) ([]string, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	var repeated []string
@@ -320,9 +329,11 @@ func manifestProblems(raw []byte, m manifest, files []staged, root string) []str
 var userConfigRef = regexp.MustCompile(`\$\{user_config\.([A-Za-z0-9_]+)\}`)
 
 // dirnameRef starts every command: ${__dirname} is the one path the
-// specification fixes to the bundle. It shows a relative command once
-// and never says what it is resolved against, and the reference host
-// resolves no path (docs/architecture.md §18 row 112).
+// specification fixes, to the bundle's directory. The specification
+// shows a relative command once and never says what it is resolved
+// against, and the reference host spawns it as written. Claude Desktop
+// is not probed.
+// https://github.com/anthropics/mcpb/blob/v2.1.2/MANIFEST.md
 const dirnameRef = "${__dirname}/"
 
 // validateManifest is the referential checks the manifest alone
@@ -531,11 +542,10 @@ var pinnedSchema = regexp.MustCompile(`/mcpb-manifest-v(\d+\.\d+)\.schema\.json$
 // upstreamSchema matches the host and path the schema is published at,
 // and captures the ref it is served from.
 //
-// An allow-list on the whole URL rather than a list of refs to refuse,
-// for §9.1's reason one level down: a blacklist of `main`, `master` and
-// `HEAD` passes a branch called anything else, a partial tag like `v2.1`
-// that upstream can re-point, and a schema served from somewhere that is
-// not upstream at all.
+// An allow-list on the whole URL rather than a list of refs to refuse: a
+// blacklist of `main`, `master` and `HEAD` passes a branch called anything
+// else, a partial tag like `v2.1` that upstream can re-point, and a schema
+// served from somewhere that is not upstream at all.
 var upstreamSchema = regexp.MustCompile(
 	`^https://raw\.githubusercontent\.com/anthropics/mcpb/([^/]+)/schemas/mcpb-manifest-v\d+\.\d+\.schema\.json$`)
 
@@ -552,12 +562,13 @@ var immutableRef = regexp.MustCompile(`^(v[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{40})$`
 // satisfied by any version agreeing with its own $schema — including the
 // self-consistent 0.2 pair this check was written to stop spreading.
 //
-// Checked 2026-09-17 against the upstream schemas: 0.2, 0.3 and 0.4 are
-// served and 0.5 is not. 0.4 adds one thing, a `uv` server type, and
-// this bundle's server type is `binary` — so the version is deliberately
-// not raised to it. Raise this floor only after checking what the newer
-// format changes AND that a desktop installs a bundle declaring it;
-// §18 row 77.
+// 0.4 differs from 0.3 in one thing, a `uv` server type, and this
+// bundle's server type is `binary`, so the version is deliberately not
+// raised to it. Agreeing with its own $schema, or with other
+// repositories, is not evidence a version is current. Raise this floor
+// only after checking what the newer format changes AND that a desktop
+// installs a bundle declaring it.
+// https://github.com/anthropics/mcpb/tree/main/schemas
 const minManifestVersion = "0.3"
 
 // mcpbSchemaFile is the vendored copy of the schema a 0.3 manifest
@@ -602,10 +613,9 @@ func checkManifestShape(m manifest) []string {
 }
 
 // manifestShapeProblems is the check itself, over the three values it
-// reads. Taking strings rather than a struct so the sibling servers can
-// call it from whatever they decode a manifest into — several read it as
-// a map, because the packer rewrites one field and must not drop the
-// rest.
+// reads. It takes strings rather than a struct so a caller can decode the
+// manifest however it needs; the packer reads it as a map, because it
+// rewrites one field and must not drop the rest.
 func manifestShapeProblems(schema, manifestVersion, support string) []string {
 	var problems []string
 
@@ -682,12 +692,11 @@ func majorMinor(v string) (int, int, bool) {
 	return major, minor, true
 }
 
-// claudeDesktopFloor is the Claude Desktop version every bundle in the
-// family claims.
+// claudeDesktopFloor is the Claude Desktop version range the bundle claims.
 const claudeDesktopFloor = ">=0.10.0"
 
 // identityProblems holds what the manifest says it is: the server's own
-// name, a binary, the family's Claude Desktop floor, a privacy policy,
+// name, a binary, the Claude Desktop floor, a privacy policy,
 // and exactly the platforms the packer stages an entry point for, so
 // dropping one platform and its override together is refused. The
 // manifest specification requires privacy_policies of a server that
@@ -703,7 +712,7 @@ func identityProblems(m manifest, files []staged) []string {
 		problems = append(problems, fmt.Sprintf("server.type is %q; the bundle carries a binary", m.Server.Type))
 	}
 	if m.Compatibility.ClaudeDesktop != claudeDesktopFloor {
-		problems = append(problems, fmt.Sprintf("compatibility.claude_desktop is %q; the family's bundles claim %q",
+		problems = append(problems, fmt.Sprintf("compatibility.claude_desktop is %q; the bundle supports Claude Desktop %q",
 			m.Compatibility.ClaudeDesktop, claudeDesktopFloor))
 	}
 	var entryPoints []string
@@ -717,6 +726,10 @@ func identityProblems(m manifest, files []staged) []string {
 		problems = append(problems, fmt.Sprintf("compatibility.platforms is %v; the packer stages entry points for %v",
 			claimed, entryPoints))
 	}
+	// The specification requires privacy_policies for a server that
+	// connects to a service processing user data; neither the schema nor
+	// `mcpb validate` enforces it.
+	// https://github.com/anthropics/mcpb/blob/v2.1.2/MANIFEST.md
 	if len(m.PrivacyPolicies) == 0 {
 		problems = append(problems, "privacy_policies is empty; the manifest specification requires one for a "+
 			"server that connects to a service processing user data, as this one does to Google")
@@ -773,8 +786,8 @@ func bundleVarsFrom(vars []config.Var, leftOut map[string]string) (asked []confi
 }
 
 // bundleKey is the user_config key a setting is asked under: its name
-// without the prefix, lowercased, which gives the family's bundles the
-// same keys.
+// without the prefix, lowercased, so the key follows from the variable's
+// name alone.
 func bundleKey(name string) string {
 	return strings.ToLower(strings.TrimPrefix(name, config.EnvPrefix))
 }
@@ -843,22 +856,15 @@ var fieldRules = map[string]fieldRule{
 //
 // Every setting bundleVarsFrom derives is asked for and reaches its
 // variable, and nothing else is. A switch is asked as a boolean, so
-// Claude Desktop shows it as one. An optional key has a default,
-// because the reference host passes ${user_config.x} to the server as
-// written when it has none and the person leaves the field blank (§18
-// row 110). The environment the defaults give the server configures it
-// as no environment does: a bundle install may turn on nothing an
-// unconfigured server leaves off, because in Claude Desktop the only
-// other guard is its approval of each tool, which a person can set to
-// always allow (§18 row 109). The sets of switches the server refuses
+// Claude Desktop shows it as one. An optional key has a default, so a
+// blank field cannot reach the server unsubstituted. The environment the
+// defaults give the server configures it as no environment does, which
+// defaultsProblems checks. The sets of switches the server refuses
 // together are the ones bundleRefused declares. mcp_config.args is
 // there and empty, and a platform override carries neither env nor
-// args, an empty one included: the reference host replaces the base's
-// with an override's rather than merging, and an argument such as
-// -enable-destructive=true would configure the server past every check
-// on env (§18 row 113). The profile field says what the server accepts,
-// and a bundle that stops asking for it is refused, so that check cannot
-// go quiet. leftOut is bundleLeftOut, or a test's.
+// args, an empty one included. The profile field says what the server
+// accepts, and a bundle that stops asking for it is refused, so that
+// check cannot go quiet. leftOut is bundleLeftOut, or a test's.
 func settingProblems(m manifest, leftOut map[string]string) []string {
 	vars := config.Vars()
 	asked, problems := bundleVarsFrom(vars, leftOut)
@@ -873,6 +879,12 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 		problems = append(problems, fmt.Sprintf("mcp_config.args is %q; the bundle passes every setting "+
 			"through mcp_config.env, and an argument would configure the server past these checks", args))
 	}
+	// The reference host replaces the base's env and args with a platform
+	// override's, an empty one included, rather than merging the two. So
+	// the settings would not reach that platform, and an argument such as
+	// -enable-destructive=true would configure the server past every
+	// check on env. Claude Desktop is not probed.
+	// https://github.com/anthropics/mcpb/blob/v2.1.2/src/shared/config.ts
 	for _, platform := range slices.Sorted(maps.Keys(m.Server.MCPConfig.PlatformOverrides)) {
 		over := m.Server.MCPConfig.PlatformOverrides[platform]
 		if over.Env != nil {
@@ -888,16 +900,27 @@ func settingProblems(m manifest, leftOut map[string]string) []string {
 
 	for _, key := range slices.Sorted(maps.Keys(m.UserConfig)) {
 		opt := m.UserConfig[key]
+		// The reference host builds its variables from the defaults and
+		// the person's values, and leaves one it does not have as
+		// written: a blank optional field with no default reaches the
+		// server as ${user_config.x}. Claude Desktop is not probed.
+		// https://github.com/anthropics/mcpb/blob/v2.1.2/src/shared/config.ts
 		if !opt.Required && opt.Default == nil {
 			problems = append(problems, fmt.Sprintf("user_config.%s is optional with no default; the reference host "+
 				"passes ${user_config.%s} to the server as written when the field is left blank", key, key))
 		}
+		// The reference host substitutes in one pass: its own variables
+		// first, then each user_config.x in manifest order, into text
+		// already substituted. So a default holding ${...} can reach the
+		// server changed. Claude Desktop is not probed.
+		// https://github.com/anthropics/mcpb/blob/v2.1.2/src/shared/config.ts
+		//
 		// The decoded value, so an escape cannot hide the reference; the
 		// message quotes the manifest as written.
 		if opt.Default != nil && strings.Contains(fmt.Sprint(opt.value), "${") {
 			problems = append(problems, fmt.Sprintf("user_config.%s defaults to %s, which holds a ${...} reference; "+
 				"a host may substitute ${HOME}, ${__dirname} or another field's value in a default, and the "+
-				"defaults check reads it as written (§18 row 115)", key, opt.Default))
+				"defaults check reads it as written", key, opt.Default))
 		}
 	}
 
@@ -1036,11 +1059,20 @@ func loadEnv(env map[string]string) (config.Config, error) {
 }
 
 // defaultsProblems reports a bundle whose defaults configure the server
-// otherwise than no environment does, naming the fields that differ. A
-// default that is a list or an object is reported rather than guessed
-// at, every one in key order, and the comparison still runs over the
-// rest. defaultsErr is what the server refuses the defaults with, which
-// decides whether refusalProblems starts the sets of switches.
+// otherwise than no environment does, naming the fields that differ.
+//
+// A bundle install may turn on nothing an unconfigured server leaves
+// off. Claude Desktop has no second approval behind the server, as
+// Claude Code's ask rules are: its one guard is the approval of each
+// tool, which a person can set to always allow. That rests on Claude's
+// connector docs and the reference host; no page names desktop
+// extensions, and Claude Desktop is not probed.
+// https://claude.com/docs/connectors/getting-started
+//
+// A default that is a list or an object is reported rather than guessed at,
+// every one in key order, and the comparison still runs over the rest.
+// defaultsErr is what the server refuses the defaults with, which decides
+// whether refusalProblems starts the sets of switches.
 func defaultsProblems(m manifest) (problems []string, defaultsErr error) {
 	env, unreadable := hostEnv(m)
 	for _, key := range slices.Sorted(maps.Keys(unreadable)) {

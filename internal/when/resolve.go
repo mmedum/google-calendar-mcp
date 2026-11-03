@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// ZoneSource says where a resolved zone came from. Every read names it
-// (§4.1), because "which Thursday" and "whose Thursday" are the two ways
+// ZoneSource says where a resolved zone came from. Every read names it,
+// because "which Thursday" and "whose Thursday" are the two ways
 // a schedule answer goes wrong, and a caller cannot check the second
 // unless the server says what it assumed.
 type ZoneSource string
@@ -56,11 +56,11 @@ func (z Zone) Explain() string {
 // fallbacks are the process's zone, which is UTC in a container and the
 // maintainer's zone on the maintainer's laptop, and UTC itself, which is
 // nobody's working day. Either would answer a scheduling question in a
-// zone the user never chose and never sees, which is §3's last row.
+// zone the user never chose and never sees.
 var ErrNoZone = fmt.Errorf("%w: no time zone available — none was given on the call, the calendar "+
 	"has none, and your Google Calendar settings have none. Pass an IANA zone such as Europe/Copenhagen", ErrInvalid)
 
-// Resolve picks the zone, in the order §4.1 fixes: the call, then the
+// Resolve picks the zone in a fixed order (D-10): the call, then the
 // calendar, then the user's settings. Empty strings are skipped, so a
 // caller can pass through whatever it has.
 //

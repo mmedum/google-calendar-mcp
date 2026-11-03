@@ -47,7 +47,7 @@ const (
 	Sharing
 	// WideSharing widens who can see a calendar past the ordinary share:
 	// the public, a whole domain, somebody outside the organization, or a
-	// new owner (§7.6). It registers only when sharing is on and the
+	// new owner. It registers only when sharing is on and the
 	// destructive flag is set, because widening access is never there by
 	// default.
 	WideSharing
@@ -56,24 +56,22 @@ const (
 	// with the sharing writes, because a deployment that has turned sharing
 	// off has turned off the surface, not merely the writes.
 	//
-	// Read-only mode drops it as well. §8 registers the nine read tools
-	// there and this is not one of them: get_calendar already reports a
+	// Read-only mode drops it as well. That mode keeps the Read tools,
+	// and this is not one of them: get_calendar already reports a
 	// calendar's exposure, so nothing is unreachable, and the read-only
-	// surface stays the list §8 names rather than the list minus a
-	// judgment call.
+	// surface stays one kind rather than a kind minus a judgment call.
 	SharingRead
 	// DecliningAll makes an out-of-office or focus-time event that
 	// declines every meeting it overlaps, the accepted ones too, with
-	// each organizer told (§7.4). It registers only with
-	// GCAL_ENABLE_DECLINE_ALL, a flag of its own: a flag people set to get
-	// out-of-office must not arm clear_calendar as well, which is §9's
-	// argument for leaving cancel_event ungated.
+	// each organizer told. It registers only with GCAL_ENABLE_DECLINE_ALL,
+	// a flag of its own: a flag people set to get out-of-office must not
+	// arm clear_calendar as well.
 	DecliningAll
 	// Destructive removes something Calendar cannot bring back. Not
 	// registered at all unless the destructive flag is set, and still
 	// needs confirm on the call. The two are delete_calendar and
-	// clear_calendar; cancel_event is an IdempotentWrite, and §9 argues
-	// the difference.
+	// clear_calendar; cancel_event is an IdempotentWrite, and its
+	// definition says why.
 	Destructive
 	// Adding creates something new and changes nothing already there: a
 	// new calendar, a new event. It is the one write that says
@@ -109,8 +107,8 @@ type Def[In any, Out service.Rendered] struct {
 	Kind        Kind
 	// PromptEveryCall marks a write whose prompt is itself the point: a
 	// delete of a whole calendar or of everything on one, which Calendar
-	// cannot bring back, or a public or domain-wide share (§9a). The tool
-	// carries Claude Code's requiresUserInteraction, so Claude Code
+	// cannot bring back, or a public or domain-wide share (D-57). The
+	// tool carries Claude Code's requiresUserInteraction, so Claude Code
 	// prompts on every call whatever the operator's rules say. Only a
 	// Destructive or WideSharing tool may set it, and add refuses it on
 	// any other.
@@ -137,7 +135,7 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 	}
 	if def.PromptEveryCall {
 		// A mark no other client reads, so never a control: the control
-		// is that the tool is unregistered unless the flag is set (§9a).
+		// is that the tool is unregistered unless the flag is set.
 		if def.Kind != Destructive && def.Kind != WideSharing {
 			panic("tools: " + def.Name + " prompts on every call and is neither Destructive nor WideSharing")
 		}
@@ -149,9 +147,9 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 		if err != nil {
 			return nil, zero, fail(err)
 		}
-		// Content is set here, always. Left unset, the SDK fills it with
-		// the JSON of the output — the same bytes twice, and the one
-		// shape the specification asks callers not to send.
+		// Content is set here, always (D-33). Left unset, the SDK fills
+		// it with the JSON of the output — the same bytes twice, and the
+		// one shape the specification asks callers not to send.
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: out.Render()}},
 		}, out, nil
@@ -162,9 +160,8 @@ func add[In any, Out service.Rendered](s *mcp.Server, d Deps, def Def[In, Out]) 
 //
 // It lives beside allowed rather than in the command that dumps the
 // schemas, because it has to name every gate allowed reads and the dump
-// has no way to know when a new one appears. A sibling's dump set one
-// flag by hand for three phases; a fourth gate arrived and the tool
-// behind it was missing from the schema diff with every test green.
+// has no way to know when a new one appears. A gate the dump misses
+// drops its tool from the schema diff with every test green.
 func FullSurface(cfg config.Config) config.Config {
 	cfg.ReadOnly = false
 	cfg.EnableDestructive = true
@@ -192,12 +189,14 @@ func allowed(k Kind, cfg config.Config) bool {
 	}
 }
 
-// annotationsFor is a kind's annotations. A write says destructiveHint
-// true unless it only adds: the MCP schema reads false as "the tool
-// performs only additive updates". Sharing is the one act whose effect
-// leaves this account, so only the two sharing kinds say openWorldHint.
-// A decline-all event is destructive too: the decline reaches every
-// overlapping meeting's organizer and is not taken back by deleting it.
+// annotationsFor is a kind's annotations (D-54). A write says
+// destructiveHint true unless it only adds: the MCP schema reads false
+// as "the tool performs only additive updates". Sharing is the one act
+// whose effect leaves this account, so only the two sharing kinds say
+// openWorldHint. A decline-all event is destructive too: the decline
+// reaches every overlapping meeting's organizer and is not taken back
+// by deleting it.
+// https://modelcontextprotocol.io/specification/2025-06-18/schema#toolannotations
 func annotationsFor(k Kind) *mcp.ToolAnnotations {
 	if k == Read || k == SharingRead {
 		return &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: ptr(false)}
@@ -211,16 +210,19 @@ func annotationsFor(k Kind) *mcp.ToolAnnotations {
 
 func ptr[T any](v T) *T { return &v }
 
-// fail turns an error into the tool result the standard specifies:
-// "[class] actionable message", never a protocol error.
+// fail turns an error into a failing tool result, "[class] actionable
+// message", never a protocol error, so the model can read it. A
+// classified error is returned as the *gapi.Error itself, which the SDK
+// keeps on the result for the call log to read the class from.
 func fail(err error) error {
 	var e *gapi.Error
 	if errors.As(err, &e) {
-		return errors.New(e.Error())
+		return e
 	}
 	// Anything unclassified is a bug in this server rather than
-	// something the caller did. It still has to arrive as a tool result
-	// with a class, so the vocabulary stays closed from the caller's
-	// side (§6.5).
+	// something the caller did. It still reads "[class] message", so the
+	// vocabulary stays closed from the caller's side. It is a plain
+	// error, so the call log records no class: a bug here is not logged
+	// as a Google outage.
 	return fmt.Errorf("[%s] %s", gapi.ClassUnavailable, err.Error())
 }

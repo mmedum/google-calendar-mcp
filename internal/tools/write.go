@@ -183,9 +183,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"rather than the two an update takes. " + notifyHelp + " " +
 			"Read that rule twice here: canceling with no notification removes the meeting from YOUR " +
 			"calendar and leaves it on your guests'. They will still turn up. " + etagHelp + " " + dryRunHelp,
-		// Not behind the destructive flag, and §9 argues why: canceling a
-		// meeting is what a calendar is for and Google keeps the record,
-		// so gating it would train people to set GCAL_ENABLE_DESTRUCTIVE
+		// Not behind the destructive flag (D-39): canceling a meeting
+		// is what a calendar is for and Google keeps the record, so
+		// gating it would train people to set GCAL_ENABLE_DESTRUCTIVE
 		// for good, which would arm clear_calendar too. Its hint still
 		// says destructive, as every write's does but an Adding one's.
 		Kind: IdempotentWrite,
@@ -275,8 +275,8 @@ type createEventIn struct {
 	GuestsCanInviteOthers   *bool  `json:"guests_can_invite_others,omitempty" jsonschema:"Whether guests may invite others. Google's default is true."`
 	GuestsCanSeeOtherGuests *bool  `json:"guests_can_see_other_guests,omitempty" jsonschema:"Whether guests see the guest list. Google's default is true."`
 	Conference              bool   `json:"conference,omitempty" jsonschema:"Ask Google for a Google Meet link. Usually in the answer; if it says the link is still being made, read the event again for it."`
-	// The status event inputs (§7.4). Each value is spelled as a read
-	// reports it.
+	// The status event inputs. Each value is spelled as a read reports
+	// it.
 	EventType            string `json:"event_type,omitempty" jsonschema:"Make a status event on your primary calendar: outOfOffice, focusTime or workingLocation. Leave it out for an ordinary event."`
 	AutoDecline          string `json:"auto_decline,omitempty" jsonschema:"Required for outOfOffice and focusTime, with no default: none, or new (invitations that arrive for that time). all is refused here; it is create_event_declining_all."`
 	DeclineMessage       string `json:"decline_message,omitempty" jsonschema:"The message each organizer gets with a decline. outOfOffice and focusTime only, and not with auto_decline none."`

@@ -15,9 +15,8 @@ import (
 // TestRestrictToOwnerSetsAProtectedACL reads the access list back rather
 // than trusting the call that set it.
 //
-// 0600 is a no-op on Windows: the first CI run there found the token
-// file at 0666, readable by every account on the machine, while its
-// warnings said "mode 0600" (§18 row 47). What replaced it has to be
+// 0600 is a no-op on Windows: a file written with it reads back as 0666,
+// readable by every account on the machine. The protection has to be
 // checked the way Windows describes access, not the way Unix does.
 func TestRestrictToOwnerSetsAProtectedACL(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "token.json")

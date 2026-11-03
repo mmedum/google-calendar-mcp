@@ -104,6 +104,10 @@ func TestSetupScopeProblems(t *testing.T) {
 	if got := setupScopeProblems(commented); len(got) != 0 {
 		t.Errorf("a comment inside a fence was read as a heading: %v", got)
 	}
+	// A fence is what the docs gate reads as one, tildes included.
+	if got := setupScopeProblems(strings.ReplaceAll(fmt.Sprintf(doc, ro, rw), "```", "~~~")); len(got) != 0 {
+		t.Errorf("blocks in tilde fences were not read as blocks: %v", got)
+	}
 	stray := setupScopeProblems(fmt.Sprintf(doc, ro, rw) + "https://www.googleapis.com/auth/calendar\n")
 	if want := []string{"docs/gcp-setup.md lists https://www.googleapis.com/auth/calendar outside the scope blocks"}; !slices.Equal(stray, want) {
 		t.Errorf("got %v, want %v", stray, want)

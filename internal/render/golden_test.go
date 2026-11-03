@@ -19,12 +19,12 @@ import (
 //	go test ./internal/render -update
 //
 // The point of a golden file is that a change to how a schedule reads
-// shows up as a diff somebody has to look at (§13). Regenerating is one
+// shows up as a diff somebody has to look at. Regenerating is one
 // flag, and reviewing the diff is the part that cannot be automated.
 var update = flag.Bool("update", false, "rewrite the golden files")
 
-// goldenDir is the repository's testdata, not the package's: §9.1 keeps
-// every fixture in one place, where the leak scan looks.
+// goldenDir is the repository's testdata, not the package's: every
+// fixture lives in one place, where the leak scan looks.
 const goldenDir = "../../testdata/golden"
 
 func golden(t *testing.T, name, got string) {
@@ -51,7 +51,8 @@ func golden(t *testing.T, name, got string) {
 }
 
 // goldenTZ is fixed so a golden file does not depend on where the tests
-// run — which is the same rule §4.1 applies to the server itself.
+// run — the same rule the server applies to itself: never the process's
+// zone.
 const goldenTZ = "Europe/Copenhagen"
 
 // goldenZone is that zone, resolved as a calendar's own rather than as
@@ -234,10 +235,10 @@ func TestGoldenAvailability(t *testing.T) {
 	golden(t, "availability", rep.Text())
 }
 
-// TestGoldenAvailabilityWorkingHours is the answer §17.2 is about: a
-// week asked about at once, with the nights and the weekend out of it.
-// Without the mask the longest gap in this answer is an overnight one,
-// which passes any min_minutes and is useless.
+// TestGoldenAvailabilityWorkingHours is the answer working hours are
+// for: a week asked about at once, with the nights and the weekend out
+// of it. Without the mask the longest gap in this answer is an
+// overnight one, which passes any min_minutes and is useless.
 func TestGoldenAvailabilityWorkingHours(t *testing.T) {
 	z := goldenZone(t)
 	w := goldenWindow(t, z, "2026-03-16T00:00:00+01:00", "2026-03-21T00:00:00+01:00")
@@ -287,9 +288,9 @@ func TestGoldenAvailabilityAllUnknown(t *testing.T) {
 }
 
 // The write report is the one result a caller acts on twice: once to see
-// what happened, and again to decide whether to tell somebody. §4.9 says
-// what it has to carry, and a golden file is how a change to any of it
-// arrives as a diff rather than as a surprise.
+// what happened, and again to decide whether to tell somebody. A golden
+// file is how a change to what it carries arrives as a diff rather than
+// as a surprise.
 func TestGoldenWrite(t *testing.T) {
 	z := goldenZone(t)
 	before := goldenEvent(t, "abcdef0123", "Project review",
@@ -349,9 +350,9 @@ func TestGoldenWriteDryRun(t *testing.T) {
 	golden(t, "write-dry-run", w.Text())
 }
 
-// The calendar write report, which carries the distinction §7.5 is
-// about: what changed on the calendar everybody sees, and what changed
-// only for this account.
+// The calendar write report, which carries the distinction between what
+// changed on the calendar everybody sees and what changed only for this
+// account.
 func TestGoldenCalendarWrite(t *testing.T) {
 	before := model.Calendar{
 		ID: "team@group.calendar.example.test", Title: "Sample Team",
@@ -394,9 +395,9 @@ func TestGoldenCalendarUnsubscribe(t *testing.T) {
 	golden(t, "calendar-unsubscribe", c.Text())
 }
 
-// A share, with exposure on both sides: §7.6's rule is that the result
-// answers "who can see this now", and the golden is how a change to that
-// answer arrives as a diff.
+// A share, with exposure on both sides: the result answers "who can see
+// this now", and the golden is how a change to that answer arrives as a
+// diff.
 func TestGoldenSharing(t *testing.T) {
 	before := []model.Sharing{
 		{RuleID: "user:owner@example.test", ScopeType: gcal.ScopeTypeUser,
@@ -441,16 +442,16 @@ func TestGoldenSharingPublic(t *testing.T) {
 
 // Tokens that read as invented, deliberately. A fixture shaped like a
 // real Google token is a string with the entropy of a credential sitting
-// in the repository — the leak gate refuses one, and rightly: §9.1 says
-// fixtures are generated, never recorded, and "it is only a test" is how
-// a real one gets committed one day.
+// in the repository — the leak gate refuses one, and rightly: fixtures
+// are generated, never recorded, and "it is only a test" is how a real
+// one gets committed one day.
 const (
 	syntheticSyncToken = "example-sync-token-not-a-real-one"
 	syntheticPageToken = "example-page-token-not-a-real-one"
 )
 
-// Incremental sync (§17.1). Two goldens, because the interesting half is
-// what the result says when it has no token to give.
+// Incremental sync. Two goldens, because the interesting half is what
+// the result says when it has no token to give.
 func TestGoldenChanges(t *testing.T) {
 	z := goldenZone(t)
 	moved := goldenEvent(t, "ev-standup", "Standup",

@@ -13,11 +13,11 @@ import (
 // liveCoverGate holds every published tool and resource to having a
 // live step.
 //
-// §13 says green gates are not done: anything touching the write path or
-// a response shape gets a live run, and the transcript is read. That is
-// only true of the tools the driver actually calls, and a tool added in
-// a later phase is exactly the one nobody remembers to drive — the fake
-// answers it, every test passes, and the first real call is a user's.
+// Anything touching the write path or a response shape counts only after
+// a live run whose transcript is read (D-70). That holds only for the
+// tools the driver actually calls, and a tool added later is exactly the
+// one nobody remembers to drive — the fake answers it, every test passes,
+// and the first real call is a user's.
 //
 // Both directions, like the other records:
 //
@@ -77,7 +77,7 @@ func liveCoverGate(bin string) error {
 	var problems []string
 	if len(missing) > 0 {
 		problems = append(problems, "tools the live driver never calls:\n  "+strings.Join(missing, "\n  ")+
-			"\n  (add a step in scripts/livecal, or name it in liveUncovered with why it cannot be driven)")
+			"\n  (add a step in "+liveDriverPackage+", or name it in liveUncovered with why it cannot be driven)")
 	}
 	if len(unexplained) > 0 {
 		problems = append(problems, "tools in liveUncovered with no reason:\n  "+strings.Join(unexplained, "\n  "))
@@ -126,7 +126,7 @@ func driverTools() (driven map[string]bool, exempt map[string]string, steps int,
 					if !ok {
 						continue
 					}
-					lit := stringOf(kv.Value)
+					lit, _ := stringOf(kv.Value)
 					if lit == "" {
 						continue
 					}
@@ -157,7 +157,8 @@ func driverTools() (driven map[string]bool, exempt map[string]string, steps int,
 						if !ok {
 							continue
 						}
-						exempt[stringOf(kv.Key)] = stringOf(kv.Value)
+						name, _ := stringOf(kv.Key)
+						exempt[name], _ = stringOf(kv.Value)
 					}
 				}
 			}
@@ -167,14 +168,12 @@ func driverTools() (driven map[string]bool, exempt map[string]string, steps int,
 	return driven, exempt, steps, nil
 }
 
-func stringOf(e ast.Expr) string {
+// stringOf is the value of a string literal, and whether e is one.
+func stringOf(e ast.Expr) (string, bool) {
 	lit, ok := e.(*ast.BasicLit)
 	if !ok || lit.Kind != token.STRING {
-		return ""
+		return "", false
 	}
 	s, err := strconv.Unquote(lit.Value)
-	if err != nil {
-		return ""
-	}
-	return s
+	return s, err == nil
 }

@@ -64,9 +64,9 @@ func TestResourcesAreListedWithTheirTemplates(t *testing.T) {
 	}
 }
 
-// TestAResourceCarriesTheToolsOwnText is §8's rule: the resources are
-// the tools' content for a client that attaches rather than calls. Two
-// renderings of one calendar is how they come to disagree.
+// TestAResourceCarriesTheToolsOwnText: the resources are the tools'
+// content for a client that attaches rather than calls. Two renderings
+// of one calendar is how they come to disagree.
 func TestAResourceCarriesTheToolsOwnText(t *testing.T) {
 	d := deps(t)
 	cs := session(t, d)

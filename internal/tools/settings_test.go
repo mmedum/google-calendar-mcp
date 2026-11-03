@@ -28,7 +28,7 @@ var argumentFor = map[string]any{
 	"calendar_title": "Sample Primary",
 }
 
-// §3: the model never widens its own reach. Only the operator turns a
+// The model never widens its own reach. Only the operator turns a
 // group on, changes a limit, edits an allowlist or lifts a refusal, and
 // does it outside the conversation, in the environment, the flags and
 // the profile directory. Every registered tool is called, and none of

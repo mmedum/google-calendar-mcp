@@ -10,17 +10,15 @@ import (
 	"sync/atomic"
 )
 
-// Class is the closed error vocabulary (§6.5).
+// Class is the closed error vocabulary (D-65).
 //
 // Closed means both directions, and `scripts/gates classes` asserts
 // both: every class emitted by the code appears in Classes below, and
 // every class in Classes is emitted somewhere. A vocabulary that is only
-// checked one way drifts — a sibling documented ten classes while the
-// code emitted fifteen, four of them named nowhere.
+// checked one way drifts.
 type Class string
 
-// The twelve classes. The standard names six; the other six are forced
-// by this API and each is argued in §6.5.
+// The classes, one for each thing a caller does next.
 const (
 	// ClassInvalid: the request is malformed or under-specified.
 	ClassInvalid Class = "invalid"
@@ -43,15 +41,15 @@ const (
 	ClassRateLimited Class = "rate_limited"
 	// ClassUnavailable: a transient upstream failure.
 	ClassUnavailable Class = "unavailable"
-	// ClassUnsupported: the API cannot do this (§2).
+	// ClassUnsupported: the API cannot do this.
 	ClassUnsupported Class = "unsupported"
 	// ClassAmbiguousOutcome: a write may or may not have landed. Read
-	// before retrying — §2.11 makes this reachable on event creation.
+	// before retrying — an event insert whose answer was lost lands here.
 	ClassAmbiguousOutcome Class = "ambiguous_outcome"
 )
 
-// Classes is the vocabulary, in the order §6.5 tabulates it. The gate
-// derives the emitted set from the code and compares against this.
+// Classes is the vocabulary. The gate derives the emitted set from the
+// code and compares against this.
 var Classes = []Class{
 	ClassInvalid, ClassNotFound, ClassAuth, ClassForbidden,
 	ClassConflict, ClassStale, ClassAmbiguous, ClassBlocked,
@@ -76,8 +74,9 @@ func (c Class) Retryable() bool {
 	return c == ClassUnavailable || c == ClassRateLimited
 }
 
-// Error is a classified API failure. It is a tool result, never a
-// protocol error (the standard's §2).
+// Error is a classified API failure. It reaches the caller as a tool
+// result with isError set, never as a protocol error, so the model can
+// read it and act on it.
 type Error struct {
 	Class Class
 	// Message is what the caller should read. It says what to do, not
@@ -86,14 +85,14 @@ type Error struct {
 	// Status is the HTTP status, 0 for a failure that never reached
 	// Google.
 	Status int
-	// Reason is Google's own machine reason, kept for the evidence log
-	// and for classification. Never a payload.
+	// Reason is Google's own machine reason, kept for classification.
+	// Never a payload.
 	Reason string
 	err    error
 }
 
-// Error renders "[class] message", which is the format the standard
-// fixes for a tool result.
+// Error renders "[class] message", the one shape every failing tool
+// result takes, so a caller can match on the class.
 func (e *Error) Error() string { return fmt.Sprintf("[%s] %s", e.Class, e.Message) }
 
 // Unwrap exposes the cause.
@@ -145,6 +144,9 @@ func classify(status int, reason, message string) (Class, string) {
 	case http.StatusUnauthorized:
 		return ClassAuth, "not signed in, or the access token expired: run `google-calendar-mcp login`"
 	case http.StatusForbidden:
+		// Google's quota answers 403 or 429 with a usageLimits reason:
+		// 600 requests per user per minute, on a sliding window.
+		// https://developers.google.com/workspace/calendar/api/guides/quota
 		switch reason {
 		case "rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "dailyLimitExceeded":
 			return ClassRateLimited, "Google is rate limiting this account: " + message
@@ -158,10 +160,8 @@ func classify(status int, reason, message string) (Class, string) {
 	case http.StatusConflict:
 		return ClassConflict, message
 	case http.StatusGone:
-		// 410 on a sync token means the token is no longer usable and
-		// the caller must start over. §17.1 keeps sync out of phase 0;
-		// the class exists so the day it arrives the failure is not a
-		// bare "conflict".
+		// 410 means the state the request referred to is gone, such as
+		// an expired sync token, and the caller must read again.
 		return ClassStale, "the server discarded the state this request referred to; read again and retry. " + message
 	case http.StatusPreconditionFailed:
 		return ClassStale, "this changed since you read it, so the write was refused rather than overwriting somebody. Read it again and reapply your change"
@@ -181,8 +181,8 @@ func classify(status int, reason, message string) (Class, string) {
 //
 // The URL is stripped before anything here is used in a message,
 // because a search term travels in a query string and a transport error
-// quotes the URL (§9). stripURL is what does it; this function must
-// never be handed a raw *url.Error message.
+// quotes the URL. stripURL is what does it; this function must never be
+// handed a raw *url.Error message.
 func classifyTransport(err error) *Error {
 	switch {
 	case errors.Is(err, context.Canceled):
@@ -198,8 +198,8 @@ func classifyTransport(err error) *Error {
 //
 // A *url.Error stringifies as `Get "https://...?q=secret": dial tcp`,
 // so the obvious fmt of a transport failure puts the caller's search
-// term in the log. §9's rule is that a search term hides in a query
-// string; this is the function that keeps it out.
+// term in the log. A search term hides in a query string, and this is
+// the function that keeps it out of every log (D-03).
 func stripURL(err error) string {
 	var ue *url.Error
 	if errors.As(err, &ue) {
@@ -219,53 +219,32 @@ func stripURL(err error) string {
 	return s
 }
 
-// Planned names the classes this server declares now and emits in a
-// later phase, with the phase that owns each.
+// Planned names the classes this server declares and does not yet
+// emit, each with what will emit it.
 //
 // It exists so the class gate's second direction — every declared class
-// is emitted somewhere — stays on during a phased build instead of being
-// switched off. An entry is a dated promise: the gate fails if a class
-// here starts being emitted and the entry is not removed, so this map
-// can only shrink.
-//
-// It is EMPTY as of phase 2, and that is the promise being kept rather
-// than a gate switched off. The three entries here were blocked,
-// ambiguous_outcome and unsupported, all of them the write path's:
-// blocked is §4.3.4's refusal of `none` for a guest outside the
-// organizer's domain; ambiguous_outcome is an insert whose answer never
-// arrived (§2.11); unsupported is "this and following" where this server
-// cannot build it out of two calls (§2.8). Every one of the twelve
-// classes is now emitted by code somebody can run.
-//
-// Note which two were NEVER here, because the first draft of this map
-// assumed they would be: conflict and stale are emitted by classify, on
-// 409, 410 and 412, and have been since phase 0. The write path is where
-// a caller most often MEETS them, which is not the same as where they
-// are produced — and the gate caught the difference.
+// is emitted somewhere — stays on while a class waits for its code. The
+// gate fails if a class here starts being emitted and the entry is not
+// removed, so this map can only shrink. It is empty: every class is
+// emitted by code somebody can run.
 var Planned = map[Class]string{}
 
 // ------------------------------------------------------- counting calls
 
-// §4.7 says one tool call is one API request, and that where it cannot
-// be, the RESULT says how many it made. That only works if the count is
-// the truth, and a count kept by hand at each call site is not: the
-// write path incremented a field of its own and so missed every request
-// its shared setup spent — the calendar list, the settings, the
-// resolution — reporting 1 for a create that made 4. That is phase 1's
-// `api_requests: 2` for 168 requests, one order of magnitude down.
+// One tool call is one API request, and where it cannot be, the RESULT
+// says how many it made. That only works if the count is the truth, and
+// a count kept by hand at each call site misses every request a shared
+// setup spends: the calendar list, the settings, the resolution.
 //
 // So the counter lives in the context and the client increments it,
-// which means it counts every request actually made, including the
-// retries of §11, and cannot drift from the code that makes them.
-// Per-call rather than per-client, so two tool calls in flight together
-// do not count each other's work.
+// which means it counts every request actually made, retries included,
+// and cannot drift from the code that makes them. Per-call rather than
+// per-client, so two tool calls in flight together do not count each
+// other's work.
 //
-// The WRITE path uses it, and only the write path: the read tools still
-// count their own fetches by hand and so still omit the calendar list,
-// the settings and the resolutions, exactly as they did in phase 1. That
-// is a smaller gap — those reads are cached for the process and phase 1
-// removed the fan-out that made it large — but it is a gap, and saying
-// so here is better than a comment that reads as though it were closed.
+// The write paths use it. The read tools count their own fetches by
+// hand, so a read's count leaves out the calendar list, the settings and
+// the resolutions, which are cached for the process.
 
 type counterKey struct{}
 

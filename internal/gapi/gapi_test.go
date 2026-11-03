@@ -134,7 +134,7 @@ func TestEveryEmittedClassIsInTheVocabulary(t *testing.T) {
 		t.Fatal("an unknown class passed Valid()")
 	}
 	if len(gapi.Classes) != 12 {
-		t.Fatalf("%d classes; §6.5 tabulates twelve", len(gapi.Classes))
+		t.Fatalf("%d classes, want twelve", len(gapi.Classes))
 	}
 }
 
@@ -195,8 +195,8 @@ func TestDoesNotRetryAClientError(t *testing.T) {
 	}
 }
 
-// TestTransportErrorsCarryNoURL is §9: a search term travels in a query
-// string, and the obvious fmt of a *url.Error quotes the whole URL.
+// TestTransportErrorsCarryNoURL: a search term travels in a query string,
+// and the obvious fmt of a *url.Error quotes the whole URL.
 func TestTransportErrorsCarryNoURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	base := srv.URL
@@ -255,7 +255,7 @@ func TestFreeBusyRoundTrip(t *testing.T) {
 		t.Fatalf("primary busy = %+v", res.Calendars["primary"])
 	}
 	if len(res.Calendars["unreadable@example.test"].Errors) != 1 {
-		t.Fatal("a per-calendar error was not reported; §4.6 must not fold it into `free`")
+		t.Fatal("a per-calendar error was not reported; it must never be folded into `free`")
 	}
 }
 
@@ -497,8 +497,8 @@ func TestErrorWithNoBodyStillClassifies(t *testing.T) {
 	}
 }
 
-// TestListInstancesOfAnOccurrenceID records what the live driver found,
-// at the layer that talks to Google.
+// TestListInstancesOfAnOccurrenceID holds what Google does, at the layer
+// that talks to it.
 //
 // events.instances does not refuse an occurrence's own id: it answers
 // 200 and expands the occurrence that id names. A canceled occurrence
@@ -506,7 +506,7 @@ func TestErrorWithNoBodyStillClassifies(t *testing.T) {
 // why internal/service refuses the id shape rather than waiting to be
 // told. The refusal means nothing here reaches this method in
 // production, so this is the only place the fake's behavior is held to
-// the probe that established it (§18 row 31).
+// Google's.
 func TestListInstancesOfAnOccurrenceID(t *testing.T) {
 	fake := caltest.Seed()
 	c := client(fake.Start())
@@ -545,7 +545,7 @@ func TestListInstancesOfAnOccurrenceID(t *testing.T) {
 	}
 }
 
-// §11: a POST that creates is sent once. Google's code.proto says of
+// A POST that creates is sent once. Google's code.proto says of
 // UNAVAILABLE that it is "not always safe to retry non-idempotent
 // operations", so a 503 is no reason to send the insert again.
 func TestANonIdempotentWriteIsSentOnce(t *testing.T) {

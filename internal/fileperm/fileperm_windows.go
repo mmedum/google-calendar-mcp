@@ -5,11 +5,10 @@
 // It exists because "0600" is not a portable statement. On Unix it is
 // the whole story; on Windows a file mode only decides the read-only
 // attribute, so a file written 0600 is readable by every account on the
-// machine. The refresh token was, and both of its warnings said
-// otherwise (§18 row 47).
+// machine.
 //
-// One owner for the rule, because there are two files that need it and
-// they had drifted: the token and the profile state. A caller asks for
+// One owner for the rule, because two files need it: the token and the
+// profile state. A caller asks for
 // the file to be restricted and asks what to tell the user; neither
 // question has a platform in it.
 package fileperm
@@ -23,11 +22,11 @@ import (
 // RestrictToOwner replaces the file's access list with one that grants
 // the current user everything and nobody else anything.
 //
-// This is what 0600 was supposed to do and does not. Go's file modes do
-// not map to Windows ACLs: `os.WriteFile(path, data, 0o600)` only
-// decides whether the read-only attribute is set, so the file keeps
-// whatever the parent directory's inheritance gave it — the first CI run
-// on Windows reported the token file as 0666 (§18 row 47).
+// This is what 0600 does on Unix and not here. Go's file modes do not
+// map to Windows ACLs: `os.WriteFile(path, data, 0o600)` only decides
+// whether the read-only attribute is set, so the file keeps whatever the
+// parent directory's inheritance gave it, and reads back as 0666.
+// https://pkg.go.dev/os#Chmod
 //
 // PROTECTED_DACL_SECURITY_INFORMATION is the half that matters as much
 // as the grant: without it the inherited entries stay, and the new

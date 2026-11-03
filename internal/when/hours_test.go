@@ -52,8 +52,8 @@ func equalSpans(t *testing.T, got []when.Window, want []string) {
 	}
 }
 
-// TestHoursMaskOneDayPerKeptWeekday is the shape §17.2 argues for: five
-// days of a week come back as five intervals, not one.
+// TestHoursMaskOneDayPerKeptWeekday: five days of a week come back as
+// five intervals, not one.
 func TestHoursMaskOneDayPerKeptWeekday(t *testing.T) {
 	loc := mustLoad(t, tzCopenhagen)
 	// 2026-03-16 is a Monday.
@@ -69,10 +69,9 @@ func TestHoursMaskOneDayPerKeptWeekday(t *testing.T) {
 	})
 }
 
-// TestHoursHoldTheWallClockAcrossATransition is the mask's version of
-// §4.1: 09:00 is 09:00 on both sides of a daylight-saving change, so
-// every day of the week is eight hours long even though one of them is
-// 23 hours long.
+// TestHoursHoldTheWallClockAcrossATransition: 09:00 is 09:00 on both
+// sides of a daylight-saving change, so every day of the week is eight
+// hours long even though one of them is 23 hours long.
 func TestHoursHoldTheWallClockAcrossATransition(t *testing.T) {
 	loc := mustLoad(t, tzCopenhagen)
 	// 2026-03-29 is the spring-forward Sunday.

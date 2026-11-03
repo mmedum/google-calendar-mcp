@@ -13,11 +13,11 @@ import (
 	"strings"
 )
 
-// fieldResources are the resources §8b holds a verdict for. They are the
-// four whose fields decide what this server can do: an event, the two
-// views of a calendar, and a sharing rule. api-diff records them and
-// every schema they reach by $ref, since a field nested in an attendee
-// or a reminder is as much a capability as one on the event.
+// fieldResources are the resources whose fields each carry a verdict. They
+// are the four whose fields decide what this server can do: an event, the
+// two views of a calendar, and a sharing rule. api-diff records them and
+// every schema they reach by $ref, since a field nested in an attendee or a
+// reminder is as much a capability as one on the event.
 //
 // The list lives here and in nothing else, so a resource cannot be
 // dropped from the record by editing the snapshot.
@@ -34,7 +34,7 @@ var wireSchema = map[string]string{
 	"conferenceEntryPoint":    "EntryPoint",
 }
 
-// apiFieldsGate is §8b: one verdict per published field.
+// apiFieldsGate holds one verdict per published field (D-08).
 //
 // Methods are the coarse axis and api-coverage holds them. This holds
 // the fine one, because this API keeps its capability in the Event

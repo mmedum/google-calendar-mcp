@@ -1,184 +1,120 @@
-# CLAUDE.md — google-calendar-mcp project instructions
+# CLAUDE.md — google-calendar-mcp
 
-Project-specific rules for Claude Code in this repository. The user's
-global instructions still apply; this file adds to them.
+A Go MCP server that exposes Google Calendar over stdio: one binary per
+person, per-user OAuth, nothing hosted. It answers *when* and hands off
+*what* to the Drive and Docs servers (D-09). Why the code is the way it
+is lives in `docs/architecture.md`, one decision per `D-NN`; read it
+before changing the tool surface, the time model, the write path or the
+auth wiring.
 
-## Mission
+## Commands
 
-A production-grade Go MCP server for Google Calendar, distributed to
-other people. One binary, stdio, per-user OAuth, no hosted deployment.
-The design, its evidence log, the decided constraints and the phase plan
-live in `docs/architecture.md`. Read it before changing the tool
-surface, the time model, the recurrence model or the write path. The
-server answers *when* and hands off *what*: a meeting's recording, notes
-document or attachment belongs to the servers built on the Meet, Docs
-and Drive APIs.
+- `make check` runs every gate CI runs; `make parity` holds the two lists
+  equal.
+- `make live` drives the built binary against a real account. Read the
+  transcript; `CONTRIBUTING.md` says what a run does to the account.
+- `make evals` scores a model and needs `ANTHROPIC_API_KEY`;
+  `make evals-check` runs the scorers with no key.
+- `make api-diff` refetches Google's discovery document, and
+  `make release-rehearse` builds the release without publishing it.
+- `go run ./scripts/gates` prints the gates; add a gate's name to run
+  that one.
 
 ## Hard rules
 
-1. **Nothing internal, ever.** No organization names, calendar ids or
-   URLs, account or attendee email addresses, Cloud project ids, OAuth
-   client ids or secrets; no event title, description, location or guest
-   list from a real calendar; and no reference to any other project,
-   repository, account or machine the maintainers use. This holds for
-   code, docs, fixtures, goldens, transcripts, commit and tag messages,
-   pull requests and logs.
-
-   A calendar is worse than a spreadsheet here: **every event carries
-   other people's email addresses**, and an attendee list is personal
-   data about people who never consented to this repository existing.
-
-   Two of these are structural rather than a matter of care, and must
-   stay that way: **fixtures are generated, never recorded**, and the
-   **live driver reads only a calendar it created and filled itself**,
-   save the one status event §9.1's narrow exception, approved by the
-   owner on 2026-10-09, lets it make and delete on the primary calendar;
-   the evals harness reads only the in-memory calendar of `caltest`.
-   `docs/architecture.md` §9.1 is the full specification, including why
-   every rule in the leak gate is an allow-list anchored on a shape the
-   server's own generated fields cannot take.
-2. **Stdout carries only MCP JSON-RPC frames.** This is the protocol, not
-   a house preference. MCP's stdio transport says the server "MUST NOT
-   write anything to its `stdout` that is not a valid MCP message", and
-   "MAY write UTF-8 strings to its standard error (`stderr`) for logging
-   purposes" —
-   <https://modelcontextprotocol.io/specification/2025-06-18/basic/transports>.
-   Logs use `slog` to stderr. A stray print corrupts the JSON-RPC stream
-   and the client silently stops working, which is why this is a hard
-   rule rather than a style note.
-
-   `forbidigo` enforces it: `fmt.Print*` and `os.Stdout` are forbidden
-   outside `main`, which names the process's streams once and passes them
-   down as `io.Writer`. `scripts/` is excluded, being maintainer tooling
-   rather than the server. Check the message text when verifying it — a
-   settings block that fails to load leaves forbidigo on its defaults,
-   firing, looking like it works.
-3. **Logs never carry the payload.** Method, tool, outcome, duration and
-   a truncated calendar id are fine. Email addresses, event titles,
-   descriptions, locations and search terms are not — a search term
-   reaches a log through a request URL, so transport errors are stripped
-   of their query string.
-4. **A date is not a time.** An all-day event is carried as a date end to
-   end and never becomes an instant; there is no `Date` → `Zoned`
-   conversion in `internal/when`, because there is no correct one. Every
-   `dateTime` carries its IANA zone, not merely an offset. The zone is
-   read — from the call, else the calendar, else the user's settings —
-   never from the process, and every read names which it used. §4.1.
-5. **The recurrence scope is required, never inferred.** Every write to a
-   recurring event takes `scope`: `instance`, `series` or
-   `this_and_following`. No default; a missing scope is refused with the
-   three choices and what each would do. `this_and_following` is two
-   calls and resets exceptions after the target — say so in the result.
-   §4.2.
-6. **`notify` is required, and the server has no default.** Not `none`,
-   which Google documents as able to lose events; not Google's default,
-   which is the opposite on ACL rules to what it is on events. Any write
-   that can reach another person refuses without an explicit choice, and
-   never reports `none` as a promise of silence. §4.3.
-7. **Patch always, PUT never.** `events.update`, `calendars.update`,
-   `calendarList.update` and `acl.update` replace the whole resource and
-   are never called — a client function for any of them fails the
-   API-coverage gate. Every write is a patch under `If-Match` from the
-   read that produced it; a 412 is `[stale]`, never a silent retry. The
-   one exception: when the etag came from the server's own read, not the
-   caller, it reads again once and retries only if the write is the same,
-   and the result says so. §4.4.
-8. **Availability comes from `freebusy.query`, never from a list.** A
-   list misses events whose details the caller cannot read and ignores
-   `transparency`. A calendar that errored is reported **unknown**, never
-   folded into "free". §4.6.
-9. **Own wire types, raw REST.** Do not import `google.golang.org/api`;
-   extend `internal/gcal`. No code is imported from any other project.
-10. **Destructive tools are unregistered** unless
-    `GCAL_ENABLE_DESTRUCTIVE=true`, and each still needs `confirm: true`
-    on the call. Those are `delete_calendar` and `clear_calendar`, and,
-    with sharing on, the two shares that widen who can see a calendar:
-    `publish_calendar` for the public or a domain, and
-    `widen_calendar_access` for somebody outside the organization or an
-    owner. Both also take the calendar's title as read.
-    `create_event_declining_all` has a flag of its own,
-    `GCAL_ENABLE_DECLINE_ALL`. A risky form of a write is a tool of its
-    own, never an argument of the ordinary one (§7.6). Registration is
-    the control: the server asks nobody, and the mark on a tool is never
-    counted as one (§9a). `cancel_event` is deliberately **not** among
-    them — §9 argues why, and the argument is not to be quietly reversed.
-11. **Every published API method has a written verdict.** All 38 are in
-    §8a, used or written off with a reason, and the gate fails on a
-    method with no verdict, a client call with no row, and a verdict for
-    a method that no longer exists. Field-level coverage is §8b.
-12. **Branches and commits.** `main` is released code and is never pushed
-    to directly, release commits included. Work on a short topic branch.
-    Commit at the end of every phase with a message that says what and
-    why. Pushing, opening the pull request and merging are the
-    maintainer's.
-13. **Verify against the discovery document or a live probe** before
-    adopting a convention, and record the verdict in the evidence log in
-    `docs/architecture.md` §18. A reference page's prose is not evidence.
-    Nine of its twenty rows refute an assumption this design started out
-    holding, and one of them reversed the most consequential decision in
-    it.
-
-## Where things go
-
-- `cmd/google-calendar-mcp/` — subcommands and server wiring.
-- `internal/config/` env plus bound flags; `internal/credentials/`
-  keyring → file → env; `internal/userconfig/` non-secret profile state;
-  `internal/fileperm/` restricting a file to the account that wrote it;
-  `internal/auth/` loopback OAuth and the token source.
-- `internal/gcal/` wire types; `internal/gapi/` the raw REST client, with
-  `caltest/` the in-memory Calendar used by tests.
-- `internal/when/` dates, zoned times and windows, no network and no
-  clock of its own; `internal/recur/` RRULEs, instance expansion and the
-  three scopes; `internal/model/` the server's view of a calendar, event
-  and busy interval; `internal/render/` text output; `internal/plan/`
-  typed write ops and the guards; `internal/service/` orchestration and
-  policy; `internal/tools/` the MCP tools; `internal/server/` SDK wiring
-  and the schema dump; `internal/redact/` the log and transcript
-  redactor.
-- `scripts/gates/` the repository's own checks, as Go; `scripts/livecal/`
-  the live driver, which also carries the live probes of §15;
-  `scripts/evals/` the model-facing scoring harness, run by hand.
-- `packaging/mcpb/` the Claude Desktop bundle: the manifest, which
-  carries a placeholder version, and the Linux launcher, whose binary
-  names the `mcpb` gate holds against the packer's.
-- `testdata/` synthetic fixtures, renderer goldens, the API surface
-  snapshot and coverage records, and the recorded tool-schema baseline.
+1. **Never commit anything internal.** No organization names, calendar
+   ids or URLs, account or attendee addresses, Cloud project ids, OAuth
+   client ids or secrets, and no event title, description, location or
+   guest list from a real calendar, anywhere: code, fixtures, goldens,
+   transcripts, commit or tag messages, logs. `make leaks` fails the
+   build (D-04).
+2. **Never record a fixture, and never let the live driver read what it
+   did not write.** Fixtures are generated (D-05). The driver works on
+   calendars it made, and writes nothing on the primary calendar but one
+   status event per run (D-71, D-72). Evals read only the in-memory
+   calendar (D-73).
+3. **Never write to stdout outside `main`.** Stdout carries only MCP
+   JSON-RPC frames, and logs go to stderr through `slog` (D-02).
+   forbidigo holds it, with `scripts/` excluded.
+4. **Never log the payload**: addresses, event titles, descriptions,
+   locations, search terms or error messages. Method, tool, outcome,
+   duration and a failed call's error class are fine (D-03).
+5. **Never turn a date into an instant**, and never send a `dateTime`
+   without its IANA zone. The zone comes from the call, the calendar or
+   the account's settings, never the process (D-10). Every read names
+   the window and zone it used (D-12).
+6. **Never infer a recurrence scope.** A write to a recurring event takes
+   `instance`, `series` or `this_and_following`, with no default (D-18).
+   `this_and_following` is two calls, and the result says what it reset
+   (D-19).
+7. **Never default `notify`.** A write that can reach a person refuses
+   without it (D-21), `none` is refused for a guest outside the
+   organizer's domain (D-24), and no result claims what a guest received
+   (D-23).
+8. **Never call a PUT method.** Every write is a patch (D-27), made under
+   the etag of the read that planned it, and a 412 is `[stale]` (D-28).
+   The one retry: under the server's own etag, it reads again once and
+   writes only if the write is unchanged (D-29).
+9. **Never answer availability from a list of events.** It comes from
+   `freebusy.query`; a calendar without an answer is unknown (D-34).
+10. **Never import `google.golang.org/api`**; extend `internal/gcal` (D-06).
+11. **Never register a tool outside `add`**, whose `Kind` decides its
+    annotations and whether it registers (D-54). Destructive tools and
+    the wider shares register only with `GCAL_ENABLE_DESTRUCTIVE=true`
+    and still take `confirm` (D-55). Never make a risky form an argument:
+    it is a tool of its own (D-49), as `create_event_declining_all` is,
+    behind `GCAL_ENABLE_DECLINE_ALL` (D-44). The server asks the person
+    nothing (D-56), and the `requiresUserInteraction` mark stays on the
+    tools D-57 names. Do not gate `cancel_event` (D-39).
+12. **Never call an API method or model a field without a verdict.**
+    `testdata/api-coverage.tsv` and `testdata/api-fields.tsv` hold one
+    per method and field; `make api-coverage` and `make api-fields` fail
+    without one (D-08).
+13. **Never rename a released tool, output field or resource URI.**
+    `make schema-diff` fails on one; adding is fine (D-68).
+14. **Never commit to `main` or push.** Work on a branch; the owner
+    pushes.
+15. **Never adopt a belief about Google from a reference page's prose.**
+    Check the discovery document or a live run, and record the verdict in
+    the comment at the line that depends on it, with the source link and
+    the live step that checks it.
 
 ## Definition of done
 
-`make check`, which is what CI runs, asserted equal by the `parity` gate:
-gofmt, `go vet` including the tagged tests, golangci-lint, race tests
-with an 80% floor per package, govulncheck, the license allow-list,
-gitleaks, the API method and field coverage gates, the closed
-error-class gate, the leak scan, the transcript redaction gate, the live
-driver coverage gate, the bundle manifest gate, the eval scorers'
-self-check, the workflow pin check, a
-stdio smoke test, the schema diff, and the staleness gate over README,
-`docs/` and CHANGELOG. On a pull request, CI also runs `schema-ack`: a
-change to the tool surface needs a `SCHEMA-CHANGE:` footer. Plus tests for new behavior, `/simplify` and
-`/code-review high` with findings resolved or written down, and a look at
-the schema diff for anything breaking — which now covers the resources
-as well as the tools. The release workflow refuses a tag whose major
-version is not go.mod's, before goreleaser runs.
+- `make check` passes; its `check` target is the list. On a pull request
+  CI also runs `schema-ack`, which needs a commit footer naming each
+  changed item of the tool surface (`CONTRIBUTING.md`).
+- New behavior has tests.
+- `/simplify` and `/code-review high` have run. A fixed finding is one
+  line in the commit body. A declined one goes in the PR body, or becomes
+  a present-tense constraint comment at the line it protects. Never write
+  findings into `docs/`.
+- The schema diff has been read for anything breaking.
+- Anything touching the write path or an API response shape has had a
+  `make live` run whose transcript was read (D-70). A release also needs
+  `make api-diff` and `make schema-refetch` (`docs/release.md`).
 
-Green gates are not done. Anything touching the write path or an API
-response shape gets a live run before it counts, and **the transcript is
-read** — a sibling's driver twice reported success while its results were
-wrong. `make evals` scores a model against the tool surface and is run
-by hand for the same reason; it needs an `ANTHROPIC_API_KEY`, and
-`-self-check` exercises the harness without one.
+## Traps
 
-## Working across sessions
-
-Each phase is one session, and the session is cleared between phases. On
-a fresh session: read this file, the status line and §15, §16 and §17 of
-`docs/architecture.md`, `CHANGELOG.md` under `[Unreleased]`,
-`git log --oneline -20` and `git status`; run `make check`; then continue
-the phase §16 names, on a topic branch. Commit at the end of the phase,
-say which version was tagged, and stop.
+- **Green gates are not done.** Every fake in `internal/gapi/caltest` is
+  written from what we believe Google does, and only `make live` tests
+  that belief. A pass count is not a read transcript: the driver's
+  `-show` prints the bodies of the steps it names.
+- **A forbidigo settings block that fails to load leaves forbidigo on its
+  defaults**, still firing and looking right. Check the message text when
+  you verify it.
+- **Redirecting the config directory does not isolate a test from the OS
+  keyring.** `TestMain` substitutes the keyring; never let a test reach
+  the real one (D-69).
+- **Creating a calendar spends a quota that deleting does not refund.**
+  Pass `-keep` to the live driver to leave its scratch calendars for the
+  next run.
+- **Never delete a decision or reuse an ID.** Supersede or deprecate it,
+  and take the next ID from the file's `Next ID:` line.
 
 ## Writing
 
-Plain and short, everywhere it lands — code comments, commit messages,
-CHANGELOG, docs, tool descriptions. Lead with the outcome. One idea per
-sentence. No narration of the investigation.
+Plain and short, everywhere: lead with the outcome, one idea per
+sentence, no narration of the investigation, and no count a gate does
+not check. History goes in commit messages. The CHANGELOG rules in `CONTRIBUTING.md` are not optional,
+because `release.yml` lifts the section verbatim into the release notes.

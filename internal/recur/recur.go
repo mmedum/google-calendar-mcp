@@ -11,16 +11,16 @@
 // A weekly event at 09:00 is at 09:00 next week too, and the number of
 // hours in between is 167 or 169 whenever a daylight-saving transition
 // falls in the gap. Expanding by adding 7*24h to an instant drifts an
-// hour at every boundary, which is §3's second row and the defect every
-// surveyed server ships. So the walker here advances DATES and carries
-// the wall-clock time of day unchanged, and each occurrence is resolved
-// in the series' own zone at the end (§2.2).
+// hour at every boundary, which is the defect every surveyed server
+// ships. So the walker here advances DATES and carries the wall-clock
+// time of day unchanged, and each occurrence is resolved in the series'
+// own zone at the end.
 //
 // # The server sends the caller's rule
 //
-// Parsing is for validating and for explaining a rule back in prose
-// (§6.4). The string that goes to Google is the string that came in:
-// composing an RRULE from struct fields is where a BYDAY gets lost.
+// Parsing is for validating and for explaining a rule back in prose. The
+// string that goes to Google is the string that came in: composing an
+// RRULE from struct fields is where a BYDAY gets lost.
 package recur
 
 import (
@@ -124,6 +124,12 @@ func (s Set) Recurring() bool { return s.Rule != nil || len(s.Added) > 0 }
 //
 // It keeps the two apart for the same reason internal/when does. An
 // EXDATE on an all-day series is a date and has no instant.
+//
+// RFC 5545 §3.8.5 lets a line carry a TZID or the VALUE=DATE form, and a
+// bare local time is read in the series' own zone. Google's reference
+// only says the lines are RFC 5545, so this follows the specification;
+// no live step checks which forms Google returns.
+// https://www.rfc-editor.org/rfc/rfc5545#section-3.8.5
 type Point struct {
 	AllDay bool
 	Date   when.Date

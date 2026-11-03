@@ -17,10 +17,8 @@ import (
 // server's own generated output cannot take. That construction is
 // deliberate: a leak gate cannot be patterns alone when the payload is
 // ordinary words, and a pattern that is not anchored collides with
-// something innocent and then gets ignored. A sibling's scan matched a
-// four-character fixture value inside a timestamp and failed about one
-// run in twenty-five — frequent enough to erode trust, rare enough to be
-// called flaky.
+// something innocent, such as a short fixture value inside a timestamp,
+// fails now and then, and then gets ignored as flaky.
 //
 // A calendar is the worst case for this: every event carries other
 // people's email addresses.
@@ -96,7 +94,7 @@ func leakRules() []leakRule {
 				// One synthetic room. A room's address is Google's own
 				// domain, so no reserved name can stand in for it, and
 				// the tests of room handling need the real domain.
-				// Argued rather than widened (§9.1): exactly this local
+				// An exact entry, never a widened pattern: this local
 				// part, which Google never generates (its rooms are
 				// `c_` and a long id), so no real room can match.
 				regexp.MustCompile(`(?i)^room-sample@resource\.calendar\.google\.com$`),
@@ -105,12 +103,11 @@ func leakRules() []leakRule {
 				regexp.MustCompile(`@noreply\.anthropic\.com$`),
 				// The commit-attribution address, which is the other
 				// shape: noreply@anthropic.com, not @noreply.anthropic.com.
-				// The entry above anticipated this and spelled it wrong,
-				// so `leaks-history` failed on every commit message in
-				// the repository — and nobody knew, because it is the one
-				// gate `make check` does not run.
+				// Only `leaks-history` reads commit messages, and `make
+				// check` does not run it, so a wrong entry here goes
+				// unseen there.
 				//
-				// Argued rather than widened (§9.1): it is a vendor's
+				// An exact entry, never a widened pattern: it is a vendor's
 				// non-routable no-reply address in a Co-Authored-By
 				// trailer, structurally identical to the GitHub noreply
 				// above, and it says nothing about a deployer, an
@@ -118,9 +115,9 @@ func leakRules() []leakRule {
 				regexp.MustCompile(`^noreply@anthropic\.com$`),
 				// The Signed-off-by trailer Dependabot writes on every
 				// version bump it opens: `dependabot[bot]
-				// <support@github.com>`. `leaks-history` failed on each.
+				// <support@github.com>`, which `leaks-history` reads.
 				//
-				// Argued rather than widened (§9.1): exactly this
+				// An exact entry, never a widened pattern: exactly this
 				// address, GitHub's own support desk, which a bot's
 				// trailer carries and which says nothing about a
 				// deployer, an organization or a person's calendar.

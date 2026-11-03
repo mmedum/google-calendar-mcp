@@ -20,8 +20,8 @@ func testZone(t *testing.T) when.Zone {
 	return z
 }
 
-// TestEventOutKeepsTheDateAndTimeHalvesApart is §4.1 carried into the
-// JSON a client actually sees. A structured event must not offer both a
+// TestEventOutKeepsTheDateAndTimeHalvesApart: a date is not a time, in
+// the JSON a client actually sees too. A structured event must not offer both a
 // date and a timestamp for the same edge, or the consumer picks.
 func TestEventOutKeepsTheDateAndTimeHalvesApart(t *testing.T) {
 	allDay := service.NewEventOut(model.Event{

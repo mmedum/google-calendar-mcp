@@ -85,6 +85,8 @@ jobs:
 
       - name: error classes
         run: make classes
+      - name: docs
+        run: make docs
       - name: API coverage
         run: make api-coverage
       - name: API field coverage

@@ -13,7 +13,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
-// spikeO — what does a read by updatedMin give back (§18 row 91)?
+// spikeO — what does a read by updatedMin give back?
 //
 // list_changes' updated_since sends updatedMin and hands back the sync
 // token its last page carries, because this spike found such a token
@@ -24,7 +24,7 @@ import (
 //   - how does Google answer a moment far in the past;
 //   - does the bound include an event written at exactly that moment.
 //
-// Everything is on the scratch calendar this run filled (§9.1). The one
+// Everything is on the scratch calendar this run filled. The one
 // write is a description change on the driver's own timed event, sent
 // with sendUpdates=none to an event with no guests.
 func spikeO(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
@@ -86,7 +86,7 @@ func spikeO(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	case status >= 400 && status < 500:
 		// Never the error: it carries the URL, and the URL the token.
 		return fail, fmt.Sprintf("Google issued a token from an updatedMin read and REFUSED it as a sync "+
-			"token (HTTP %d), and list_changes hands such a token back (§18 row 91)", status)
+			"token (HTTP %d), and list_changes hands such a token back", status)
 	default:
 		// No answer, or a 5xx, says nothing about the token.
 		return undetermined, fmt.Sprintf("the sync with the token got no answer to read (HTTP %d); "+
@@ -95,11 +95,11 @@ func spikeO(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	for _, it := range synced.Items {
 		if it.ID == timedID {
 			return pass, "a token from an updatedMin read chains: a sync with it reported the change made " +
-				"after it, as list_changes assumes when it hands one back (§18 row 91)"
+				"after it, as list_changes assumes when it hands one back"
 		}
 	}
 	return fail, fmt.Sprintf("Google accepted the token but the sync missed the change made after it "+
-		"(%d rows), and list_changes hands such a token back (§18 row 91)", len(synced.Items))
+		"(%d rows), and list_changes hands such a token back", len(synced.Items))
 }
 
 // pageUpdatedMin pages an updatedMin read to its end, as list_changes

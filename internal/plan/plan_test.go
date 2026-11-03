@@ -26,8 +26,9 @@ func zone(t *testing.T) when.Zone {
 
 func ptr[T any](v T) *T { return &v }
 
-// §4.1: a date is not a time, and a draft that mixes them is refused
-// rather than resolved. This is the failure §3's first row names.
+// A date is not a time, and a draft that mixes them is refused rather
+// than resolved: a date read as an instant lands on the wrong day west of
+// UTC.
 func TestADateIsNotATime(t *testing.T) {
 	_, err := plan.Insert("abcde12345", plan.Draft{
 		Title: ptr("Mixed"), Start: "2026-03-16", End: "2026-03-16T10:00:00+01:00", Zone: zone(t),
@@ -55,12 +56,12 @@ func TestAllDayEndIsInclusiveOnTheWayIn(t *testing.T) {
 		t.Fatalf("got %s to %s, want 2026-03-20 to 2026-03-21 on the wire", e.Start.Date, e.End.Date)
 	}
 	if e.Start.TimeZone != "" || e.End.TimeZone != "" {
-		t.Error("an all-day event carries no zone; there is no instant for one to act on (§4.1)")
+		t.Error("an all-day event carries no zone; there is no instant for one to act on")
 	}
 }
 
-// §4.1: every timed write carries its IANA zone, recurring or not, so
-// the same path is exercised every time rather than only on the rare one.
+// Every timed write carries its IANA zone, recurring or not, so the same
+// path is exercised every time rather than only on the rare one.
 func TestEveryTimedWriteCarriesItsZone(t *testing.T) {
 	e, err := plan.Insert("abcde12345", plan.Draft{
 		Title: ptr("Sync"), Start: "2026-03-16T09:00:00+01:00", End: "2026-03-16T09:15:00+01:00",
@@ -87,8 +88,8 @@ func TestInsertRefusesAnEndBeforeItsStart(t *testing.T) {
 // A rule RFC 5545 forbids is refused here rather than at Google, where
 // the answer names neither the field nor the rule.
 //
-// What is NOT refused is a rule this server cannot EXPAND: §6.4 sends
-// the caller's string, and a FREQ Google supports and internal/recur
+// What is NOT refused is a rule this server cannot EXPAND: the server
+// sends the caller's string, and a FREQ Google supports and internal/recur
 // does not is Google's to accept. Refusing it would be this server
 // inventing a constraint.
 func TestInsertRefusesARuleRFC5545Forbids(t *testing.T) {
@@ -122,9 +123,8 @@ func TestAnEmptyRecurrenceEndsTheRepetition(t *testing.T) {
 	}
 }
 
-// §4.4: a patch carries only what changed, and a field rewritten to its
-// own value is not sent at all — it would move the etag under everybody
-// else holding one.
+// A patch carries only what changed, and a field rewritten to its own
+// value is not sent at all, so the change list says what the write did.
 func TestPatchSendsOnlyWhatChanged(t *testing.T) {
 	before := gcal.Event{
 		Summary: "Morning sync", Description: "as before", Location: "Room 1",
@@ -167,8 +167,8 @@ func TestPatchRefusesAChangeThatChangesNothing(t *testing.T) {
 	}
 }
 
-// §4.4: adding a guest is a read-modify-write on the array that was
-// read, so a comment or an RSVP on somebody else's row survives.
+// Adding a guest is a read-modify-write on the array that was read, so a
+// comment or an RSVP on somebody else's row survives.
 func TestGuestsAreModifiedNotReplaced(t *testing.T) {
 	before := gcal.Event{Attendees: []gcal.EventAttendee{
 		{Email: "colleague@example.test", ResponseStatus: gcal.ResponseAccepted, Comment: "see you there"},
@@ -194,7 +194,7 @@ func TestGuestsAreModifiedNotReplaced(t *testing.T) {
 	if got[1].Email != "new@example.test" {
 		t.Errorf("the new guest is missing: %+v", got)
 	}
-	// Counts in the change line, never addresses (§9).
+	// Counts in the change line, never addresses.
 	for _, c := range changes {
 		if strings.Contains(c.To, "@") || strings.Contains(c.From, "@") {
 			t.Errorf("a change line leaked an address: %+v", c)
@@ -246,8 +246,8 @@ func TestAOneSidedTimeChangeKeepsTheEventsKind(t *testing.T) {
 	}
 }
 
-// §4.2: no scope, no write — and the refusal names the three choices and
-// what each would do here.
+// No scope, no write — and the refusal names the three choices and what
+// each would do here.
 func TestScopeIsRequiredOnARecurringEvent(t *testing.T) {
 	e := model.Event{Recurrence: []string{"RRULE:FREQ=WEEKLY;COUNT=10"}}
 	_, err := plan.Scope("", e, func() string { return "this series has 10 occurrences" })
@@ -290,8 +290,8 @@ func TestScopeIsNotDemandedOnASingleEvent(t *testing.T) {
 	}
 }
 
-// §2.8: there is no server-side "this and following", so where this
-// server cannot build it out of two calls the operation does not exist.
+// There is no server-side "this and following", so where this server
+// cannot build it out of two calls the operation does not exist.
 func TestNoSplitRefusesThisAndFollowing(t *testing.T) {
 	err := plan.NoSplit(recur.ScopeThisAndFollowing, "answering an invitation")
 	if !errors.Is(err, plan.ErrUnsupported) {
@@ -316,11 +316,11 @@ func TestEmptyDraftIsRecognized(t *testing.T) {
 	}
 }
 
-// §4.1, inside the guard that enforces it. An RFC3339 string sorts by
-// its text, and either side of a daylight-saving fold two strings carry
-// different offsets — so comparing them refused a valid event and
-// accepted an impossible one. Copenhagen falls back at 03:00 on
-// 2026-10-25, which makes 02:45+02:00 EARLIER than 02:30+01:00.
+// An RFC3339 string sorts by its text, and either side of a
+// daylight-saving fold two strings carry different offsets — so comparing
+// them refuses a valid event and accepts an impossible one. Copenhagen
+// falls back at 03:00 on 2026-10-25, which makes 02:45+02:00 EARLIER than
+// 02:30+01:00.
 func TestTimesAreComparedAsInstantsNotStrings(t *testing.T) {
 	z := zone(t)
 	forward := plan.Draft{

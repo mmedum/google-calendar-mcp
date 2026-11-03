@@ -48,7 +48,7 @@ func TestCreateCalendarSendsTheResolvedZone(t *testing.T) {
 	}
 }
 
-// §4.1: a calendar created with no zone must not take the process's.
+// A calendar created with no zone must not take the process's.
 // With none on the call and no calendar to read, the account's own
 // setting is the answer, and the result says so.
 func TestCreateCalendarFallsBackToTheAccountZone(t *testing.T) {
@@ -95,9 +95,9 @@ func TestCreateCalendarDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// §7.5's distinction, held at the API: a title change goes to
-// calendars.patch and a color to calendarList.patch, and neither
-// touches the other resource.
+// The calendar and the subscription stay apart at the API: a title
+// change goes to calendars.patch and a color to calendarList.patch, and
+// neither touches the other resource.
 func TestManageSeparatesTheCalendarFromTheSubscription(t *testing.T) {
 	svc, fake := calendarSeed(t)
 	title, color := "Team — renamed", "7"
@@ -306,9 +306,9 @@ func TestManageRefusesAnUnknownTimeZone(t *testing.T) {
 	}
 }
 
-// §4.4 at the calendar: the patch carries the etag of the read that
-// produced it, and the two resources carry different etags — so the
-// entry's must never end up on the calendar's write.
+// A calendar patch carries the etag of the read that produced it, and
+// the two resources carry different etags — so the entry's must never
+// end up on the calendar's write.
 func TestCalendarPatchesCarryTheirOwnETag(t *testing.T) {
 	svc, fake := calendarSeed(t)
 	title, color := "Renamed", "3"
@@ -681,12 +681,12 @@ func TestRenamingASharedCalendarKeepsYourOwnNameForIt(t *testing.T) {
 	}
 }
 
-// §4.7: one tool call is one API request, and where it cannot be, the
-// result says how many it made. Phase 1 shipped a defect where one call
-// spent 168 requests and reported 2 — invisible, because the number in
-// the result was kept by hand. These assert the reported count against
-// what the fake actually served, and pin the counts themselves so a
-// second read added later fails here rather than in somebody's quota.
+// One tool call is one API request, and where it cannot be, the result
+// says how many it made. A count kept by hand can drift from what was
+// spent with nothing looking wrong, so these assert the reported count
+// against what the fake actually served, and pin the counts themselves
+// so a second read added later fails here rather than in somebody's
+// quota.
 func TestTheCalendarWritesSpendWhatTheySay(t *testing.T) {
 	color, title := "5", "Renamed"
 
@@ -880,9 +880,9 @@ func TestADryRunShowsBothHalvesOfWhatItWouldDo(t *testing.T) {
 
 // Google refuses to let a calendar's data owner remove it from their own
 // list — 403, "The data owner of a calendar cannot remove such a
-// calendar from their calendar list" — which the live run found and
-// nothing published says. The refusal is translated into the two things
-// that do work, rather than passed through as somebody else's sentence.
+// calendar from their calendar list" — which nothing published says.
+// The refusal is translated into the two things that do work, rather
+// than passed through as somebody else's sentence.
 func TestUnsubscribingFromYourOwnCalendarSaysWhatDoesWork(t *testing.T) {
 	svc, fake := calendarSeed(t)
 	fake.Fail["DELETE /users/me/calendarList/"] = 403

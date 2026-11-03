@@ -50,10 +50,8 @@ func TestDateIsNotAnInstant(t *testing.T) {
 	}
 }
 
-// TestAllDayEventDoesNotSlipWestOfUTC is §3's first row, as a test.
-//
-// The defect being guarded against: an all-day event stored as midnight
-// UTC and then read in a negative-offset zone renders as the day
+// TestAllDayEventDoesNotSlipWestOfUTC: an all-day event stored as
+// midnight UTC and read in a negative-offset zone renders as the day
 // before. Chicago is UTC-5 or UTC-6, so midnight UTC is 18:00 or 19:00
 // on the *previous* day there.
 func TestAllDayEventDoesNotSlipWestOfUTC(t *testing.T) {
@@ -148,7 +146,7 @@ func TestWallStrictReportsAmbiguity(t *testing.T) {
 	}
 }
 
-// TestZonedKeepsTheZoneNotJustTheOffset is §2.2: a recurrence needs the
+// TestZonedKeepsTheZoneNotJustTheOffset: a recurrence needs the zone's
 // rule, not one moment's offset.
 func TestZonedKeepsTheZoneNotJustTheOffset(t *testing.T) {
 	cph := mustLoad(t, tzCopenhagen)
@@ -172,8 +170,9 @@ func TestZonedKeepsTheZoneNotJustTheOffset(t *testing.T) {
 	}
 }
 
-// TestWeeklyRecurrenceHoldsTheWallClock is the DST-drift defect from §3,
-// reduced to the arithmetic that causes it.
+// TestWeeklyRecurrenceHoldsTheWallClock is the daylight-saving drift of a
+// series written as a UTC instant, reduced to the arithmetic that causes
+// it.
 //
 // Adding 7*24h to an instant crosses a transition and lands an hour out.
 // Stepping the wall clock in the zone does not.
@@ -347,8 +346,8 @@ func TestWindowIsHalfOpen(t *testing.T) {
 		t.Fatal("window includes its own end; it must be open at the end")
 	}
 
-	// Back-to-back meetings do not overlap. This is the property the
-	// free-gap arithmetic in phase 1 will stand on.
+	// Back-to-back meetings do not overlap. The free-gap arithmetic
+	// stands on this.
 	next, err := when.NewWindow(end, when.Wall(2026, time.June, 15, 11, 0, cph), cph)
 	if err != nil {
 		t.Fatalf("NewWindow: %v", err)

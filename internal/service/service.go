@@ -45,7 +45,7 @@ type Service struct {
 	// the sentence they need.
 	AuthErr error
 	// Clock is injected so a test can stand at a daylight-saving
-	// boundary (§13).
+	// boundary.
 	Clock when.Clock
 
 	// cached per process lifetime: the user's settings change rarely and
@@ -103,7 +103,8 @@ func (s *Service) Settings(ctx context.Context) (*gcal.Settings, error) {
 	return out, nil
 }
 
-// userZone is the last resort in §4.1's resolution order.
+// userZone is the last resort for a zone, after the call's and the
+// calendar's.
 //
 // A failure to read settings is not an error here: it means the last
 // resort is unavailable, and Resolve will refuse with ErrNoZone if the
@@ -119,7 +120,7 @@ func (s *Service) userZone(ctx context.Context) string {
 }
 
 // Zone resolves the zone for a call: the caller's, then the calendar's,
-// then the user's (§4.1). calendarTZ may be empty.
+// then the user's. calendarTZ may be empty.
 func (s *Service) Zone(ctx context.Context, fromCall, calendarTZ string) (when.Zone, error) {
 	z, err := when.Resolve(fromCall, calendarTZ, s.userZone(ctx))
 	if err != nil {
@@ -139,7 +140,7 @@ func (s *Service) Zone(ctx context.Context, fromCall, calendarTZ string) (when.Z
 // Calendars returns the subscribed calendar list, paging to the end.
 //
 // It pages to the end rather than returning the first page: a calendar
-// missing from the list cannot be resolved by title (§6.1), and "not
+// missing from the list cannot be resolved by title, and "not
 // found" for a calendar that is simply on page two is the kind of wrong
 // answer nobody thinks to check.
 func (s *Service) Calendars(ctx context.Context, showHidden bool) ([]model.Calendar, error) {
@@ -220,7 +221,7 @@ func sortCalendars(cals []model.Calendar) {
 	})
 }
 
-// ResolveCalendar turns a reference into a calendar (§6.1).
+// ResolveCalendar turns a reference into a calendar (D-16).
 //
 // "primary" is the API's own alias and passes through. An id is used as
 // given. Anything else is matched against the subscribed list by title,
@@ -263,8 +264,8 @@ func (s *Service) ResolveCalendar(ctx context.Context, ref string) (model.Calend
 		return hits[0], nil
 	case 0:
 		// It may still be a calendar id the user is not subscribed to.
-		// Saying "not found" for a calendar they can read would be a lie
-		// (§6.1), so try it before refusing.
+		// Saying "not found" for a calendar they can read would be a lie,
+		// so try it before refusing.
 		if strings.Contains(ref, "@") {
 			return s.calendarByID(ctx, ref)
 		}
@@ -286,10 +287,8 @@ func (s *Service) calendarByID(ctx context.Context, id string) (model.Calendar, 
 	// when it has one. Every call resolves a calendar and the list is
 	// cached for the process, so going to calendarList.get for the alias
 	// spends a request on a question already answered — once per tool
-	// call, on the commonest reference there is. That is the shape of
-	// the defect phase 1 found in check_availability, one request at a
-	// time instead of 166, and invisible for the same reason: the
-	// result's own count does not include it.
+	// call, on the commonest reference there is, and invisible because
+	// the result's own count does not include it.
 	if strings.EqualFold(id, "primary") {
 		if c, ok := s.cachedPrimary(); ok {
 			return c, nil
@@ -339,19 +338,27 @@ type ListOptions struct {
 	// From and To bound the window. Both required.
 	From string
 	To   string
-	// Expand chooses instances over series parents (§2.9).
+	// Expand chooses instances over series parents: events.list returns
+	// one or the other, never both.
 	Expand bool
 	// Query is the free-text q, matched against fields Google documents,
-	// with no field syntax (§2).
+	// with no field syntax.
 	Query string
-	// ShowCanceled includes canceled events (§2.13).
+	// ShowCanceled includes canceled events. events.list hides them
+	// unless showDeleted is set, except on an incremental sync, and
+	// events.get always returns them. Checked by the live step "canceled
+	// hidden by default".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events/list
 	ShowCanceled bool
 	// EventTypes keeps only events of these types. Empty means every
 	// type, which is what Google does when the filter is left out.
 	EventTypes []string
 	// ICalUID keeps only the event with this iCalendar UID, the one an
 	// invitation carries. Every occurrence of a series shares it. It is
-	// a filter within the window, never an address (§6.2).
+	// a filter within the window, never an address: Google applies the
+	// window alongside it, which the reference does not say. Checked by
+	// the live step "ical_uid keeps to the window".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events/list
 	ICalUID string
 	// MaxEvents overrides the configured budget.
 	MaxEvents int
@@ -389,7 +396,7 @@ func (s *Service) ListEvents(ctx context.Context, o ListOptions) (render.Schedul
 	}
 
 	// The zone comes from the first calendar when the caller named none,
-	// and the result says which (§4.5).
+	// and the result says which.
 	firstTZ := ""
 	if len(cals) > 0 {
 		firstTZ = cals[0].TimeZone
@@ -517,7 +524,7 @@ func (s *Service) readCalendar(ctx context.Context, c model.Calendar, o ListOpti
 		MaxResults:   250,
 		PageToken:    pageToken,
 	}
-	// §2.9: orderBy=startTime is only legal with singleEvents.
+	// orderBy=startTime is only legal with singleEvents.
 	if o.Expand {
 		opts.OrderBy = "startTime"
 	}
@@ -668,19 +675,17 @@ func decodeToken(tok string, v any) bool {
 
 // drain reads pages until the budget is reached or the pages run out.
 //
-// It is §4.5's completeness policy in one place: stop at the budget
-// rather than draining a year of events to throw them away, and hand
-// back the token so the caller can say how to continue. The two read
-// paths had a copy each and had already drifted on what "truncated"
-// means.
+// It is the completeness policy in one place: stop at the budget rather
+// than draining a year of events to throw them away, and hand back the
+// token so the caller can say how to continue. One copy, so the read
+// paths cannot drift on what "truncated" means.
 //
 // showCanceled is the caller's promise, passed in rather than read off
 // opts.ShowDeleted. The two are not the same knob: ShowDeleted is what
-// this server asked Google for, and the defect being fixed here is
-// exactly that the server treated the request field as if it were the
-// promise. Phase 2 needs to ask for canceled occurrences without
-// putting them in a result — a canceled instance is an exception, and
-// §4.2's `this_and_following` has to see them.
+// this server asked Google for, and Google returns canceled instances
+// without it. A split asks for canceled occurrences without putting them
+// in a result: a canceled instance is an exception, and
+// `this_and_following` has to see it.
 func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, budget int,
 	showCanceled bool, opts gapi.EventsListOptions,
 	fetch func(context.Context, gapi.EventsListOptions) (*gcal.EventList, error),
@@ -697,11 +702,10 @@ func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, 
 		opts.MaxResults = budget
 	}
 	// The budget bounds what the read DRAINS, not what survives the
-	// filter below. Counting kept events let every dropped row buy
-	// another page: a window whose first twenty rows were canceled cost
-	// twenty-one requests to return one event, which is §4.7 failing
-	// where the result cannot show it. A page that is mostly canceled
-	// now comes back short, truncated and resumable — §4.5's bargain.
+	// filter below. Counting kept events would let every dropped row buy
+	// another page: a window whose first twenty rows are canceled would
+	// cost twenty-one requests to return one event. A page that is mostly
+	// canceled comes back short, truncated and resumable instead.
 	drained := 0
 	for {
 		page, ferr := fetch(ctx, opts)
@@ -717,13 +721,14 @@ func (s *Service) drain(ctx context.Context, calendarID string, zone when.Zone, 
 			// Google sends these bare, so a conversion error on one
 			// would fail a read over an event nobody asked for.
 			//
-			// showDeleted=false does not mean Google filtered them. The
-			// discovery document: "Cancelled instances of recurring
-			// events (but not the underlying recurring event) will
-			// still be included if showDeleted and singleEvents are
-			// both False." One arrives with no start and no summary, so
-			// a series read rendered a row with no date and no title
-			// and counted it among the results (§18).
+			// showDeleted=false does not mean Google filters them. The
+			// reference: "Cancelled instances of recurring events (but
+			// not the underlying recurring event) will still be
+			// included if showDeleted and singleEvents are both False."
+			// One arrives with no start and no summary, and would render
+			// as a row with no date and no title. Checked by the live
+			// step "list_events as series".
+			// https://developers.google.com/workspace/calendar/api/v3/reference/events/list
 			if !showCanceled && raw.Status == gcal.StatusCanceled {
 				continue
 			}
@@ -837,13 +842,12 @@ func parseBound(v string, zone when.Zone, upper bool) (when.Zoned, error) {
 // sortKey orders a schedule the way the renderer groups it: by LOCAL
 // date, in the zone the read resolved.
 //
-// It used to sort timed events by their UTC instant and all-day events
-// by their local date, while `render.dayKey` grouped both by local date.
-// East of UTC the two disagree — in Asia/Tokyo an 08:00 event carries a
-// UTC key on the previous day — so an all-day event landed in the middle
-// of its own day instead of at the front, which is what this function
-// promises. Every event here has already been converted to the one
-// resolved zone, so a local key is consistent across calendars.
+// `render.dayKey` groups by local date, so sorting timed events by their
+// UTC instant would disagree with it east of UTC — in Asia/Tokyo an 08:00
+// event carries a UTC key on the previous day — and put an all-day event
+// in the middle of its own day instead of at the front. Every event here
+// has already been converted to the one resolved zone, so a local key is
+// consistent across calendars.
 func sortKey(e model.Event) string {
 	if e.Start.AllDay {
 		// All-day events sort to the front of their day, which is where
@@ -859,11 +863,11 @@ func sortKey(e model.Event) string {
 // CalendarDetail is get_calendar: the calendar plus who it is shared
 // with.
 //
-// A missing ACL scope is reported as a note rather than an error. §2.15
-// makes it a separate grant, so an account that never consented to it
-// would otherwise see the whole tool fail — and an empty sharing list
-// would read as "shared with nobody", which is the wrong answer rather
-// than a missing one.
+// A missing ACL scope is reported as a note rather than an error.
+// acl.list needs a scope calendar.readonly does not cover, so an account
+// that never consented to it would otherwise see the whole tool fail —
+// and an empty sharing list would read as "shared with nobody", which is
+// the wrong answer rather than a missing one.
 func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResult, error) {
 	if err := s.ready(); err != nil {
 		return CalendarResult{}, err
@@ -1002,12 +1006,11 @@ type InstanceOptions struct {
 	EventID  string
 	TimeZone string
 	// From and To bound the occurrences. Both or neither: a half window
-	// cannot be stated absolutely, and §4.5 says every read states its
-	// window.
+	// cannot be stated absolutely, and every read states its window.
 	From string
 	To   string
 	// ShowCanceled reveals the occurrences that were removed from the
-	// series, which is what a canceled instance is (§2.13).
+	// series, which is what a canceled instance is.
 	ShowCanceled bool
 	MaxEvents    int
 	PageToken    string
@@ -1028,6 +1031,11 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 			"event_id is required: it is the id of the repeating event, which list_events reports as "+
 				"series_id on each occurrence")
 	}
+	// events.instances answers an occurrence id with 200 and that one
+	// occurrence, and a canceled one with an empty list, never a
+	// refusal. So the id's shape is refused here. Checked by the live
+	// step "list_instances rejects an occurrence id".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events/instances
 	if series, start, ok := gcal.SplitOccurrenceID(o.EventID); ok {
 		return render.Instances{}, gapi.Errf(gapi.ClassInvalid,
 			"%s names the occurrence starting %s, not the series. Pass %s — the series_id list_events "+
@@ -1100,14 +1108,13 @@ func (s *Service) Instances(ctx context.Context, o InstanceOptions) (render.Inst
 	}
 	// Ordered AFTER the cut, never before.
 	//
-	// Google does not return occurrences in date order — the live run
-	// got a canceled 24 March after 7 April — and a list of dates out
-	// of order is hard to read for the question this tool answers, which
-	// is "which dates does this series have". But sorting before the
-	// budget cut would keep a different SET than the page token accounts
-	// for, and the ones dropped would be reachable from nowhere. That is
-	// the defect phase 1 fixed in the schedule read; this is the same
-	// trap one tool over.
+	// Google does not return occurrences in date order — a canceled
+	// occurrence can come after later ones — and a list of dates out of
+	// order is hard to read for the question this tool answers, which is
+	// "which dates does this series have". But sorting before the budget
+	// cut would keep a different SET than the page token accounts for,
+	// and the ones dropped would be reachable from nowhere. The schedule
+	// read sorts after the cut for the same reason.
 	sort.Slice(out.Events, func(i, j int) bool {
 		return sortKey(out.Events[i]) < sortKey(out.Events[j])
 	})
@@ -1177,11 +1184,10 @@ func (c instancesCursor) resume(tok string) (string, error) {
 
 // instancesError says where the id should have come from.
 //
-// It no longer claims the id names an occurrence: seriesOf catches every
+// It does not claim the id names an occurrence: seriesOf catches every
 // occurrence-shaped id before the request is built, so anything reaching
-// here is by construction NOT one, and the old wording could only
-// misdirect. What is left is the part that stays true — this call wants
-// the series id, and the result that carries it.
+// here is by construction NOT one. It says what stays true — this call
+// wants the series id, and the result that carries it.
 func instancesError(err error, id string) error {
 	cls, ok := gapi.ClassOf(err)
 	if !ok || (cls != gapi.ClassNotFound && cls != gapi.ClassInvalid) {
@@ -1202,8 +1208,8 @@ type AvailabilityOptions struct {
 	TimeZone  string
 	// MinMinutes drops free gaps shorter than this. Zero keeps them all.
 	MinMinutes int
-	// WorkingFrom, WorkingTo and WorkingDays are the daily mask of
-	// §17.2, all optional and none with a default. They are the caller's
+	// WorkingFrom, WorkingTo and WorkingDays are the daily working-hours
+	// mask, all optional and none with a default. They are the caller's
 	// own strings, parsed here, because "09:00" is a reading rather than
 	// a time and the zone that turns it into one is resolved below.
 	WorkingFrom string
@@ -1211,14 +1217,22 @@ type AvailabilityOptions struct {
 	WorkingDays []string
 }
 
-// FreeBusyBatch is the API's ceiling on calendars per query (§2.10).
+// FreeBusyBatch is the API's ceiling on calendars per query.
+//
+// calendarExpansionMax documents "Maximum value is 50", and a calendar
+// Google cannot read gets an error of its own rather than failing the
+// query. Fifty-one unreadable ids sent with no cap all come back
+// answered, which does not settle fifty-one readable ones, so the batch
+// keeps to the documented cap. Checked by the live step "spike I: 50 vs
+// 51 calendars".
+// https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query
 const FreeBusyBatch = 50
 
 // Availability answers "when is this person free" from freebusy.query.
 //
 // Never from a list of events: a list misses everything whose details
 // the caller cannot see and ignores transparency, so it answers "free"
-// for somebody who is busy (§4.6). The two rules that follow from that
+// for somebody who is busy (D-34). The two rules that follow from that
 // are here: a calendar that errored is reported unknown rather than
 // free, and the free gaps say how many calendars they were computed
 // from.
@@ -1234,7 +1248,7 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 		return render.AvailabilityReport{}, gapi.Errf(gapi.ClassInvalid,
 			"asked about %d calendars; this server answers for at most %d in one availability call. "+
 				"That is not "+config.EnvPrefix+"MAX_CALENDARS, which bounds the reads that cost a request per calendar: "+
-				"free/busy answers for %d calendars per request (§2.10). Split the request",
+				"free/busy answers for at most %d calendars per request. Split the request",
 			len(refs), config.MaxFreeBusyCalendars, FreeBusyBatch)
 	}
 
@@ -1260,8 +1274,8 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 		MinGap: time.Duration(o.MinMinutes) * time.Minute,
 	}
 
-	// §2.10 caps one query at 50 calendars, so more than that is more
-	// than one request — and §4.7 says the result reports how many.
+	// Google caps one query at 50 calendars, so more than that is more
+	// than one request, and the result reports how many.
 	resp := &gcal.FreeBusyResponse{Calendars: map[string]gcal.FreeBusyCalendar{}, Groups: map[string]gcal.FreeBusyGroup{}}
 	query := func(ids []string) error {
 		for batch := range slices.Chunk(ids, FreeBusyBatch) {
@@ -1308,10 +1322,9 @@ func (s *Service) Availability(ctx context.Context, o AvailabilityOptions) (rend
 		busy = append(busy, a.Busy...)
 	}
 	// Gaps computed from nothing are the whole window, which is the one
-	// answer §4.6 forbids: "nobody could be read" must not arrive as
-	// "everybody is free". The decision is here rather than in the
-	// renderer, so the text and the structured half cannot disagree —
-	// they did, and the JSON was the one offering the window.
+	// answer this tool must never give: "nobody could be read" must not
+	// arrive as "everybody is free". The decision is here rather than in
+	// the renderer, so the text and the structured half cannot disagree.
 	if report.GapsFrom > 0 {
 		report.Gaps = model.FreeGaps(win, busy, report.MinGap, hours)
 	}
@@ -1332,7 +1345,9 @@ const maxAskedAgain = 2 * maxGroupMembers
 // whose error is tooManyCalendarsRequested is no answer: Google
 // documents that reason as "The number of calendars requested is too
 // large for a single query", and does not say whether a calendar past
-// the cap comes back that way or not at all (§18 row 100).
+// the cap comes back that way or not at all, so both shapes count as no
+// answer.
+// https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query
 func unanswered(ids []string, resp *gcal.FreeBusyResponse) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -1379,7 +1394,12 @@ func answerFor(id string, resp *gcal.FreeBusyResponse, zone when.Zone) model.Ava
 // groupAnswer is a group's members' busy time together. It is unknown
 // when Google could not expand the group, expanded it to nobody, or
 // could not read a member: one member unread is somebody who may be
-// busy, and a group answered as free on that is §4.6's defect.
+// busy, and a group answered as free on that is wrong.
+//
+// Google answers a group under `groups`, as its member calendar ids,
+// not under `calendars`, and refuses one with more members than
+// groupExpansionMax, at most 100.
+// https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query
 func groupAnswer(id string, g gcal.FreeBusyGroup, resp *gcal.FreeBusyResponse, zone when.Zone) model.Availability {
 	out := model.Availability{CalendarID: id, Group: true, Members: len(g.Calendars)}
 	switch {
@@ -1433,7 +1453,7 @@ func calendarAnswer(id string, resp *gcal.FreeBusyResponse, zone when.Zone) mode
 		end, eerr := when.ParseZoned(p.End, zone.Loc)
 		if serr != nil || eerr != nil {
 			// Unknown rather than partial: half a busy list read as a
-			// whole one is the shape §4.6 refuses.
+			// whole one reports somebody busy as free.
 			out.Busy = nil
 			out.Unknown, out.Reason = true, "Google returned a busy period this server could not read"
 			return out
@@ -1465,7 +1485,7 @@ func freeBusyReason(e gcal.FreeBusyError) string {
 // freeBusyTargets turns the caller's references into calendar ids.
 //
 // It deliberately does NOT resolve an address. Free/busy is the one read
-// that works on a calendar this account cannot open (§4.6), so resolving
+// that works on a calendar this account cannot open, so resolving
 // one first would refuse exactly the query the tool exists for — and it
 // would cost two failing round trips per colleague, because a calendar
 // nobody is subscribed to answers neither calendarList.get nor

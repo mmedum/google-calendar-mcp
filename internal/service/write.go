@@ -23,11 +23,11 @@ import (
 
 // The write path. Five tools, one shape: resolve the calendar and the
 // zone, read what is there, let internal/plan decide, spend the
-// requests, and report what changed and who was told (§4.9).
+// requests, and report what changed and who was told.
 //
-// Nothing here invents a default. The scope (§4.2) and the notification
-// (§4.3) are the caller's, the etag is the one the read produced (§4.4),
-// and a refusal says which of the three it wants.
+// Nothing here invents a default. The scope and the notification are the
+// caller's, the etag is the one the read produced, and a refusal says
+// which of the three it wants.
 
 // classifyPlan turns a guard's sentinel into a classified error.
 //
@@ -52,8 +52,7 @@ func classifyPlan(err error) error {
 		// package prefix and two of which did not.
 		{recur.ErrInvalid, gapi.ClassInvalid},
 		// when's failures reach the read path directly: a window whose
-		// end is not after its start, and the working-hours mask of
-		// §17.2.
+		// end is not after its start, and the working-hours mask.
 		{when.ErrInvalid, gapi.ClassInvalid},
 	} {
 		if !errors.Is(err, m.sentinel) {
@@ -73,18 +72,17 @@ func classifyPlan(err error) error {
 type writeEnv struct {
 	cal  model.Calendar
 	zone when.Zone
-	// organizer is the address §4.3.5 splits the guest count on. For a
-	// new event it is this account; for an existing one it is whoever
-	// organizes it, which is not always the same person.
+	// organizer is the address the guest count is split on, inside the
+	// domain or outside it. For a new event it is this account; for an
+	// existing one it is whoever organizes it, which is not always the
+	// same person.
 	organizer string
 }
 
-// §4.7's api_requests is read with gapi.Requests off the context prepare
+// api_requests is read with gapi.Requests off the context prepare
 // returns, which counts every request the call made — the shared setup
-// reads included, and the retries of §11. It used to be a field on this
-// struct incremented by hand at each call site, which missed all of the
-// setup: a create reported 1 and made 4, and a dry run reported 0 while
-// spending three. A counter kept by hand is a counter that drifts.
+// reads included, and the retries. A counter kept by hand at each call
+// site drifts, and misses the setup.
 
 // prepare resolves the calendar and the zone, and refuses a write to a
 // calendar this account is known not to be able to write to.
@@ -144,7 +142,7 @@ func (s *Service) primaryID(ctx context.Context) string {
 // what a patch is built against, and the model, which is what a guard
 // and a renderer read.
 //
-// Both, and not one: §4.4's read-modify-write on the guest list needs
+// Both, and not one: the read-modify-write on the guest list needs
 // the wire attendees, because model.Attendee drops a guest's comment and
 // their extra-guest count, and rebuilding the array from the model would
 // erase those for every guest on any write that touched the list.
@@ -161,7 +159,7 @@ func (s *Service) readEvent(ctx context.Context, env *writeEnv, eventID string) 
 }
 
 // address turns the caller's event_id, and an optional original_start,
-// into the id to read (§6.2).
+// into the id to read.
 //
 // A series id plus the occurrence's scheduled start becomes the
 // occurrence id Google itself uses. That address is the stable one:
@@ -224,12 +222,13 @@ func (s *Service) aim(ctx context.Context, env *writeEnv, scope recur.Scope,
 	return parentRaw, parent, "Wrote the series " + e.SeriesID + ", not the one occurrence.", nil
 }
 
-// seriesReach counts a series' occurrences for the refusal §4.2 wants.
+// seriesReach counts a series' occurrences for the refusal of a write
+// that names no scope.
 //
 // Returned as a closure and called only on the refusal path: counting
 // the occurrences of an instance's series means reading its parent, and
 // spending that request on every successful write to improve a message
-// nobody sees is §4.7 failing where the result cannot show it.
+// nobody sees spends requests the result cannot show.
 func (s *Service) seriesReach(ctx context.Context, env *writeEnv, raw gcal.Event, e model.Event) func() string {
 	return func() string {
 		parent, pe := raw, e
@@ -255,7 +254,12 @@ func (s *Service) seriesReach(ctx context.Context, env *writeEnv, raw gcal.Event
 	}
 }
 
-// ifMatch decides what goes in the If-Match header (§4.4).
+// ifMatch decides what goes in the If-Match header (D-28).
+//
+// Google honors If-Match on every event write, refuses a stale etag with
+// 412, and takes If-Match: * as "write it anyway". Checked by the live
+// step "stale etag refused".
+// https://developers.google.com/workspace/calendar/api/guides/version-resources
 //
 // The etag from the read that produced the plan, unless the caller
 // explicitly asked for "whatever it says now". A caller who quotes an
@@ -291,15 +295,17 @@ func ifMatch(addressedETag, targetETag, callerETag string, force bool) (string, 
 // ------------------------------------------------------------ one retry
 
 // retrying makes a write, and makes it once more when Google refused it
-// with 412 under an etag this server read itself (§4.4).
+// with 412 under an etag this server read itself (D-29).
 //
 // A caller's etag is a statement about the version they read, so a 412
 // under it stays [stale]. Without one, the etag is this server's own
 // read, and a 412 says only that the event changed in the moment between
 // that read and the write. Google changes an event by itself moments
-// after moving it: a move straight back met that in two live runs of
-// three (§18 row 103). The second try reads afresh and plans again, and
+// after moving it, which the reference does not mention, so a move
+// straight back can meet a 412 nobody caused. Checked by the live step
+// "move_event back". The second try reads afresh and plans again, and
 // attempt.commit holds it to what the first try planned.
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/move
 func retrying(ctx context.Context, callerETag string,
 	write func(context.Context, *attempt) (render.WriteReport, error),
 ) (render.WriteReport, error) {
@@ -412,10 +418,10 @@ type CreateOptions struct {
 	GuestsCanModify         *bool
 	GuestsCanInviteOthers   *bool
 	GuestsCanSeeOtherGuests *bool
-	// Conference asks for a Google Meet link on the new event (§17.3).
+	// Conference asks for a Google Meet link on the new event.
 	Conference bool
 	// EventType makes a status event: outOfOffice, focusTime or
-	// workingLocation, with the settings below (§7.4).
+	// workingLocation, with the settings below.
 	EventType            string
 	AutoDecline          string
 	DeclineMessage       string
@@ -426,7 +432,7 @@ type CreateOptions struct {
 	DryRun               bool
 
 	// declineAll lets auto_decline all through. Only
-	// CreateDecliningEvent sets it (§7.4).
+	// CreateDecliningEvent sets it.
 	declineAll bool
 }
 
@@ -447,7 +453,7 @@ type DecliningOptions struct {
 	DryRun         bool
 }
 
-// CreateDecliningEvent is create_event_declining_all (§7.4): create_event
+// CreateDecliningEvent is create_event_declining_all: create_event
 // with auto_decline all, which create_event itself refuses. Registered
 // only with GCAL_ENABLE_DECLINE_ALL.
 func (s *Service) CreateDecliningEvent(ctx context.Context, o DecliningOptions) (render.WriteReport, error) {
@@ -464,13 +470,13 @@ func (s *Service) CreateDecliningEvent(ctx context.Context, o DecliningOptions) 
 	})
 }
 
-// CreateEvent inserts an event with a client-generated id (§2.11).
+// CreateEvent inserts an event with a client-generated id.
 //
 // The id is minted here so a failure nobody saw the answer to is
 // recoverable: a retry either lands or collides with a 409, where an id
 // Google chose would have created a second event. The server does not
-// retry it itself — §11 — and reports [ambiguous_outcome] with the id
-// instead, so a caller can look rather than double-book.
+// retry it itself, and reports [ambiguous_outcome] with the id instead,
+// so a caller can look rather than double-book.
 func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.WriteReport, error) {
 	ctx, env, err := s.prepare(ctx, o.Calendar, o.TimeZone)
 	if err != nil {
@@ -618,13 +624,13 @@ const dryRunConferenceNote = "A Google Meet link would be requested. Nothing is 
 
 // conferenceNote says what actually happened to a requested Meet link.
 //
-// A live run saw the link arrive with the insert (§18 row 60), and
-// Google documents the conference as generated asynchronously, so
-// "pending" with no entry point is a published answer as well. This
-// reports what came back rather than what was asked for: a result that
-// said "with a Google Meet link" on the strength of having asked would
-// be promising something that may not be there — the same failure as
-// reporting `none` as silence (§4.3 rule 3).
+// The link usually arrives with the insert, and Google documents the
+// conference as generated asynchronously, so "pending" with no entry
+// point is a published answer as well. This reports what came back
+// rather than what was asked for: a result that said "with a Google Meet
+// link" on the strength of having asked would be promising something
+// that may not be there — the same failure as reporting `none` as
+// silence.
 func conferenceNote(asked bool, e model.Event) string {
 	if !asked {
 		return ""
@@ -648,7 +654,7 @@ func conferenceNote(asked bool, e model.Event) string {
 	}
 }
 
-// maybeLanded is the boundary of the ambiguous_outcome class (§2.11): a
+// maybeLanded is the boundary of the ambiguous_outcome class: a
 // 4xx definitely did not land, while a failure that never reached Google
 // or one Google answered with a 5xx may have.
 //
@@ -665,7 +671,9 @@ func maybeLanded(err error) (*gapi.Error, bool) {
 	return e, true
 }
 
-// insertError produces [ambiguous_outcome] for an event insert (§2.11).
+// insertError produces [ambiguous_outcome] for an event insert. Google
+// declines to guarantee that a duplicate id is caught at creation, so a
+// failure without an answer is never retried blind.
 //
 // The event can exist with the id this call chose while the caller was
 // told the write failed. Retrying that blindly is how a meeting gets
@@ -684,7 +692,7 @@ func insertError(err error, id, calendarID string) error {
 }
 
 // moveError produces [ambiguous_outcome] for a move that may have
-// landed. events.move is not retried (§11), and a caller told
+// landed. events.move is not retried, and a caller told
 // [unavailable] would move again into a 404 on the old calendar.
 func moveError(err error, id, destination string) error {
 	e, maybe := maybeLanded(err)
@@ -732,7 +740,7 @@ type UpdateOptions struct {
 	GuestsCanInviteOthers   *bool
 	GuestsCanSeeOtherGuests *bool
 	// AddConference asks Google for a Meet link on an event that has no
-	// conference (§17.3).
+	// conference.
 	AddConference bool
 
 	Notify string
@@ -741,7 +749,7 @@ type UpdateOptions struct {
 	DryRun bool
 }
 
-// UpdateEvent patches an event under If-Match (§4.4).
+// UpdateEvent patches an event under If-Match.
 func (s *Service) UpdateEvent(ctx context.Context, o UpdateOptions) (render.WriteReport, error) {
 	return retrying(ctx, o.ETag, func(ctx context.Context, at *attempt) (render.WriteReport, error) {
 		return s.updateEvent(ctx, o, at)
@@ -864,8 +872,8 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 	patch.ApplyTo(&afterRaw)
 	// A status event that declines every meeting it overlaps, moved or
 	// made to cover more, declines in its new time too. Whether Google
-	// declines the meetings already there is not probed (§18 row 102),
-	// so the result says it may.
+	// declines the meetings already there is not known, so the result
+	// says it may.
 	if plan.DeclinesMore(target, afterRaw) {
 		report.Notes = append(report.Notes, declinesMoreNote)
 	}
@@ -899,11 +907,10 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 // project is what the event would look like after a patch, for a dry
 // run to show.
 //
-// A dry run used to render "after" as the event unchanged, so an update
-// showed the same line twice while the change list said otherwise, and a
-// cancellation showed the event alive under the words "Deleted the
-// event". create's dry run always projected; the three disagreed, and
-// the tool description promises all of them report what WOULD change.
+// Every dry run reports what WOULD change, as the tool descriptions
+// promise. Rendering "after" as the event unchanged would show an update
+// as the same line twice while the change list says otherwise, and a
+// cancellation as the event alive under the words "Deleted the event".
 func project(before gcal.Event, patch gcal.EventPatch, env *writeEnv) (model.Event, error) {
 	after := before
 	patch.ApplyTo(&after)
@@ -934,17 +941,17 @@ const declinesMoreNote = "This change covers time the event did not, and the eve
 const remindersOnlyNote = "Reminders are yours alone: Google keeps them per person, so this reaches no " +
 	"guest and no notification was asked for."
 
-// forcedNote says a write went through with If-Match: *, which is §4.4's
-// explicit override and never a default.
+// forcedNote says a write went through with If-Match: *, the explicit
+// override of the etag check and never a default.
 const forcedNote = "Written with If-Match: *, so a change somebody else made since this was read was " +
 	"overwritten rather than reported."
 
-// organizerOf is whose domain the guest count is split on (§4.3.5).
+// organizerOf is whose domain the guest count is split on.
 //
 // The event's organizer, not the signed-in account: an event on a shared
 // calendar can be organized by somebody else, and `external_only` splits
-// on the ORGANIZER's Workspace domain (§18 row 40). The account is the
-// fallback for an event that names none.
+// on the ORGANIZER's Workspace domain. The account is the fallback for
+// an event that names none.
 func organizerOf(e model.Event, env *writeEnv) string {
 	// An event on a secondary calendar is organized by the CALENDAR, and
 	// its id is an address with a domain of its own. Splitting the guest
@@ -978,20 +985,23 @@ func notFoundHint(err error, id, originalStart string) error {
 		"globally, so check the calendar as well as the id", id)
 }
 
-// thisAndFollowing performs the two-call pattern of §2.8.
+// thisAndFollowing performs "this and following" as two calls.
 //
-// Google has no such operation: the original series is truncated before
-// the target and a new one is inserted starting at it. Two consequences
-// the result has to state, because no caller expects either — exceptions
-// after the target are RESET (spike E confirmed it against Google), and
-// the later occurrences now belong to a DIFFERENT event with a different
-// id.
+// Google has no such operation: its recurring-events guide truncates the
+// original series before the target and inserts a new one starting at
+// it. Two consequences the result has to state, because no caller
+// expects either — "changing all following instances resets any
+// exceptions happening after the target instance", and the later
+// occurrences now belong to a DIFFERENT event with a different id.
+// Checked by the live step "spike E: this and following", and through
+// the tool by the live step "this_and_following splits".
+// https://developers.google.com/workspace/calendar/api/guides/recurringevents
 func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target model.Event,
 	draft plan.Draft, o UpdateOptions, note string, at *attempt,
 ) (render.WriteReport, error) {
 	if draft.Conference {
 		// The new series is a new event, and a split mints no
-		// conference for it (§17.3). Google could make one, so this is
+		// conference for it. Google could make one, so this is
 		// the server's guard: [blocked], as on an event that has one.
 		return render.WriteReport{}, gapi.Errf(gapi.ClassBlocked,
 			"add_conference cannot go with this_and_following: a split starts a new series and does not "+
@@ -1018,8 +1028,13 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 
 	// The occurrence's SCHEDULED start is where the split falls, not
 	// where somebody moved it to: the rule generated the scheduled one,
-	// and a COUNT counts what the rule generated (§18).
+	// and a COUNT counts what the rule generated.
 	split := scheduledStart(target)
+
+	// The parent is read in the zone this call resolved, which need not
+	// be the event's own, and the rule is expanded from that anchor. A
+	// weekly or a daily rule splits the same either way; one whose local
+	// day walk depends on the zone, such as BYMONTHDAY=31, may not.
 
 	var beforeRule, afterRule string
 	if parent.Start.AllDay {
@@ -1058,7 +1073,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 		report.Notes = append(report.Notes, n)
 	}
 	report.Notes = append(report.Notes,
-		fmt.Sprintf("\"This and following\" is two calls, because Google has no such operation (§2.8). "+
+		fmt.Sprintf("\"This and following\" is two calls, because Google has no such operation. "+
 			"The original series %s now ends before this occurrence, with the rule %s, and the occurrences "+
 			"from here on belong to a NEW event with the rule %s.",
 			// The rule the new series actually carries, which is not
@@ -1105,7 +1120,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	// that removes the later occurrences from everybody's calendar, so a
 	// result reading "asked Google to notify all 4 guests" while the
 	// truncate asked for nothing described a decision applied to half the
-	// operation (§4.3.3).
+	// operation.
 	lines := []string{beforeRule}
 	_, err = s.API.PatchEvent(ctx, env.cal.ID, parent.ID,
 		&gcal.EventPatch{Recurrence: &lines}, decision.SendUpdatesFor(), etag)
@@ -1130,11 +1145,9 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	return report, nil
 }
 
-// newEventID mints the client-generated id of §2.11, classified once.
+// newEventID mints a client-generated event id, classified once for
+// every path that inserts.
 //
-// It had two classifications: [unavailable] on the create path and
-// nothing at all on the split path, where it fell through unclassified
-// — one failure reading two ways depending on which call reached it.
 // A system random source that cannot produce bytes is a transient
 // failure of the machine, so [unavailable] is right, and retrying is
 // what the caller should do.
@@ -1149,11 +1162,9 @@ func newEventID() (string, error) {
 // scheduledStart is where the recurrence rule put this occurrence.
 //
 // Not where somebody moved it to: originalStartTime is the stable
-// address (§6.2) and it is what the RULE generated, which is what a
-// COUNT counts — and counting the moved one was one of the six defects
-// phase 1's review found in the split arithmetic. An occurrence carrying
-// no original start is one nobody has moved, so its own start is the
-// scheduled one.
+// address and it is what the RULE generated, which is what a COUNT
+// counts. An occurrence carrying no original start is one nobody has
+// moved, so its own start is the scheduled one.
 func scheduledStart(e model.Event) model.When {
 	if e.OriginalStart.IsZero() {
 		return e.Start
@@ -1178,6 +1189,12 @@ func insertMessage(err error) string {
 // the change applied. What it does NOT carry is the parent's id, its
 // etag or its instance exceptions: those belong to the event being left
 // behind.
+//
+// Google keeps attachments on an insert only with supportsAttachments
+// and a label only with eventLabelVersion=1, and the insert sets both
+// when the body carries them. Checked by the live step "the split keeps
+// what the series carried".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/insert
 func splitBody(parent gcal.Event, target model.Event, draft plan.Draft, rule string,
 	zone when.Zone,
 ) (gcal.Event, []plan.Change, bool, error) {
@@ -1303,12 +1320,12 @@ type CancelOptions struct {
 // Two API shapes behind one honest verb, and the result names which
 // happened: events.delete for a whole event, and a status:cancelled
 // patch for one instance, because deleting an instance id is not how an
-// occurrence leaves a series (§7.4).
+// occurrence leaves a series.
 //
-// Not behind the destructive flag, and §9 argues why: canceling a
-// meeting is the most ordinary write there is, a gate everybody turns on
-// protects nobody, and turning it on would also arm clear_calendar. What
-// protects it instead is the required scope and the required notify.
+// Not behind the destructive flag: canceling a meeting is the most
+// ordinary write there is, a gate everybody turns on protects nobody,
+// and turning it on would also arm clear_calendar. What protects it
+// instead is the required scope and the required notify.
 func (s *Service) CancelEvent(ctx context.Context, o CancelOptions) (render.WriteReport, error) {
 	return retrying(ctx, o.ETag, func(ctx context.Context, at *attempt) (render.WriteReport, error) {
 		return s.cancelEvent(ctx, o, at)
@@ -1371,10 +1388,9 @@ func (s *Service) cancelEvent(ctx context.Context, o CancelOptions, at *attempt)
 		report.Notes = append(report.Notes, note)
 	}
 	if o.Force {
-		// §4.4 on the write where it matters most: a forced cancel
-		// deletes an event under If-Match: *, so a change somebody made
-		// since the read is gone with it. update_event and move_event
-		// said so and this did not.
+		// A forced cancel deletes an event under If-Match: *, so a
+		// change somebody made since the read is gone with it, and the
+		// result says so as every forced write does.
 		report.Notes = append(report.Notes, forcedNote)
 	}
 	report.Notes = append(report.Notes, guestsStillHaveIt(decision))
@@ -1507,12 +1523,14 @@ func (s *Service) cancelFollowing(ctx context.Context, env *writeEnv, parentRaw 
 	return report, nil
 }
 
-// guestsStillHaveIt is §4.3.3's sentence, and it is the one a caller
-// most needs on a cancellation.
+// guestsStillHaveIt says who still holds a canceled meeting, the
+// sentence a caller most needs on a cancellation (D-23).
 //
 // Deleting an event with `none` removes it from the organizer's calendar
-// and leaves it on the guests' (§18 row 43). That is not quiet, it is a
-// meeting they will still turn up to.
+// and leaves it on the guests', which the reference does not say. That
+// is not quiet, it is a meeting they will still turn up to. Checked by
+// the live step "cancel_event quietly".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/delete
 func guestsStillHaveIt(d plan.Decision) string {
 	// The count comes from the decision that was just made, not from a
 	// second pass over the event. One result quoting two guest counts is
@@ -1545,7 +1563,7 @@ func alreadyGone(err error) error {
 	// much there and somebody edited it between the read and the write.
 	// Reporting that as "already gone" tells a caller their meeting was
 	// canceled when it is still live, and sends them to show_canceled
-	// instead of to a re-read — §4.4's protection reported as its
+	// instead of to a re-read — the etag's protection reported as its
 	// opposite.
 	var e *gapi.Error
 	if !errors.As(err, &e) || (e.Status != http.StatusNotFound && e.Status != http.StatusGone) {
@@ -1560,12 +1578,9 @@ func alreadyGone(err error) error {
 
 // MoveOptions is what move_event takes.
 //
-// It carries an etag like every other write, and for a while it did not:
-// events.move is a POST with no body and nothing Google publishes says
-// If-Match applies to it, so this server sent none and its result told
-// callers the protection was absent. Spike J asked the API instead of
-// the documentation — a stale etag is refused with 412 (§18 row 49) — so
-// §4.4 covers this too and the exception is gone.
+// It carries an etag like every other write: events.move honors
+// If-Match and refuses a stale one with 412, though nothing Google
+// publishes says so.
 type MoveOptions struct {
 	Calendar      string
 	EventID       string
@@ -1591,7 +1606,7 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (render.WriteReport, error) {
 	// There is nothing to split when an event simply changes calendars,
 	// whether or not it repeats, so this is answered before anything is
-	// read (§2.8).
+	// read.
 	if err := plan.NoSplit(recur.Scope(strings.ToLower(strings.TrimSpace(o.Scope))),
 		"moving an event to another calendar"); err != nil {
 		return render.WriteReport{}, classifyPlan(err)
@@ -1673,16 +1688,16 @@ func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (re
 		return render.WriteReport{}, moveError(err, target.ID, dest.ID)
 	}
 	// The event is READ BACK from the destination rather than taken from
-	// the move's own response, and the live run is why: a successful
-	// move answers with `status: cancelled`, so the result reported a
-	// meeting that had just been moved as a meeting that had been
-	// called off. Reading the destination afterward showed it
-	// confirmed and intact (§18 row 48).
+	// the move's own response: a successful events.move answers with
+	// `status: cancelled`, which the reference does not mention, while
+	// the destination holds the event confirmed and intact. Checked by
+	// the live step "move_event".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events/move
 	//
-	// That costs one request, which §4.7 says a result must then own —
-	// api_requests counts it, and the note below says the move is two
-	// calls. It buys the difference between "moved" and "canceled" in
-	// the one sentence a caller acts on.
+	// That costs one request, which the result owns — api_requests
+	// counts it, and the note below says the move is two calls. It buys
+	// the difference between "moved" and "canceled" in the one sentence
+	// a caller acts on.
 	landed := *moved
 	if fresh, rerr := s.API.GetEvent(ctx, dest.ID, moved.ID); rerr == nil {
 		landed = *fresh
@@ -1733,7 +1748,7 @@ func (s *Service) respondToEvent(ctx context.Context, o RespondOptions, at *atte
 	// Both of these read only the caller's own arguments, so they are
 	// answered before a request is spent. "this and following" is
 	// refused whether or not the event repeats: there is no such
-	// operation for an RSVP either way (§2.8).
+	// operation for an RSVP either way.
 	response, err := parseResponse(o.Response)
 	if err != nil {
 		return render.WriteReport{}, err
@@ -1836,7 +1851,7 @@ func parseResponse(v string) (string, error) {
 	}
 }
 
-// setOwnResponse rewrites this account's entry and nobody else's (§4.4).
+// setOwnResponse rewrites this account's entry and nobody else's (D-40).
 //
 // The list is the one that was read, carried through unchanged except
 // for the caller's own row — comments, extra-guest counts and everybody

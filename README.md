@@ -1,8 +1,9 @@
 # google-calendar-mcp
 
 [![CI](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mmedum/google-calendar-mcp/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/mmedum/google-calendar-mcp)](https://github.com/mmedum/google-calendar-mcp/releases)
+[![Release](https://img.shields.io/github/v/release/mmedum/google-calendar-mcp?sort=semver)](https://github.com/mmedum/google-calendar-mcp/releases/latest)
 [![Go Reference](https://pkg.go.dev/badge/github.com/mmedum/google-calendar-mcp/v5.svg)](https://pkg.go.dev/github.com/mmedum/google-calendar-mcp/v5)
+[![License: Apache 2.0](https://img.shields.io/github/license/mmedum/google-calendar-mcp)](./LICENSE)
 
 An MCP server for Google Calendar. One binary, stdio, per-user OAuth
 against your own Google account.
@@ -12,11 +13,53 @@ a meeting produces (a recording, a notes document, an attachment) belongs
 to servers built on the Meet, Docs and Drive APIs. `get_event` names the
 files attached to an event, with the Drive file id those servers take.
 
+It is for one person who uses Google Calendar, on a Workspace or a
+personal Google account, and wants an assistant to read and change that
+calendar as them. You create your own OAuth client in Google Cloud once,
+and nothing is hosted.
+
+## Goals and non-goals
+
+Goals:
+
+- **Correct about time.** An all-day event stays a date, every timed
+  write carries an IANA zone, and every read states its window and zone.
+- **Nobody emailed by surprise.** `notify` is required on any write that
+  can reach a guest, and `scope` on any write to a repeating event, with
+  no default for either.
+- **A write never overwrites what it did not see.** Every change is a
+  patch under the etag of the read that planned it.
+- **Safe by default.** What cannot be taken back, and every share beyond
+  your organization, is registered only when you turn it on. Read-only
+  mode removes every write, and the writes take `dry_run`.
+- **Act as you, and log nothing about your calendar.** Every call runs as
+  the signed-in account, and the logs never carry event content or
+  addresses.
+
+Non-goals:
+
+- **What a meeting produces.** Recordings, notes documents and the files
+  attached to an event belong to the Drive and Docs servers. Google Tasks
+  is a separate API.
+- **Push notifications.** Google's watch methods need a public HTTPS
+  endpoint, which a stdio server cannot offer. `list_changes` hands back
+  a sync token instead.
+- **A local cache or sync loop.** The server keeps no copy of your
+  calendar between calls.
+- **Migration and administration.** Importing events from another system
+  and transferring a calendar's ownership as an administrator are out.
+- **Parsing natural language into events.** Google's quick-add hides
+  which fields it set and in which zone it read the time; the model
+  calling this server parses better.
+- **A hosted service.** It speaks stdio only, so Claude on the web and on
+  mobile cannot reach it.
+- **Asking you before a call.** Your client approves each call; the
+  server asks nothing.
+
 ## What makes this one different
 
-Most calendar tooling an LLM reaches for gets three things subtly wrong.
-This server is built around not getting them wrong, and each is enforced
-by a test rather than by care:
+Calendar tooling often gets these wrong. This server is built around
+getting them right, and a test enforces each:
 
 - **An all-day event is a date, not a time.** It never becomes an
   instant, so it cannot land on the wrong day for anyone west of UTC.
@@ -32,15 +75,7 @@ by a test rather than by care:
   not. A calendar that could not be read is reported as *unknown*, never
   folded into "free".
 
-The design, its evidence log and the phase plan are in
-`docs/architecture.md`.
-
-## Status
-
-Complete and in use: reading, writing, recurrence, availability,
-calendars, sharing, the resources and the Claude Desktop bundle. The
-tools are listed below, and the phase plan and what is still owed are in
-`docs/architecture.md` §16.
+The design and the decisions behind it are in `docs/architecture.md`.
 
 ## Install
 
@@ -48,7 +83,9 @@ tools are listed below, and the phase plan and what is still owed are in
 go install github.com/mmedum/google-calendar-mcp/v5/cmd/google-calendar-mcp@latest
 ```
 
-Or download an archive from the releases page.
+Or take a signed archive from the
+[latest release](https://github.com/mmedum/google-calendar-mcp/releases/latest).
+`docs/release.md` gives the commands that verify it.
 
 ## Set up
 
@@ -100,8 +137,9 @@ Every setting is in `docs/configuration.md`.
 Every release also carries a `.mcpb` bundle. Open it and Claude Desktop
 installs the server and asks for the settings a client's configuration
 would carry: your OAuth client JSON, which may be left empty to use the
-one `login` recorded, the profile, read-only and three switches. Deleting a calendar or every event on one, publishing it and
-sharing it outside your organization (`enable_destructive`), and an
+one `login` recorded, the profile, read-only and the switches. Deleting
+a calendar or every event on one, publishing it and sharing it outside
+your organization (`enable_destructive`), and an
 event that declines every meeting it overlaps (`enable_decline_all`)
 stay off unless you turn them on. Sharing inside your organization
 (`sharing`) stays on, as on a server you configure by hand, and
@@ -145,8 +183,9 @@ the bundle uses the same login.
 | `delete_calendar` | Delete a calendar and every event on it. Gated. |
 | `clear_calendar` | Delete every event on your primary calendar. Gated. |
 
-`GCAL_READ_ONLY=true` registers the first nine and requests only read
-scopes, so the API itself refuses a write.
+`GCAL_READ_ONLY=true` registers only the reads, the rows above
+`create_event`, and requests only read scopes, so the API itself refuses
+a write.
 
 `manage_calendar` covers what the API splits across two resources and
 people do not: **the calendar** — its title, description, location and
@@ -155,8 +194,7 @@ subscription** to it — the color, the name you give it, whether it is
 hidden, what you are emailed about — is yours alone. Unsubscribing
 removes it from your list; it deletes nothing and nobody else notices.
 
-Three rules run through every write, and each exists because guessing is
-what the surveyed servers do:
+These rules run through every write:
 
 - **`notify` is required** whenever the write can reach another person,
   and there is no default in either direction. `none` is refused outright
@@ -179,7 +217,7 @@ result about such an event says that the RSVPs it lists are incomplete.
 ## Resources
 
 For clients that attach context rather than call tools, the same content
-is published as three resources:
+is published as resources:
 
 | URI | What it carries |
 |---|---|
@@ -214,17 +252,16 @@ none.
 
 ## Safety
 
-- The two tools that remove something Calendar cannot bring back —
-  `delete_calendar` and `clear_calendar` — and the two that widen who can
-  see a calendar — `publish_calendar` and `widen_calendar_access` — are
-  not registered at all unless `GCAL_ENABLE_DESTRUCTIVE=true`, and each
-  still needs `confirm: true` on the call. The two shares also take the
+- The tools that remove something Calendar cannot bring back,
+  `delete_calendar` and `clear_calendar`, and those that widen who can
+  see a calendar, `publish_calendar` and `widen_calendar_access`, are
+  not registered at all unless `GCAL_ENABLE_DESTRUCTIVE=true`. Each still
+  needs `confirm: true` on the call. The wider shares also take the
   calendar's title as `list_calendars` shows it, so the call names the
   calendar it opens. `cancel_event` is deliberately not behind
   that flag: canceling a meeting is what a calendar is for, Google keeps
-  the record, and a gate everybody turns on protects nobody.
-  `docs/architecture.md` §9 argues it. What guards it instead is the
-  required `scope` and the required `notify`.
+  the record, and a gate everybody turns on protects nobody. What guards
+  it instead is the required `scope` and the required `notify`.
 - A cancellation with `notify: none` removes the meeting from your
   calendar and leaves it on your guests'. The result says so every time.
 - Sharing is the one act here whose effect leaves your account, so every
@@ -248,9 +285,9 @@ none.
   `auto_decline: all`; `create_event_declining_all` makes it, and is
   registered only with `GCAL_ENABLE_DECLINE_ALL=true`, a flag of its own
   so that turning it on arms nothing else.
-- Logs carry the method, tool, outcome, duration and a truncated calendar
-  id. Never an email address, event title, description, location or
-  search term. A debug log is safe to paste into a bug report by
+- Logs carry the method, tool, outcome and duration, and a failed call's
+  error class. Never an email address, event title, description, location,
+  search term or error message. A debug log is safe to paste into a bug report by
   construction.
 
 Your MCP client approves each call; the server does not ask you itself.
@@ -258,10 +295,9 @@ claude.ai and Codex prompt for the tools marked destructive, which is
 every write but `create_calendar` and `create_event`, and VS Code
 prompts for every tool not marked read-only, which is every tool that
 writes. In Claude Code, `delete_calendar`, `clear_calendar` and
-`publish_calendar` ask on every call whatever your rules say: the first
-two delete a whole calendar's events, which Calendar cannot bring back,
-and the third opens a calendar to the internet or a domain, which
-removing the rule cannot take back. Where Claude Code cannot ask, as
+`publish_calendar` ask on every call whatever your rules say. Deleting a
+whole calendar's events cannot be undone, and removing a public rule
+cannot take back what was already seen. Where Claude Code cannot ask, as
 with `-p`, it refuses them. For the
 rest, list the calls you want to approve one by one under
 `permissions.ask` in your settings, with the name you gave the server in
@@ -282,20 +318,53 @@ move, decline or delete:
 }
 ```
 
+## Getting help
+
+If something does not work, run `google-calendar-mcp status` and
+`google-calendar-mcp doctor`. `status` says which account is signed in,
+where the token lives and which scopes were granted. `doctor` calls
+Google and names each check that failed, and what to do. Most first-run
+trouble is an API that was never enabled or a scope that was never
+granted. [`docs/troubleshooting.md`](docs/troubleshooting.md) has the
+fixes.
+
+If that does not explain it,
+[open an issue](https://github.com/mmedum/google-calendar-mcp/issues).
+Never paste event titles, guest lists, calendar ids or your OAuth client
+JSON into one. Security problems go through [`SECURITY.md`](SECURITY.md),
+privately.
+
+## Versioning
+
+Tool names, their output fields and the resource URIs are stable within
+a major version. A change needing you to act, such as an added scope,
+another login or a different setting, is marked **Breaking:** in
+[`CHANGELOG.md`](CHANGELOG.md), which is also what each release's notes
+are made from.
+
 ## Development
 
-`make check` runs everything CI runs, and `make parity` asserts that
-those two lists are the same. See `CONTRIBUTING.md`.
+`make check` runs everything CI runs. `make live` drives the built binary
+against a real account, and `make evals` scores a model against the
+tools; both are run by hand.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers the gates, the live run and
+the review flow.
 
-Two things are run by hand rather than by CI, because they reach outside
-this repository. `make live` drives the built binary against a real
-account, on a scratch calendar it creates and deletes. `make evals`
-scores whether a model can complete the three tasks of
-`docs/architecture.md` §3 through these tools, against the in-memory
-calendar, and needs an `ANTHROPIC_API_KEY`;
-`go run -tags=evals ./scripts/evals -self-check` exercises the harness
-without a key or a model.
+## Documentation
+
+- [`docs/architecture.md`](docs/architecture.md): the request flow, the
+  package layout, and the design decisions a contributor should not
+  undo.
+- [`docs/configuration.md`](docs/configuration.md): every setting.
+- [`docs/gcp-setup.md`](docs/gcp-setup.md): the Google Cloud project and
+  OAuth client, step by step.
+- [`docs/troubleshooting.md`](docs/troubleshooting.md): symptoms and
+  their fixes, then rotating the client secret, revoking access and
+  running two accounts.
+- [`docs/security.md`](docs/security.md): the threat model.
+- [`docs/release.md`](docs/release.md): how a release is cut and
+  checked.
 
 ## License
 
-Apache 2.0. See `LICENSE`.
+Apache 2.0. See [`LICENSE`](LICENSE).
