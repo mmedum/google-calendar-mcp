@@ -12,11 +12,10 @@ import (
 
 // spikeN — which parameters suppress `nextSyncToken`?
 //
-// Phase 6 built `list_changes` against a fake written from the discovery
-// document, and the first live run found the baseline coming back with
-// NO sync token at all. That is the failure §18 keeps recording: the
-// fake encodes one reading of the documentation, the code agrees with
-// the fake, and both are wrong together.
+// A baseline read can come back from Google with NO sync token at all,
+// which a fake written from the discovery document never does: the fake
+// encodes one reading of the documentation, the code agrees with the
+// fake, and both are wrong together.
 //
 // The documentation says only that the token arrives "on the last page
 // of results" and lists the parameters that cannot accompany a token. It
@@ -25,7 +24,7 @@ import (
 //
 // So this asks the API directly, one parameter set at a time, and
 // reports which of them come back with a token. Read-only, on the
-// calendar this driver created and filled itself (§9.1).
+// calendar this driver created and filled itself.
 func spikeN(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
 	if scratch == "" {
 		return undetermined, "no scratch calendar this run"
@@ -69,7 +68,7 @@ func spikeN(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		a := answer{name: p.name}
 		if err := api.do(ctx, "GET", path, nil, &list); err != nil {
 			// Never the whole error: a request URL carries the query,
-			// and §9 keeps search terms out of a transcript.
+			// and a search term never reaches a transcript.
 			a.err = redact.String(err.Error())
 		} else {
 			a.token = list.NextSyncToken != ""

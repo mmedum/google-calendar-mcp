@@ -44,7 +44,7 @@ func TestAvailabilityReportsBusyAndFree(t *testing.T) {
 	}
 }
 
-// TestUnknownIsNeverFree is §4.6, the rule this tool exists to keep: a
+// TestUnknownIsNeverFree is the rule this tool exists to keep: a
 // calendar that could not be read is unknown, and a model that cannot
 // tell that from "free" will book over somebody.
 func TestUnknownIsNeverFree(t *testing.T) {
@@ -83,7 +83,7 @@ func TestUnknownIsNeverFree(t *testing.T) {
 }
 
 // TestNoCalendarReadableReportsNoFreeTime: when nothing could be read,
-// printing the whole window as free is the defect §4.6 is about. The
+// printing the whole window as free would report everybody free. The
 // report refuses to print gaps at all.
 func TestNoCalendarReadableReportsNoFreeTime(t *testing.T) {
 	fake := caltest.Seed()
@@ -190,9 +190,9 @@ func TestAvailabilityMinMinutes(t *testing.T) {
 	}
 }
 
-// TestAvailabilityWorkingHours is §17.2's own argument as a test: a
-// week asked about in one call, where the longest gap without a mask is
-// an overnight one that passes any min_minutes.
+// TestAvailabilityWorkingHours: a week asked about in one call, where
+// the longest gap without a mask is an overnight one that passes any
+// min_minutes.
 func TestAvailabilityWorkingHours(t *testing.T) {
 	fake := caltest.Seed()
 	fake.Busy["primary"] = nil
@@ -241,7 +241,7 @@ func TestAvailabilityWorkingHours(t *testing.T) {
 
 // TestAvailabilityRefusesAMaskItCannotApply: the refusal is classified,
 // because an unwrapped when error falls through to [unavailable], which
-// tells a caller to retry something that cannot succeed (§16a.3).
+// tells a caller to retry something that cannot succeed.
 func TestAvailabilityRefusesAMaskItCannotApply(t *testing.T) {
 	svc, _ := seeded(t)
 	o := day("2026-03-16", "2026-03-20")
@@ -299,9 +299,9 @@ func TestAvailabilityRefusesTooManyCalendars(t *testing.T) {
 	}
 }
 
-// TestAvailabilityBatchesAtFifty is §2.10: the API caps one query at 50
-// calendars, so more than that is more than one request — and §4.7 says
-// the result reports how many it made.
+// TestAvailabilityBatchesAtFifty: the API caps one query at 50
+// calendars, so more than that is more than one request, and the result
+// reports how many it made.
 func TestAvailabilityBatchesAtFifty(t *testing.T) {
 	fake := caltest.Seed()
 	svc := newService(t, fake)
@@ -346,9 +346,8 @@ func countRequests(served []string, prefix string) int {
 	return n
 }
 
-// TestAvailabilityDoesNotResolveEveryAddress is the cost half of §4.7:
-// the result says what it spent, so what it spends has to be what the
-// result says.
+// TestAvailabilityDoesNotResolveEveryAddress: the result says what it
+// spent, so what it spends has to be what the result says.
 //
 // The first version of this path resolved every reference through
 // ResolveCalendar. That re-listed the account's calendars once per
@@ -379,7 +378,7 @@ func TestAvailabilityDoesNotResolveEveryAddress(t *testing.T) {
 	}
 	if n := countRequests(served, "GET /users/me/calendarList/"); n > 0 {
 		t.Fatalf("resolved %d addresses one at a time; free/busy works on calendars this account "+
-			"cannot open, so an address is an id (§4.6)", n)
+			"cannot open, so an address is an id", n)
 	}
 }
 
@@ -458,7 +457,7 @@ func TestAvailabilityAnswersForAGroup(t *testing.T) {
 }
 
 // A group Google could not expand, expanded to nobody, or with a member
-// it could not read is unknown, never free (§4.6).
+// it could not read is unknown, never free.
 func TestAGroupWithAnUnreadMemberIsUnknown(t *testing.T) {
 	const group = "team-group@example.test"
 	for _, tc := range []struct {

@@ -11,15 +11,15 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
-// The three resources, for a client that attaches rather than calls
-// (§8). They carry what the matching tool returns and nothing else: a
+// The three resources, for a client that attaches rather than calls.
+// They carry what the matching tool returns and nothing else: a
 // resource that rendered a calendar differently from get_calendar would
 // be a second description of the same thing, drifting from the first.
 //
 // Reads only, so read-only mode keeps all three and no gate removes
 // them. A resource cannot take arguments, which is why there is no
-// resource for a schedule: a window and a zone are not optional here
-// (§4.5), and a URI with no way to state them would have to invent both.
+// resource for a schedule: a window and a zone are not optional here,
+// and a URI with no way to state them would have to invent both.
 const (
 	uriCalendars = "gcal://calendars"
 	// The + is RFC 6570's reserved expansion, and it is not decoration.
@@ -28,6 +28,8 @@ const (
 	// obvious URI, with the at sign written as itself, does not match and
 	// comes back "not found" while the percent-encoded form works. With
 	// + both forms match, and parseURI unescapes either into one id.
+	// Checked by the live step "resource: one calendar".
+	// https://www.rfc-editor.org/rfc/rfc6570#section-3.2.3
 	tmplCalendar = "gcal://calendars/{+calendar_id}"
 	tmplEvent    = "gcal://calendars/{+calendar_id}/events/{+event_id}"
 )

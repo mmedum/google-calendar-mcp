@@ -2,9 +2,10 @@
 //
 // Hand-written, for the fields this server actually uses. The generated
 // client (google.golang.org/api/calendar/v3) drags in gRPC and telemetry
-// for a subset we could type out in an afternoon, so §4.8 forbids it.
+// for a subset we could type out in an afternoon, so this package is
+// hand-written instead (D-06).
 //
-// Every field here is a decision, and §8b's api-fields gate holds the
+// Every field here is a decision, and the api-fields gate holds the
 // list: a published field of Event, Calendar, CalendarListEntry or
 // AclRule is either modeled below or written off by name in
 // testdata/api-fields.tsv with a reason. Without that gate, "we support
@@ -32,18 +33,23 @@ import (
 // EventDateTime is the start or end of an event.
 //
 // Date and DateTime are mutually exclusive: Date means an all-day event
-// and carries no instant at all. This is the API shape that §4.1 is
-// built to preserve, so the two stay separate strings here rather than
-// being merged into one time.Time on the way in. internal/when turns
-// them into the types that cannot be confused.
+// and carries no instant at all, and DateTime needs an offset unless
+// TimeZone is set. Forcing a date into an instant picks a day, so the
+// two stay separate strings here rather than being merged into one
+// time.Time on the way in. internal/when turns them into the types that
+// cannot be confused. Checked by the live step "create_event all-day".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 type EventDateTime struct {
 	// Date is "yyyy-mm-dd" for an all-day event.
 	Date string `json:"date,omitempty"`
 	// DateTime is RFC3339 with an offset.
 	DateTime string `json:"dateTime,omitempty"`
-	// TimeZone is an IANA name. Required on a recurring event's start
-	// and end (§2.2); this server sends it on every write so the same
-	// path is exercised every time rather than only on the rare one.
+	// TimeZone is an IANA name. Google requires it on a recurring
+	// event's start and end, and refuses a series without it with a 400.
+	// This server sends it on every write so the same path is exercised
+	// every time rather than only on the rare one. Checked by the live
+	// step "spike C: unzoned series".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events
 	TimeZone string `json:"timeZone,omitempty"`
 }
 
@@ -62,7 +68,7 @@ type Event struct {
 	Updated  string `json:"updated,omitempty"`
 	Summary  string `json:"summary,omitempty"`
 	// Description and Location are content. They reach a renderer and
-	// never a log (§9).
+	// never a log.
 	Description string `json:"description,omitempty"`
 	Location    string `json:"location,omitempty"`
 	ColorID     string `json:"colorId,omitempty"`
@@ -77,12 +83,12 @@ type Event struct {
 	EndTimeUnspecified bool `json:"endTimeUnspecified,omitempty"`
 
 	// Recurrence holds RRULE/EXRULE/RDATE/EXDATE lines, RFC 5545. Sent
-	// as the caller's strings (§6.4).
+	// as the caller's strings.
 	Recurrence []string `json:"recurrence,omitempty"`
 	// RecurringEventID is set on an instance and names its series.
 	RecurringEventID string `json:"recurringEventId,omitempty"`
 	// OriginalStartTime is the instance's scheduled start. It identifies
-	// the instance even after it has been moved (§6.2).
+	// the instance even after it has been moved.
 	OriginalStartTime *EventDateTime `json:"originalStartTime,omitempty"`
 
 	Transparency string `json:"transparency,omitempty"`
@@ -103,10 +109,11 @@ type Event struct {
 
 	// EventType is one of default, birthday, focusTime, fromGmail,
 	// outOfOffice, workingLocation. It cannot be changed after creation
-	// and fromGmail cannot be created at all (§2.12).
+	// and fromGmail cannot be created at all.
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events
 	EventType string `json:"eventType,omitempty"`
 
-	// The details of a status event, one block per type (§7.4). Each
+	// The details of a status event, one block per type. Each
 	// stays raw JSON, as conferenceData does: a read and a split copy
 	// carry the block whole, so a detail Google adds later is not lost
 	// on the way through. The types below read and write them.
@@ -115,7 +122,7 @@ type Event struct {
 	WorkingLocationProperties json.RawMessage `json:"workingLocationProperties,omitempty"`
 
 	// ConferenceData is read here, and a create request is written by
-	// create_event and by update_event's add_conference (§17.3).
+	// create_event and by update_event's add_conference.
 	// It stays raw JSON: the union has a third-party arm this package
 	// does not model, and a read that round-trips the value whole cannot
 	// lose what it did not understand. ReadConference takes out the
@@ -124,20 +131,20 @@ type Event struct {
 
 	// Attachments are the files on the event, usually Drive files. Reads
 	// show them and nothing here writes them, except a series split,
-	// which carries the parent's (§4.2). The file itself belongs to the
+	// which carries the parent's. The file itself belongs to the
 	// Drive server; FileID is what hands it over.
 	Attachments []EventAttachment `json:"attachments,omitempty"`
 
-	// ETag backs If-Match on every write (§4.4).
+	// ETag backs If-Match on every write.
 	ETag string `json:"etag,omitempty"`
 
 	// Unmodeled is every field Google sent that the fields above do not
 	// name, kept as Google sent it. No result shows it. It exists so an
 	// event copied whole keeps what this package does not understand:
-	// the new series of a this_and_following split (§2.8) is the parent
-	// copied, and decoding into the fields above alone dropped another
+	// the new series of a this_and_following split is the parent copied,
+	// and decoding into the fields above alone would drop another
 	// application's extended properties and a working location's
-	// details — which Google needs to create one.
+	// details, which Google needs to create one.
 	Unmodeled map[string]json.RawMessage `json:"-"`
 }
 
@@ -211,8 +218,13 @@ func (e Event) HasLabel() bool {
 // EventAttachment is one file on an event.
 //
 // Title is text somebody else wrote, like a description: it reaches a
-// renderer and never a log (§9). All five fields are carried, so a
-// split hands Google back the attachment it read, icon included.
+// renderer and never a log. All five fields are carried, so a split
+// hands Google back the attachment it read, icon included.
+//
+// A read returns attachments without asking: supportsAttachments is a
+// parameter of the writes only. FileID is the Drive file id. Checked by
+// the live step "get_event shows an attachment".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 type EventAttachment struct {
 	// FileID is the Drive file's id, which Google sets.
 	FileID string `json:"fileId,omitempty"`
@@ -235,7 +247,7 @@ type EventPerson struct {
 //
 // Email is personal data about somebody who never agreed to this
 // server existing, so it is redacted in logs and in the live driver's
-// transcript without exception (§9).
+// transcript without exception.
 type EventAttendee struct {
 	ID               string `json:"id,omitempty"`
 	Email            string `json:"email,omitempty"`
@@ -257,14 +269,14 @@ const (
 	ResponseAccepted    = "accepted"
 )
 
-// Event statuses (§2.13).
+// Event statuses.
 const (
 	StatusConfirmed = "confirmed"
 	StatusTentative = "tentative"
 	StatusCanceled  = "cancelled"
 )
 
-// Event types (§2.12).
+// Event types.
 const (
 	EventTypeDefault         = "default"
 	EventTypeBirthday        = "birthday"
@@ -281,7 +293,7 @@ type EventOutOfOfficeProperties struct {
 	AutoDeclineMode string `json:"autoDeclineMode,omitempty"`
 	// DeclineMessage is the account's own text, sent to each organizer
 	// whose invitation is declined. Content: it reaches a result and
-	// never a log (§9).
+	// never a log.
 	DeclineMessage string `json:"declineMessage,omitempty"`
 }
 
@@ -368,7 +380,7 @@ func Raw(v any) json.RawMessage {
 
 // Transparency values. "transparent" means the event does not make the
 // person busy, which is why availability cannot be computed from an
-// event list (§4.6).
+// event list.
 const (
 	TransparencyOpaque      = "opaque"
 	TransparencyTransparent = "transparent"
@@ -439,12 +451,12 @@ type Calendar struct {
 	Summary     string `json:"summary,omitempty"`
 	Description string `json:"description,omitempty"`
 	Location    string `json:"location,omitempty"`
-	// TimeZone is the calendar's own IANA zone and the second source in
-	// §4.1's resolution order.
+	// TimeZone is the calendar's own IANA zone: the zone a call uses when
+	// it names none.
 	TimeZone string `json:"timeZone,omitempty"`
 	// ConferenceProperties says which conference types this calendar
 	// accepts, which is what create_event checks before asking for a
-	// Meet link (§17.3).
+	// Meet link.
 	ConferenceProperties *ConferenceProperties `json:"conferenceProperties,omitempty"`
 	ETag                 string                `json:"etag,omitempty"`
 }
@@ -464,7 +476,7 @@ type CalendarListEntry struct {
 	TimeZone    string `json:"timeZone,omitempty"`
 	// SummaryOverride is the name this user gave the calendar. The
 	// renderer shows it and says the original, because a title that
-	// matches for one user may not for another (§6.1).
+	// matches for one user may not for another.
 	SummaryOverride string `json:"summaryOverride,omitempty"`
 	ColorID         string `json:"colorId,omitempty"`
 	BackgroundColor string `json:"backgroundColor,omitempty"`
@@ -472,7 +484,7 @@ type CalendarListEntry struct {
 	Hidden          bool   `json:"hidden,omitempty"`
 	Selected        bool   `json:"selected,omitempty"`
 	// AccessRole is what this user may do here; it decides whether a
-	// write will be refused before it is attempted (§7.1).
+	// write will be refused before it is attempted.
 	AccessRole       string          `json:"accessRole,omitempty"`
 	DefaultReminders []EventReminder `json:"defaultReminders,omitempty"`
 	Primary          bool            `json:"primary,omitempty"`
@@ -519,7 +531,7 @@ func AtLeast(role, want string) bool {
 }
 
 // RoleMeans explains a role in the terms a person uses, because
-// "writerWithoutPrivateAccess" is not self-explanatory (§7.6).
+// "writerWithoutPrivateAccess" is not self-explanatory.
 func RoleMeans(role string) string {
 	switch role {
 	case RoleOwner:
@@ -556,7 +568,7 @@ type AclRule struct {
 // AclRule's Scope has no `omitempty` — it is required on insert — and a
 // patch carrying an empty scope object asks Google to read a field the
 // caller did not mean to send. acl.update, which replaces the rule whole
-// and could therefore move it to another person, is never called (§4.4).
+// and could therefore move it to another person, is never called.
 type AclPatch struct {
 	Role *string `json:"role,omitempty"`
 }
@@ -565,7 +577,7 @@ type AclPatch struct {
 type AclScope struct {
 	// Type is user, group, domain or default. "default" means the whole
 	// public internet and is the one value that cannot be undone from
-	// the other side, so §7.6 puts it behind an explicit flag.
+	// the other side, so it sits behind an explicit flag.
 	Type string `json:"type,omitempty"`
 	// Value is an address or a domain; empty for type "default".
 	Value string `json:"value,omitempty"`
@@ -599,7 +611,7 @@ type FreeBusyRequest struct {
 	// TimeZone defaults to UTC at the API. This server always sends one
 	// so a result never renders in a zone nobody chose.
 	TimeZone string `json:"timeZone,omitempty"`
-	// CalendarExpansionMax is capped at 50 by the API (§2.10).
+	// CalendarExpansionMax is capped at 50 by the API.
 	CalendarExpansionMax int                   `json:"calendarExpansionMax,omitempty"`
 	GroupExpansionMax    int                   `json:"groupExpansionMax,omitempty"`
 	Items                []FreeBusyRequestItem `json:"items"`
@@ -619,8 +631,8 @@ type FreeBusyResponse struct {
 	Groups    map[string]FreeBusyGroup    `json:"groups,omitempty"`
 }
 
-// FreeBusyCalendar is one calendar's answer. Errors is why §4.6 reports
-// "unknown" rather than folding a failure into "free".
+// FreeBusyCalendar is one calendar's answer. Errors is why a calendar is
+// reported "unknown" rather than a failure being folded into "free".
 type FreeBusyCalendar struct {
 	Busy   []TimePeriod    `json:"busy,omitempty"`
 	Errors []FreeBusyError `json:"errors,omitempty"`
@@ -663,8 +675,8 @@ type Settings struct {
 
 // Setting ids this server reads by name.
 const (
-	// SettingTimezone is the user's own zone: the last resort in §4.1's
-	// resolution order.
+	// SettingTimezone is the user's own zone: the last resort when neither
+	// the call nor the calendar names one.
 	SettingTimezone = "timezone"
 	// SettingWeekStart is 0 for Sunday, 1 for Monday, 6 for Saturday.
 	SettingWeekStart = "weekStart"
@@ -703,15 +715,15 @@ type ColorPair struct {
 // ------------------------------------------------------------ event ids
 
 // An event id is base32hex: the digits and the lowercase letters a
-// through v, 5 to 1024 characters (§2.11). w, x, y and z are refused,
-// which is not obvious and cost a live run — Google answers "Invalid
-// resource id value", naming neither the field nor the constraint
-// (§18 row 21).
+// through v, 5 to 1024 characters. w, x, y and z are refused, which is
+// easy to miss: Google answers one with a 400 "Invalid resource id
+// value", naming neither the field nor the constraint.
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 //
 // The rule lives here rather than in the one caller that first needed
 // it. Three places depend on it: the live driver generates ids, the
 // server refuses an occurrence id by splitting on a character the
-// grammar excludes, and §2.11 lets a client supply an id on insert.
+// grammar excludes, and a client may supply an id on insert.
 const (
 	// EventIDMinLen and EventIDMaxLen bound a client-supplied id.
 	EventIDMinLen = 5
@@ -746,9 +758,13 @@ var occurrenceSuffix = regexp.MustCompile(`^[0-9]{8}([Tt][0-9]{6}[Zz])?$`)
 // SplitOccurrenceID reports whether an id names one occurrence of a
 // series, and if so which series and which start.
 //
-// The split on "_" is safe because ValidEventID's grammar has no
-// underscore in it, so an id carrying one is either an occurrence id or
-// not an event id at all (§18 row 35).
+// An occurrence id is {seriesId}_{yyyymmdd}[T{hhmmss}Z]. Google returns
+// ids of that shape from events.instances but does not document the
+// grammar. The split on "_" is safe because ValidEventID's grammar has
+// no underscore in it, so an id carrying one is either an occurrence id
+// or not an event id at all. Checked by the live step "list_instances
+// rejects an occurrence id".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/instances
 //
 // This is a grammar, not a policy. get_event must keep ACCEPTING an
 // occurrence id — that is how a single occurrence is addressed — so the
@@ -761,12 +777,17 @@ func SplitOccurrenceID(id string) (series, start string, ok bool) {
 	return id[:i], id[i+1:], true
 }
 
-// NewEventID returns a random, legal event id (§2.11).
+// NewEventID returns a random, legal event id.
 //
 // A client-supplied id is what makes an insert nearly idempotent: a
 // retry after a failure nobody saw the answer to either lands or
 // collides with a 409, where an id Google chose would quietly create a
-// second event. Twenty-six base32hex characters is 130 bits, which is
+// second event. Only nearly: Google "cannot guarantee that ID collisions
+// will be detected at event creation time", so the insert itself is
+// never retried.
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
+//
+// Twenty-six base32hex characters is 130 bits, which is
 // more than enough for an id that only has to be unique on one calendar.
 //
 // The masking is exact rather than a modulo: 256 is eight times 32, so
@@ -787,7 +808,7 @@ func NewEventID() (string, error) {
 
 // ------------------------------------------------------------ the patch
 
-// EventPatch is the body of an events.patch call (§4.4).
+// EventPatch is the body of an events.patch call.
 //
 // Every field is a pointer, and that is the whole point of the type: a
 // nil field is absent from the JSON and Google leaves it alone, while a
@@ -804,7 +825,7 @@ type EventPatch struct {
 	// Recurrence points at the whole list because RFC 5545 lines are
 	// replaced together: an empty non-nil slice ends the repetition.
 	Recurrence *[]string `json:"recurrence,omitempty"`
-	// Attendees is read-modify-write, never a blind replacement (§4.4).
+	// Attendees is read-modify-write, never a blind replacement.
 	// The service builds it from the guest list it just read, under the
 	// etag from that read.
 	Attendees    *[]EventAttendee `json:"attendees,omitempty"`
@@ -889,11 +910,11 @@ func (p EventPatch) ApplyTo(e *Event) {
 	}
 }
 
-// sendUpdates values, the wire spelling of §4.3's notify.
+// sendUpdates values, the wire spelling of a tool's notify.
 //
 // The server never sends one it was not given. Google's own default
-// differs between events and ACL rules (§2.5), so "leave it out" is not
-// a decision this server is willing to make on a caller's behalf.
+// differs between events and ACL rules, so "leave it out" is not a
+// decision this server is willing to make on a caller's behalf.
 const (
 	SendUpdatesAll          = "all"
 	SendUpdatesExternalOnly = "externalOnly"
@@ -901,8 +922,8 @@ const (
 )
 
 // OccurrenceID is the id Google gives one occurrence of a series: the
-// series id, an underscore, and the occurrence's SCHEDULED start in UTC
-// (§6.2).
+// series id, an underscore, and the occurrence's SCHEDULED start in
+// UTC.
 //
 // The inverse of SplitOccurrenceID, and a test asserts it round-trips
 // through it, because the two would otherwise be two opinions about the
@@ -910,11 +931,10 @@ const (
 // series, that start" — the stable address, since originalStartTime
 // identifies the instance even after somebody moves it.
 //
-// The shape is not inferred: phase 1's live run read occurrence ids of
-// exactly this form back from Google, which is how it found that an
-// occurrence id reaching events.instances answers 200 (§18 row 35).
+// The shape is not inferred: it is the one events.instances returns,
+// as SplitOccurrenceID says.
 //
-// The series id is NOT held to ValidEventID. That grammar is §2.11's
+// The series id is NOT held to ValidEventID. That grammar is Google's
 // rule for an id a CLIENT supplies on insert; whether every id Google
 // itself issues obeys it is unverified, and refusing an id Google gave
 // out would be this server inventing a constraint. An id that is wrong
@@ -943,7 +963,7 @@ func OccurrenceID(series string, start EventDateTime) (string, error) {
 
 // -------------------------------------------- calendar and ACL patches
 
-// CalendarPatch is the body of a calendars.patch call (§4.4).
+// CalendarPatch is the body of a calendars.patch call.
 //
 // Pointers for the same reason EventPatch uses them: a nil field is
 // absent from the JSON and Google leaves it alone, while a non-nil field
@@ -1027,6 +1047,7 @@ type CalendarNotification struct {
 	// Method is always "email". The discovery document lists exactly one
 	// possible value, so a parameter for it would be a choice with one
 	// option — the server fills it in and says so.
+	// https://developers.google.com/workspace/calendar/api/v3/reference/calendarList
 	Method string `json:"method,omitempty"`
 }
 
@@ -1118,11 +1139,13 @@ const ConferenceSolutionMeet = "hangoutsMeet"
 
 // The three states a create request can be in.
 //
-// Google documents the data as generated ASYNCHRONOUSLY, and a live run
-// answered the insert with "success" and the link already in it (§18 row
-// 60). Both are true: the link is usually there at once, and "pending"
-// is a published value this server must not report as a link. The status
-// is carried rather than assumed either way.
+// Google documents the data as generated ASYNCHRONOUSLY, yet an insert
+// usually answers "success" with the link already in it. Both are true:
+// the link is usually there at once, and "pending" is a published value
+// this server must not report as a link. The status is carried rather
+// than assumed either way. Checked by the live step "the Meet link
+// arrives".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 const (
 	ConferencePending = "pending"
 	ConferenceSuccess = "success"
@@ -1241,13 +1264,13 @@ func (c Conference) Ready() bool { return c.State() == ConferenceReady }
 //
 // requestId is the caller's. create_event passes the event id: the
 // discovery document says a request repeating an id is IGNORED, so a
-// retry of a create that may have landed (§2.11) cannot produce a second
+// retry of a create that may have landed cannot produce a second
 // conference. An id regenerated per attempt would. update_event passes
 // ConferenceRequestID, for the reason given there.
 //
 // The request only asks, and Conference carries the status rather than a
 // promise: the answer may be "success" with the link in it, which is
-// what one live run saw, or "pending" with no entry point yet.
+// the usual one, or "pending" with no entry point yet.
 func NewConferenceRequest(requestID string) json.RawMessage {
 	raw, err := json.Marshal(conferenceData{CreateRequest: &conferenceCreateRequest{
 		RequestID:             requestID,
@@ -1273,6 +1296,10 @@ func NewConferenceRequest(requestID string) json.RawMessage {
 // The etag moves with every write, so each version gets its own id,
 // while a retry of the same patch, made under the same etag, repeats it
 // and cannot make a second conference.
+//
+// A patch can create a conference, as an insert can, when it sets
+// conferenceDataVersion=1. Checked by the live step "add_conference".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/patch
 func ConferenceRequestID(eventID, etag string) string {
 	sum := sha256.Sum256([]byte(eventID + "\x00" + etag))
 	return hex.EncodeToString(sum[:16])

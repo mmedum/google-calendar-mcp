@@ -167,7 +167,7 @@ func TestFileIsOwnerOnly(t *testing.T) {
 		// the file reads as 0666 whatever it was written with. The
 		// access list is what restricts it, and TestFileIsRestrictedToOwner
 		// reads that list back. All this holds is that the warning
-		// describes the real mechanism (§18 row 47).
+		// describes the real mechanism.
 		if note := credentials.FileProtection(); !strings.Contains(note, "ACL") {
 			t.Fatalf("on Windows the file is restricted by an ACL, and the warning says %q", note)
 		}

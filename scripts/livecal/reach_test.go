@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// These hold §9.1's promise that a default run mails nobody, without a
+// These hold the promise that a default run mails nobody, without a
 // network or an account. example.com and its siblings stand for real
 // people here; addresses under .test are the driver's invented ones.
 

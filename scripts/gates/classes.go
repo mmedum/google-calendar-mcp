@@ -18,8 +18,8 @@ import (
 // class must be emitted somewhere, or the documentation promises a
 // vocabulary the server cannot produce.
 //
-// A sibling documented ten classes while its code emitted fifteen, four
-// of them named nowhere. That is what checking one direction buys you.
+// Checking one direction only lets the documented and the emitted
+// vocabularies drift apart.
 func classGate() error {
 	declared, err := declaredClasses()
 	if err != nil {
@@ -32,7 +32,7 @@ func classGate() error {
 
 	// Floors, so "found nothing" cannot pass for "looked at nothing".
 	if len(declared) < 6 {
-		return fmt.Errorf("only %d classes declared; the standard's baseline alone is six", len(declared))
+		return fmt.Errorf("only %d classes declared; that is not the error vocabulary", len(declared))
 	}
 	if files < 5 {
 		return fmt.Errorf("scanned only %d files for class uses; that is not the whole module", files)

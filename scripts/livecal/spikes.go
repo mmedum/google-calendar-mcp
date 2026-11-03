@@ -12,19 +12,18 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
-// spikeC answers §15's daylight-saving question, and it is the half
-// phase 0 could not answer: what happens to a recurring event written
-// WITHOUT a time zone.
+// spikeC answers the daylight-saving question no tool call can: what
+// happens to a recurring event written WITHOUT a time zone.
 //
-// The zoned half already runs as a step — the seeded weekly series holds
-// 14:00 across the 29 March transition. This writes the same series with
-// a dateTime and no timeZone and reads its occurrences back. §2.2 says
-// the zone is required on a recurring event, so there are three possible
-// answers and each is worth having:
+// The zoned half runs as a step — the seeded weekly series holds 14:00
+// across the 29 March transition. This writes the same series with a
+// dateTime and no timeZone and reads its occurrences back. The discovery
+// document says the zone is required on a recurring event, so there are
+// three possible answers and each is worth having:
 //
-//   - Google REFUSES it. §4.1's refusal has the API behind it.
-//   - Google accepts it and the series DRIFTS. That is §3's second row,
-//     reproduced, and the reason this server always sends a zone.
+//   - Google REFUSES it. The server's refusal has the API behind it.
+//   - Google accepts it and the series DRIFTS, which is the reason this
+//     server always sends a zone.
 //   - Google accepts it and the series holds. Then the zone this server
 //     insists on is belt and braces, which is worth knowing and does not
 //     change the rule.
@@ -34,7 +33,7 @@ func spikeC(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 		// message is quoted through the redactor.
 		if strings.Contains(err.Error(), "returned 4") {
 			out.Printf("      Google refused the unzoned series: %s\n", redact.String(err.Error()))
-			return pass, "CONFIRMS §2.2: a recurring event without a timeZone is refused by the API"
+			return pass, "CONFIRMS the discovery document: a recurring event without a timeZone is refused by the API"
 		}
 		return undetermined, "could not create the unzoned series: " + redact.String(err.Error())
 	}
@@ -60,10 +59,10 @@ func spikeC(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	before, after := walls[0], walls[len(walls)-1]
 	if before == after {
 		return pass, fmt.Sprintf("Google accepted a recurrence with no timeZone and held %s across the "+
-			"transition — this server still sends the zone (§2.2), and now knows the API does not need it", before)
+			"transition — this server still sends the zone, and now knows the API does not need it", before)
 	}
-	return pass, fmt.Sprintf("REPRODUCES §3: an unzoned recurrence drifted from %s to %s across the "+
-		"29 March transition. This is the defect every surveyed server ships", before, after)
+	return pass, fmt.Sprintf("REPRODUCES the drift: an unzoned recurrence drifted from %s to %s across the "+
+		"29 March transition. This is the defect other calendar servers ship", before, after)
 }
 
 // wallClock takes the local time out of an RFC3339 timestamp without
@@ -76,16 +75,16 @@ func wallClock(dateTime string) string {
 	return dateTime[11:16]
 }
 
-// spikeI answers §15's ceiling question: calendarExpansionMax is
-// documented with a maximum of 50 (§2.10), and this server batches at
-// that number. What happens at 51 decides whether the batching is
-// correctness or politeness — and, more importantly, whether a query
-// that exceeds it FAILS or silently answers for fewer calendars.
+// spikeI answers the ceiling question: calendarExpansionMax is
+// documented with a maximum of 50, and this server batches at that
+// number. What happens at 51 decides whether the batching is correctness
+// or politeness — and, more importantly, whether a query that exceeds it
+// FAILS or silently answers for fewer calendars.
 //
 // A silent truncation is the dangerous one: the missing calendars come
-// back as no answer at all, which §4.6 reports as unknown. That is only
-// true because this server treats a missing calendar as unknown rather
-// than as free, and this spike is what tells us the case is real.
+// back as no answer at all, which the server reports as unknown. That is
+// only true because this server treats a missing calendar as unknown
+// rather than as free, and this spike is what tells us the case is real.
 func spikeI(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
 	// Two rules this spike got wrong once each, both of them the same
 	// mistake: answering a question it did not ask.
@@ -98,11 +97,11 @@ func spikeI(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	// NO calendarExpansionMax. The second run sent 51 ids and asked
 	// Google to expand at most 50 — so a response carrying 50 would
 	// have been this driver's own cap reported as Google's ceiling.
-	// The server sets the cap in production (§4.6); the spike must not,
+	// The server sets the cap in production; the spike must not,
 	// because the cap is the thing being measured.
 	//
 	// The filler ids are invented and belong to nobody, so this still
-	// reads only the one calendar the driver created (§9.1). An id that
+	// reads only the one calendar the driver created. An id that
 	// cannot be resolved comes back as an entry carrying an error, which
 	// is what makes the count meaningful: a calendar dropped for
 	// exceeding a ceiling is ABSENT, where an unreadable one is present
@@ -126,7 +125,7 @@ func spikeI(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 
 	atFiftyOne, err := api.freeBusy(ctx, ids, 0)
 	if err != nil {
-		return pass, "CONFIRMS §2.10: 51 calendars in one query is refused (" +
+		return pass, "CONFIRMS the documented maximum: 51 calendars in one query is refused (" +
 			redact.String(firstLine(err.Error())) + "). The batching at 50 is correctness, not politeness"
 	}
 	out.Printf("      51 distinct calendars, no expansion cap: %d answered, %d errored\n",
@@ -167,7 +166,7 @@ func spikeI(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	case len(atFiftyOne) > 0:
 		return pass, fmt.Sprintf("51 distinct ids came back as %d entries: Google DROPS the excess "+
 			"silently rather than refusing, so a calendar can be missing from the response entirely — "+
-			"which is why a missing calendar is reported unknown and never free (§4.6).%s",
+			"which is why a missing calendar is reported unknown and never free.%s",
 			len(atFiftyOne), caveat)
 	default:
 		return undetermined, "51 calendars answered for none, which is neither a refusal nor a truncation"
@@ -200,7 +199,7 @@ func firstLine(s string) string {
 // expand.
 //
 // It creates them, asks, and deletes them, reporting anything it could
-// not delete so nothing is left behind silently (§9.1). Every calendar
+// not delete so nothing is left behind silently. Every calendar
 // is one this driver made, so it still reads only what it wrote.
 func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api *liveAPI) (verdict, string) {
 	const want = 51
@@ -224,13 +223,13 @@ func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api 
 		// The quota refusal is not a failed spike, it is the answer to a
 		// question nobody asked: an account cannot hold enough calendars
 		// to reach the ceiling. Reported as its own finding, because
-		// phase 3's create_calendar meets the same 403 (§18 row 36).
+		// create_calendar meets the same 403.
 		if strings.Contains(err.Error(), "quotaExceeded") ||
 			strings.Contains(err.Error(), "usage limits") {
 			return fail, fmt.Sprintf("BLOCKED, and the blocker is the finding: Google refused to "+
 				"create more than %d calendars — 403 quotaExceeded, \"Calendar usage limits "+
 				"exceeded\". The readable half of this spike cannot be run on an account at all, "+
-				"so §2.10's ceiling stays unsettled for readable calendars by decision rather than "+
+				"so the documented ceiling stays unsettled for readable calendars by decision rather than "+
 				"by neglect", len(ids))
 		}
 		return undetermined, fmt.Sprintf("could only create %d of %d calendars: %s",
@@ -239,7 +238,7 @@ func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api 
 
 	answered, err := api.freeBusy(ctx, ids, 0)
 	if err != nil {
-		return pass, "CONFIRMS §2.10: 51 READABLE calendars in one free/busy query is refused (" +
+		return pass, "CONFIRMS the documented maximum: 51 READABLE calendars in one free/busy query is refused (" +
 			redact.String(firstLine(err.Error())) + "). The batching at 50 is correctness"
 	}
 	out.Printf("      51 readable calendars, no expansion cap: %d answered, %d errored\n",
@@ -247,12 +246,12 @@ func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api 
 	switch {
 	case len(answered) == want:
 		return pass, "51 READABLE calendars all came back, so the documented maximum of 50 does not " +
-			"cap a free/busy request at all. §4.6's batching at 50 is politeness, and the rule that " +
+			"cap a free/busy request at all. The server's batching at 50 is politeness, and the rule that " +
 			"matters — a calendar missing from the response is unknown, never free — stands on spike H"
 	case len(answered) > 0:
 		return pass, fmt.Sprintf("51 READABLE calendars came back as %d: Google TRIMS the excess "+
 			"silently, so a calendar can be absent from the response entirely. That is exactly what "+
-			"§4.6 reports as unknown rather than free, and the batching at 50 is correctness", len(answered))
+			"the server reports as unknown rather than free, and the batching at 50 is correctness", len(answered))
 	default:
 		return undetermined, "51 readable calendars answered for none, which is neither a refusal nor a trim"
 	}
@@ -260,17 +259,13 @@ func ceilingWithReadableCalendars(ctx context.Context, out *redact.Printer, api 
 
 // spikeJ — does events.move honor If-Match?
 //
-// The one question phase 2 left open. §4.4 puts every write under
-// If-Match, and move_event is the single exception: events.move is a
-// POST with the destination in the query string and no body, and neither
-// the reference nor the discovery document says whether the header
-// applies. So the server sends none, and its result says the protection
-// is absent — which is honest, and is also an assumption. Rule 13 says
-// an assumption gets probed before it is adopted, and this is the probe.
+// The server puts every write under If-Match, move_event included.
+// events.move is a POST with the destination in the query string and no
+// body, and neither the reference nor the discovery document says
+// whether the header applies, so this keeps asking Google.
 //
 // The discriminator is a STALE etag. A current one would succeed whether
-// the header is honored or ignored, and would settle nothing — which is
-// exactly the shape of failure §15 opens by naming.
+// the header is honored or ignored, and would settle nothing.
 func spikeJ(ctx context.Context, out *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
 	if spikeDest == "" {
 		return undetermined, "no destination calendar this run, so there is nothing to move to"
@@ -322,11 +317,11 @@ func spikeJ(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 
 	switch {
 	case status == http.StatusPreconditionFailed:
-		return pass, "HONORED: a stale If-Match is refused with 412, so move_event can and should carry " +
-			"the etag — §4.4's exception is not needed and the tool should take one"
+		return pass, "HONORED: a stale If-Match is refused with 412, so move_event is right to carry " +
+			"the etag"
 	case status >= 200 && status < 300:
 		return pass, "IGNORED: a stale If-Match was accepted and the event moved anyway, so events.move " +
-			"offers no optimistic concurrency and move_event is right to take no etag and to say so"
+			"offers no optimistic concurrency and move_event must stop implying it does"
 	case moveErr != nil:
 		return undetermined, "the move failed for another reason, so the header question is unsettled: " +
 			redact.String(moveErr.Error())

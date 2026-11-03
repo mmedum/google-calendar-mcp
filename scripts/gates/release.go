@@ -10,21 +10,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The release gate (§12, and the standard's §9 and §10b).
+// The release gate. A release ships six platform archives and a Claude
+// Desktop bundle, built with -trimpath and the commit's timestamp so
+// that rebuilding a tag reproduces it byte for byte.
 //
-// It is the third member of the family `mcpb` belongs to, and it holds
-// the same KIND of claim: not "is this file well formed" but "do these
-// two files name the same thing". The bundle gate holds the manifest
-// against the staged names; this one holds the staged names against the
-// build that produces them, and the pack hook against the Makefile.
+// It holds the same KIND of claim as the bundle gate: not "is this file
+// well formed" but "do these two files name the same thing". The bundle
+// gate holds the manifest against the staged names; this one holds the
+// staged names against the build that produces them, and the pack hook
+// against the Makefile.
 //
-// It exists because phase 4 wrote `dist/*darwin*universal*/…` into the
-// packer while there was no goreleaser config to check it against.
-// goreleaser names that directory <id>_darwin_all, so the id comes first
-// and the glob matched nothing. Every gate was green: the packer only
-// runs at release time, and the release did not exist yet. That is the
-// most expensive moment there is to find a typo, which is the argument
-// for reading the config on every commit instead.
+// The packer runs only at release time, which is the most expensive
+// moment there is to find a typo. goreleaser names the universal
+// directory <id>_darwin_all, id first, so a glob such as
+// `dist/*darwin*universal*/` matches nothing and every other gate stays
+// green. Reading the config on every commit finds that instead.
 //
 // Nothing here builds anything. The config is static, the staged names
 // are static, and what a build would put under dist/ is derivable from
@@ -192,7 +192,7 @@ func validateRelease(cfg goreleaserConfig, files []staged, mcpbOut string, flow 
 	}
 	if platforms < 6 {
 		problems = append(problems, fmt.Sprintf(
-			"%s builds %d platform targets and §12 says six archives; the matrix is short, "+
+			"%s builds %d platform targets and a release ships six archives; the matrix is short, "+
 				"or the builds block is not being read", goreleaserPath, platforms))
 	}
 	if len(files) < 5 {
@@ -344,7 +344,7 @@ func validateRelease(cfg goreleaserConfig, files []staged, mcpbOut string, flow 
 		}
 	}
 
-	// 6. Reproducibility, which is the claim §12 makes out loud.
+	// 6. Reproducibility: rebuilding a tag reproduces it.
 	for _, b := range cfg.Builds {
 		if !contains(b.Flags, "-trimpath") {
 			problems = append(problems, fmt.Sprintf(
@@ -529,13 +529,9 @@ func buildTargets(cfg goreleaserConfig) []buildTarget {
 		// the directory is <id>_darwin_all, which is why a glob reading
 		// "darwin then universal" matches nothing.
 		//
-		// The FILE inside it is named by this block's name_template,
-		// which defaults to the project name — NOT by the build's
-		// `binary`. Taking it from the build is right only while the two
-		// happen to be the same string, and a probe with them renamed
-		// apart confirmed goreleaser writes the project name (§18 row
-		// 71). Reading the wrong one makes this gate agree with a glob
-		// that mcpb-pack then cannot resolve.
+		// The FILE inside it is named as universalName says, NOT by the
+		// build's `binary`. Reading the wrong one makes this gate agree
+		// with a glob that mcpb-pack then cannot resolve.
 		targets = append(targets, buildTarget{
 			goos: "darwin", goarch: "all", binary: universalName(cfg, u.NameTemplate),
 			dir: u.ID + "_darwin_all",
@@ -595,7 +591,7 @@ func globCount(files []staged) int {
 func readGoreleaser(p string) (goreleaserConfig, error) {
 	data, err := os.ReadFile(p) //nolint:gosec // a repository path from a constant
 	if err != nil {
-		return goreleaserConfig{}, fmt.Errorf("%s: %w (§12's release does not exist)", p, err)
+		return goreleaserConfig{}, fmt.Errorf("%s: %w (without it there is no release)", p, err)
 	}
 	var cfg goreleaserConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
@@ -665,6 +661,8 @@ func buildsDarwin(cfg goreleaserConfig, ids []string) bool {
 // goreleaser defaults name_template to the project name, so an empty
 // template is not "the same as the build's binary" — it is the project
 // name, which is a different field and only sometimes the same string.
+// A snapshot with the two renamed apart writes the project name.
+// https://goreleaser.com/customization/universalbinaries/
 func universalName(cfg goreleaserConfig, template string) string {
 	if template == "" {
 		return cfg.ProjectName

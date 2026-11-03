@@ -11,9 +11,7 @@ import (
 
 // Pinning an action pins the WRAPPER. The steps below fetch a tool, and a
 // SHA on the `uses:` line says nothing about which version of that tool
-// arrives — which is why this half reads as complete when it is not, and
-// why the standard records it breaking a release on two servers the same
-// afternoon.
+// arrives — which is why this half reads as complete when it is not.
 //
 // The last two cases of the table, and the flow-style test below it, are
 // not hypothetical: they are the two ways the first version of this check

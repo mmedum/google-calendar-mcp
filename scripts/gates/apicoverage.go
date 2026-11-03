@@ -28,7 +28,7 @@ type apiSurface struct {
 		Verb string `json:"verb"`
 		Path string `json:"path"`
 	} `json:"methods"`
-	// Schemas is the field-level half (§8b). Methods are the coarse
+	// Schemas is the field-level half. Methods are the coarse
 	// axis; this API keeps its capability in the Event resource, and a
 	// method-only record hides the 44 properties nobody considered.
 	Schemas []schemaRow `json:"schemas"`
@@ -53,15 +53,13 @@ type verdict struct {
 //  3. a verdict of `used` with no reason, or `out` with no reason, fails;
 //  4. a client method in internal/gapi that no row names fails.
 //
-// The fourth is the one this file's header and CLAUDE.md rule 11 both
-// promised and nothing implemented, for a whole phase. A record that
-// only reads the published surface can be complete while the code calls
-// something nobody decided about.
+// The fourth is what D-08 asks of the code: a record that only reads
+// the published surface can be complete while the code calls something
+// nobody decided about.
 //
-// The verb and path live ONLY in the machine-owned snapshot. A sibling
-// put them in the hand-written file too, and ended up with 112 rows of
-// two fields nothing ever read — so a method that kept its name and
-// changed its path was invisible.
+// The verb and path live ONLY in the machine-owned snapshot. A copy in
+// the hand-written file is read by nothing, so a method that kept its
+// name and changed its path would go unseen.
 func apiCoverageGate() error {
 	surface, err := loadSurface()
 	if err != nil {

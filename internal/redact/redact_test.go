@@ -104,10 +104,8 @@ func TestPrinterRedacts(t *testing.T) {
 // transcript gets pasted into issues. It has no shape of its own, so the
 // rule is anchored on the label this server's own renderer prints.
 //
-// The fixtures below are invented and say so. The first draft of this
-// test carried a REAL token copied out of a live transcript, and the
-// leak gate refused the commit — which is the gate doing exactly its job
-// and the reason §9.1 says fixtures are generated, never recorded.
+// The fixtures below are invented and say so. A token copied out of a
+// live transcript is real, and the leak gate refuses one.
 func TestSyncAndPageTokensAreRedacted(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"Next sync token: example-token-not-a-real-one", "Next sync token: [cursor]"},

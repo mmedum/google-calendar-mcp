@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
+	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/tools"
 )
@@ -79,11 +80,11 @@ func New(d Deps) *mcp.Server {
 // logCalls records that a call happened and how it went, and nothing
 // about what it carried.
 //
-// The fields are the method, the tool name, the outcome and the
-// duration. Arguments and results are the person's calendar — titles,
+// The fields are the method, the tool name, the outcome, the duration
+// and, for a tool failure, its error class. Arguments and results are the person's calendar — titles,
 // guest lists, locations, search terms — and a log somebody is asked to
 // paste into a bug report has to be safe to paste by construction
-// rather than by their vigilance (§9). The tool name is the one part of
+// rather than by their vigilance (D-03). The tool name is the one part of
 // a request that comes from this server's own schema.
 func logCalls(lg *slog.Logger) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
@@ -94,17 +95,38 @@ func logCalls(lg *slog.Logger) mcp.Middleware {
 			if ctr, ok := req.(*mcp.CallToolRequest); ok && ctr.Params != nil {
 				attrs = append(attrs, "tool", ctr.Params.Name)
 			}
+			msg, outcome := "mcp call", "ok"
 			if err != nil {
-				// The error text is this server's own message, built
-				// from a class and a fixed sentence. It is not the
-				// caller's payload.
-				lg.Debug("mcp call failed", append(attrs, "outcome", "error")...)
-			} else {
-				lg.Debug("mcp call", append(attrs, "outcome", "ok")...)
+				// A protocol error, such as a call naming a tool this
+				// configuration does not register. Its result is a
+				// typed nil, so res is not read.
+				msg, outcome = "mcp call failed", "error"
+			} else if failed, class, classified := toolFailure(res); failed {
+				// A tool's own failure arrives as a result with IsError
+				// set, not as err. Only its class is logged: the message
+				// can carry Google's text about the person's calendar.
+				msg, outcome = "mcp call failed", "error"
+				if classified {
+					attrs = append(attrs, "class", class)
+				}
 			}
+			lg.Debug(msg, append(attrs, "outcome", outcome)...)
 			return res, err
 		}
 	}
+}
+
+// toolFailure reports whether res is a failed tool call, and the class of
+// its error when this server classified it. A failure the SDK made
+// itself, such as invalid arguments, has no class, and neither has a bug
+// in this server.
+func toolFailure(res mcp.Result) (failed bool, class gapi.Class, classified bool) {
+	r, ok := res.(*mcp.CallToolResult)
+	if !ok || r == nil || !r.IsError {
+		return false, "", false
+	}
+	class, classified = gapi.ClassOf(r.GetError())
+	return true, class, classified
 }
 
 // SchemaDump is the stable description of the tool surface, for the

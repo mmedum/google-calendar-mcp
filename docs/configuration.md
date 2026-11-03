@@ -27,19 +27,17 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_WRITE_TIMEOUT` | `-write-timeout` | `120s` | Timeout for a write. |
 | `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. Unset or empty, the server uses the client `login` recorded for the profile. |
 
-`GCAL_READ_ONLY` was `GCAL_READONLY` until 4.1.0, and took the name
-the sibling servers and the Claude Desktop bundle use. 5.0.0 removed the
-old name. Unset or off (`false`, `0`, `no`, `off` or empty, in any case)
-it starts the server and does nothing. On, or a value that is not a
-boolean, is refused at start, naming `GCAL_READ_ONLY`: use that instead.
+The removed settings below are still read, so that one left turned on
+is refused rather than ignored. Unset or off (`false`, `0`, `no`, `off` or
+empty, in any case), each does nothing. On, or a value that is not a
+boolean, stops the server at start with a message naming what to do:
 
-`GCAL_REQUIRE_PROMPT` and `-require-prompt` were removed with the
-server's question: the server asks the person nothing, and your client's
-own approval decides each call. A configuration that still turns it on
-is refused at start, since ignoring it would quietly allow what it was
-set to stop. Unset it, and leave `GCAL_ENABLE_DESTRUCTIVE` and
-`GCAL_ENABLE_DECLINE_ALL` off for a client that runs with nobody
-watching.
+- `GCAL_READONLY` is the old name of `GCAL_READ_ONLY`. Use that instead.
+- `GCAL_REQUIRE_PROMPT` is refused because the server asks the person
+  nothing; your client's own approval decides each call. Ignoring it
+  would quietly allow what it was set to stop. Unset it, and leave
+  `GCAL_ENABLE_DESTRUCTIVE` and `GCAL_ENABLE_DECLINE_ALL` off for a
+  client that runs with nobody watching.
 
 `check_availability` is the exception to `GCAL_MAX_CALENDARS`: it asks
 about at most 100 calendars per call, because free/busy answers for 50
@@ -47,7 +45,7 @@ per request where a schedule read spends one request per calendar. That
 ceiling is not configurable, and the refusal says which limit it is so
 nobody changes the wrong setting.
 
-Two more are read directly rather than through a flag:
+These are read directly, with no flag:
 
 | Variable | What it does |
 |---|---|
@@ -74,4 +72,6 @@ model sees, gives the counts, and returns a `next_page_token`.
 
 A fan-out across calendars costs one request per calendar. The result
 reports how many requests it spent. Google allows 600 requests per user
-per minute, on a sliding window.
+per minute, on a sliding window, as its
+[quota guide](https://developers.google.com/workspace/calendar/api/guides/quota)
+says.

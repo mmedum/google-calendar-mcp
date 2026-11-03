@@ -12,19 +12,15 @@ import (
 // TestMain makes it STRUCTURALLY impossible for a test in this package
 // to reach the real OS keyring.
 //
-// This is not caution, it is a repair. Without it, every test that did
-// not install its own fake ran against the maintainer's real keyring
-// under the default profile — and `logout` revokes the grant at Google
-// and deletes the token. Running `go test ./cmd/...` signed the
-// maintainer out of their own account.
+// Without it, every test that does not install its own fake runs against
+// the maintainer's real keyring under the default profile — and `logout`
+// revokes the grant at Google and deletes the token, so `go test
+// ./cmd/...` would sign the maintainer out of their own account.
 //
-// The sibling servers hit exactly this and the warning is in their
-// source: a test can redirect the config directory and the environment,
-// and it CANNOT redirect the OS keyring, so isolation that stops at the
-// filesystem is not isolation. That warning is quoted in
-// internal/credentials and was written into this repository before this
-// happened, which is the point the standard's preamble makes: a rule
-// stated is not a rule kept.
+// A test can redirect the config directory and the environment, and it
+// CANNOT redirect the OS keyring, so isolation that stops at the
+// filesystem is not isolation. internal/credentials says so too, and a
+// rule stated is not a rule kept.
 //
 // Installed for the whole package rather than per test, because a rule
 // each test has to remember is a rule the next test forgets.

@@ -14,11 +14,11 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/render"
 )
 
-// The calendar writes (§7.5): create_calendar, manage_calendar, and the
+// The calendar writes: create_calendar, manage_calendar, and the
 // two gated ones.
 //
 // **No etag parameter, and the reason is the API's shape rather than an
-// omission.** An event is one resource with one etag, so §4.4's round
+// omission.** An event is one resource with one etag, so the round
 // trip — read it, decide, write under the version you read — has one
 // thing to hold. A calendar is two: the calendar itself and this user's
 // subscription to it, each with its own etag, each patched by a
@@ -84,7 +84,7 @@ type CreateCalendarOptions struct {
 
 // CreateCalendar makes a new secondary calendar.
 //
-// The zone is resolved rather than left to Google (§4.1): a calendar
+// The zone is resolved rather than left to Google: a calendar
 // created with no zone takes the account's, which is usually right and
 // is never stated. This server sends one and says where it came from, so
 // a calendar created from a machine in another zone cannot quietly
@@ -143,14 +143,15 @@ func (s *Service) CreateCalendar(ctx context.Context, o CreateCalendarOptions) (
 	return report, nil
 }
 
-// createCalendarError is §2.11's problem without §2.11's remedy.
+// createCalendarError reports a calendar insert whose answer was never
+// seen.
 //
 // An event insert can supply its own id, so a retry after an answer
 // nobody saw either lands or collides. A calendar insert cannot: Google
 // mints the id, so a blind retry makes a second calendar with the same
 // title — and calendar creations are quota-counted and not refunded by
-// deleting them (§18 row 36). So a failure that may have landed says
-// "go and look", by title, and does not retry.
+// deleting them. So a failure that may have landed says "go and look",
+// by title, and does not retry.
 func createCalendarError(err error, title string) error {
 	e, maybe := maybeLanded(err)
 	if !maybe {
@@ -195,7 +196,7 @@ type ManageOptions struct {
 }
 
 // ManageCalendar changes a calendar, a subscription to it, or one
-// user's view of it (§7.5).
+// user's view of it.
 func (s *Service) ManageCalendar(ctx context.Context, o ManageOptions) (render.CalendarReport, error) {
 	ctx, cal, err := s.openCalendar(ctx, o.Calendar)
 	if err != nil {
@@ -253,10 +254,10 @@ func (s *Service) ManageCalendar(ctx context.Context, o ManageOptions) (render.C
 //
 // manage_calendar can be two patches, and the second failing does not
 // undo the first: a call that renamed the calendar and then failed to
-// set the color returned a bare error, so the caller could not tell
-// that half the write had landed and a retry would redo it. There is no
-// rollback to offer — §2 has no transaction — so the honest thing is to
-// say which change is already made.
+// set the color would otherwise return a bare error, and the caller
+// could not tell that half the write had landed. There is no rollback to
+// offer — the API has no transaction — so the honest thing is to say
+// which change is already made.
 func partly(err error, report render.CalendarReport) error {
 	if report.DryRun {
 		// Nothing landed, so there is nothing to say stands. A dry run
@@ -361,7 +362,7 @@ func (s *Service) unsubscribe(ctx context.Context, cal model.Calendar, dryRun bo
 //
 // Read fresh, not taken from the resolved calendar, and the reason is
 // that these tools have no `force`. The calendar list is cached for the
-// process (§7.1), so its etag can be minutes old; sending it would turn
+// process, so its etag can be minutes old; sending it would turn
 // a color somebody changed in the web UI into a `[stale]` refusal with
 // no way past it. A read immediately before the write is what the tool
 // descriptions promise and the only version worth holding a write to.
@@ -535,20 +536,21 @@ func notSubscribed(err error, cal model.Calendar) error {
 			"settings ON that list entry. Pass subscribe:true in the same call to add it first", cal.Title)
 }
 
-// cannotUnsubscribe translates the refusal the live run found.
+// cannotUnsubscribe translates Google's refusal to unsubscribe a
+// calendar's data owner.
 //
 // **A calendar's data owner cannot remove it from their own list.**
 // Google answers 403 "The data owner of a calendar cannot remove such a
-// calendar from their calendar list", which is a rule nothing published
-// says and this server had no idea about — manage_calendar offered an
-// operation that could not work on a calendar you made.
+// calendar from their calendar list", which the reference does not
+// mention. Checked by the live step "manage_calendar unsubscribe is
+// refused for an owner".
+// https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/delete
 //
 // Not pre-empted, and the distinction is Google's own: the `owner` ACL
 // role is not the same as the data owner, which is a single account per
-// calendar and lives in a field §8b writes off for being an address
-// nothing here needs. So the API stays the authority on who that is, and
-// this translates its answer into the two things a caller can actually
-// do instead.
+// calendar and lives in a field this server does not read. So the API
+// stays the authority on who that is, and this translates its answer
+// into the two things a caller can actually do instead.
 func cannotUnsubscribe(err error, cal model.Calendar) error {
 	var e *gapi.Error
 	if !errors.As(err, &e) || e.Status != http.StatusForbidden ||
@@ -629,19 +631,16 @@ func mergeCalendar(have model.Calendar, c gcal.Calendar) model.Calendar {
 // rememberCalendar and forgetCalendar keep the cached list right after a
 // write, instead of throwing it away.
 //
-// The list is cached for the process (§7.1), which is what keeps a
-// resolution from costing a request; dropping it made the NEXT tool call
-// pay for a full calendarList.list, so setting a color on ten calendars
-// cost thirty requests instead of twenty-one. Every write here has the
-// row Google just returned in hand, so the cache can be corrected rather
-// than emptied.
+// The list is cached for the process, which is what keeps a resolution
+// from costing a request; dropping it would make the NEXT tool call pay
+// for a full calendarList.list. Every write here has the row Google just
+// returned in hand, so the cache can be corrected rather than emptied.
 //
-// A calendar this process CREATED has to be added for a second reason,
-// and it is a defect rather than a cost: create_calendar left the cache
-// untouched, so the new calendar was not in it, and resolving the
-// calendar by the title it had just been given answered "no calendar
-// called that" — for the life of the process, with no way for the caller
-// to recover.
+// A calendar this process CREATED has to be added for a second reason:
+// without it, resolving the calendar by the title it was just given
+// answers "no calendar called that" for the life of the process, with no
+// way for the caller to recover.
+//
 // Both build a NEW slice and swap it in rather than editing the one the
 // cache holds. allCalendars hands that slice to its callers without
 // copying it, and tool calls run concurrently — the SDK serves each in
@@ -701,7 +700,12 @@ type DestructiveOptions struct {
 //
 // Registered only under GCAL_ENABLE_DESTRUCTIVE, and still refused
 // without confirm on the call: the flag is the deployment's decision and
-// the confirmation is this call's, and §9 wants both.
+// the confirmation is this call's, and both are required.
+//
+// Google deletes only a secondary calendar: "Deletes a secondary
+// calendar. Use calendars.clear for clearing all events on primary
+// calendars." So the primary is refused here, naming clear_calendar.
+// https://developers.google.com/workspace/calendar/api/v3/reference/calendars/delete
 func (s *Service) DeleteCalendar(ctx context.Context, o DestructiveOptions) (render.CalendarReport, error) {
 	ctx, cal, err := s.openCalendar(ctx, o.Calendar)
 	if err != nil {
@@ -745,12 +749,12 @@ func (s *Service) DeleteCalendar(ctx context.Context, o DestructiveOptions) (ren
 
 // ClearCalendar deletes every event on the account's primary calendar.
 //
-// The most destructive call this API offers (§9), and the narrowest:
-// Google's own description is "Clears a primary calendar", so a
-// secondary one is refused here rather than sent and hoped for. Which
-// way Google actually answers for a secondary calendar is spike K; until
-// that has run, this server does not send a request whose effect it
-// cannot state.
+// The most destructive call this API offers, and the narrowest. The
+// reference says only "Clears a primary calendar"; handed a secondary
+// calendar, Google refuses with 400. So a secondary one is refused here
+// before any request. Checked by the live step "spike K: clear on a
+// secondary".
+// https://developers.google.com/workspace/calendar/api/v3/reference/calendars/clear
 func (s *Service) ClearCalendar(ctx context.Context, o DestructiveOptions) (render.CalendarReport, error) {
 	ctx, cal, err := s.openCalendar(ctx, o.Calendar)
 	if err != nil {

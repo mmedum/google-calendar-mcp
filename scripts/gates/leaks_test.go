@@ -143,6 +143,23 @@ func gitIn(t *testing.T, dir string) func(args ...string) {
 	}
 }
 
+// isolatedRepo makes the working directory a fresh git repository on main
+// and returns it with a git runner. The gate's own git calls read none of
+// the machine's configuration either.
+func isolatedRepo(t *testing.T) (string, func(args ...string)) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	// git reads $XDG_CONFIG_HOME/git/ignore even with the global
+	// configuration off.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	git := gitIn(t, dir)
+	git("init", "--quiet", "--initial-branch=main")
+	return dir, git
+}
+
 // The history scan reads an annotated tag, its message included, less
 // the tagger line, which git writes from the tagger's own identity.
 func TestTheHistoryScanReadsATagButNotItsTagger(t *testing.T) {

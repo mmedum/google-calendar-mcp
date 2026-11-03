@@ -55,7 +55,7 @@ func listTools(t *testing.T, cfg config.Config) []*mcp.Tool {
 
 // newClient is the test client: one that can ask the person, through
 // form elicitation, as a client with somebody at it can. The server asks
-// nobody (§9a), so every tool is called through such a client and a
+// nobody, so every tool is called through such a client and a
 // question from any of them fails the test that made the call.
 func newClient(t *testing.T) *mcp.Client {
 	t.Helper()
@@ -79,39 +79,37 @@ func names(ts []*mcp.Tool) map[string]*mcp.Tool {
 	return out
 }
 
-// readTools is §8's first block: everything read-only mode keeps, and
-// everything that asks for only the read scopes. `list_changes` is one
-// of them — incremental sync reads, and the token it hands back is the
-// caller's to keep (§17.1).
+// readTools are everything read-only mode keeps, and everything that asks
+// for only the read scopes. `list_changes` is one of them — incremental
+// sync reads, and the token it hands back is the caller's to keep.
 var readTools = []string{
 	"list_calendars", "get_calendar", "list_events",
 	"search_events", "get_event", "list_instances",
 	"check_availability", "get_settings", "list_changes",
 }
 
-// writeTools is phase 2's block: the five event writes.
+// writeTools are the five event writes.
 var writeTools = []string{
 	"create_event", "update_event", "cancel_event", "move_event", "respond_to_event",
 }
 
-// calendarTools is phase 3's, minus the ones behind a gate: creating a
+// calendarTools are the calendar writes outside every gate: creating a
 // calendar and managing it register wherever a write does.
 var calendarTools = []string{"create_calendar", "manage_calendar"}
 
 // sharingTools are the sharing tools registered by default, the read
-// among them (§7.6).
+// among them.
 var sharingTools = []string{"list_sharing", "share_calendar", "unshare_calendar"}
 
 // wideSharingTools widen access past the ordinary share. They need
-// GCAL_SHARING on and GCAL_ENABLE_DESTRUCTIVE set (§7.6).
+// GCAL_SHARING on and GCAL_ENABLE_DESTRUCTIVE set.
 var wideSharingTools = []string{"publish_calendar", "widen_calendar_access"}
 
-// decliningTools need GCAL_ENABLE_DECLINE_ALL, a flag of their own
-// (§7.4).
+// decliningTools need GCAL_ENABLE_DECLINE_ALL, a flag of their own.
 var decliningTools = []string{"create_event_declining_all"}
 
 // gatedTools need GCAL_ENABLE_DESTRUCTIVE to register at all, and
-// confirm:true on the call besides (§9, §7.6).
+// confirm:true on the call besides.
 var gatedTools = append([]string{"delete_calendar", "clear_calendar"}, wideSharingTools...)
 
 func TestTheDefaultSurfaceIsEverythingButTheGatedTools(t *testing.T) {
@@ -129,7 +127,7 @@ func TestTheDefaultSurfaceIsEverythingButTheGatedTools(t *testing.T) {
 	}
 }
 
-// §10: read-only mode registers only the read tools, because it also
+// Read-only mode registers only the read tools, because it also
 // requests only the read scopes. A write tool left registered there
 // would fail at Google with a 403 nobody can act on.
 func TestReadOnlyModeDropsEveryWrite(t *testing.T) {
@@ -162,9 +160,8 @@ func TestReadOnlyKeepsEveryReadTool(t *testing.T) {
 }
 
 // TestFullSurfaceRegistersEverything holds the claim that FullSurface
-// names every gate `allowed` reads. A sibling's schema dump set one flag
-// by hand for three phases; a fourth gate arrived and the tool behind it
-// was missing from the schema diff with every test still green.
+// names every gate `allowed` reads. A gate it misses drops its tool from
+// the schema diff with every other test still green.
 func TestFullSurfaceRegistersEverything(t *testing.T) {
 	full := names(listTools(t, tools.FullSurface(baseConfig())))
 
@@ -229,7 +226,7 @@ func TestReadToolsAreAnnotatedReadOnly(t *testing.T) {
 // (MCP schema, ToolAnnotations), so only the two writes that add say it:
 // a new calendar, a new event. Every other write says true, gated or
 // not; cancel_event, an edit, a move and an answer to an invitation
-// register without the destructive flag all the same (§9).
+// register without the destructive flag all the same.
 // create_event's auto_decline new declines only invitations that arrive
 // later, which adds a rule rather than changing anything there.
 func TestOnlyToolsThatAddSayTheyAreNotDestructive(t *testing.T) {
@@ -266,9 +263,8 @@ func TestEveryWriteToolDocumentsNotifyAndDryRun(t *testing.T) {
 	}
 }
 
-// TestOverlappingToolsPointAtEachOther is the standard's rule: if two
-// tools overlap, each description names the other and says when to
-// choose it.
+// TestOverlappingToolsPointAtEachOther: if two tools overlap, each
+// description names the other and says when to choose it.
 func TestOverlappingToolsPointAtEachOther(t *testing.T) {
 	got := names(listTools(t, tools.FullSurface(baseConfig())))
 	pairs := [][2]string{
@@ -299,8 +295,8 @@ func TestOverlappingToolsPointAtEachOther(t *testing.T) {
 	}
 }
 
-// TestListEventsWarnsAboutTheRecurrenceChoice: §2.9 makes expand a real
-// decision, so the description has to say so.
+// TestListEventsWarnsAboutTheRecurrenceChoice: expand changes what Google
+// returns, so it is a real decision and the description has to say so.
 func TestListEventsWarnsAboutTheRecurrenceChoice(t *testing.T) {
 	tool := names(listTools(t, baseConfig()))["list_events"]
 	for _, want := range []string{"expand", "occurrence", "series"} {
@@ -472,8 +468,8 @@ func TestGatesAreServerSide(t *testing.T) {
 }
 
 // The decline-all tool has a flag of its own: the destructive flag does
-// not register it, and its flag registers nothing else (§7.4). Read-only
-// wins over it.
+// not register it, and its flag registers nothing else. Read-only wins
+// over it.
 func TestDecliningAllNeedsItsOwnFlag(t *testing.T) {
 	for _, c := range []struct {
 		cfg  config.Config
@@ -566,17 +562,20 @@ func TestFailFormatsEveryError(t *testing.T) {
 	if classified.Error() != "[not_found] no such event" {
 		t.Fatalf("classified error = %q", classified.Error())
 	}
+	// The call log reads the class from the error the result keeps.
+	if class, ok := gapi.ClassOf(classified); !ok || class != gapi.ClassNotFound {
+		t.Errorf("ClassOf(classified) = %q, %v; want not_found, true", class, ok)
+	}
 
 	// An unclassified error is a bug in this server, and still has to
 	// arrive with a class so the vocabulary stays closed from the
-	// caller's side.
+	// caller's side. The call log must not read it as a Google outage.
 	plain := tools.Fail(errors.New("something unexpected"))
-	if !strings.HasPrefix(plain.Error(), "[") {
-		t.Fatalf("an unclassified error reached the caller without a class: %q", plain.Error())
+	if plain.Error() != "[unavailable] something unexpected" {
+		t.Fatalf("unclassified error = %q, want %q", plain.Error(), "[unavailable] something unexpected")
 	}
-	cls := plain.Error()[1:strings.Index(plain.Error(), "]")]
-	if !gapi.Class(cls).Valid() {
-		t.Fatalf("an unclassified error produced %q, which is not in the vocabulary", cls)
+	if class, ok := gapi.ClassOf(plain); ok {
+		t.Errorf("ClassOf(unclassified) = %q, true; want no class for the call log", class)
 	}
 }
 
@@ -658,8 +657,8 @@ func TestEveryToolAnswers(t *testing.T) {
 	}
 }
 
-// TestAnAllDayEventNeverRendersATimeThroughTheTools is §4.1 end to end,
-// at the boundary a model actually sees.
+// TestAnAllDayEventNeverRendersATimeThroughTheTools: a date is not a
+// time, end to end, at the boundary a model actually sees.
 func TestAnAllDayEventNeverRendersATimeThroughTheTools(t *testing.T) {
 	cs, cleanup := session(t, baseConfig())
 	defer cleanup()
@@ -786,9 +785,9 @@ func text(t *testing.T, res *mcp.CallToolResult) string {
 	return tc.Text
 }
 
-// TestCheckAvailabilityExplainsWhyItIsNotAnEventList is §4.6 at the
-// boundary a model reads: a list of events answers a different question,
-// and an unreadable calendar is not free.
+// TestCheckAvailabilityExplainsWhyItIsNotAnEventList holds the rule at
+// the boundary a model reads: a list of events answers a different
+// question, and an unreadable calendar is not free.
 func TestCheckAvailabilityExplainsWhyItIsNotAnEventList(t *testing.T) {
 	tool := names(listTools(t, baseConfig()))["check_availability"]
 	lower := strings.ToLower(tool.Description)
@@ -803,9 +802,8 @@ func TestCheckAvailabilityExplainsWhyItIsNotAnEventList(t *testing.T) {
 //
 // It asserts the explanation and not the class: Google does not document
 // what events.instances returns for an id that exists but is not a
-// series, so the class here is whatever Google chose. The live driver
-// probes it and §18 will carry the answer; this holds the part that is
-// this server's to get right.
+// series, and no live step settles it, so the class here is whatever
+// Google chose. This holds the part that is this server's to get right.
 func TestListInstancesExplainsAnOccurrenceID(t *testing.T) {
 	cs, cleanup := session(t, baseConfig())
 	defer cleanup()
@@ -897,7 +895,7 @@ func TestTheWriteToolsWorkThroughTheProtocol(t *testing.T) {
 			if res.IsError {
 				t.Fatalf("%s failed: %s", c.name, text(t, res))
 			}
-			// Both halves, never the same bytes (§10).
+			// Both halves, never the same bytes.
 			if res.StructuredContent == nil {
 				t.Fatalf("%s returned no structured half", c.name)
 			}
@@ -909,7 +907,7 @@ func TestTheWriteToolsWorkThroughTheProtocol(t *testing.T) {
 }
 
 // A refusal arrives as a tool result carrying a class, never as a
-// protocol error (§6.5).
+// protocol error.
 func TestAWriteRefusalArrivesAsAClassifiedToolResult(t *testing.T) {
 	cs, cleanup := session(t, tools.FullSurface(baseConfig()))
 	defer cleanup()
@@ -925,7 +923,7 @@ func TestAWriteRefusalArrivesAsAClassifiedToolResult(t *testing.T) {
 		t.Fatalf("a refusal must not be a protocol error: %v", err)
 	}
 	if !res.IsError {
-		t.Fatal("creating an event with guests and no notify must be refused (§4.3)")
+		t.Fatal("creating an event with guests and no notify must be refused")
 	}
 	if got := text(t, res); !strings.Contains(got, "[invalid]") {
 		t.Fatalf("the refusal carries no class:\n%s", got)

@@ -10,7 +10,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
 )
 
-// The sharing half of the plan package (§7.6).
+// The sharing half of the plan package.
 //
 // Sharing is the one act here whose effect leaves the account, so the
 // guards are about blast radius rather than about correctness: who a
@@ -48,7 +48,7 @@ const (
 // an ACL scope.
 //
 // existing is the calendar's current rules, which are read before every
-// share anyway (§7.6 shows exposure before and after). They are used
+// share anyway, to show exposure before and after. They are used
 // here rather than only reported: if this calendar already has a rule
 // for that address, its scope type is Google's own answer to the
 // question this function would otherwise guess at.
@@ -161,7 +161,7 @@ func looksLikeDomain(v string) bool {
 	return !strings.HasPrefix(v, ".") && !strings.HasSuffix(v, ".")
 }
 
-// The three sharing tools split one act by how far it reaches (§7.6).
+// The three sharing tools split one act by how far it reaches.
 // share_calendar takes named people and groups inside the organization,
 // below owner; publish_calendar the public and whole domains; and
 // widen_calendar_access people and groups outside the organization, and
@@ -184,7 +184,9 @@ var consumerDomains = map[string]bool{"gmail.com": true, "googlemail.com": true}
 // GroupReach is what a group rule reaches, said on every group share and
 // in share_calendar's description. Google's own help says access follows
 // membership, later members included, and that a member outside the
-// organization gets in unless its sharing policy forbids it (§7.6).
+// organization gets in unless its sharing policy forbids it. Whether
+// this server can see such a member is not known.
+// https://support.google.com/a/users/answer/167101
 const GroupReach = "A group rule reaches everyone in the group, including people added later; a member " +
 	"outside the organization too, if the organization's sharing policy lets them in."
 
@@ -337,8 +339,8 @@ func ParseRole(v string) (string, error) {
 	}
 }
 
-// RoleChoices is the role vocabulary, explained rather than echoed
-// (§7.6): writerWithoutPrivateAccess is not self-explanatory.
+// RoleChoices is the role vocabulary, explained rather than echoed:
+// writerWithoutPrivateAccess is not self-explanatory.
 func RoleChoices() string {
 	var b strings.Builder
 	for _, r := range gcal.Roles {
@@ -347,19 +349,22 @@ func RoleChoices() string {
 	return b.String()
 }
 
-// ShareNotify applies §4.3 to a sharing change.
+// ShareNotify reads the notify choice on a sharing change (D-25).
 //
 // Two differences from a write to an event, both of them Google's:
 //
-//  1. the default is TRUE here and false there (§2.5), which is why this
-//     server asks rather than inheriting either;
+//  1. acl.insert's sendNotifications defaults to TRUE, where an event
+//     write's default sends nothing, which is why this server asks
+//     rather than inheriting either;
 //  2. sendNotifications is a boolean, so `external_only` has nothing to
 //     map to. It is refused as unsupported rather than quietly rounded
 //     to one of the two, because rounding it would email either more
-//     people or fewer than the caller asked for.
+//     people or fewer than the caller asked for. Checked by the live
+//     step "widen_calendar_access refuses external_only".
+//     https://developers.google.com/workspace/calendar/api/v3/reference/acl/insert
 //
-// There is no "reaches nobody" exemption of the kind §4.3.2 gives an
-// event write, and that is the honest position rather than an oversight:
+// There is no "reaches nobody" exemption of the kind an event write has,
+// and that is the honest position rather than an oversight:
 // a group address expands to people this server cannot count, a domain
 // rule covers everybody in it, and the public scope covers the internet.
 // The reach of a sharing change is not knowable here, so the choice is
@@ -407,15 +412,14 @@ const (
 	ShareRemoved
 )
 
-// ShareReport is what a sharing result says about notification (§4.9).
+// ShareReport is what a sharing result says about notification.
 //
 // As on an event, it says what was ASKED FOR. The API reports nothing
 // about delivery.
 //
 // All four sentences a sharing call can produce come from here, outcome
-// included. The service wrote two of them by hand for a while, and both
-// made the flat promise "Nobody was emailed" — which is the exact claim
-// this function exists to avoid making (§2.6).
+// included, so none of them makes the flat promise "Nobody was emailed",
+// which the API cannot back.
 func ShareReport(outcome ShareOutcome, notify bool, a Audience) string {
 	switch outcome {
 	case ShareUnchanged:
@@ -441,7 +445,7 @@ func grantReport(notify bool, a Audience) string {
 		// There is no address in a public rule, so there is nobody for
 		// Google to write to. The choice still has to be made and sent,
 		// because leaving it out means Google's default, which is to
-		// notify (§2.5).
+		// notify.
 		if notify {
 			return "Asked Google to send a sharing notification, though a public rule names nobody to send " +
 				"it to. That is what was asked for, not what arrived."
@@ -468,8 +472,8 @@ func FindRule(rules []model.Sharing, a Audience) (model.Sharing, bool) {
 
 // Describe names an audience in the words a result uses, without
 // printing an address that a log or a transcript must not carry: the
-// caller supplied it, so the result may echo it, but §9 keeps it out of
-// everything else.
+// caller supplied it, so the result may echo it, but nothing else may
+// carry it.
 //
 // model.Sharing.Who() owns the wording, because the same audience is
 // named by the exposure list in the same result. Two spellings meant one

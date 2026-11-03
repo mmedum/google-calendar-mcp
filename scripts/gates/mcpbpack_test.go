@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Tests that read a packed bundle BACK, which nothing in this family had.
+// Tests that read a packed bundle BACK.
 // The manifest checks hold the document; these hold the archive, and the
 // two fail in different ways.
 
@@ -40,7 +40,7 @@ func fakeDist(t *testing.T) string {
 	return dist
 }
 
-// The claim §12 makes out loud: rebuilding a tag reproduces it. The
+// A release promises that rebuilding a tag reproduces it. The
 // binaries get that from -trimpath and mod_timestamp; the bundle gets it
 // only if the packer stamps its own entries, and nothing else in any of
 // these repositories would notice if it stopped.
@@ -202,7 +202,7 @@ func TestEveryStagedBinaryIsExecutable(t *testing.T) {
 		names = append(names, f.Name)
 		mode, ok := want[f.Name]
 		if !ok {
-			t.Errorf("the bundle carries %s, which is not the family's layout", f.Name)
+			t.Errorf("the bundle carries %s, which is not in the bundle's layout", f.Name)
 			continue
 		}
 		if got := f.Mode().Perm(); got != mode {
@@ -210,7 +210,7 @@ func TestEveryStagedBinaryIsExecutable(t *testing.T) {
 		}
 	}
 	if len(names) != len(want) {
-		t.Errorf("the bundle carries %v; want the %d files of the family's layout", names, len(want))
+		t.Errorf("the bundle carries %v; want the %d files of the bundle's layout", names, len(want))
 	}
 }
 

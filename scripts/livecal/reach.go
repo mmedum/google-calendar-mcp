@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// Who a run may reach (§9.1).
+// Who a run may reach (D-71).
 //
 // A default run mails nobody. No event or share it writes names anybody
 // but the signed-in account, or an address under .test, a top-level
@@ -85,12 +85,12 @@ func (g *reachGuard) tool(name string, args map[string]any) error {
 		addrs, ok := addresses(args[k])
 		if !ok {
 			return fmt.Errorf("%s was not called: the driver cannot read its %s, so it cannot tell "+
-				"who it reaches (§9.1)", name, k)
+				"who it reaches", name, k)
 		}
 		for _, a := range addrs {
 			if !g.may(a) {
 				return fmt.Errorf("%s was not called: its %s names somebody this run may not reach. "+
-					"Only -spike-notify with -spike-invitees naming them lets a run reach a person (§9.1)", name, k)
+					"Only -spike-notify with -spike-invitees naming them lets a run reach a person", name, k)
 			}
 		}
 	}
@@ -105,29 +105,29 @@ func (g *reachGuard) rest(method, path string, body any) error {
 	if _, query, ok := strings.Cut(path, "?"); ok {
 		q, err := url.ParseQuery(query)
 		if err != nil {
-			return fmt.Errorf("%s with a query the driver cannot read was not sent (§9.1)", method)
+			return fmt.Errorf("%s with a query the driver cannot read was not sent", method)
 		}
 		for _, v := range q["sendUpdates"] {
 			if v != "none" && !g.armed() {
-				return fmt.Errorf("%s with sendUpdates=%s was not sent: an unarmed run mails nobody (§9.1)",
+				return fmt.Errorf("%s with sendUpdates=%s was not sent: an unarmed run mails nobody",
 					method, v)
 			}
 		}
 		for _, v := range q["sendNotifications"] {
 			if v != "false" && !g.armed() {
-				return fmt.Errorf("%s with sendNotifications=%s was not sent: an unarmed run mails nobody (§9.1)",
+				return fmt.Errorf("%s with sendNotifications=%s was not sent: an unarmed run mails nobody",
 					method, v)
 			}
 		}
 	}
 	addrs, ok := bodyAddresses(body)
 	if !ok {
-		return fmt.Errorf("%s was not sent: the driver cannot read who its body names (§9.1)", method)
+		return fmt.Errorf("%s was not sent: the driver cannot read who its body names", method)
 	}
 	for _, a := range addrs {
 		if !g.may(a) {
 			return fmt.Errorf("%s was not sent: its body names somebody this run may not reach. "+
-				"Only -spike-notify with -spike-invitees naming them lets a run reach a person (§9.1)", method)
+				"Only -spike-notify with -spike-invitees naming them lets a run reach a person", method)
 		}
 	}
 	return nil

@@ -11,9 +11,8 @@ import (
 // parityGate asserts that `make check` and CI run the same things.
 //
 // The two lists live in different files and you are only ever editing
-// one of them. Three of the four servers in this family had them
-// diverged, usually with the local one ahead — which means the
-// build-tagged files compile only on a maintainer's laptop.
+// one of them. They drift apart, usually with the local one ahead, and
+// then the build-tagged files compile only on a maintainer's laptop.
 //
 // A comment in the Makefile claiming "everything CI runs" is the
 // sentence that stops the next person checking, so this checks.
@@ -60,8 +59,8 @@ func parityGate() error {
 	// targets, so a tagged vet inside `vet:` is covered when CI runs
 	// `make vet` — and the first version of this check, which looked for
 	// the literal string in ci.yml, reported that as a divergence when
-	// the two agreed perfectly. Matching names instead of mapping
-	// targets is the mistake the standard warns about, made here.
+	// the two agreed perfectly. A check is matched by the target that
+	// runs it, never by its name.
 	for tag, target := range vetTags {
 		if ciVetTags[tag] || ciSteps[target] {
 			continue

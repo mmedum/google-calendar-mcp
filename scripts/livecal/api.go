@@ -26,7 +26,7 @@ import (
 )
 
 // The scratch calendar's contents. Everything here is invented: the
-// driver reads only what it wrote (§9.1), so nothing from the operator's
+// driver reads only what it wrote, so nothing from the operator's
 // real calendar can reach a transcript.
 const (
 	scratchTitle  = "google-calendar-mcp live driver scratch"
@@ -50,19 +50,17 @@ const (
 )
 
 // Event ids are base32hex: lowercase a-v and the digits, 5 to 1024
-// characters (§2.11). Not a-z — the letters w, x, y and z are NOT
-// allowed, which is the kind of detail that reads as obvious and is not.
-// The first run of this driver used "allday" and "weekly" and Google
-// refused both with "Invalid resource id value", naming neither the
-// field nor the rule; gcal.ValidEventID holds it now and caught
-// "following" in this file before a request was built.
+// characters. Not a-z: Google refuses an id holding w, x, y or z with
+// "Invalid resource id value", naming neither the field nor the rule, so
+// gcal.ValidEventID checks every id here before a request is built.
 //
 // Generated per run, not fixed. Deleting an event does NOT release its
 // id — Google answers a re-insert with 409 — so a driver that reuses its
-// scratch calendar (which is how it stops spending calendar quota, §18
-// row 36) cannot reuse ids. Base 32 in Go's strconv is exactly
-// base32hex's alphabet, "0123456789abcdefghijklmnopqrstuv", so a
-// formatted integer is a legal id fragment by construction.
+// scratch calendar to save calendar quota cannot reuse ids. Base 32 in
+// Go's strconv is exactly base32hex's alphabet,
+// "0123456789abcdefghijklmnopqrstuv", so a formatted integer is a legal
+// id fragment by construction.
+// https://developers.google.com/workspace/calendar/api/v3/reference/events/insert
 var (
 	runSuffix = strconv.FormatInt(time.Now().UnixNano(), 32)
 
@@ -76,21 +74,19 @@ var (
 //
 // move_event changes which calendar an event lives on, so driving it
 // needs somewhere to move to — and that somewhere may not be the
-// operator's own calendar, because §9.1 says this driver writes only on
-// a calendar it created. So it creates a second one, adopts it on every
+// operator's own calendar, because this driver writes only on a
+// calendar it created. So it creates a second one, adopts it on every
 // later run exactly as it adopts the first, and moves the event there
 // and straight back, leaving the scratch calendar as it found it.
 //
-// It costs one more of the calendar-creation quota §18 row 36 is about,
-// once. That is the price of driving the write path rather than
-// exempting it, and §13 is explicit that green gates are not done.
+// It costs one more calendar from the creation quota, once. That is the
+// price of driving the write path live rather than exempting it.
 const destTitle = scratchTitle + " destination"
 
 const apiBase = "https://www.googleapis.com/calendar/v3"
 
 // liveAPI does the driver's own setup and teardown, directly against
-// REST. The server's tool surface has no writes in phase 0, and giving
-// the driver its own keeps that surface honest.
+// REST, so the server publishes no tool that only the driver needs.
 type liveAPI struct {
 	hc *http.Client
 	ts oauth2.TokenSource
@@ -153,7 +149,7 @@ func (a *liveAPI) doWithMatch(ctx context.Context, method, path, ifMatch string,
 }
 
 func (a *liveAPI) status(ctx context.Context, method, path, ifMatch string, body, out any) (int, error) {
-	// Every REST call passes the same §9.1 guards the tool calls do.
+	// Every REST call passes the same guards the tool calls do.
 	if err := primaryCal.rest(method, path); err != nil {
 		return 0, err
 	}
@@ -228,16 +224,13 @@ func (a *liveAPI) createScratchCalendar(ctx context.Context, title string) (stri
 // adopted calendar still holds because they have guests besides this
 // account.
 //
-// Creating one per run is what phase 1 did, and it is what spent this
-// account's calendar quota: the limit counts calendars CREATED and
-// deleting them does not refund it (§18 row 36). Phase 2 needs the most
-// live runs of any phase, so a run that can reuse `-keep`'s leftover
-// costs the quota nothing.
+// Google's calendar quota counts calendars CREATED, and deleting one
+// does not refund it, so a run that reuses `-keep`'s leftover costs the
+// quota nothing.
 //
 // The lookup reads the account's calendar list, which is the one place
 // this driver looks past what it wrote. Nothing from the list is
-// printed, and §9.1's rule about the transcript is enforced separately,
-// on what steps may show.
+// printed, and what a step may show is decided separately, by withheld.
 func (a *liveAPI) ensureScratchCalendar(ctx context.Context, title, self string) (id string, created bool, kept int, err error) {
 	found, err := a.findScratchCalendar(ctx, title, self)
 	if err != nil {
@@ -266,7 +259,7 @@ type calendarEntry struct {
 }
 
 // driversOwn reports whether e is a scratch calendar this driver made
-// for this account: its title, the driver's marker in its description,
+// for this account (D-71): its title, the driver's marker in its description,
 // and the signed-in account as both an owner and its data owner. A
 // title alone proves nothing, and the owner role alone can be granted
 // by somebody else. Any field missing fails closed, which costs a
@@ -310,8 +303,8 @@ func (a *liveAPI) findScratchCalendar(ctx context.Context, title, self string) (
 // An event with a guest besides this account is left where it is,
 // unless -sweep-spikes asked for it. Only an armed run puts one there,
 // as spikes A and B do on purpose, and removing it either mails the
-// guest or, with sendUpdates=none, leaves the meeting on their calendar
-// (§18 row 43). A default run mails nobody, so it does neither.
+// guest or, with sendUpdates=none, leaves the meeting on their calendar.
+// A default run mails nobody, so it does neither.
 func (a *liveAPI) clearEvents(ctx context.Context, cal, self string) (kept int, err error) {
 	// Bounded, because the exit condition depends on Google agreeing
 	// that what was deleted is gone. A driver that spins forever on a
@@ -370,7 +363,7 @@ func (a *liveAPI) clearEvents(ctx context.Context, cal, self string) (kept int, 
 //
 // sendUpdates=none is correct for every event this driver writes except
 // spikes A and B: they carry no guests, so nothing can be sent, and
-// saying so keeps the driver from ever mailing a real person (§9.1).
+// saying so keeps the driver from ever mailing a real person.
 func (a *liveAPI) insertEvent(ctx context.Context, cal string, body map[string]any) error {
 	return a.insertWithUpdates(ctx, cal, body, "none")
 }
@@ -389,7 +382,7 @@ func (a *liveAPI) insertWithUpdates(ctx context.Context, cal string, body map[st
 		"/calendars/"+cal+"/events?sendUpdates="+updates, body, nil)
 }
 
-// patchEvent patches one event. Patch, never PUT (§4.4).
+// patchEvent patches one event. Patch, never PUT, as the server does.
 func (a *liveAPI) patchEvent(ctx context.Context, cal, id string, body map[string]any) error {
 	return a.do(ctx, http.MethodPatch,
 		"/calendars/"+cal+"/events/"+id+"?sendUpdates=none", body, nil)
@@ -438,11 +431,11 @@ func (a *liveAPI) deleteCalendar(ctx context.Context, id string) error {
 // createFillerCalendars makes n real, readable, empty calendars, and
 // returns what it managed to create even when it then fails.
 //
-// Only spike I needs these, and only to answer whether the free/busy
-// ceiling counts calendars it can actually expand. They are the driver's
-// own, so §9.1 holds, but 51 calendars on somebody's real account is not
-// something to do by default — `-spike-ceiling` gates it, and the caller
-// deletes what comes back whatever the error.
+// Only spike I needs these, and only to answer whether the free/busy ceiling
+// counts calendars it can actually expand. They are the driver's own, so it
+// still reads only what it made, but 51 calendars on somebody's real account
+// is not something to do by default — `-spike-ceiling` gates it, and the
+// caller deletes what comes back whatever the error.
 func (a *liveAPI) createFillerCalendars(ctx context.Context, n int) ([]string, error) {
 	ids := make([]string, 0, n)
 	for i := range n {
@@ -557,13 +550,11 @@ func (a *liveAPI) seed(ctx context.Context, cal string) (map[string]string, erro
 }
 
 // primaryAddress is the signed-in account's own calendar id, which is
-// its email address (§6.1).
+// its email address.
 //
 // tokeninfo cannot supply it: it returns an email only when an email
-// scope was granted, and this server asks for none — which is what phase
-// 0's `login` reported as a field that could never populate (§18). The
-// primary calendar's id is the same fact, from a scope this server
-// already has.
+// scope was granted, and this server asks for none. The primary
+// calendar's id is the same fact, from a scope this server already has.
 //
 // It reaches the transcript only through the redactor, which matches an
 // address by shape.
@@ -596,8 +587,8 @@ func (a *liveAPI) liveScopes(ctx context.Context) ([]string, error) {
 	return info.Scopes, nil
 }
 
-// listACL is spike G's probe: acl.list is not covered by
-// calendar.readonly (§2.15).
+// listACL is spikeG's probe: the discovery document lists
+// calendar.readonly among acl.get's scopes and not among acl.list's.
 func (a *liveAPI) listACL(ctx context.Context, cal string) error {
 	return a.do(ctx, http.MethodGet, "/calendars/"+cal+"/acl", nil, nil)
 }
@@ -677,8 +668,8 @@ type instanceRow struct {
 // listInstances reads a series' occurrences directly, for the setup that
 // needs a real instance id rather than one composed from a convention.
 //
-// The id format is not documented, so composing one would be adopting a
-// convention on a reference page's silence — which §18 says not to do.
+// The id format is not documented, so composing one would rest on a
+// reference page's silence.
 func (a *liveAPI) listInstances(ctx context.Context, cal, event string) ([]instanceRow, error) {
 	var out struct {
 		Items []instanceRow `json:"items"`
@@ -696,9 +687,9 @@ func (a *liveAPI) cancelInstance(ctx context.Context, cal, instance string) erro
 }
 
 // createUnzonedSeries writes a recurring event whose start carries a
-// dateTime and NO timeZone. §2.2 says the zone is required on a
-// recurring event; whether Google refuses it, or accepts it and lets the
-// series drift across a transition, is spike C's question.
+// dateTime and NO timeZone. The discovery document requires the zone on
+// a recurring event; spikeC asks whether Google refuses one without it,
+// or accepts it and lets the series drift across a transition.
 func (a *liveAPI) createUnzonedSeries(ctx context.Context, cal string) error {
 	return a.do(ctx, http.MethodPost, "/calendars/"+cal+"/events?sendUpdates=none", map[string]any{
 		"id": unzonedID, "summary": unzonedTitle,
@@ -745,8 +736,8 @@ type seedState struct {
 // series, which is how a single date leaves a series.
 //
 // It reads the instances first rather than composing an instance id from
-// the series id and a timestamp: that format is not documented, and §18
-// says a convention gets verified before it is adopted.
+// the series id and a timestamp: that format is not documented, and an
+// undocumented convention is not adopted unverified.
 func (a *liveAPI) removeOneOccurrence(ctx context.Context, cal string) (string, error) {
 	rows, err := a.listInstances(ctx, cal, weeklyID)
 	if err != nil {

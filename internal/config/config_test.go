@@ -123,9 +123,9 @@ func TestInvalidValuesAreRejected(t *testing.T) {
 	}
 }
 
-// TestMaxCalendarsCannotExceedTheAPICeiling is §2.10: freebusy.query
-// takes at most 50 calendars, so a budget above that promises a fan-out
-// the API will refuse.
+// TestMaxCalendarsCannotExceedTheAPICeiling: freebusy.query takes at
+// most 50 calendars, so a budget above that promises a fan-out the API
+// will refuse.
 func TestMaxCalendarsCannotExceedTheAPICeiling(t *testing.T) {
 	if config.MaxMaxCalendars != 50 {
 		t.Fatalf("MaxMaxCalendars = %d; the API ceiling is 50 (calendarExpansionMax)", config.MaxMaxCalendars)

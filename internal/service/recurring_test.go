@@ -26,19 +26,19 @@ func TestInstancesReturnsTheOccurrences(t *testing.T) {
 		t.Fatalf("series id = %q", got.SeriesID)
 	}
 	if got.Requests != 1 {
-		t.Fatalf("spent %d requests; one series is one request (§4.7)", got.Requests)
+		t.Fatalf("spent %d requests; one series is one request", got.Requests)
 	}
 	if got.Window != nil {
 		t.Fatal("no window was asked for, so none should be reported")
 	}
 	if got.Zone.Name() == "" {
-		t.Fatal("the result does not name the zone it rendered in (§4.5)")
+		t.Fatal("the result does not name the zone it rendered in; every read states its zone")
 	}
 }
 
 // TestInstancesHidesCanceledUntilAsked. A canceled occurrence is how a
 // single date is removed from a series, so its absence is a fact the
-// result has to admit to rather than a detail (§2.13).
+// result has to admit to rather than a detail.
 func TestInstancesHidesCanceledUntilAsked(t *testing.T) {
 	svc, _ := seeded(t)
 	ctx := context.Background()
@@ -67,7 +67,7 @@ func TestInstancesHidesCanceledUntilAsked(t *testing.T) {
 }
 
 // TestInstancesMarksAMovedOccurrence: originalStartTime is the stable
-// identity of an instance (§6.2), and the difference between it and the
+// identity of an instance, and the difference between it and the
 // start is somebody's exception.
 func TestInstancesMarksAMovedOccurrence(t *testing.T) {
 	svc, _ := seeded(t)
@@ -108,7 +108,7 @@ func TestInstancesWindow(t *testing.T) {
 		t.Fatalf("got %d occurrences in the window, want 1", len(got.Events))
 	}
 	if got.Window == nil {
-		t.Fatal("the result does not state the window it used (§4.5)")
+		t.Fatal("the result does not state the window it used; every read states its window")
 	}
 }
 
@@ -140,12 +140,11 @@ func TestInstancesRefusesWithoutAnEventID(t *testing.T) {
 // actually hit: it has an occurrence's id from list_events and passes
 // that.
 //
-// The live run settled what Google does with one, and it is not a
-// refusal — it answers 200 and expands the occurrence the id names. A
-// CANCELED occurrence expands to nothing, so the call succeeded with
-// an empty list and the tool reported "No occurrences" for a series
-// that has three. The server reads the id's shape now, so all three of
-// these are refused before a request is built.
+// Google does not refuse one — it answers 200 and expands the
+// occurrence the id names. A CANCELED occurrence expands to nothing, so
+// the call succeeds with an empty list, which would read as "No
+// occurrences" for a series that has three. The server reads the id's
+// shape, so all three of these are refused before a request is built.
 func TestInstancesRefusesAnOccurrenceID(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -281,14 +280,13 @@ func TestInstancesPagingDoesNotSkipOccurrences(t *testing.T) {
 	}
 }
 
-// Google does not return occurrences in date order: the live run got a
-// canceled 24 March after 7 April, which reads badly for the question
-// this tool answers — which dates does this series have.
+// Google does not return occurrences in date order: a canceled
+// occurrence can come after later ones, which reads badly for the
+// question this tool answers — which dates does this series have.
 //
 // The order is applied AFTER the budget cut, never before. Sorting first
 // would keep a different set than the page token accounts for, and the
-// dropped ones would be reachable from nowhere; that is the defect phase
-// 1 fixed in the schedule read, one tool over.
+// dropped ones would be reachable from nowhere.
 func TestInstancesComeBackInDateOrder(t *testing.T) {
 	const tz = "Europe/Copenhagen"
 	fake := caltest.New()

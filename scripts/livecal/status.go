@@ -19,10 +19,10 @@ import (
 
 // The one write this driver makes on the account's primary calendar.
 //
-// Only the primary calendar can hold a status event, and §9.1 keeps the
-// driver off it. On 2026-10-09 the owner allowed one narrow exception:
-// one status event per run, about a year ahead, with an invented title,
-// declining nothing, and deleted by its id in the same run. primaryGuard
+// Only the primary calendar can hold a status event, and the driver
+// otherwise writes nothing there. The exception is narrow: one status
+// event per run, about a year ahead, with an invented title, declining
+// nothing, and deleted by its id in the same run. primaryGuard
 // is what holds the driver to that, on both of its paths to Google: the
 // server's tools and its own REST calls. Every write naming the primary
 // calendar is refused except that one create and the delete of the id it
@@ -44,7 +44,7 @@ var statusKind = "outOfOffice"
 var primaryCal = &primaryGuard{}
 
 // primaryGuard refuses every write on the primary calendar but the one
-// §9.1 allows.
+// status event a run may make (D-72).
 type primaryGuard struct {
 	mu sync.Mutex
 	// self is the account's address, which is its primary calendar's id.
@@ -67,8 +67,8 @@ type primaryGuard struct {
 	record string
 }
 
-// readTools change nothing. §9.1's print rule decides what of theirs may
-// be shown.
+// readTools change nothing. withheld decides what of theirs may be
+// shown.
 var readTools = map[string]bool{
 	"list_calendars": true, "get_calendar": true, "list_events": true, "get_event": true,
 	"list_instances": true, "list_changes": true, "search_events": true, "check_availability": true,
@@ -120,7 +120,7 @@ func (g *primaryGuard) tool(name string, args map[string]any) error {
 	}
 	keys, known := calendarArgs[name]
 	if !known {
-		return fmt.Errorf("the driver does not know which calendar %s writes, so it does not call it (§9.1)", name)
+		return fmt.Errorf("the driver does not know which calendar %s writes, so it does not call it", name)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -145,11 +145,11 @@ func (g *primaryGuard) tool(name string, args map[string]any) error {
 		return nil
 	}
 	return fmt.Errorf("%s on the primary calendar was not called: the driver writes nothing there but "+
-		"one status event that declines nothing (§9.1)", name)
+		"one status event that declines nothing", name)
 }
 
 // theStatusEvent reports whether create_event arguments are the one
-// status event §9.1 allows: the invented title, a status type, declining
+// status event a run may make: the invented title, a status type, declining
 // nothing, and nobody and nothing else on it.
 func theStatusEvent(args map[string]any) bool {
 	decline, _ := args["auto_decline"].(string)
@@ -171,11 +171,11 @@ func (g *primaryGuard) rest(method, path string) error {
 	if _, query, ok := strings.Cut(path, "?"); ok {
 		q, err := url.ParseQuery(query)
 		if err != nil {
-			return fmt.Errorf("%s with a query the driver cannot read was not sent (§9.1)", method)
+			return fmt.Errorf("%s with a query the driver cannot read was not sent", method)
 		}
 		if dest, named := q["destination"]; named && (len(dest) != 1 || g.namesLocked(dest[0])) {
 			return fmt.Errorf("%s moving an event onto the primary calendar was not sent: the driver writes "+
-				"nothing there but one status event (§9.1)", method)
+				"nothing there but one status event", method)
 		}
 	}
 	cal, rest := "", ""
@@ -203,7 +203,7 @@ func (g *primaryGuard) rest(method, path string) error {
 		return nil
 	}
 	return fmt.Errorf("%s on the primary calendar was not sent: the driver deletes nothing there but the "+
-		"status event it made (§9.1)", method)
+		"status event it made", method)
 }
 
 // answered records how the create was answered: the status event's id,
@@ -467,7 +467,7 @@ func statusSteps(scratch string) []step {
 	}
 	return []step{
 		{
-			// §7.4: create_event refuses auto_decline all wherever it is
+			// create_event refuses auto_decline all wherever it is
 			// aimed, naming the tool that makes one.
 			name: "create_event refuses declining all",
 			tool: "create_event",
@@ -510,14 +510,14 @@ func statusSteps(scratch string) []step {
 			},
 		},
 		{
-			name: "status event (§9.1 exception)",
+			name: "status event on the primary calendar",
 			tool: "create_event",
 			args: statusArgs("primary"),
 			check: func(r callResult) (verdict, string) {
 				id := primaryCal.answered(r)
 				switch {
 				case r.isError:
-					return fail, "Google or the server refused the status event; the body is withheld (§9.1)"
+					return fail, "Google or the server refused the status event; a body from the primary calendar is withheld"
 				case id == "":
 					return fail, "the result names no id, so the cleanup cannot delete it by id"
 				case !strings.Contains(r.text, statusTag()):
@@ -540,7 +540,7 @@ func statusSteps(scratch string) []step {
 			},
 			check: func(r callResult) (verdict, string) {
 				if r.isError {
-					return fail, "the status event could not be read back; the body is withheld (§9.1)"
+					return fail, "the status event could not be read back; a body from the primary calendar is withheld"
 				}
 				if !strings.Contains(r.text, statusTag()) {
 					return fail, "the read does not carry the " + statusKind + " details"
@@ -558,7 +558,7 @@ func statusSteps(scratch string) []step {
 // whether Google agrees. This asks the API directly, on the scratch
 // calendar, with an out-of-office event that declines nothing. An event
 // Google accepts is left on the scratch calendar, which the next run
-// empties (§18 row 99).
+// empties.
 func spikeP(ctx context.Context, _ *redact.Printer, api *liveAPI, scratch string) (verdict, string) {
 	if scratch == "" {
 		return undetermined, "no scratch calendar this run"
@@ -573,7 +573,7 @@ func spikeP(ctx context.Context, _ *redact.Printer, api *liveAPI, scratch string
 	switch {
 	case err == nil:
 		return fail, "Google ACCEPTED a status event on a secondary calendar, so create_event's refusal is " +
-			"stricter than Google; record it in §18 row 99"
+			"stricter than Google and should be lifted"
 	case strings.Contains(err.Error(), "returned 4"):
 		return pass, "Google refuses it: " + firstLine(truncate(redact.String(err.Error()), 200))
 	default:

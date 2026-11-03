@@ -57,7 +57,7 @@ const (
 	LogJSON LogFormat = "json"
 )
 
-// Read budgets, counted in events rather than requests (§4.5). A tool
+// Read budgets, counted in events rather than requests. A tool
 // call that fans out across calendars can spend many requests for few
 // events, and the number that matters to a client's result limit — and
 // to a model's attention — is the events.
@@ -66,8 +66,10 @@ const (
 	MaxMaxEvents     = 2500
 )
 
-// Fan-out limits. §11: 600 requests per user per minute is the ceiling,
-// and the fan-out tools are where one tool call can spend dozens.
+// Fan-out limits. Google allows 600 requests per user per minute, on a
+// sliding window, and the fan-out tools are where one tool call can
+// spend dozens.
+// https://developers.google.com/workspace/calendar/api/guides/quota
 const (
 	// DefaultMaxCalendars bounds how many calendars one call may read.
 	DefaultMaxCalendars = 25
@@ -78,7 +80,7 @@ const (
 	// MaxFreeBusyCalendars bounds one availability call, and is higher
 	// than MaxCalendars because the cost is different: a schedule read
 	// spends one request per calendar, while free/busy answers for 50 in
-	// one (§2.10). Asking about a whole team is the ordinary case for
+	// one. Asking about a whole team is the ordinary case for
 	// that tool and would otherwise be refused at 25.
 	MaxFreeBusyCalendars = 100
 )
@@ -100,7 +102,7 @@ type Config struct {
 	// out-of-office or focus-time event that declines every meeting it
 	// overlaps, the accepted ones too. Its own flag rather than the
 	// destructive one, because a flag people set to get out-of-office
-	// would otherwise arm clear_calendar too (§9).
+	// would otherwise arm clear_calendar too.
 	EnableDeclineAll bool
 	MaxEvents        int
 	MaxCalendars     int
@@ -177,7 +179,8 @@ func Lookup(env func(string) string, name string) string {
 // owner set it. None has a flag. A setting renamed later goes the same
 // way, rather than answering to two names.
 var removedSettings = []struct{ key, why string }{
-	// The server's question went in 4.0.0 (§9a), and its flag with it.
+	// The server asks the person nothing (D-56), so its switch for
+	// asking is refused rather than ignored.
 	{key: "REQUIRE_PROMPT",
 		why: "the server no longer asks the person, and the client's own approval decides each call. Unset it, " +
 			"and leave " + EnvPrefix + "ENABLE_DESTRUCTIVE and " + EnvPrefix + "ENABLE_DECLINE_ALL off for a client " +

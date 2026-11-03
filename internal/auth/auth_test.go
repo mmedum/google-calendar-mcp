@@ -16,9 +16,9 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
 )
 
-// TestScopesNeverIncludeTheBroadScope is §10 and §9 together: the broad
-// `calendar` scope grants the two operations kept behind an env flag, so
-// asking for it would make the flag a label.
+// TestScopesNeverIncludeTheBroadScope: the broad `calendar` scope grants
+// the two operations kept behind an env flag, so asking for it would make
+// the flag a label.
 func TestScopesNeverIncludeTheBroadScope(t *testing.T) {
 	const broad = "https://www.googleapis.com/auth/calendar"
 	for _, a := range []auth.Access{
@@ -48,8 +48,8 @@ func TestReadOnlyAsksForNoWriteScope(t *testing.T) {
 	}
 }
 
-// TestACLReadNeedsItsOwnScope is §2.15, verified against the discovery
-// document: calendar.readonly does not cover acl.list.
+// TestACLReadNeedsItsOwnScope: the discovery document does not list
+// calendar.readonly among acl.list's scopes.
 func TestACLReadNeedsItsOwnScope(t *testing.T) {
 	with := auth.Scopes(auth.Access{Sharing: true})
 	if !contains(with, auth.ScopeACLReadonly) {
@@ -209,8 +209,8 @@ func TestLoginRejectsAStateMismatch(t *testing.T) {
 	}
 }
 
-// TestNoBrowserPrintsThePortToForward: the SSH case, which the standard
-// says to give people rather than let them discover.
+// TestNoBrowserPrintsThePortToForward: the SSH case, which people are
+// given rather than left to discover.
 func TestNoBrowserPrintsThePortToForward(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

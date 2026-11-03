@@ -3,9 +3,9 @@
 What a person pastes into the Cloud console. **This page is an input,
 not a description.** It is written by hand, and the staleness gate
 checks each scope block below against `internal/auth/auth.go`, so it
-cannot fall behind what `login` asks for. On an External app, a scope missing from your consent screen
-is not a stale document, it is a 403 from one tool weeks after a working
-setup.
+cannot fall behind what `login` asks for. On an External app, a scope
+missing from your consent screen is a 403 from one tool weeks after a
+working setup.
 
 ## 1. Project and API
 
@@ -20,9 +20,10 @@ organization, choose **External** and add yourself as a test user.
 
 On an External app, add these scopes. Google asks for the list only from
 apps used by people outside your Workspace organization: for an
-**Internal** app, "scopes aren't listed on the consent screen" (Google's
-configure-oauth-consent guide, updated 2026-09-03), so an Internal app
-can skip this step. The set depends on how you run the server:
+**Internal** app, "scopes aren't listed on the consent screen", as
+[Google's consent screen guide](https://developers.google.com/workspace/guides/configure-oauth-consent)
+says, so an Internal app can skip this step. The set depends on how you
+run the server:
 
 ### Read-only (`GCAL_READ_ONLY=true`)
 
@@ -44,9 +45,9 @@ https://www.googleapis.com/auth/calendar.calendarlist
 https://www.googleapis.com/auth/calendar.acls
 ```
 
-With `GCAL_SHARING=off`, drop the two `acls` scopes.
+With `GCAL_SHARING=off`, drop the `acls` scopes.
 
-### Two things worth knowing about this list
+### Why the list looks like this
 
 **The broad `calendar` scope is deliberately absent.** It grants
 everything the API can do, including deleting a calendar and clearing
@@ -56,10 +57,10 @@ rather than a limit.
 
 **`calendar.acls.readonly` is separate on purpose.** Reading *one*
 sharing rule is covered by `calendar.readonly`; reading the *list* of
-them is not. Verified against the Calendar v3 discovery document. Without
-it, `get_calendar` reports that it could not read the sharing list — and
-says so, rather than showing an empty list that would read as "shared
-with nobody".
+them is not, as the Calendar v3 discovery document's scopes for
+`acl.get` and `acl.list` show. Without it, `get_calendar` says it could
+not read the sharing list, rather than show an empty list that would
+read as "shared with nobody".
 
 ## 3. OAuth client
 

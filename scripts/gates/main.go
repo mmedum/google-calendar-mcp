@@ -1,10 +1,9 @@
 // Command gates is this repository's own checks.
 //
-// They are Go rather than shell for three reasons that have each cost
-// something in this family of servers: a shell script is not held to
-// gofmt, vet, lint or a test; `make check` runs on Windows in CI, where
-// bash is a dependency rather than a given; and a script that parses
-// JSON with sed is how a quote ends up inside a string.
+// They are Go rather than shell for three reasons: a shell script is
+// not held to gofmt, vet, lint or a test; `make check` runs on Windows
+// in CI, where bash is a dependency rather than a given; and a script
+// that parses JSON with sed is how a quote ends up inside a string.
 //
 // Every gate here also asserts a FLOOR on how much it read. "Found
 // nothing" and "looked at nothing" print the same sentence otherwise,
@@ -22,6 +21,7 @@
 //	go run ./scripts/gates smoke ./google-calendar-mcp
 //	go run ./scripts/gates schema-diff ./google-calendar-mcp
 //	go run ./scripts/gates staleness ./google-calendar-mcp
+//	go run ./scripts/gates docs
 //	go run ./scripts/gates mcpb
 //	go run ./scripts/gates mcpb-pack DIST VERSION OUT
 //	go run ./scripts/gates release
@@ -44,7 +44,7 @@ func main() {
 		fail("usage: gates coverage PROFILE MIN | classes | api-coverage | api-fields | api-diff | " +
 			"leaks [history] | transcript | live-cover | pins | parity | smoke BIN | schema-diff BIN | " +
 			"schema-baseline BIN | schema-ack BASE HEAD | " +
-			"staleness BIN | mcpb | mcpb-pack DIST VERSION OUT | release | " +
+			"staleness BIN | docs | mcpb | mcpb-pack DIST VERSION OUT | release | " +
 			"release-notes VERSION [CHANGELOG] | release-tag TAG | server-json VERSION CHECKSUMS")
 	}
 	root, err := repoRoot()
@@ -69,10 +69,9 @@ func main() {
 	case "live-cover":
 		check(liveCoverGate(binArg()), "live driver coverage")
 	case "api-diff":
-		// Manual: it reaches the network. What CI holds is the snapshot
-		// this writes, not the fetch itself — the standard's split
-		// between a fetch that refreshes a stable judgment and a check
-		// whose freshness IS the check.
+		// Manual: it reaches the network. CI holds the snapshot this
+		// writes, not the fetch: a fetch that refreshes a stable judgment
+		// runs by hand, and CI runs only checks that need no network.
 		check(apiDiff(os.Stdout), "API diff")
 	case "schema-refetch":
 		// Manual, and for the same reason as api-diff above: it reaches
@@ -93,6 +92,8 @@ func main() {
 		check(writeBaseline(binArg()), "schema baseline")
 	case "staleness":
 		check(staleness(binArg()), "staleness")
+	case "docs":
+		check(docsGate(), "docs")
 	case "mcpb":
 		check(mcpbGate(), "bundle manifest")
 	case "release":

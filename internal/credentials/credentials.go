@@ -101,10 +101,9 @@ type tokenFile struct {
 // achieve on this platform, so a warning never names a protection the
 // platform does not provide.
 //
-// It used to be unconditional: every warning said "mode 0600", which was
-// false on Windows, where Go's modes do not map to ACLs and the file
-// landed readable by any account on the machine. The file is restricted
-// by an explicit ACL there now, and this says so (§18 row 47).
+// On Windows a mode is not an access list: a file written 0600 is
+// readable by any account on the machine. The file is restricted by an
+// explicit ACL there, and the warning names that rather than a mode.
 func FileProtection() string { return fileperm.Describe() }
 
 func (s *Store) warn(msg string) {
@@ -225,7 +224,7 @@ func (s *Store) writeFile(token string) error {
 	}
 	// Writing the refresh token is what this function is for. It lands
 	// in a 0600 file, only when the keyring was unavailable, and every
-	// read of it warns (§10).
+	// read of it warns.
 	data, err := json.Marshal(tokenFile{RefreshToken: token, SavedAt: time.Now().UTC()}) //nolint:gosec // the token file, by design
 	if err != nil {
 		return fmt.Errorf("credentials: encode token file: %w", err)

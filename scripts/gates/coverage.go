@@ -94,8 +94,7 @@ func coverageGate(profile string, minPct float64) error {
 	}
 
 	// The floor on how much was read. Without it an empty or truncated
-	// profile passes silently, which is the failure mode this whole
-	// gate family is written against.
+	// profile passes silently.
 	if lines < 100 {
 		return fmt.Errorf("coverage profile has only %d statement lines; that is not a real run", lines)
 	}

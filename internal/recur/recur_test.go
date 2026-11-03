@@ -178,7 +178,7 @@ func TestParseSetReadsTheWholeField(t *testing.T) {
 }
 
 // TestExdateValueDate: an all-day series excludes a DATE, which has no
-// instant at all (§4.1).
+// instant at all.
 func TestExdateValueDate(t *testing.T) {
 	set, err := recur.Parse([]string{
 		"RRULE:FREQ=DAILY;COUNT=5",

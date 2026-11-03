@@ -9,23 +9,19 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
-// WriteReport is everything a write produced (§4.9).
+// WriteReport is everything a write produced (D-31).
 //
 // A write result that says only "ok" is a defect: the caller cannot tell
 // a patch that changed one field from one that changed five, and cannot
 // tell who was emailed. So every write carries what the event looked
 // like before, what changed, what it looks like now, and what the server
-// asked Google to send — never what anybody received (§4.3.3).
+// asked Google to send — never what anybody received.
 type WriteReport struct {
 	// Verb is what this write does — create, update, cancel, move,
 	// answer — and NOT the word printed. The past tense and the
-	// conditional are derived from it below.
-	//
-	// They used to be two strings assigned at eight call sites, which is
-	// how "Would update" came to appear twice and "Would cancel" three
-	// times, and how five of the eight dry-run branches said "nothing
-	// was sent" while three did not. A dry run being honest is a
-	// property of a dry run, not of each operation remembering.
+	// conditional are derived from it below, so no call site can print
+	// its own. A dry run being honest is a property of a dry run, not of
+	// each operation remembering.
 	Verb     string
 	DryRun   bool
 	Calendar string
@@ -37,16 +33,17 @@ type WriteReport struct {
 	Changes []plan.Change
 
 	// Scope is the recurrence decision this write was made under, empty
-	// when the event does not repeat (§4.2).
+	// when the event does not repeat.
 	Scope string
-	// Notify is the sentence §4.3.3 requires: what was asked for.
+	// Notify is what Google was asked to send, never what anybody
+	// received.
 	Notify string
 	// Notes carry the consequences a caller does not expect — the reset
 	// exceptions of a this_and_following write, the guests who still
 	// hold a canceled meeting.
 	Notes []string
-	// Requests is how many API calls this cost. §4.7's exceptions are
-	// the writes that are two calls, and this is where they say so.
+	// Requests is how many API calls this cost. A write that takes more
+	// than one call says so here.
 	Requests int
 }
 
@@ -77,7 +74,7 @@ const (
 	VerbAnswer = "answer"
 )
 
-// The calendar and sharing writes (§7.5, §7.6).
+// The calendar and sharing writes.
 const (
 	VerbSubscribe   = "subscribe"
 	VerbUnsubscribe = "unsubscribe"
@@ -173,8 +170,8 @@ func (w WriteReport) Text() string {
 	return b.String()
 }
 
-// Crowded is §17.5's warning for the event this write produced, or ""
-// when there is nothing to warn about.
+// Crowded is the guest-threshold warning for the event this write
+// produced, or "" when there is nothing to warn about.
 //
 // It counts ATTENDEE ROWS, not guests, and the difference matters here
 // in the other direction from everywhere else. Google's threshold is on
@@ -194,7 +191,7 @@ func (w WriteReport) Crowded() string {
 // EventLine leaves the date out on purpose: a schedule groups by day and
 // the heading carries it. A write result has no heading, so the same
 // line reads "10:00-11:00" and does not say which Thursday — which is
-// exactly the mistake §4.5 forbids on a read, on the result where it
+// exactly the mistake a read must never make, on the result where it
 // matters more. An all-day event already renders its own date, so it is
 // not repeated.
 func dated(e model.Event, z when.Zone) string {

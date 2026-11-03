@@ -4,7 +4,7 @@
 //
 // It is maintainer tooling, run by hand, and it is the only thing in
 // this repository that touches a real calendar. Two rules make that
-// safe, and both are structural rather than a matter of care (§9.1):
+// safe, and both are structural rather than a matter of care:
 //
 //   - It reads ONLY a calendar it created and filled itself. A scratch
 //     calendar is created at the start and deleted at the end, so the
@@ -16,8 +16,8 @@
 //     next time somebody adds a debug line.
 //
 // Setup and teardown talk to the REST API directly rather than through
-// the server's tools: phase 0 has no write tools, and giving the driver
-// its own writes keeps the server's published surface honest.
+// the server's tools, so the server publishes no tool that only the
+// driver needs.
 //
 //	make live
 package main
@@ -73,7 +73,7 @@ func main() {
 	// cancels them properly, which mails the guests — so it is asked for.
 	sweep := flag.Bool("sweep-spikes", false,
 		"delete the kept spike A and B events, canceling them to their guests")
-	// The one write on the primary calendar (§9.1). One type per run, so
+	// The one write on the primary calendar. One type per run, so
 	// the three are checked over three runs.
 	status := flag.String("status-type", statusKind,
 		"the one status event made on the primary calendar and deleted: outOfOffice, focusTime or workingLocation")
@@ -102,7 +102,7 @@ func main() {
 	}
 	// Ctrl-C, SIGTERM or a closed terminal stops the steps rather than
 	// the process, so the deferred cleanup still deletes the status event
-	// on the primary calendar and the calendars this run made (§9.1). A
+	// on the primary calendar and the calendars this run made. A
 	// second signal exits at once, after the first has said what that
 	// leaves behind.
 	ctx, stop := stopOnSignal(context.Background())
@@ -165,7 +165,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		// mistake, so it gets its own sentence rather than a raw 403.
 		if strings.Contains(err.Error(), "quotaExceeded") ||
 			strings.Contains(err.Error(), "usage limits") {
-			out.Printf("\nThis account's calendar-creation quota is spent (§18 row 36). The limit " +
+			out.Printf("\nThis account's calendar-creation quota is spent. The limit " +
 				"counts\ncalendars created, and deleting them does not refund it, so the driver " +
 				"cannot make\nthe scratch calendar it reads. Wait for Google to reset it and run " +
 				"again.\n")
@@ -185,7 +185,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	// Only a calendar this run created is deleted. One left by an earlier
 	// `-keep` is somebody's deliberate choice, and removing it would
 	// spend the quota again on the next run — which is the cost this
-	// adoption exists to avoid (§18 row 36).
+	// adoption exists to avoid.
 	if created && !keep {
 		defer func() {
 			if err := api.deleteCalendar(context.Background(), scratch); err != nil {
@@ -269,9 +269,8 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		unknownCalendarRef: true,
 	}}
 	// The destination calendar is this driver's too, so a step naming it
-	// may have its body printed. An empty id is not added: §9.1's
-	// allow-list must never gain a blank key that matches an absent
-	// argument.
+	// may have its body printed. An empty id is not added: the allow-list
+	// must never gain a blank key that matches an absent argument.
 	if dest != "" {
 		r.invented[dest] = true
 	}
@@ -281,7 +280,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	// The only address in this run that belongs to another person. It is
 	// read from the environment and never written anywhere: not to a
 	// file, not to the transcript (the redactor masks it by shape), and
-	// above all not into this repository (§9.1).
+	// above all not into this repository.
 	if spikeNotify {
 		writes.guest = guestsFromEnv().internal
 	}
@@ -294,18 +293,18 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 	for _, st := range writeSteps(scratch, writes) {
 		r.run(ctx, sess, st)
 	}
-	// The one status event on the primary calendar (§9.1). Its delete is
+	// The one status event on the primary calendar. Its delete is
 	// deferred before it is made, so it runs however the run ends.
 	defer primaryCal.cleanUp(api, out)
 	for _, st := range statusSteps(scratch) {
 		r.run(ctx, sess, st)
 	}
 
-	// Phase 3, on a calendar of its own that create_calendar makes and
-	// delete_calendar removes. It is registered as the driver's own as
-	// soon as it exists, so §9.1 lets its bodies be printed; a run that
-	// fails before the delete step leaves it behind, so the deferred
-	// sweep below removes it.
+	// The calendar and sharing steps, on a calendar of their own that
+	// create_calendar makes and delete_calendar removes. It is registered
+	// as the driver's own as soon as it exists, so its bodies may be
+	// printed; a run that fails before the delete step leaves it behind,
+	// so the deferred sweep below removes it.
 	cals := &calendarState{remember: func(id string) { r.invented[id] = true }}
 	defer func() {
 		if cals.probe == "" {
@@ -314,7 +313,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		// Best effort, and silent when it is already gone: the delete
 		// step removes it in an ordinary run and this is the net for the
 		// runs that stop early. A calendar left behind costs the next
-		// run a creation from a quota that is not refunded (§18 row 36).
+		// run a creation from a quota that is not refunded.
 		_ = api.deleteCalendar(context.Background(), cals.probe)
 	}()
 	for _, st := range calendarSteps(cals) {
@@ -363,7 +362,7 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		}
 	}
 
-	out.Printf("\n%d question(s) put to the person; the server asks nobody (§9a)\n", sess.asked)
+	out.Printf("\n%d question(s) put to the person; the server asks nobody\n", sess.asked)
 	out.Printf("\n%d steps, %d failed, %d undetermined\n", r.total, r.failed, r.undetermined)
 	if ctx.Err() != nil {
 		out.Printf("\nThe run was interrupted, so this count is not a result.\n")
@@ -381,11 +380,11 @@ func run(ctx context.Context, out *redact.Printer, bin, profile string, keep boo
 		// "read the transcript" should not bury it forty lines up.
 		out.Printf("\nThis run mailed a real person, and left one meeting behind on purpose.\n")
 		out.Printf("  \u2022 %q was canceled with notify:none. It is gone from this account and\n", quietTitle)
-		out.Printf("    STILL ON THEIRS, and this account can no longer withdraw it (\u00a718 row 43).\n")
+		out.Printf("    STILL ON THEIRS, and this account can no longer withdraw it.\n")
 		out.Printf("    Ask them to delete it; nothing here can.\n")
 		out.Printf("  \u2022 Spikes A and B set up events and cannot score themselves: who received\n")
 		out.Printf("    what is visible in an inbox and nowhere in the API. Read the inbox AND\n")
-		out.Printf("    the calendar, then write the verdict into \u00a718 by hand.\n")
+		out.Printf("    the calendar, then record the verdict at the code it settles, by hand.\n")
 	}
 	return 0
 }
@@ -414,8 +413,8 @@ var sinceToken string
 type results struct {
 	out *redact.Printer
 	// invented is every calendar id this driver made up, the scratch
-	// calendar it created included. It is what §9.1's promise means in
-	// practice, and what decides whether a body may be printed.
+	// calendar it created included. It decides whether a body may be
+	// printed.
 	invented                    map[string]bool
 	total, failed, undetermined int
 }
@@ -434,32 +433,30 @@ func (r *results) show(st step, args map[string]any, res callResult) {
 	}
 }
 
-// withheld reports whether §9.1 forbids printing this step's body, and
-// prints the notice when it does.
+// withheld reports whether this step's body may not be printed, and
+// prints the notice when it may not (D-71).
 //
-// The first live run printed a dozen of the account's real calendar
-// titles, because `list_calendars` is account-wide and the redactor is
-// anchored on shapes — an address, an id, a URL — while a display name
-// has none. No pattern could have caught them.
+// The redactor is anchored on shapes — an address, an id, a URL — and a
+// display name has none, so an account-wide step such as
+// `list_calendars` would print the account's real calendar titles. No
+// pattern can catch them.
 //
-// So the rule is derived from the step's own arguments rather than set
-// by hand on each step. A flag would be a matter of care, and §9.1's two
-// protections are required to be structural: the first draft of this
-// carried a flag, and missed `get_settings` on the same day it was
-// written. A step names the calendars it reads, and if every one of them
-// is a calendar this driver invented then the answer can only hold
-// content this driver invented. A step that names none is account-wide
-// by construction. It fails closed, so an argument shape this does not
-// understand is withheld rather than printed.
+// So the rule is derived from the step's own arguments rather than set by
+// hand on each step: a flag would be a matter of care, and a flag set by
+// hand is missed on some step. A step names the calendars it reads, and if
+// every one of them is a calendar this driver invented then the answer can
+// only hold content this driver invented. A step that names none is
+// account-wide by construction. It fails closed, so an argument shape this
+// does not understand is withheld rather than printed.
 func (r *results) withheld(args map[string]any) bool {
 	if readsOnlyInvented(args, r.invented) {
 		return false
 	}
-	r.out.Printf("      (body withheld: this step reads past the calendar the driver created, §9.1)\n")
+	r.out.Printf("      (body withheld: this step reads past the calendar the driver created)\n")
 	return true
 }
 
-// readsOnlyInvented is the allow-list §9.1 asks for, anchored on ids
+// readsOnlyInvented is the allow-list, anchored on ids
 // this driver generated rather than on a shape a real id cannot take.
 // The keys are every argument that names a calendar. A tool that takes
 // one this list does not know about reads as "names none", which is
@@ -520,7 +517,7 @@ func (r *results) run(ctx context.Context, s *session, st step) {
 	}
 	verdict, note := st.check(res)
 	if s.asked != before {
-		verdict, note = fail, "the server asked the person, and it asks nobody (§9a); the question was declined"
+		verdict, note = fail, "the server asked the person, and it asks nobody; the question was declined"
 	}
 	switch verdict {
 	case pass:
@@ -568,7 +565,7 @@ type step struct {
 	// nicety: a step whose target an earlier step failed to create would
 	// otherwise be called with no calendar named, and a calendar
 	// reference this server cannot resolve is the PRIMARY one. A driver
-	// that may not read past what it wrote (§9.1) must not be able to
+	// that may not read past what it wrote must not be able to
 	// write past it either, and "the tool refuses without confirm" is
 	// care rather than structure — it is also the last guard in the
 	// chain rather than the first.
@@ -576,16 +573,15 @@ type step struct {
 	check func(callResult) (verdict, string)
 }
 
-// reads is what the §9.1 print decision is made from: the calendars
+// reads is what the print decision is made from: the calendars
 // this step actually touches.
 //
 // For a tool call that is its arguments. For a resource read it is
 // derived from the URI the step READS, not from anything the step
 // declares — a declaration is a flag in an argument map's clothes, and
 // a uriFn edited to point somewhere else while the declaration still
-// said "scratch" would print a real calendar's body. The rule §9.1
-// requires is that the two cannot disagree, so there is only one of
-// them.
+// said "scratch" would print a real calendar's body. The two must not be
+// able to disagree, so there is only one of them.
 func (st step) reads() map[string]any {
 	if st.resource == "" {
 		return st.arguments()
@@ -644,8 +640,8 @@ var gapRow = regexp.MustCompile(
 	`^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?:-(\d{2}:\d{2})| to (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})) \(`)
 
 // gapsOutside returns the free gaps that fall outside a working-hours
-// mask of from..to on weekdays — which is the assertion §17.2's step
-// needs, and it is about the ROWS rather than about the sentence over
+// mask of from..to on weekdays — which is the assertion the working-hours
+// step needs, and it is about the ROWS rather than about the sentence over
 // them. A mask that said it applied and did not would otherwise pass on
 // its own heading.
 func gapsOutside(text, from, to string) []string {
@@ -675,13 +671,11 @@ func gapsOutside(text, from, to string) []string {
 
 // linesWith returns the rendered rows that mention needle.
 //
-// Every assertion about one event's time or date goes through this, and
-// the live run is why: two of them grepped the whole result for a date
-// or a clock time, so an unrelated probe seeded on 19 March at 13:00
-// made "the all-day event moved to the previous day" and "the series
-// drifted to 13:00-14:00" both fire. Neither had. An assertion that can
-// be satisfied by a line it is not about is the failure §15 opens by
-// naming, pointed the other way.
+// Every assertion about one event's time or date goes through this. One
+// that greps the whole result for a date or a clock time is satisfied by
+// any other event on that date or at that time, so an unrelated probe
+// makes it fire, and an assertion satisfied by a line it is not about
+// proves nothing.
 func linesWith(text, needle string) []string {
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
@@ -808,10 +802,10 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// The three resources of §8, read the way a client that
-			// attaches rather than calls would. This one is account-wide
-			// by construction, so its body is withheld and the check
-			// says what it verified instead (§9.1).
+			// The three resources, read the way a client that attaches
+			// rather than calls would. This one is account-wide by
+			// construction, so its body is withheld and the check says
+			// what it verified instead.
 			name:     "resource: calendar list",
 			resource: "gcal://calendars",
 			uriFn:    func() string { return "gcal://calendars" },
@@ -904,9 +898,9 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// §18 row 89. Every event the seed wrote is an ordinary one,
-			// so a focus-time filter that Google honors finds none, and
-			// one it ignored would return them all.
+			// Google filters by event type. Every event the seed wrote is
+			// an ordinary one, so a focus-time filter that Google honors
+			// finds none, and one it ignored would return them all.
 			name: "event_types keeps a kind out",
 			tool: "list_events",
 			args: cal(map[string]any{"event_types": []string{"focusTime"}}),
@@ -938,8 +932,8 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// §18 row 94. The UID an invitation carries finds its event,
-			// and only it.
+			// The UID an invitation carries finds its event, and only
+			// it.
 			name: "ical_uid finds one event",
 			tool: "list_events",
 			args: cal(map[string]any{"ical_uid": state.timedUID}),
@@ -1058,12 +1052,11 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// The §3 defect, live. The seeded series runs weekly from
-			// 17 March, so its third and fourth occurrences fall AFTER
-			// the 29 March European transition. A series written with a
-			// zone holds its wall clock across that boundary; one
-			// written as a bare UTC instant drifts an hour, and that
-			// drift is what every surveyed server ships.
+			// The daylight-saving drift, live. The seeded series runs
+			// weekly from 17 March, so its third and fourth occurrences
+			// fall AFTER the 29 March European transition. A series
+			// written with a zone holds its wall clock across that
+			// boundary; one written as a bare UTC instant drifts an hour.
 			name: "DST: wall clock holds",
 			tool: "list_events",
 			args: cal(map[string]any{"time_zone": scratchZone}),
@@ -1178,8 +1171,8 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// §18 row 90: a read shows the file on an event without
-			// asking for it, with the Drive file id that hands it over.
+			// A read shows the file on an event without asking for it,
+			// with the Drive file id that hands it over.
 			name: "get_event shows an attachment",
 			tool: "get_event",
 			args: map[string]any{"calendar": scratch, "event_id": weeklyID},
@@ -1218,7 +1211,7 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// §17.1. Two calls, because the claim worth driving live is
+			// Two calls, because the claim worth driving live is
 			// not "it lists" but "the token round-trips": the baseline
 			// hands one back, and passing it returns a quiet answer
 			// rather than the whole calendar again.
@@ -1275,8 +1268,8 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// §18 row 91. The seed wrote every event in this run, so an
-			// hour back covers them; Google filters, not the server.
+			// The seed wrote every event in this run, so an hour back
+			// covers them; Google filters, not the server.
 			name: "list_changes by updated_since",
 			tool: "list_changes",
 			args: map[string]any{
@@ -1462,7 +1455,7 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// §17.2. A week asked about in one call: without the mask
+			// A week asked about in one call: without the mask
 			// the answer's longest gap is an overnight one, which passes
 			// any min_minutes and is useless.
 			name: "availability, working hours",
@@ -1514,9 +1507,9 @@ func steps(scratch string, state seedState) []step {
 			},
 		},
 		{
-			// SPIKE H. A calendar this account cannot read must come back
-			// UNKNOWN, never folded into free (§4.6). The id is invented
-			// and belongs to nobody.
+			// A calendar this account cannot read must come back UNKNOWN,
+			// never folded into free. The id is invented and belongs to
+			// nobody.
 			name: "spike H: unreadable calendar",
 			tool: "check_availability",
 			args: map[string]any{
@@ -1537,7 +1530,7 @@ func steps(scratch string, state seedState) []step {
 				if !strings.Contains(r.text, "could not be read") {
 					return fail, "the free gaps do not say a calendar was missing from them"
 				}
-				return pass, "CONFIRMS §4.6: per-calendar error, reported unknown, gaps qualified"
+				return pass, "CONFIRMS unknown is never free: per-calendar error, reported unknown, gaps qualified"
 			},
 		},
 		{

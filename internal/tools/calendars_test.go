@@ -13,7 +13,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/tools"
 )
 
-// §7.6: GCAL_SHARING=off removes the sharing surface — the read among
+// GCAL_SHARING=off removes the sharing surface — the read among
 // them, because a deployment that turned sharing off turned off the
 // surface and not merely the writes, and the wider shares even with the
 // destructive flag set.
@@ -36,7 +36,7 @@ func TestSharingOffRemovesEverySharingTool(t *testing.T) {
 	}
 }
 
-// §9: the two gated tools do not exist unless the flag is set, because
+// The two gated tools do not exist unless the flag is set, because
 // an annotation is a hint a host in auto-approve may ignore.
 func TestTheGatedToolsNeedTheFlag(t *testing.T) {
 	got := names(listTools(t, baseConfig()))
@@ -63,10 +63,11 @@ func TestTheGatedToolsNeedTheFlag(t *testing.T) {
 	}
 }
 
-// The mark goes only where §3 puts it (§9a): the delete of a whole
-// calendar, and of every event on the primary one, neither of which
-// Calendar can bring back, and a public or domain-wide share. Claude
-// Code then prompts on every such call, and every client is listed it.
+// The mark goes only where the prompt is the point: the delete of a
+// whole calendar, and of every event on the primary one, neither of
+// which Calendar can bring back, and a public or domain-wide share.
+// Claude Code then prompts on every such call, and every client is
+// listed it.
 func TestWhichToolsPromptEveryCall(t *testing.T) {
 	var got []string
 	for _, tool := range listTools(t, tools.FullSurface(baseConfig())) {
@@ -253,10 +254,10 @@ func TestTheCalendarToolsAnswerThroughTheProtocol(t *testing.T) {
 	}
 }
 
-// The two halves of §9's protection, end to end: the flag registers the
-// tool, and the call still has to confirm. Driven against a calendar
-// this account made in the same session, because deleting needs owner
-// access and the seed's other calendars are not owned.
+// The two halves of the destructive protection, end to end: the flag
+// registers the tool, and the call still has to confirm. Driven against
+// a calendar this account made in the same session, because deleting
+// needs owner access and the seed's other calendars are not owned.
 func TestDeleteCalendarThroughTheProtocolStillNeedsConfirm(t *testing.T) {
 	cs, cleanup := session(t, tools.FullSurface(baseConfig()))
 	defer cleanup()

@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// The MCP registry entry (§12, "the MCP registry entry last").
+// The MCP registry entry, published last.
 //
 // Last because the registry does a HEAD on the bundle's download URL
 // before it accepts the entry, so the release has to exist first. That
@@ -29,7 +29,7 @@ import (
 // Everything else is derived rather than typed: the owner and repository
 // from the module path, the description from the bundle manifest. A
 // constant beside either would be a second copy with nothing keeping it
-// honest, which is the failure §16 keeps finding one level up.
+// honest.
 
 const registrySchema = "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json"
 

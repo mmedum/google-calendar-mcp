@@ -54,8 +54,8 @@ func TestCalendarPatchClearsAFieldButNotTheTitle(t *testing.T) {
 	}
 }
 
-// §4.1: a zone that does not exist will not start existing, so it is
-// refused here rather than sent and 400'd.
+// A zone that does not exist will not start existing, so it is refused
+// here rather than sent and 400'd.
 func TestCalendarPatchRefusesAZoneThatDoesNotExist(t *testing.T) {
 	_, _, err := plan.CalendarDraft{TimeZone: ptr("Mars/Olympus")}.Patch(gcal.Calendar{})
 	if !errors.Is(err, plan.ErrInvalid) {
@@ -184,8 +184,8 @@ func TestNotificationChoicesExplainThemselves(t *testing.T) {
 	}
 }
 
-// §9: the destructive tools take a confirmation on the call as well as
-// the flag on the server, and the refusal says what would be destroyed.
+// The destructive tools take a confirmation on the call as well as the
+// flag on the server, and the refusal says what would be destroyed.
 func TestConfirmRefusesWithoutIt(t *testing.T) {
 	err := plan.Confirm(false, "this deletes the calendar %q and every event on it")
 	if !errors.Is(err, plan.ErrBlocked) {

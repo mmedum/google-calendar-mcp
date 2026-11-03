@@ -8,48 +8,42 @@
 # gate, a client call with no row fails, and a verdict for a method that
 # no longer exists fails.
 #
-# Phases 0 and 1 implement the reads, phase 2 the event writes and
-# phase 3 the calendar and sharing ones. A row marked `used` whose client
-# method does not exist yet names the phase that builds it, as
-# `planned=N`, and the gate treats that as a promise rather than a lie.
-# Every row below now names a client method: there are no promises left.
-#
 # api	method	verdict	reason
 calendar	acl.delete	used	gapi.DeleteACL, behind unshare_calendar; it publishes no sendNotifications and Google sends none on a removal
 calendar	acl.get	out	acl.list returns every rule in one request; a single-rule read has no caller
-calendar	acl.insert	used	gapi.InsertACL, behind share_calendar for a new rule; sendNotifications is always sent, because Google defaults it to true (§2.5)
+calendar	acl.insert	used	gapi.InsertACL, behind share_calendar for a new rule; sendNotifications is always sent, because Google defaults it to true, unlike sendUpdates on an event
 calendar	acl.list	used	gapi.ListACL, behind list_sharing and get_calendar's exposure
-calendar	acl.patch	used	gapi.PatchACL, behind share_calendar for a role change; §4.4 patches always
-calendar	acl.update	out	PUT: replaces the rule whole. §4.4 patches always
-calendar	acl.watch	out	needs a public HTTPS webhook; a stdio server has nowhere to put one (§1)
+calendar	acl.patch	used	gapi.PatchACL, behind share_calendar for a role change; a change to a rule is always a patch
+calendar	acl.update	out	PUT: replaces the rule whole; a change is always a patch (D-27)
+calendar	acl.watch	out	needs a public HTTPS webhook; a stdio server has nowhere to put one (D-82)
 calendar	calendarList.delete	used	gapi.DeleteCalendarListEntry, behind manage_calendar unsubscribe: the list entry goes, the calendar stays
 calendar	calendarList.get	used	gapi.GetCalendarListEntry, behind get_calendar and calendar resolution
 calendar	calendarList.insert	used	gapi.InsertCalendarListEntry, behind manage_calendar subscribe
 calendar	calendarList.list	used	gapi.ListCalendars, behind list_calendars
 calendar	calendarList.patch	used	gapi.PatchCalendarListEntry, behind manage_calendar for the per-user overrides: color, hidden, selected, the name this user gave it, notifications
-calendar	calendarList.update	out	PUT: replaces the entry whole. §4.4
-calendar	calendarList.watch	out	needs a public HTTPS webhook (§1)
+calendar	calendarList.update	out	PUT: replaces the entry whole; a change is always a patch (D-27)
+calendar	calendarList.watch	out	needs a public HTTPS webhook, which a stdio server cannot offer (D-82)
 calendar	calendars.clear	used	gapi.ClearCalendar, behind clear_calendar: gated by GCAL_ENABLE_DESTRUCTIVE and confirm, and refused on anything but the primary calendar, which is what Google documents it for
 calendar	calendars.delete	used	gapi.DeleteCalendar, behind delete_calendar: gated by GCAL_ENABLE_DESTRUCTIVE and confirm, and refused on the primary, which Google does not delete
 calendar	calendars.get	used	gapi.GetCalendar, behind get_calendar for a calendar not in the list
 calendar	calendars.insert	used	gapi.InsertCalendar, behind create_calendar; never retried, because Google mints the id and a blind retry makes a second calendar
 calendar	calendars.patch	used	gapi.PatchCalendar, behind manage_calendar for the calendar itself: title, description, location and time zone, which everybody subscribed to it sees
-calendar	calendars.transferOwnership	out	requires a Workspace admin privilege and useAdminAccess=true; this server authenticates as one ordinary user and never requests admin access (§1)
-calendar	calendars.update	out	PUT: replaces the calendar whole. §4.4
-calendar	channels.stop	out	stops a push channel; there are none, because watch is out (§1)
+calendar	calendars.transferOwnership	out	requires a Workspace admin privilege and useAdminAccess=true; this server authenticates as one ordinary user and never requests admin access (D-82)
+calendar	calendars.update	out	PUT: replaces the calendar whole; a change is always a patch (D-27)
+calendar	channels.stop	out	stops a push channel; there are none, because every watch method is out (D-82)
 calendar	colors.get	used	gapi.GetColors, behind get_settings
-calendar	events.delete	used	gapi.DeleteEvent, behind cancel_event for a whole event; one occurrence is a status patch instead (§7.4)
+calendar	events.delete	used	gapi.DeleteEvent, behind cancel_event for a whole event; one occurrence is a status: cancelled patch instead
 calendar	events.get	used	gapi.GetEvent, behind get_event
-calendar	events.import	out	carries a private copy of an event between systems, preserving iCalUID and organizer: a migration tool, not a scheduling one, with different failure modes (§1)
-calendar	events.insert	used	gapi.InsertEvent, behind create_event and the second half of a this_and_following update, with a client-generated id (§2.11)
+calendar	events.import	out	carries a private copy of an event between systems, preserving iCalUID and organizer: a migration tool, not a scheduling one, with different failure modes (D-82)
+calendar	events.insert	used	gapi.InsertEvent, behind create_event and the second half of a this_and_following update, with a client-generated id; never retried, because Google does not promise to catch a repeated id
 calendar	events.instances	used	gapi.ListInstances, behind list_instances
 calendar	events.list	used	gapi.ListEvents, behind list_events, search_events and list_changes
 calendar	events.move	used	gapi.MoveEvent, behind move_event
-calendar	events.patch	used	gapi.PatchEvent, behind update_event, cancel_event on one occurrence, and respond_to_event; §4.4 patches always
-calendar	events.quickAdd	out	parses a natural-language string, but gives no control over the time zone and does not report which fields it set; the model calling this server is a better parser (§17.4)
-calendar	events.update	out	PUT: drops attendees, RSVPs and recurrence when they are omitted. §4.4, and this is the method that rule exists for
-calendar	events.watch	out	needs a public HTTPS webhook (§1)
-calendar	freebusy.query	used	gapi.QueryFreeBusy, behind check_availability; batched at 50 (§2.10)
+calendar	events.patch	used	gapi.PatchEvent, behind update_event, cancel_event on one occurrence, and respond_to_event; a change to an event is always a patch
+calendar	events.quickAdd	out	parses a natural-language string, but gives no control over the time zone and does not report which fields it set; the model calling this server is a better parser (D-84)
+calendar	events.update	out	PUT: drops attendees, RSVPs and recurrence when they are omitted, which is why a change is always a patch (D-27)
+calendar	events.watch	out	needs a public HTTPS webhook, which a stdio server cannot offer (D-82)
+calendar	freebusy.query	used	gapi.QueryFreeBusy, behind check_availability; batched at 50, the most calendars one query takes
 calendar	settings.get	out	settings.list returns every setting in one request
-calendar	settings.list	used	gapi.ListSettings, behind get_settings and §4.1's zone resolution
-calendar	settings.watch	out	needs a public HTTPS webhook (§1)
+calendar	settings.list	used	gapi.ListSettings, behind get_settings and the account's zone, the last place a time zone is looked for
+calendar	settings.watch	out	needs a public HTTPS webhook, which a stdio server cannot offer (D-82)

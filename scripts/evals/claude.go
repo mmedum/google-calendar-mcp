@@ -14,7 +14,7 @@ import (
 )
 
 // The Messages API client, hand-rolled for the same reason
-// internal/gapi is (hard rule 9): this repository owns its wire types
+// internal/gapi is (D-06): this repository owns its wire types
 // and takes no third-party client. The official Anthropic Go SDK would
 // be the ordinary choice, and it brings eleven transitive modules into
 // the module graph of a binary whose whole distribution story is

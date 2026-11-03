@@ -16,13 +16,11 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 )
 
-// The standard says: break the manifest all six ways and watch each be
-// refused before you believe the check. A check nobody has watched fail
-// is a check nobody knows the shape of — doing this in a sibling
-// repository found a packer that verified the entry point and the Linux
-// files and never the win32 override's command, so a typo in the .exe
-// path would have packed cleanly, installed cleanly, and been caught by
-// nothing.
+// Break the manifest each way it can break, and watch each be refused
+// before believing the check. A check nobody has watched fail
+// is a check nobody knows the shape of. A packer that checks the entry
+// point and the Linux files but not the win32 override's command packs a
+// typo in the .exe path cleanly.
 //
 // Each case below breaks exactly one thing in a manifest that is
 // otherwise correct, and asserts the sentence that names it.
@@ -123,7 +121,7 @@ func TestTheSixWaysAManifestBreaks(t *testing.T) {
 		},
 		{
 			// The specification shows this form once and never says what
-			// it is resolved against (§18 row 112).
+			// it is resolved against.
 			name: "a relative command",
 			edit: func(d map[string]any) {
 				dig(d, "server", "mcp_config")["command"] = "server/google-calendar-mcp-darwin"
@@ -283,7 +281,7 @@ func TestManifestProblemsRunsEveryCheck(t *testing.T) {
 			dig(d, "compatibility")["platforms"] = []any{"darwin", "win32"}
 			delete(dig(d, "server", "mcp_config", "platform_overrides"), "linux")
 		}, want: "compatibility.platforms is [darwin win32]; the packer stages entry points for [darwin linux win32]"},
-		// The 4.0.0 name: the family's layout is -linux-amd64.
+		// The launcher runs the names the packer stages: -linux-amd64, not -x64.
 		{name: "a launcher of other names", file: launcherPath,
 			old: "google-calendar-mcp-linux-amd64", new: "google-calendar-mcp-linux-x64",
 			want: "the launcher runs [google-calendar-mcp-linux-arm64 google-calendar-mcp-linux-x64]; " +
@@ -740,7 +738,7 @@ func TestACredentialsFieldIsSensitive(t *testing.T) {
 }
 
 // What the bundle says it is, broken once each: the server's own name, a
-// binary, the family's floor, a privacy policy, and exactly the
+// binary, the Claude Desktop floor, a privacy policy, and exactly the
 // platforms the packer stages an entry point for.
 func TestTheIdentityRefusesEachBreak(t *testing.T) {
 	const entryPoints = "; the packer stages entry points for [darwin linux win32]"
@@ -754,7 +752,7 @@ func TestTheIdentityRefusesEachBreak(t *testing.T) {
 		{"a node server", func(d map[string]any) { dig(d, "server")["type"] = "node" },
 			`server.type is "node"; the bundle carries a binary`},
 		{"no Claude Desktop floor", func(d map[string]any) { delete(dig(d, "compatibility"), "claude_desktop") },
-			`compatibility.claude_desktop is ""; the family's bundles claim ">=0.10.0"`},
+			`compatibility.claude_desktop is ""; the bundle supports Claude Desktop ">=0.10.0"`},
 		{"no Linux", func(d map[string]any) { dig(d, "compatibility")["platforms"] = []any{"darwin", "win32"} },
 			"compatibility.platforms is [darwin win32]" + entryPoints},
 		{"a platform the packer stages nothing for", func(d map[string]any) {

@@ -314,8 +314,8 @@ func TestRoleChoicesExplainEveryRole(t *testing.T) {
 	}
 }
 
-// §4.3 at the ACL: no default in either direction, and Google's own
-// default here is the opposite of the one on an event.
+// A sharing change has no notify default in either direction, and
+// Google's own default here is the opposite of the one on an event.
 func TestShareNotifyHasNoDefault(t *testing.T) {
 	if _, err := plan.ShareNotify(""); !errors.Is(err, plan.ErrInvalid) {
 		t.Fatalf("error %v, want invalid", err)

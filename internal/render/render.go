@@ -4,10 +4,10 @@
 // Two rules run through everything here:
 //
 //   - Every read states its window, the zone it is rendered in and where
-//     that zone came from, and whether the list is complete (§4.5). A
+//     that zone came from, and whether the list is complete (D-12). A
 //     schedule that does not say which Thursday it is showing can be
 //     read as any Thursday.
-//   - An all-day event is rendered as a date, never as 00:00 (§4.1).
+//   - An all-day event is rendered as a date, never as 00:00.
 //     Printing midnight for an all-day event is how a reader concludes
 //     it starts at midnight, and how the next implementer concludes it
 //     is an instant.
@@ -37,11 +37,11 @@ type Schedule struct {
 	Truncated bool
 	// NextPageToken lets the caller continue.
 	NextPageToken string
-	// Requests is how many API calls this cost (§4.7).
+	// Requests is how many API calls this cost.
 	Requests int
 	// Expanded says whether recurring series were expanded into
-	// instances (§2.9). The two return different things and a reader
-	// must know which they got.
+	// instances. The two return different things and a reader must know
+	// which they got.
 	Expanded bool
 	// EventTypes is the type filter the read was made with, empty when it
 	// had none. A reader must know the list leaves the other types out.
@@ -187,7 +187,8 @@ func commonTags(e model.Event) []string {
 	}
 	if e.Transparent {
 		// Worth saying: it is on the calendar and does not make the
-		// person busy, which is the distinction §4.6 turns on.
+		// person busy, which is why availability is never read off an
+		// event list.
 		tags = append(tags, "free")
 	}
 	switch {
@@ -224,7 +225,7 @@ func commonTags(e model.Event) []string {
 //
 // The title is printed as its owner wrote it, as a description is. The
 // file id comes first after it, because it is what hands the file to a
-// Drive server, and this server never opens a file itself (§1).
+// Drive server, and this server never opens a file itself.
 func Attachments(files []model.Attachment) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\nAttachments (%d):\n", len(files))
@@ -347,7 +348,7 @@ func ConferenceLine(c gcal.Conference) string {
 //
 // The all-day branch prints dates. It must never print a time: an
 // all-day event has no instant, and "00:00" is the sentence a reader
-// turns into a bug (§4.1).
+// turns into a bug (D-10).
 func TimeRange(e model.Event, z when.Zone) string {
 	if e.Start.AllDay {
 		// Google's end date is exclusive, so a one-day event ends on the
@@ -393,9 +394,8 @@ func Recurrence(rules []string) string {
 	return set.Explain()
 }
 
-// eventTypeTag names the event types that are not ordinary meetings
-// (§2.12), so a model does not treat a birthday as something it can
-// reschedule.
+// eventTypeTag names the event types that are not ordinary meetings, so
+// a model does not treat a birthday as something it can reschedule.
 func eventTypeTag(t string) string {
 	switch t {
 	case gcal.EventTypeBirthday:
@@ -641,12 +641,12 @@ type AvailabilityReport struct {
 	// GapsFrom is how many calendars the gaps were computed from. Zero
 	// with answers present means nothing could be read, and the service
 	// leaves Gaps empty rather than offering a window it knows nothing
-	// about (§4.6).
+	// about.
 	GapsFrom int
 	// MinGap is the shortest gap reported, zero when the caller set none.
 	MinGap time.Duration
 	// Hours is the working-hours mask the gaps were filtered by, empty
-	// when the caller asked for none (§17.2). It is stated in the result
+	// when the caller asked for none. It is stated in the result
 	// because a gap list that silently hid the evenings would read as
 	// "nobody is free then", which is a different claim.
 	Hours    when.Hours
@@ -683,7 +683,7 @@ func (r AvailabilityReport) Text() string {
 		}
 		switch {
 		case a.Unknown:
-			// Never "free". §4.6: a model that cannot tell these apart
+			// Never "free" (D-34): a model that cannot tell these apart
 			// will book over somebody.
 			fmt.Fprintf(&b, "  UNKNOWN — this %s could not be read (%s). "+
 				"Do not treat this as free.\n", what, a.Reason)
@@ -726,9 +726,8 @@ func (r AvailabilityReport) gaps() string {
 	switch {
 	case r.GapsFrom == 0 && len(r.Answers) > 0:
 		// Nothing was read, so there is no free time to report. Printing
-		// the whole window as free here is the defect §4.6 exists to
-		// prevent, and it is worth refusing to print rather than
-		// qualifying.
+		// the whole window as free here would book over everybody, and
+		// it is worth refusing to print rather than qualifying.
 		b.WriteString("No free time can be computed: not one of these calendars could be read.\n")
 		return b.String()
 	case len(r.Gaps) == 0 && r.MinGap > 0:

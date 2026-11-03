@@ -1,72 +1,254 @@
-# Contributing
+# Contributing to google-calendar-mcp
 
-Thanks for looking. A few things are non-obvious.
+Thanks for considering a contribution. This is a Go MCP server for Google
+Calendar with a strict test and confidentiality posture. Read this once
+before your first pull request; CI enforces the rest.
 
-## Before anything else
+## Reporting bugs and requesting features
 
+Open a [GitHub issue](https://github.com/mmedum/google-calendar-mcp/issues/new/choose)
+with the bug report template. It asks for what
+[`docs/troubleshooting.md`](docs/troubleshooting.md#reporting-a-problem)
+lists: `doctor` output, the version and a debug log. All of them are safe
+to paste, because the logs carry no event content. Never paste event
+titles, guest lists, calendar ids or your OAuth client JSON.
+
+For anything security-sensitive, such as a vulnerability or a suspected
+token leak, do not open a public issue. Follow [`SECURITY.md`](SECURITY.md).
+
+## Development setup
+
+```bash
+git clone https://github.com/mmedum/google-calendar-mcp
+cd google-calendar-mcp
+make build
 ```
+
+Go is the only prerequisite, at the version in `go.mod`. Every check the
+repository runs on itself is Go, under `scripts/gates`, so a gate never
+needs an interpreter you have not installed.
+
+## Gates that must pass
+
+```bash
 make check
 ```
 
-That is the full gate set and it is what CI runs. `make parity` asserts
-those two lists are the same, so if you add a gate, add it to both.
+`make check` runs the gates CI runs, and the `check` target in the
+`Makefile` is the list. `make parity` fails when that list and `ci.yml`
+differ, so a gate you add goes in both. Among them: gofmt, `go vet` with
+the `live` and `evals` tags, golangci-lint, and race tests with an 80%
+coverage floor per package. The others include govulncheck, a license
+allow-list, gitleaks, a stdio smoke test, the schema diff, the
+staleness gate and the docs gate. CI runs the unit tests on Linux, macOS
+and Windows, and on a pull request adds `schema-ack`.
 
-`docs/development.md` explains what each gate holds and why.
+Every gate also asserts a floor on how much it read, because "found
+nothing" and "read nothing" print the same line. Before you trust a gate
+you changed, break what it holds and watch it fail.
 
-## The rules that are not style
+These are worth knowing before they fail on you:
 
-Three things in this repository are correctness rather than preference,
-and a change that breaks one will be sent back:
+- **The schema diff** compares the built binary's dump with
+  `testdata/schema-baseline.json`, the newest release's surface. A
+  removed tool, resource or output field fails the build, as does an
+  input that accepts less or becomes required. Anything else that moved
+  is reported. The release commit records the baseline with
+  `make schema-baseline VERSION=vX.Y.Z`.
 
-1. **Stdout carries only MCP JSON-RPC frames.** Logs use `slog` to
-   stderr. `forbidigo` enforces it outside `main`, which is the one place
-   that names the process's streams.
-2. **An all-day event is a date, never an instant.** There is no
-   `Date` → `Zoned` conversion in `internal/when` because there is no
-   correct one. If you need an instant, take a zone as an argument and
-   say so in the result.
-3. **Nothing deployer-specific enters the repository.** No real calendar
-   ids, email addresses, event content or Cloud project ids — in code,
-   docs, fixtures, tests or commit messages. Fixtures are generated, not
-   recorded.
+  On a pull request, CI also runs `schema-ack`. When the tool surface
+  changes, annotations included, a commit footer has to name each
+  changed item: `SCHEMA-CHANGE: create_event, update_event:
+  destructiveHint true`. The names are the list before the first colon
+  followed by white space; the text after it describes the change and
+  names nothing. Name a tool by its name, a resource by its URI or
+  template, and the instructions as `instructions`. Put a name with a
+  comma in it in backticks, and keep the list on one line: a wrapped line
+  that starts `word: ` begins another footer, as Conventional Commits
+  reads it. A `Token #value` footer such as `Closes #12` acknowledges
+  nothing. If the change breaks something a release shipped, name that
+  item in a `BREAKING CHANGE:` footer instead. A refusal prints the
+  footer that fixes it; add it in an empty commit, never an amend.
+- **`make leaks`** fails on anything that could identify a real person,
+  account or calendar: an address outside the reserved `example` and
+  `test` domains, an OAuth client id or refresh token, an API key, a
+  calendar id or event URL in Google's own shape, a Drive file link.
+  Write fixtures as `janedoe@example.com`. `make leaks-history` scans
+  every blob and commit message as well.
 
-## Before you change the tool surface
+  **What it cannot catch is the payload.** An event title or a guest's
+  name has no shape. Two habits cover the gap, and only habits can:
+  fixtures are generated by `internal/gapi/caltest`, never recorded, and
+  the live driver reads back only what it wrote.
+- **The API gates** hold the client to Google's discovery document.
+  `testdata/api-surface.json` is the snapshot, written by
+  `make api-diff` and never by hand. `testdata/api-coverage.tsv` gives
+  each method a verdict: `used` with the client method that calls it, or
+  `out` with the reason it is not called. `testdata/api-fields.tsv`
+  gives each field of `Event`, `Calendar`, `CalendarListEntry`, `AclRule`
+  and the schemas they reach a verdict: `modeled` when `internal/gcal`
+  carries it, or `out` with a reason. `make api-coverage` and
+  `make api-fields` fail on a call or a field with no row, and on a row
+  for something Google does not publish.
+- **`make live-cover`** fails when a published tool has no step in the
+  live driver. A tool nobody drives is answered by the fake, passes every
+  test, and meets Google first in a user's hands.
+- **`make classes`** holds the error vocabulary closed from both sides:
+  every class the code emits is declared in `internal/gapi/errors.go`,
+  and every declared class is emitted somewhere.
+- **The docs gate** (`make docs`) holds the docs to their references. A
+  decision in `docs/architecture.md` is `D-NN`; an ID is never reused,
+  and the file ends with its `Next ID:` line. Cite a decision by ID, or a
+  doc by `docs/<file>.md#<heading-slug>`, never by section number. What
+  you verified about Google goes in the comment at the line that depends
+  on it, with the source link and the live step that checks it, never in
+  a file of its own. The gate fails on a citation that does not resolve,
+  a "Held by" that names no test or gate, a package missing from the
+  codemap, and a path, `make` target or gate a doc names that does not
+  exist.
+- **Renderer goldens.** `testdata/golden/` holds what each renderer
+  prints, so a change to how a schedule reads shows up as a diff.
+  `go test ./internal/render -update` rewrites them; read the diff before
+  you commit it.
 
-Read `docs/architecture.md`. It carries the design, the decided
-constraints, and an evidence log where every convention is recorded with
-how it was verified. If you are about to adopt a convention, verify it
-against the discovery document or a live probe and add a row — a
-reference page's prose is not evidence.
+## The live run
 
-## Adding an API call
+Every fake in the unit suite is written from what we believe Google does,
+and only a live run tests that belief. Anything touching the write path
+or an API response shape needs one before it counts, and the transcript
+has to be read: a pass count cannot show a result that is confidently
+wrong.
 
-`make api-coverage` fails on a client method with no verdict. Add a row
-to `testdata/api-coverage.tsv`: `used` with the method that implements
-it, or `out` with why this server does not call it.
+```bash
+make live
+```
 
-## Commits and branches
+It drives the built binary against the signed-in account. What it does
+there:
 
-`main` is released code and takes pull requests only. Work on a short
-topic branch and write a message that says what and why. Cutting a tag is
-the maintainer's, and `docs/release.md` is what it involves.
+- **Scratch calendars.** It creates a scratch calendar, or adopts and
+  empties one an earlier run left, and a second for the move steps. It
+  adopts only a calendar this account owns whose description carries the
+  driver's marker. Creating a calendar spends a quota that deleting does
+  not refund, so `-keep` leaves them for the next run:
+  `go run -tags=live ./scripts/livecal -bin ./google-calendar-mcp -keep`.
+- **The gated tools.** It starts the server with
+  `GCAL_ENABLE_DESTRUCTIVE=true` and `GCAL_ENABLE_DECLINE_ALL=true`. A
+  third calendar, made by `create_calendar`, carries the destructive and
+  sharing steps and is removed by `delete_calendar`. It is published to
+  anyone, free/busy only, for one step, and holds only invented events.
+  `create_event_declining_all` is called only on a scratch calendar.
+- **No questions.** The driver declares form elicitation, and a step
+  fails if the server asks the person anything (D-56).
+- **Nobody is reached unless you ask.** Every event has no guest but the
+  account itself, and the one address it shares with cannot resolve.
+  `-spike-notify` arms the steps that mail a real person, and is refused
+  unless `-spike-invitees` names every address the `GCAL_LIVE_GUEST_*`
+  variables set. A guard on the server's tools and on the driver's own
+  calls refuses any other address. `-sweep-spikes` cancels the events
+  those steps keep, which mails their guests.
+- **Attachments.** `GCAL_LIVE_ATTACHMENT` arms the attachment steps. Set
+  it to the link of a Drive file you made for the purpose, with an
+  invented name and nothing in it. Without it those steps are skipped.
+- **One status event on your primary calendar.** No other calendar can
+  hold one. It sits about a year ahead, has an invented title, declines
+  nothing, and is deleted by its id before the run ends. `-status-type`
+  picks out of office, focus time or a working location. A guard refuses
+  every other write to the primary calendar, and `make cover` tests the
+  guard without an account.
+- **Stopping it.** Ctrl-C, SIGTERM or a closed terminal stops the steps,
+  not the cleanup. The driver records the status event in an owner-only
+  file before it asks for it, and removes the record only once the event
+  reads back gone. If the cleanup fails, the warning names the event and
+  the record, and
+  [`docs/troubleshooting.md`](docs/troubleshooting.md#a-live-run-warns-that-the-status-event-may-still-be-on-the-primary-calendar)
+  says what to do.
+- **Reading it.** `-show <substring>` prints the redacted body of every
+  step whose name contains it.
 
-If a pull request changes the tool surface, annotations included, end one
-of its commits with a footer naming each changed item:
-`SCHEMA-CHANGE: create_event, update_event: destructiveHint true`. The
-names are the list before the first colon followed by white space; the
-text after it describes the change and names nothing. Name a tool by its
-name, a resource by its URI or template, and the instructions as
-`instructions`. Put a name with a comma in it in backticks, and keep the
-list on one line: a wrapped line that starts `word: ` begins a new
-footer, as Conventional Commits reads it. Names are separated by commas,
-and a `Token #value` footer such as `Closes #12` acknowledges nothing. If
-it breaks something a release shipped, name that item in a
-`BREAKING CHANGE:` footer instead. CI checks this with `schema-ack`, and
-a refusal prints the footer that fixes it.
+`make evals` is run by hand too. It scores whether a model gets the hard
+cases right through these tools, against the in-memory calendar, and
+needs an `ANTHROPIC_API_KEY`. `make evals-check`, in `make check`, runs
+the scorers without a key and fails if one passes on an untouched
+calendar.
 
-## Reporting a bug
+## Adding a tool
 
-Use the issue template. It asks for `doctor` output, a version and a
-debug log, all of which are safe to paste: the log carries no event
-content by construction. Please do not paste event titles, guest lists or
-your OAuth client JSON.
+1. Add the handler in `internal/tools` through `add`, with a `Kind` that
+   decides its annotations and whether it registers at all (D-54).
+2. Put the logic in `internal/service`, and the guards in
+   `internal/plan`, so the rules test without the handler.
+3. Add it to the README's tool table, or the staleness gate fails.
+4. Add a step to `scripts/livecal`, or `make live-cover` fails.
+5. Read `make schema-diff`, and add the `SCHEMA-CHANGE:` footer above.
+
+A new API call needs a row in `testdata/api-coverage.tsv`, and a new wire
+field one in `testdata/api-fields.tsv`. `make api-diff` brings a field
+Google adds in as a gate failure that names it.
+
+## Branch and commit conventions
+
+- `main` is released code and takes pull requests only. Work on a short
+  topic branch.
+- Write the subject in the imperative, under 72 characters, saying what
+  changes: `Refuse a share outside the organization`. Look at a recent
+  `git log` for the tone.
+- The body says the problem, why this change solves it, and the
+  alternatives rejected. A fixed review finding is one line at the end
+  of the body. A declined one goes in the pull request, or becomes a
+  present-tense comment at the line it protects.
+- Never commit directly to `main`. The maintainer pushes tags and
+  releases.
+
+## Pull requests
+
+1. Open against `main`, with a summary and a test plan.
+2. CI must be fully green.
+3. A maintainer reviews and merges.
+
+## Changelog
+
+Every user-visible change gets an entry under `## [Unreleased]` in
+`CHANGELOG.md`, in the same pull request that makes the change. Leave out
+changes only contributors see, unless they must act on them.
+
+- **Sections** are the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+  set and nothing else: Added, Changed, Deprecated, Removed, Fixed and
+  Security, in that order.
+- **One line per change, 25 words or fewer, impact first.** Write for
+  someone deciding whether to upgrade: what changes for them, not the
+  mechanism. The investigation and the rejected alternatives belong in
+  the commit message.
+- **Breaking changes** start with `**Breaking:**`. Such an entry may add
+  one sentence saying what to do, in the imperative. Anything needing a
+  new OAuth consent, a fresh login or a config change is breaking.
+- **Security fixes** name the CVE or GHSA.
+
+`release.yml` lifts the matching section verbatim into the GitHub release
+notes, so the entry is the release note. Versioning follows
+[SemVer](https://semver.org/spec/v2.0.0.html), read through the tool
+surface: tool names, input and output schemas, resources and documented
+behavior.
+
+## Releasing
+
+Maintainers release as [`docs/release.md`](docs/release.md) says.
+
+## Code style
+
+- Match the surrounding code. Do not reformat what you did not touch.
+- Comments explain why: a constraint, an invariant, something Google does
+  that the code has to work around. Do not narrate what the code does.
+- An all-day event is a date, never an instant. `internal/when` has no
+  conversion from one to the other, because there is no correct one; if
+  you need an instant, take a zone as an argument (D-10).
+- Logs record the call, never the payload (D-03).
+
+`CLAUDE.md` has the short version of the rules, and `docs/architecture.md`
+the reasoning. Start there if you are wondering why the code is the way
+it is.
+
+## License
+
+By contributing, you agree that your contributions will be licensed
+under the project's [Apache 2.0 License](./LICENSE).

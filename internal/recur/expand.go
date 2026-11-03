@@ -23,8 +23,8 @@ const MaxOccurrences = 3650
 // will report "10 occurrences" for a series that has no end.
 type Occurrences struct {
 	// Dates is set for an all-day series, Times for a timed one. Never
-	// both: §4.1 holds here too, and an all-day series has no instant to
-	// carry.
+	// both: a date is not a time here either, and an all-day series has
+	// no instant to carry.
 	Dates []when.Date
 	Times []when.Zoned
 	// Truncated says the limit stopped the walk before the rule did.
@@ -32,8 +32,8 @@ type Occurrences struct {
 	// Reason names what stopped it, for a result to quote.
 	Reason string
 	// Notes carries what a zone did to a wall-clock reading: a weekly
-	// 02:30 meets a morning that has no 02:30 once a year, and §4.1 says
-	// the server names it rather than resolving it quietly.
+	// 02:30 meets a morning that has no 02:30 once a year, and the
+	// server names that rather than resolving it quietly.
 	Notes []string
 }
 
@@ -139,8 +139,10 @@ func (s Set) ExpandDates(start when.Date, from, to when.Date, limit int) (Occurr
 // The zone is load-bearing and is why this takes a when.Zoned rather
 // than an instant: each occurrence is the same WALL CLOCK on a later
 // date, resolved in that zone afterward. A weekly 09:00 stays 09:00
-// across a transition, which is what Google's own expansion does and
-// what §2.2 requires the write to carry.
+// across a transition, which is what Google's own expansion does for a
+// series written with a timeZone. Not every transition is an hour:
+// Australia/Lord_Howe shifts by 30 minutes. Walking dates keeps the size
+// of the shift out of the arithmetic, and TestHalfHourTransition holds it.
 func (s Set) ExpandTimes(start when.Zoned, from, to when.Zoned, limit int) (Occurrences, error) {
 	out := Occurrences{}
 	if err := s.expandable(); err != nil {

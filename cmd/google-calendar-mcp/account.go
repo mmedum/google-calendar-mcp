@@ -174,9 +174,7 @@ func cmdLogin(args []string, stdout, stderr io.Writer, env func(string) string) 
 
 	// tokeninfo returns an email only when an email scope was granted,
 	// and this server asks for none — it has no business reading the
-	// person's profile. So the account was silently blank, and `status`
-	// had a field that could never populate. Observed on the first live
-	// login.
+	// person's profile — so the account would stay blank.
 	//
 	// The primary calendar's id IS the account's address, and reading it
 	// needs nothing beyond the scopes already granted.

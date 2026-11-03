@@ -2,8 +2,8 @@
 // and refuses the calls that must not be made.
 //
 // It has no network, no clock and no client: a plan is a value, so every
-// guard §4.2, §4.3 and §4.4 require is testable on its own rather than
-// through a fake calendar. The service calls these, spends the requests
+// guard on scope, notification and etags is testable on its own rather
+// than through a fake calendar. The service calls these, spends the requests
 // and reports the result; what belongs here is the decision.
 //
 // Its refusals are sentinels — ErrInvalid, ErrBlocked, ErrUnsupported —
@@ -32,16 +32,16 @@ var (
 	ErrInvalid = errors.New("plan: invalid")
 	// ErrBlocked: a guard refused what the API would have allowed.
 	ErrBlocked = errors.New("plan: blocked")
-	// ErrUnsupported: the API cannot do this (§2).
+	// ErrUnsupported: the API cannot do this.
 	ErrUnsupported = errors.New("plan: unsupported")
 )
 
 // Draft is a requested change, field by field.
 //
 // A nil pointer means the caller did not ask about that field, which is
-// what makes this a patch rather than a replacement: §4.4 forbids a
-// write that destroys what it cannot see, and Event's own `omitempty`
-// strings cannot tell "leave it" from "clear it".
+// what makes this a patch rather than a replacement: a write must not
+// destroy what it cannot see, and Event's own `omitempty` strings cannot
+// tell "leave it" from "clear it".
 type Draft struct {
 	Title       *string
 	Description *string
@@ -49,7 +49,7 @@ type Draft struct {
 
 	// Start and End are the caller's own strings: a yyyy-mm-dd date for
 	// an all-day event or an RFC3339 timestamp for a timed one. Empty
-	// means unchanged. The two must agree — a date is not a time (§4.1).
+	// means unchanged. The two must agree — a date is not a time.
 	//
 	// End on an all-day event is the LAST DAY, inclusive. Google's wire
 	// end is exclusive, and the renderer already shows it inclusive, so
@@ -58,7 +58,7 @@ type Draft struct {
 	Start string
 	End   string
 	// Zone is the resolved zone and goes on every timed write, recurring
-	// or not, so the same path is exercised every time (§4.1).
+	// or not, so the same path is exercised every time.
 	Zone when.Zone
 
 	// Recurrence replaces the RFC 5545 lines together. A non-nil pointer
@@ -67,20 +67,25 @@ type Draft struct {
 
 	// AddGuests and RemoveGuests are applied to the list that was read,
 	// never to a list the caller supplied whole: an RSVP that arrived
-	// between the read and the write would otherwise be overwritten
-	// (§4.4).
+	// between the read and the write would otherwise be overwritten.
 	AddGuests    []string
 	RemoveGuests []string
 	// AddRooms are rooms and other resources to book. They go with
 	// `resource: true`, the one way Google documents to name a resource,
 	// and only as they are added: "Can only be set when the attendee is
 	// added to the event for the first time" (EventAttendee.resource).
+	// Who a write reaches is decided by the address, not by this flag.
 	// RemoveGuests takes a room's address as well.
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events
 	AddRooms []string
 	// AddOptional are guests invited as optional. They are reached like
-	// any other guest, so they count toward notify. A room cannot be
-	// optional. Add only: an address already on the event keeps the role
-	// it has, and AlreadyOn names it so a result can say so.
+	// any other guest, so they count toward notify: the reference says
+	// nothing of mailing one less, and Google keeps `optional` as sent.
+	// A room cannot be optional. Add only: an address already on the
+	// event keeps the role it has, and AlreadyOn names it so a result can
+	// say so. Checked by the live step "get_event shows the optional
+	// guest".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events
 	AddOptional []string
 
 	// Transparent marks the event as not making the person busy.
@@ -99,8 +104,7 @@ type Draft struct {
 
 	// Conference asks Google to attach a Google Meet link: to a new event
 	// on an insert, and to an event that has none on a patch, which
-	// refuses one that has a conference because Google would replace it
-	// (§17.3).
+	// refuses one that has a conference because Google would replace it.
 	Conference bool
 
 	// Status makes a new event a status event: out of office, focus time
@@ -120,7 +124,9 @@ func (d Draft) Empty() bool {
 
 // OnlyReminders reports whether the draft changes nothing but this
 // account's reminders. Google documents them as "the event's reminders
-// for the authenticated user", so such a write reaches nobody.
+// for the authenticated user", so such a write reaches nobody. Checked
+// by the live step "an empty list removes them".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 func (d Draft) OnlyReminders() bool {
 	rest := d
 	rest.Reminders = nil
@@ -220,8 +226,14 @@ func remindersText(r *gcal.EventReminders) string {
 
 // visibilities are the values a write may send, in order of how many
 // people see the details: public to all readers of the calendar, default
-// as the calendar decides, private to the guests alone. Google ranks only
-// public below private; default in the middle is a belief (§18 row 101).
+// as the calendar decides, private to the guests alone.
+//
+// Google applies a more restrictive visibility on one occurrence to the
+// whole series and ignores a less restrictive one. Its reference ranks
+// public below private and is silent on default: a default occurrence
+// makes a public series default, and default below private is unchecked.
+// Checked by the live step "the series is default".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 var visibilities = []string{gcal.VisibilityPublic, gcal.VisibilityDefault, gcal.VisibilityPrivate}
 
 // visibilityRank orders a visibility from least to most restrictive. An
@@ -287,7 +299,7 @@ func (d Draft) touchesGuests() bool {
 }
 
 // Change is one field a write alters, in the exact values that went over
-// the wire (§4.9). The readable before and after are rendered from the
+// the wire. The readable before and after are rendered from the
 // event itself; this is the machine half, so a caller can check what was
 // sent rather than trust a sentence about it.
 type Change struct {
@@ -301,9 +313,8 @@ type Change struct {
 //
 // A field whose new value equals the old one is not sent and is not
 // listed, so the change list describes the write rather than the
-// request. Whether such a no-op would ALSO move the etag under everybody
-// else holding one is unprobed for events: it was assumed here, and the
-// live run refuted it for calendars (§18 row 58).
+// request. Whether such a no-op moves an event's etag is not known; a
+// calendar's it leaves alone.
 //
 // A status event takes no guests, rooms or Meet link, and comes out of
 // the patch in a shape Google takes, or the patch is refused before
@@ -452,8 +463,8 @@ func Patch(before gcal.Event, d Draft) (gcal.EventPatch, []Change, error) {
 
 // Insert builds the events.insert body for a new event.
 //
-// id is the client-generated one of §2.11: the server mints it so a
-// retry after an answer nobody saw collides rather than double-books.
+// id is client-generated: the server mints it so a retry after an answer
+// nobody saw collides rather than double-books.
 func Insert(id string, d Draft) (gcal.Event, error) {
 	if err := gcal.ValidEventID(id); err != nil {
 		return gcal.Event{}, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
@@ -507,12 +518,11 @@ func Insert(id string, d Draft) (gcal.Event, error) {
 		e.Recurrence = lines
 	}
 	if d.Conference {
-		// The request only asks: Google makes the conference
-		// asynchronously, so the insert's answer usually says pending
-		// and the caller is told to read the event for the link. The
-		// request id is the event id, so a retry of an insert whose
-		// answer was never seen (§2.11) cannot make a second
-		// conference — a repeated request id is ignored.
+		// The request only asks: the link usually comes back with the
+		// insert, and Google may still answer pending and make it later.
+		// The request id is the event id, so a retry of an insert whose
+		// answer was never seen cannot make a second conference — a
+		// repeated request id is ignored.
 		e.ConferenceData = gcal.NewConferenceRequest(id)
 	}
 	if len(d.RemoveGuests) > 0 {
@@ -635,7 +645,7 @@ func (d Draft) times(before *gcal.Event) (start, end *gcal.EventDateTime, err er
 		return nil, nil, endErr
 	case hasStart && hasEnd && startAllDay != endAllDay:
 		return nil, nil, fmt.Errorf(
-			"%w: start and end disagree about whether this is an all-day event. A date is not a time (§4.1): "+
+			"%w: start and end disagree about whether this is an all-day event. A date is not a time: "+
 				"pass two yyyy-mm-dd dates for an all-day event, or two RFC3339 timestamps for a timed one",
 			ErrInvalid)
 	}
@@ -722,9 +732,9 @@ func (d Draft) times(before *gcal.Event) (start, end *gcal.EventDateTime, err er
 	// daylight-saving fold two strings carry different offsets — so
 	// "02:45+02:00" to "02:30+01:00" is 45 real minutes forward and
 	// sorts backwards, while the genuinely backwards pair sorts forwards.
-	// The string comparison refused the valid event and accepted the
-	// impossible one, which is §4.1's whole argument for carrying a zone
-	// rather than an offset, failing inside the guard meant to enforce it.
+	// A string comparison refuses the valid event and accepts the
+	// impossible one, which is why a write carries a zone rather than an
+	// offset.
 	if !startZ.IsZero() && !endZ.IsZero() && !endZ.After(startZ) {
 		return nil, nil, fmt.Errorf("%w: the end %s is not after the start %s",
 			ErrInvalid, endZ, startZ)
@@ -779,7 +789,7 @@ func sameMoment(a, b *gcal.EventDateTime) bool {
 // cleanRecurrence validates the caller's RFC 5545 lines and returns them
 // unchanged.
 //
-// Unchanged is the point (§6.4): the parse is there to refuse a rule the
+// Unchanged is the point (D-20): the parse is there to refuse a rule the
 // server cannot expand and to explain it back, not to rebuild it. A
 // round trip through a struct is where a BYDAY goes missing.
 func cleanRecurrence(lines []string) ([]string, error) {
@@ -802,7 +812,7 @@ func cleanRecurrence(lines []string) ([]string, error) {
 }
 
 // guestList applies the additions and removals to the list that was
-// read (§4.4).
+// read, never a list the caller supplied whole (D-27).
 //
 // The attendees come from the raw event rather than from model.Attendee
 // deliberately: the model drops a guest's comment, their extra-guest
@@ -849,7 +859,7 @@ func guestList(before []gcal.EventAttendee, add []gcal.EventAttendee, remove []s
 	if added == 0 && removed == 0 {
 		return nil, nil, nil
 	}
-	// Counts, never addresses (§9).
+	// Counts, never addresses.
 	return out, &Change{
 		Field: "guests",
 		From:  fmt.Sprintf("%d", len(before)),
@@ -865,7 +875,9 @@ func guestList(before []gcal.EventAttendee, add []gcal.EventAttendee, remove []s
 // The display name is dropped here and goes nowhere: not to Google, not
 // to a result, not to a log. One address per entry: a list in one string
 // is refused rather than split, because which entries the caller meant
-// as one guest is not this server's to guess.
+// as one guest is not this server's to guess. Checked by the live step
+// "a guest given as a mailbox".
+// https://www.rfc-editor.org/rfc/rfc5322#section-3.4
 func Address(v, what string) (string, error) {
 	v = strings.TrimSpace(v)
 	a, err := mail.ParseAddress(v)
@@ -928,12 +940,13 @@ func validAddress(v, what string) error {
 
 // ------------------------------------------------------------- the scope
 
-// Scope applies §4.2 to one write.
+// Scope reads the caller's scope, and refuses a write to a recurring
+// event that names none (D-18).
 //
 // reach is called ONLY on the refusal path. Counting a series' occurrences
 // means reading its parent, and a guard that spends a request on every
-// successful write to improve a message nobody sees is §4.7 failing where
-// the result cannot show it.
+// successful write to improve a message nobody sees spends requests the
+// result cannot show.
 //
 // An event that does not repeat needs no scope and is not refused for
 // passing one: the caller believed it repeated, and the result says it
@@ -985,7 +998,7 @@ func fromRecur(err error) error {
 // NoSplit refuses `this_and_following` where this server cannot build it.
 //
 // The refusal is about this server's construction, not a guess about
-// Google's: §2.8 says there is NO server-side "this and following", so
+// Google's: there is NO server-side "this and following", so
 // the only way to have one is to truncate the original series and insert
 // a new one from the target. That takes the right to rewrite the series.
 // An attendee RSVPing has no such right, and a move between calendars
@@ -996,7 +1009,7 @@ func NoSplit(s recur.Scope, what string) error {
 		return nil
 	}
 	return fmt.Errorf("%w: %s cannot be done for \"this and following\". Google has no such operation — "+
-		"the server builds it by ending the original series and starting a new one (§2.8), which rewrites "+
+		"the server builds it by ending the original series and starting a new one, which rewrites "+
 		"the series itself. Use scope:instance for one occurrence, or scope:series for all of them",
 		ErrUnsupported, what)
 }
@@ -1013,21 +1026,18 @@ const (
 	AimSeries
 )
 
-// Target is §4.2's second half: having chosen a scope, WHICH event does
-// the write land on?
+// Target is the other half of a scope: having chosen one, WHICH event
+// does the write land on?
 //
-// Choosing the scope and applying it are two decisions, and only the
-// first had an owner. The second was written out at each call site, and
-// two of the four were already wrong: move_event had no version of it at
-// all, so `scope:series` on an occurrence id moved one occurrence while
-// the result printed `scope: series`, and `scope:instance` on a series
-// id moved the whole series. respond_to_event was missing the refusal
-// and would have patched a whole series' attendee array — the exact
-// thing its own description says it exists to prevent.
+// It is decided here once, for every write tool. `scope:series` on an
+// occurrence id writes the series, and `scope:instance` on a series id is
+// refused, since a copy of this at a call site gets one of them wrong:
+// one occurrence moved under `scope: series`, or a whole series' attendee
+// array patched by an RSVP.
 //
 // this_and_following is not decided here. It is not a target but a
-// construction (§2.8), so a caller either builds it or refuses it with
-// NoSplit before asking.
+// construction, so a caller either builds it or refuses it with NoSplit
+// before asking.
 func Target(s recur.Scope, e model.Event, eventID string) (Aim, error) {
 	switch s {
 	case recur.ScopeSeries:

@@ -18,8 +18,8 @@ func zone(t *testing.T, name string) *when.Zone {
 	return &z
 }
 
-// TestParseWhenKeepsTheHalvesApart is §4.1 at the conversion boundary:
-// a Date never acquires an instant, whatever zone is in play.
+// TestParseWhenKeepsTheHalvesApart: at the conversion boundary a Date
+// never acquires an instant, whatever zone is in play.
 func TestParseWhenKeepsTheHalvesApart(t *testing.T) {
 	chicago := zone(t, "America/Chicago")
 
@@ -111,9 +111,9 @@ func TestFromEvent(t *testing.T) {
 	}
 }
 
-// TestReachesPeopleExcludesSelfAndRooms is §4.3.2: a write that cannot
-// reach anybody must not demand a notify decision, or the requirement
-// becomes friction with no safety in it.
+// TestReachesPeopleExcludesSelfAndRooms: a write that cannot reach
+// anybody must not demand a notify decision, or the requirement becomes
+// friction with no safety in it.
 func TestReachesPeopleExcludesSelfAndRooms(t *testing.T) {
 	cases := []struct {
 		name  string

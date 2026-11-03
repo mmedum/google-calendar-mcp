@@ -10,7 +10,7 @@ import (
 // TimeOfDay is a wall-clock reading with no day and no zone: "09:00".
 //
 // It is not a Zoned and cannot become one on its own, for the same
-// reason a Date cannot (§4.1). 09:00 is a reading a zone turns into an
+// reason a Date cannot. 09:00 is a reading a zone turns into an
 // instant on a given day, and which instant depends on the day — a
 // daylight-saving Sunday has one fewer or one more hour in it than the
 // Sunday before.
@@ -37,11 +37,11 @@ func (t TimeOfDay) minutes() int { return t.Hour*60 + t.Minute }
 
 // Hours is a daily mask: a wall-clock span on chosen weekdays.
 //
-// It exists because a window and a working week are different shapes
-// (§17.2). A window is one interval, so "next week, 09:00 to 17:00" is
-// not expressible as one — a caller either accepts a fifteen-hour
-// overnight gap in the answer or makes five calls. A mask is the daily
-// shape the window cannot hold.
+// It exists because a window and a working week are different shapes. A
+// window is one interval, so "next week, 09:00 to 17:00" is not
+// expressible as one — a caller either accepts a fifteen-hour overnight
+// gap in the answer or makes five calls. A mask is the daily shape the
+// window cannot hold.
 //
 // The mask is applied in the zone the answer is rendered in, day by
 // local day, so it means 09:00 where the person is rather than a fixed
@@ -106,7 +106,7 @@ func ParseHours(from, to string, days []string) (Hours, error) {
 func (h Hours) Set() bool { return h.set }
 
 // String says what the mask is, for a result that has to state what it
-// applied (§4.5).
+// applied.
 func (h Hours) String() string {
 	if !h.set {
 		return ""
@@ -144,8 +144,8 @@ func (h Hours) keeps(d time.Weekday) bool {
 // Each day is built from that day's own midnight, so a day carrying a
 // daylight-saving transition is 23 or 25 hours long and 09:00 is still
 // 09:00 on it. A mask built by adding a fixed number of hours to the
-// window's start would drift by an hour halfway through the week, which
-// is the defect §4.1 exists to prevent, one level up from an event.
+// window's start would drift by an hour halfway through the week: the
+// daylight-saving drift of a series, one level up from an event.
 func (h Hours) Windows(w Window) []Window {
 	if !h.set {
 		return nil

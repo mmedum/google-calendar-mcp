@@ -26,7 +26,7 @@ func TestListSharingExplainsEveryRole(t *testing.T) {
 		t.Fatalf("%d rules, want 2", len(got.After))
 	}
 	// The role is explained rather than echoed: writerWithoutPrivateAccess
-	// tells a reader nothing on its own (§7.6).
+	// tells a reader nothing on its own.
 	if !strings.Contains(got.Text(), "private events show without their details") {
 		t.Fatalf("the roles are not explained:\n%s", got.Text())
 	}
@@ -53,7 +53,7 @@ func TestListSharingCallsOutAPublicCalendar(t *testing.T) {
 	}
 }
 
-// §2.15: the ACL read is a separate grant, and an empty list would read
+// The ACL read needs a scope of its own, and an empty list would read
 // as "shared with nobody" — the wrong answer rather than a missing one.
 func TestListSharingSaysWhenTheScopeIsMissing(t *testing.T) {
 	svc, fake := calendarSeed(t)
@@ -94,7 +94,7 @@ func TestShareCalendarGrantsAccessAndShowsExposureBothWays(t *testing.T) {
 	for _, w := range fake.Wrote() {
 		if w.Method == "acl.insert" {
 			inserted = true
-			// §2.5: Google's default here is to email, so the parameter
+			// Google's default here is to email, so the parameter
 			// is sent on every call rather than left out.
 			if w.SendNotifications != "true" {
 				t.Fatalf("sendNotifications was %q, want true", w.SendNotifications)
@@ -184,7 +184,7 @@ func TestAGroupShareSaysWhoItReaches(t *testing.T) {
 }
 
 // share_calendar takes named people and groups inside the organization,
-// below owner (§7.6). Everything wider is refused before anything is
+// below owner. Everything wider is refused before anything is
 // written, naming the tool that takes it, and an audience before the
 // role, so a caller is not walked through fixing a role for a share this
 // tool refuses anyway.

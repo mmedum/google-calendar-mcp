@@ -13,7 +13,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
-// Incremental sync (§17.1). The claims worth holding are not "it lists
+// Incremental sync. The claims worth holding are not "it lists
 // events" — list_events does that — but the four things a list cannot
 // do: hand back a token, report a DELETION, withhold the token when the
 // read did not finish, and say what to do when the token dies.
@@ -41,7 +41,7 @@ func TestChangesBaselineHandsBackAToken(t *testing.T) {
 		t.Fatalf("a baseline called already-canceled events deletions:\n%s", got.Text())
 	}
 	if got.Zone.Name() == "" {
-		t.Fatal("the result does not name the zone it rendered in (§4.5)")
+		t.Fatal("the result does not name the zone it rendered in; every read states its zone")
 	}
 }
 
@@ -151,15 +151,14 @@ func TestAnUnfinishedIncrementalReadHandsBackNoSyncToken(t *testing.T) {
 	}
 }
 
-// And the other half, which a live run found the hard way: a BASELINE
-// pages past its budget to reach the token.
+// And the other half: a BASELINE pages past its budget to reach the
+// token.
 //
-// On a real calendar the scratch account had 507 rows across 3 pages,
-// nearly all of them tombstones from deleted events. With the budget
-// stopping the read at 250 the last page was never reached, so no token
-// ever came back and incremental sync could not be started at all. The
-// rows are not changes on a baseline — the token covers them — so paging
-// past them loses nothing.
+// A calendar with a deletion history can hold pages of tombstones before
+// the last page, and the token comes only there. With the budget
+// stopping the read, no token would ever come back and incremental sync
+// could not be started at all. The rows are not changes on a baseline —
+// the token covers them — so paging past them loses nothing.
 func TestABaselinePagesPastItsBudgetToReachTheToken(t *testing.T) {
 	svc, fake := seeded(t)
 	fake.PageSize = 1
@@ -188,7 +187,7 @@ func TestABaselinePagesPastItsBudgetToReachTheToken(t *testing.T) {
 	}
 }
 
-// §17.1's invalidation story: 410 means start over, and saying "read
+// An expired token is 410, which means start over, and saying "read
 // again and retry" would send the caller round the same loop.
 func TestAnExpiredTokenSaysToStartOver(t *testing.T) {
 	svc, fake := seeded(t)
@@ -281,7 +280,7 @@ func TestUpdatedSinceReportsWhatChangedAfterIt(t *testing.T) {
 
 // The sync token a read since a moment hands back follows the calendar
 // from there: a sync with it reports what changed after the read and
-// nothing before. Spike O found Google's token chains (§18 row 91).
+// nothing before.
 func TestATokenFromAReadSinceAMomentChains(t *testing.T) {
 	fake := caltest.Seed()
 	svc := newService(t, fake)

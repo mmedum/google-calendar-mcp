@@ -16,9 +16,7 @@ import (
 //
 // It exists because redaction that depends on remembering to route a
 // call is redaction that ends the next time somebody adds a debug line —
-// the new print looks exactly like the safe ones beside it. A sibling
-// found a section header printing directly, one refactor away from
-// carrying a document title with it.
+// the new print looks exactly like the safe ones beside it.
 //
 // The driver talks to a real account, so what it prints is somebody's
 // real calendar.
@@ -73,16 +71,17 @@ func transcriptGate() error {
 	return nil
 }
 
+// liveDriverPackage is the live driver, which runs the steps the docs
+// cite and the tools live-cover holds.
+const liveDriverPackage = "scripts/livecal"
+
 // driverFiles are the packages that talk to a real account.
 func driverFiles() ([]string, error) {
 	var out []string
-	// scripts/spikes was in this list and never existed: the live probes
-	// are in scripts/livecal (§18 row 46). It was invisible because a
-	// missing directory was skipped, so the list could name anything.
-	// A directory this gate is told to read and cannot find fails it
-	// now — the floor below counts files, and scripts/livecal alone
-	// clears it, so losing scripts/evals would otherwise be silent.
-	for _, dir := range []string{"scripts/livecal", "scripts/evals"} {
+	// A directory this gate is told to read and cannot find fails it.
+	// The floor below counts files, and the live driver alone clears it,
+	// so a skipped directory would let this list name anything.
+	for _, dir := range []string{liveDriverPackage, "scripts/evals"} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return nil, fmt.Errorf("read %s, which this gate is told to scan: %w", dir, err)

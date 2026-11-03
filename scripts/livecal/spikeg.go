@@ -11,11 +11,11 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
-// spikeG answers §15's question: does acl.list really need its own
-// scope, or is calendar.readonly enough?
+// spikeG asks: does acl.list really need its own scope, or is
+// calendar.readonly enough?
 //
 // The discovery document says acl.get lists calendar.readonly among its
-// scopes and acl.list does not (§2.15). That is an odd enough asymmetry
+// scopes and acl.list does not. That is an odd enough asymmetry
 // to be worth a live probe, because if it is wrong this server asks
 // every user for a scope it does not need, and if it is right and we had
 // not noticed, get_calendar would 403 weeks after a working setup.
@@ -60,14 +60,14 @@ func spikeG(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	case hasACLScope && err != nil:
 		return fail, "acl.list failed even though the acls scope was granted: " + err.Error()
 	case !hasACLScope && err == nil:
-		// This would refute §2.15 and mean the extra scope is
-		// unnecessary — a real finding, and the one that would let this
-		// server ask for less.
-		return fail, "REFUTES §2.15: acl.list succeeded WITHOUT calendar.acls.readonly. " +
-			"The extra scope is not needed; §10 and docs/gcp-setup.md should drop it"
+		// This would refute the discovery document and mean the extra
+		// scope is unnecessary — a real finding, and the one that would
+		// let this server ask for less.
+		return fail, "REFUTES the discovery document: acl.list succeeded WITHOUT calendar.acls.readonly. " +
+			"The extra scope is not needed; internal/auth and docs/gcp-setup.md should drop it"
 	default:
 		if isForbidden(err) {
-			return pass, "CONFIRMS §2.15: acl.list is refused without calendar.acls.readonly"
+			return pass, "CONFIRMS the discovery document: acl.list is refused without calendar.acls.readonly"
 		}
 		return undetermined, "acl.list failed without the scope, but not with a 403: " + err.Error()
 	}

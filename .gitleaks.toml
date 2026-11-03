@@ -7,7 +7,7 @@ useDefault = true
 description = "Synthetic fixtures and reserved example domains"
 paths = [
   # The in-memory Calendar generates everything it returns; nothing in
-  # it was recorded from a real account (§9.1).
+  # it was recorded from a real account.
   '''internal/gapi/caltest/.*''',
   '''testdata/.*''',
 ]

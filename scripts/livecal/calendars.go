@@ -6,12 +6,12 @@ import (
 	"strings"
 )
 
-// The calendar and sharing steps (§16, phase 3).
+// The calendar and sharing steps.
 //
 // Everything here happens on a calendar this run created through
-// create_calendar and deletes through delete_calendar, so §9.1 holds for
-// this half too: the only content that can reach the transcript is
-// content the driver invented.
+// create_calendar and deletes through delete_calendar, so the driver
+// still reads only what it made: the only content that can reach the
+// transcript is content the driver invented.
 //
 // **Nothing here can reach a person, and that is structural rather than
 // careful.** The one address these steps share a calendar with is in
@@ -35,12 +35,11 @@ const probeGuest = "livecal-nobody@example.test"
 type calendarState struct {
 	// probe is the calendar create_calendar made this run. Empty when
 	// that step failed — most often because the account's calendar
-	// creation quota is spent (§18 row 36), which is not a defect in the
-	// server, so the steps that need it report undetermined rather than
-	// failing.
+	// creation quota is spent, which is not a defect in the server, so
+	// the steps that need it report undetermined rather than failing.
 	probe string
-	// remember tells the run this id is the driver's own, so §9.1 lets a
-	// step's body be printed. It fails closed: an id nobody registered
+	// remember tells the run this id is the driver's own, so a step's
+	// body may be printed. It fails closed: an id nobody registered
 	// makes the step account-wide by construction, and withheld.
 	remember func(string)
 }
@@ -53,8 +52,8 @@ type calendarState struct {
 // so the alternative — calling and letting the result be judged
 // afterward — would point `manage_calendar`, `unshare_calendar` and
 // `clear_calendar` at the operator's own calendar on any run where
-// `create_calendar` failed. The quota that makes that failure ordinary
-// is §18 row 36.
+// `create_calendar` failed. That failure is ordinary, because deleting a
+// calendar does not refund the creation quota.
 func (c *calendarState) needProbe() string {
 	if c.probe == "" {
 		return "no probe calendar this run, so this step could not run"
@@ -97,11 +96,11 @@ func calendarSteps(c *calendarState) []step {
 			check: func(r callResult) (verdict, string) {
 				if r.isError {
 					// The quota is spent rather than the server being
-					// wrong, and §18 row 36 says that is expected on an
-					// account this driver has run against all day.
+					// wrong, which is expected on an account this driver
+					// has run against all day.
 					if strings.Contains(r.text, "quota") || strings.Contains(r.text, "usage limits") {
-						return undetermined, "the calendar-creation quota is spent (§18 row 36); " +
-							"phase 3's steps cannot run"
+						return undetermined, "the calendar-creation quota is spent; " +
+							"the calendar and sharing steps cannot run"
 					}
 					return fail, "returned an error: " + truncate(r.text, 300)
 				}
@@ -117,8 +116,8 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
-			// §7.5's first axis: the calendar itself, which everybody
-			// subscribed to it sees.
+			// The calendar itself, which everybody subscribed to it
+			// sees.
 			name:   "manage_calendar title",
 			tool:   "manage_calendar",
 			argsFn: args(map[string]any{"title": probeRenamed}),
@@ -137,7 +136,7 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
-			// §7.5's third axis: this account's own view, which nobody
+			// This account's own view of the calendar, which nobody
 			// else sees. The color id is 1, which every account has.
 			name: "manage_calendar my view",
 			tool: "manage_calendar",
@@ -163,25 +162,24 @@ func calendarSteps(c *calendarState) []step {
 		},
 		{
 			// **Unsubscribing from a calendar you own is refused by
-			// Google**, and the live run is how that was found: 403,
-			// "The data owner of a calendar cannot remove such a
-			// calendar from their calendar list". Nothing published says
-			// so, and this driver had been written expecting it to work.
+			// Google**: 403, "The data owner of a calendar cannot remove
+			// such a calendar from their calendar list". Nothing
+			// published says so.
 			//
 			// So the step holds the translation rather than the
 			// operation. Every calendar this driver has is one it made,
 			// which means the working path — unsubscribing from somebody
 			// else's calendar — cannot be driven here at all without
-			// reading past what the driver wrote (§9.1). It is covered
-			// offline against the fake instead, and §16 says so.
+			// reading past what the driver wrote. It is covered offline
+			// against the fake instead.
 			name:   "manage_calendar unsubscribe is refused for an owner",
 			tool:   "manage_calendar",
 			argsFn: args(map[string]any{"unsubscribe": true}),
 			skip:   c.needProbe,
 			check: func(r callResult) (verdict, string) {
 				if !r.isError {
-					return fail, "Google let the data owner unsubscribe from their own calendar, which it " +
-						"refused on 2026-09-16 — §18 row 55 needs revisiting"
+					return fail, "Google let the data owner unsubscribe from their own calendar, so the " +
+						"server's refusal of it is stricter than Google"
 				}
 				if !strings.Contains(r.text, "[unsupported]") {
 					return fail, "the refusal is not classified unsupported: " + truncate(r.text, 200)
@@ -228,13 +226,13 @@ func calendarSteps(c *calendarState) []step {
 					return fail, "a calendar this account owns does not list an owner rule"
 				}
 				if !strings.Contains(r.text, "can see and change everything") {
-					return fail, "the roles are echoed rather than explained (§7.6)"
+					return fail, "the roles are echoed rather than explained"
 				}
 				return pass, "the owner rule is listed and explained"
 			},
 		},
 		{
-			// §7.6: share_calendar takes people and groups inside the
+			// share_calendar takes people and groups inside the
 			// organization. The public is publish_calendar's. This refusal
 			// is what stands between a model and publishing a calendar on
 			// a tool somebody always allowed, so it is driven live.
@@ -317,7 +315,7 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
-			// §4.3 at the ACL: no notify, no write. Refused before a
+			// At the ACL too: no notify, no write. Refused before a
 			// request is built, so nothing reaches Google.
 			name: "widen_calendar_access needs notify",
 			tool: "widen_calendar_access",
@@ -370,7 +368,7 @@ func calendarSteps(c *calendarState) []step {
 				}
 				if !strings.Contains(r.text, "who could see it before") ||
 					!strings.Contains(r.text, "who can see it now") {
-					return fail, "the result does not show exposure on both sides (§7.6)"
+					return fail, "the result does not show exposure on both sides"
 				}
 				if !strings.Contains(r.text, "reader") {
 					return fail, "the new rule is not in the exposure afterward"
@@ -379,7 +377,7 @@ func calendarSteps(c *calendarState) []step {
 					return fail, "the result does not say the share reaches outside the organization"
 				}
 				if !strings.Contains(r.text, "not a promise of silence") {
-					return fail, "notify:none was reported as silence (§4.3.3)"
+					return fail, "notify:none was reported as silence"
 				}
 				return pass, "shared outside as reader, with exposure before and after"
 			},
@@ -422,10 +420,10 @@ func calendarSteps(c *calendarState) []step {
 				// that was just removed. Read from the "now" heading
 				// rather than from the whole page: the "before" half
 				// names it too, and an assertion satisfied by a line it
-				// is not about is the failure §15 opens by naming.
+				// is not about proves nothing.
 				at := strings.Index(r.text, "who can see it now")
 				if at < 0 {
-					return fail, "the result does not show the exposure afterward (§7.6)"
+					return fail, "the result does not show the exposure afterward"
 				}
 				if strings.Contains(r.text[at:], probeGuest) {
 					return fail, "the rule is still in the exposure after being removed"
@@ -528,8 +526,8 @@ func calendarSteps(c *calendarState) []step {
 			},
 		},
 		{
-			// §9's second half: the flag registers the tool and the call
-			// still has to confirm.
+			// The flag registers the tool, and the call still has to
+			// confirm.
 			name:   "delete_calendar needs confirm",
 			tool:   "delete_calendar",
 			argsFn: args(nil),

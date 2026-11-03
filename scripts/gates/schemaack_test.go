@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -337,12 +336,8 @@ type dumpRepo struct {
 
 func newDumpRepo(t *testing.T) *dumpRepo {
 	t.Helper()
-	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	dir := t.TempDir()
-	t.Chdir(dir)
-	r := &dumpRepo{t: t, root: dir, git: gitIn(t, dir)}
-	r.git("init", "--quiet", "--initial-branch=main")
+	dir, git := isolatedRepo(t)
+	r := &dumpRepo{t: t, root: dir, git: git}
 	put(t, dir, "go.mod", "module example.invalid/fake\n\ngo 1.21\n")
 	r.git("add", "go.mod")
 	return r

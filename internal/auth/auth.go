@@ -28,7 +28,7 @@ import (
 //
 // The broad `calendar` scope is deliberately absent. It grants
 // everything this API can do, including deleting a calendar and clearing
-// the primary one — the two operations §9 keeps behind an env flag — so
+// the primary one — the two operations kept behind an env flag — so
 // asking for it would make the flag a label rather than a limit. The
 // narrow scopes below add up to the tool surface and nothing more.
 const (
@@ -36,16 +36,19 @@ const (
 	// events. It does NOT cover acl.list; see ScopeACLReadonly.
 	ScopeReadonly = "https://www.googleapis.com/auth/calendar.readonly"
 	// ScopeSettingsReadonly covers settings.list, which is where the
-	// user's own time zone lives — the last resort in §4.1's resolution
-	// order.
+	// user's own time zone lives: the last resort when neither the call
+	// nor the calendar names a zone.
 	ScopeSettingsReadonly = "https://www.googleapis.com/auth/calendar.settings.readonly"
 	// ScopeACLReadonly covers acl.list.
 	//
-	// It is a separate scope rather than an oversight. Verified against
-	// the discovery document (§2.15): acl.get lists calendar.readonly
-	// among its scopes and acl.list does not. Reading one sharing rule
-	// and reading the list of them take different grants, which surfaces
-	// as a 403 from one tool weeks after a working setup.
+	// calendar.readonly does not cover acl.list: the discovery document
+	// lists calendar.acls and calendar.acls.readonly for it, while acl.get
+	// takes calendar.readonly too. The reference page does not point out
+	// the difference, which surfaces as a 403 from one tool weeks after a
+	// working setup. Checked by the live steps "spike G: acl scopes" and
+	// "list_sharing", which prove the granted half only: a grant once
+	// given is not revoked by a later login asking for less.
+	// https://developers.google.com/workspace/calendar/api/v3/reference/acl/list
 	ScopeACLReadonly = "https://www.googleapis.com/auth/calendar.acls.readonly"
 
 	// ScopeEvents covers events.insert, patch, delete, move and import.
@@ -76,9 +79,9 @@ type Access struct {
 // consent screen and the same stored list.
 //
 // The staleness gate holds docs/gcp-setup.md's scope blocks against this
-// function, in each mode and with sharing off: the standard's rule is
-// that a scope list a person pastes into an External app's consent
-// screen is an input, not a description.
+// function, in each mode and with sharing off, because a scope list a
+// person pastes into an External app's consent screen is an input, not a
+// description.
 func Scopes(a Access) []string {
 	out := []string{ScopeReadonly, ScopeSettingsReadonly}
 	if a.Sharing {
@@ -396,8 +399,8 @@ func Inspect(ctx context.Context, client *http.Client, accessToken string) (*Tok
 		// transport failure stringifies the whole URL: client.Do returns
 		// a *url.Error whose Error() is `Get "https://…?access_token=ya29.…":
 		// dial tcp …`. That reaches `doctor`, which is the output a user
-		// pastes into a bug report — so the URL never survives the error
-		// (§9). internal/gapi strips its own for the same reason, on
+		// pastes into a bug report — so the URL never survives the error.
+		// internal/gapi strips its own for the same reason, on
 		// search terms rather than on credentials.
 		return nil, fmt.Errorf("auth: tokeninfo: %w", withoutURL(err))
 	}

@@ -15,13 +15,12 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
-// writeSeed is a calendar whose event ids are legal base32hex (§2.11).
+// writeSeed is a calendar whose event ids are legal base32hex, as a
+// client-generated id must be.
 //
 // Seed's ids are not, and that is fine for reads — but an occurrence is
 // addressed as "series id, underscore, scheduled start", so a fixture
-// with a hyphen in its ids cannot exercise the address §6.2 is built on.
-// A fake that made that path untestable is how it would have shipped
-// untested.
+// with a hyphen in its ids cannot exercise the occurrence address.
 func writeSeed(t *testing.T) (*service.Service, *caltest.Server) {
 	t.Helper()
 	const tz = "Europe/Copenhagen"
@@ -46,7 +45,7 @@ func writeSeed(t *testing.T) (*service.Service, *caltest.Server) {
 	// A weekly series and two of its occurrences. 24 March is still CET
 	// and 31 March is CEST, so the two occurrence ids differ by an hour
 	// in UTC while both are 14:00 on the wall clock — which is the whole
-	// reason §4.1 carries a zone rather than an offset.
+	// reason a write carries a zone rather than an offset.
 	fake.AddEvent("me@example.test", caltest.Recurring("evseries001", "Weekly review",
 		"2026-03-17T14:00:00+01:00", "2026-03-17T15:00:00+01:00", tz,
 		"RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=8"))
@@ -98,7 +97,7 @@ func TestCreateEventMintsALegalIDAndSendsTheZone(t *testing.T) {
 	if out.After == nil {
 		t.Fatal("a create must report what it made")
 	}
-	// §2.11: the id is the server's, so a retry collides rather than
+	// The id is the server's, so a retry collides rather than
 	// creating a second meeting.
 	if err := gcal.ValidEventID(out.After.ID); err != nil {
 		t.Fatalf("the generated id is not one Google would accept: %v", err)
@@ -107,7 +106,7 @@ func TestCreateEventMintsALegalIDAndSendsTheZone(t *testing.T) {
 	if len(writes) != 1 || writes[0].Method != "insert" {
 		t.Fatalf("got writes %+v, want one insert", writes)
 	}
-	// §4.3.2: nobody to reach, so no sendUpdates was invented.
+	// Nobody to reach, so no sendUpdates was invented.
 	if writes[0].SendUpdates != "" {
 		t.Errorf("sendUpdates %q sent for an event with no guests", writes[0].SendUpdates)
 	}
@@ -128,9 +127,8 @@ func TestCreateEventRefusesWithoutNotifyWhenItHasGuests(t *testing.T) {
 	}
 }
 
-// §4.3.4: `none` is refused when a guest is outside the organizer's
-// domain, because that guest may have no calendar for the event to
-// appear in (spike B).
+// `none` is refused when a guest is outside the organizer's domain,
+// because that guest may have no calendar for the event to appear in.
 func TestCreateEventRefusesNoneForAnOutsideGuest(t *testing.T) {
 	svc, fake := writeSeed(t)
 	_, err := svc.CreateEvent(context.Background(), service.CreateOptions{
@@ -192,7 +190,7 @@ func TestCreateEventBooksRoomsWithoutReachingAnybody(t *testing.T) {
 
 // A person's address is somebody the write reaches whichever list it
 // comes in: passed as a room, it still asks for notify and refuses none
-// for somebody outside the domain (§4.3.4).
+// for somebody outside the domain.
 func TestAPersonPassedAsARoomIsStillReached(t *testing.T) {
 	outside := []string{"partner@elsewhere.test"}
 	for _, notify := range []string{"", "none"} {
@@ -444,7 +442,7 @@ func TestAGuestGivenAsAMailboxIsItsAddress(t *testing.T) {
 	}
 }
 
-// §4.3.5: dry_run shows the blast radius and writes nothing.
+// dry_run shows the blast radius and writes nothing.
 func TestDryRunWritesNothing(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
@@ -469,8 +467,8 @@ func TestDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// §2.11 and §11: an insert that failed without an answer this server can
-// trust is ambiguous_outcome, never a silent retry.
+// An insert that failed without an answer this server can trust is
+// ambiguous_outcome, never a silent retry.
 func TestAnInsertThatMayHaveLandedIsAmbiguous(t *testing.T) {
 	svc, fake := writeSeed(t)
 	fake.Fail["POST /calendars/me@example.test/events"] = 500
@@ -524,11 +522,11 @@ func TestUpdatePatchesUnderIfMatch(t *testing.T) {
 		t.Fatalf("got changes %+v, want one location change", out.Changes)
 	}
 	if out.Before == nil || out.After == nil {
-		t.Fatal("§4.9: a write reports what it looked like before and after")
+		t.Fatal("a write reports what it looked like before and after")
 	}
 }
 
-// §4.4: the etag the caller decided on is held to. If it moved, the
+// The etag the caller decided on is held to. If it moved, the
 // write is [stale] and no request is spent.
 func TestAnEtagThatMovedIsStale(t *testing.T) {
 	svc, fake := writeSeed(t)
@@ -561,7 +559,7 @@ func TestForceWritesWithAStarAndSaysSo(t *testing.T) {
 	}
 }
 
-// §4.2: the refusal names the three choices and how far `series` reaches.
+// The refusal names the three choices and how far `series` reaches.
 func TestUpdateRefusesARecurringEventWithoutAScope(t *testing.T) {
 	svc, fake := writeSeed(t)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
@@ -612,7 +610,7 @@ func TestScopeInstanceAgainstTheSeriesIDIsRefused(t *testing.T) {
 	}
 }
 
-// §6.2: an occurrence is addressable as "the series, that scheduled
+// An occurrence is addressable as "the series, that scheduled
 // start" — the address that survives somebody moving it.
 func TestAnOccurrenceIsAddressableByItsScheduledStart(t *testing.T) {
 	svc, fake := writeSeed(t)
@@ -627,7 +625,7 @@ func TestAnOccurrenceIsAddressableByItsScheduledStart(t *testing.T) {
 		t.Fatalf("patched %q, want the occurrence for 24 March", got)
 	}
 	if !strings.Contains(out.Text(), "Addressed the occurrence") {
-		t.Errorf("the result must say which address it used (§6.2):\n%s", out.Text())
+		t.Errorf("the result must say which address it used:\n%s", out.Text())
 	}
 }
 
@@ -645,9 +643,9 @@ func TestAnOriginalStartThatNamesNoOccurrenceSaysWhy(t *testing.T) {
 	}
 }
 
-// §2.8: two calls, the original truncated and a new series started — and
-// the result says the exceptions after the target were reset, because
-// Google does that and no caller expects it (spike E).
+// Two calls, the original truncated and a new series started — and the
+// result says the exceptions after the target were reset, because Google
+// does that and no caller expects it.
 func TestThisAndFollowingIsTwoCallsAndSaysWhatItReset(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
@@ -678,7 +676,7 @@ func TestThisAndFollowingIsTwoCallsAndSaysWhatItReset(t *testing.T) {
 		t.Errorf("the new series should carry the remaining six:\n%s", text)
 	}
 	if out.Requests < 2 {
-		t.Errorf("§4.7: a two-call write must report it, got %d", out.Requests)
+		t.Errorf("a two-call write must report its requests, got %d", out.Requests)
 	}
 }
 
@@ -707,7 +705,7 @@ func TestAWriteToAReadOnlyCalendarIsForbidden(t *testing.T) {
 
 // ----------------------------------------------------------- canceling
 
-// §7.4: two API shapes behind one verb, and the result names which.
+// Two API shapes behind one verb, and the result names which.
 func TestCancelingAWholeEventDeletesIt(t *testing.T) {
 	svc, fake := writeSeed(t)
 	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
@@ -745,9 +743,9 @@ func TestCancelingOneOccurrenceIsAStatusPatch(t *testing.T) {
 	}
 }
 
-// §4.3.3: canceling with no notification removes it from the
-// organizer's calendar and leaves it on the guests' (§18 row 43). The
-// result says so, because that is the sentence a caller most needs.
+// Canceling with no notification removes it from the organizer's
+// calendar and leaves it on the guests'. The result says so, because
+// that is the sentence a caller most needs.
 func TestCancelingQuietlySaysTheGuestsStillHaveIt(t *testing.T) {
 	svc, _ := writeSeed(t)
 	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
@@ -843,7 +841,7 @@ func TestMoveToTheSameCalendarIsRefused(t *testing.T) {
 	}
 }
 
-// §2.8: there is no "this and following" to build here, so the operation
+// There is no "this and following" to build here, so the operation
 // does not exist rather than being half-done.
 func TestMoveRefusesThisAndFollowingAsUnsupported(t *testing.T) {
 	svc, fake := writeSeed(t)
@@ -861,7 +859,7 @@ func TestMoveRefusesThisAndFollowingAsUnsupported(t *testing.T) {
 
 // ----------------------------------------------------------- responding
 
-// §7.4: RSVPing is not editing. Only this account's row changes, and
+// RSVPing is not editing. Only this account's row changes, and
 // everybody else's answer and comment survive exactly.
 func TestRespondChangesOnlyThisAccountsAnswer(t *testing.T) {
 	svc, fake := writeSeed(t)
@@ -933,11 +931,10 @@ func TestRespondRefusesThisAndFollowingAsUnsupported(t *testing.T) {
 // ptr is v by pointer, for an input whose absence means "leave it".
 func ptr[T any](v T) *T { return &v }
 
-// §4.7: one tool call is one API request, and where it cannot be, the
+// One tool call is one API request, and where it cannot be, the
 // exceptions are named. This is the guard that stops the count creeping
-// back — phase 1 found `check_availability` spending 168 requests to set
-// up a query its own result called 2, and the direction that hides in is
-// the one nothing prints.
+// back, in the direction nothing prints: spending more than the result
+// reports.
 //
 // The two reads every write shares — the calendar list and the account
 // settings — are cached for the process, so they are paid once and never
@@ -973,7 +970,7 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 		// Five, not four: the event is read back from the destination,
 		// because a successful move answers with status:cancelled and
 		// the result would otherwise report a moved meeting as a
-		// canceled one (§18 row 48).
+		// canceled one.
 		{"move", 5, func(s *service.Service) error {
 			_, err := s.MoveEvent(context.Background(), service.MoveOptions{
 				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
@@ -987,7 +984,7 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 			return err
 		}, "list, settings, read, patch"},
 		// The one write that is genuinely two calls, plus the parent read
-		// the split needs. §4.7 says the result has to say so, and
+		// the split needs. The result has to say so, and
 		// TestThisAndFollowingIsTwoCallsAndSaysWhatItReset holds that.
 		{"this_and_following", 6, func(s *service.Service) error {
 			_, err := s.UpdateEvent(context.Background(), service.UpdateOptions{
@@ -1032,10 +1029,10 @@ func TestASecondWriteReusesWhatTheFirstRead(t *testing.T) {
 	}
 }
 
-// §4.2's second half, and the reason it has one owner: choosing a scope
-// and applying it are two decisions, and only the first had one. These
-// four cases are the reproductions that found it — move_event had no
-// targeting at all, and respond_to_event was missing the refusal.
+// Applying a scope is decided in one place: choosing a scope and
+// applying it are two decisions, and a copy at a call site gets the
+// second wrong. These four cases hold move_event's targeting and
+// respond_to_event's refusal.
 func TestAScopeReachesTheEventItNames(t *testing.T) {
 	t.Run("move series from an occurrence writes the parent", func(t *testing.T) {
 		svc, fake := writeSeed(t)
@@ -1119,10 +1116,9 @@ func TestAScopeReachesTheEventItNames(t *testing.T) {
 
 // The new series of a this_and_following write is the parent copied, so
 // it keeps its attachments and the fields this server has no struct
-// field for. It used to be built from the decoded fields alone:
-// attachments and another application's properties were lost, and a
-// working-location series went to Google without the details a create
-// needs (§18 row 88).
+// field for. Built from the decoded fields alone, it would lose
+// attachments and another application's properties, and send a
+// working-location series without the details a create needs.
 func TestASplitCarriesWhatThisServerDoesNotModel(t *testing.T) {
 	svc, fake := writeSeed(t)
 	var series gcal.Event
@@ -1183,7 +1179,7 @@ func TestASplitCarriesWhatThisServerDoesNotModel(t *testing.T) {
 	}
 }
 
-// §4.3.3: a two-call write asks for the same notification on both calls.
+// A two-call write asks for the same notification on both calls.
 // The truncate is the one that removes the later occurrences from
 // everybody's calendar, so a result saying "asked Google to notify all
 // 2 guests" while the truncate asked for nothing described a decision
@@ -1223,11 +1219,9 @@ func TestBothHalvesOfASplitCarryTheNotifyChoice(t *testing.T) {
 	}
 }
 
-// §4.7: api_requests is read off a counter the client increments, so it
-// counts every request the call made — the shared setup reads included.
-// It used to be a field incremented by hand, which missed all of them: a
-// create reported 1 and made 4, and a dry run reported 0 while spending
-// three.
+// api_requests is read off a counter the client increments, so it
+// counts every request the call made — the shared setup reads included,
+// which a count kept by hand misses.
 func TestTheReportedRequestCountIsTheTruth(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -1341,10 +1335,8 @@ func TestArgumentsThatCannotWorkAreRefusedBeforeAnyRequest(t *testing.T) {
 	}
 }
 
-// The all-day half of "this and following", which is the caller §16's
-// phase-1 note said would arrive in phase 2 and decide whether the split
-// arithmetic could be shared. A date has no instant, so it cannot go
-// through the timed path at all (§4.1).
+// The all-day half of "this and following". A date has no instant, so
+// it cannot go through the timed path at all.
 func TestThisAndFollowingOnAnAllDaySeries(t *testing.T) {
 	svc, fake := writeSeed(t)
 	// A weekly all-day series: four Tuesdays from 17 March.
@@ -1373,7 +1365,7 @@ func TestThisAndFollowingOnAnAllDaySeries(t *testing.T) {
 		t.Errorf("the split did not land on two and two:\n%s", text)
 	}
 	// And the new series is still all-day: a date must never have become
-	// an instant on the way through (§4.1).
+	// an instant on the way through.
 	after := out.After
 	if after == nil || !after.Start.AllDay {
 		t.Fatalf("the new series is not all-day: %+v", after)
@@ -1419,10 +1411,9 @@ func TestCancelThisAndFollowingOnAnAllDaySeries(t *testing.T) {
 	}
 }
 
-// §4.4: the etag a caller passes is a statement about the event THEY
-// read. A scope that redirects the write to the series parent must not
-// turn that into a refusal — it used to, every time, and re-reading the
-// occurrence returned the same etag it had just rejected.
+// The etag a caller passes is a statement about the event THEY read. A
+// scope that redirects the write to the series parent must not turn that
+// into a refusal that re-reading the occurrence cannot clear.
 func TestAnEtagFromTheOccurrenceWorksWithScopeSeries(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ, _, err := svc.GetEvent(context.Background(), "primary", "evseries001_20260324T130000Z", "")
@@ -1445,9 +1436,10 @@ func TestAnEtagFromTheOccurrenceWorksWithScopeSeries(t *testing.T) {
 	}
 }
 
-// §4.3.4's refusal must not fire on a colleague. An event on a secondary
-// calendar is organized by the CALENDAR, whose id has a domain of its
-// own, and splitting the guest count on that made everybody external.
+// The refusal of `none` must not fire on a colleague. An event on a
+// secondary calendar is organized by the CALENDAR, whose id has a domain
+// of its own, and splitting the guest count on that makes everybody
+// external.
 func TestAnEventOrganizedByACalendarStillKnowsWhoIsInside(t *testing.T) {
 	svc, fake := writeSeed(t)
 	ev := caltest.Timed("evteamev001", "Team thing",
@@ -1478,9 +1470,8 @@ func TestAnEventOrganizedByACalendarStillKnowsWhoIsInside(t *testing.T) {
 	}
 }
 
-// §4.3.5: a dry run reports what WOULD change, so it has to project the
-// change rather than print the event twice. create's always did; update
-// and cancel printed the unchanged event, and cancel printed it alive
+// A dry run reports what WOULD change, so it has to project the change
+// rather than print the event twice, or print a canceled event alive
 // under the words "Deleted the event".
 func TestADryRunProjectsTheChange(t *testing.T) {
 	svc, _ := writeSeed(t)
@@ -1528,11 +1519,9 @@ func TestAConcurrentEditOnADeleteIsStaleNotGone(t *testing.T) {
 	}
 }
 
-// §18 row 48, offline: a successful move answers with status:cancelled,
-// so the result must come from reading the destination rather than from
-// the move's own response. It reported a meeting that had just been
-// moved as one that had been called off — green in every gate, and
-// visible only in the live transcript.
+// A successful move answers with status:cancelled, so the result must
+// come from reading the destination rather than from the move's own
+// response, or a meeting that has just been moved reads as called off.
 func TestAMovedEventIsNotReportedAsCanceled(t *testing.T) {
 	svc, _ := writeSeed(t)
 	out, err := svc.MoveEvent(context.Background(), service.MoveOptions{
@@ -1557,10 +1546,8 @@ func TestAMovedEventIsNotReportedAsCanceled(t *testing.T) {
 	}
 }
 
-// §18 row 49: events.move honors If-Match, which nothing Google
-// publishes says. The server sent none for a while and told callers the
-// protection was absent; spike J asked the API instead of the
-// documentation, and §4.4 turned out to have no exception.
+// events.move honors If-Match, which nothing Google publishes says, so
+// a move is made under the etag like every other write.
 func TestMoveIsMadeUnderIfMatch(t *testing.T) {
 	svc, fake := writeSeed(t)
 	before, _, err := svc.GetEvent(context.Background(), "primary", "evsolo00001", "")
@@ -1596,11 +1583,10 @@ func TestMoveWithAnEtagThatMovedIsStale(t *testing.T) {
 	}
 }
 
-// §18 row 103: Google changes an event by itself moments after moving
-// it, so a move straight back, made under the etag of the server's own
-// read, met a 412 in two live runs of three. With no etag from the
-// caller, the server reads the event again and moves it once more, and
-// the result says so.
+// Google changes an event by itself moments after moving it, so a move
+// straight back, made under the etag of the server's own read, can meet
+// a 412. With no etag from the caller, the server reads the event again
+// and moves it once more, and the result says so.
 func TestAMoveStraightBackIsMadeAfterOneFreshRead(t *testing.T) {
 	svc, fake := writeSeed(t)
 	ctx := context.Background()
@@ -1786,10 +1772,10 @@ func TestASecondTryKeepsWhatArrivedBetween(t *testing.T) {
 	}
 }
 
-// TestCreateEventAsksForAMeetLinkAndSaysItIsNotThereYet is §17.3's
-// whole point: Google makes the conference asynchronously, so a result
-// that announced a link on the strength of having asked for one would
-// be wrong about the only thing the caller wanted.
+// TestCreateEventAsksForAMeetLinkAndSaysItIsNotThereYet: Google may
+// make the conference asynchronously, so a result that announced a link
+// on the strength of having asked for one could be wrong about the only
+// thing the caller wanted.
 func TestCreateEventAsksForAMeetLinkAndSaysItIsNotThereYet(t *testing.T) {
 	svc, _ := writeSeed(t)
 	out, err := svc.CreateEvent(context.Background(), service.CreateOptions{
@@ -1890,7 +1876,7 @@ func TestCreateEventDryRunDoesNotPromiseALink(t *testing.T) {
 	}
 }
 
-// TestACrowdedEventSaysItsRSVPsAreIncomplete is §17.5: above 200 guests
+// TestACrowdedEventSaysItsRSVPsAreIncomplete: above 200 guests
 // Google stops propagating response status, so the RSVPs this server
 // reports are not the RSVPs on the event.
 func TestACrowdedEventSaysItsRSVPsAreIncomplete(t *testing.T) {
@@ -1923,7 +1909,7 @@ func TestACrowdedEventSaysItsRSVPsAreIncomplete(t *testing.T) {
 	if !found {
 		t.Fatalf("the structured result does not carry the warning: %+v", res.Notes)
 	}
-	// And the addresses are never in it (§9).
+	// And the addresses are never in it.
 	for _, n := range res.Notes {
 		if strings.Contains(n, "@example.test") {
 			t.Fatalf("a note names a guest: %q", n)
@@ -1977,8 +1963,8 @@ func TestAConferenceIsRefusedOnACalendarReachedByID(t *testing.T) {
 
 // TestACrowdedEventWarnsOnTheReadPathToo: get_event prints each guest's
 // response, and above the limit those responses are not the ones on the
-// event. §17.5 says any result describing such an event says so, not
-// only the write that made it.
+// event. Any result describing such an event says so, not only the
+// write that made it.
 func TestACrowdedEventWarnsOnTheReadPathToo(t *testing.T) {
 	fake := caltest.Seed()
 	crowd := caltest.Timed("evcrowded01", "All hands",
@@ -2036,11 +2022,9 @@ func TestTheCrowdWarningCountsWhatGoogleCounts(t *testing.T) {
 	}
 }
 
-// TestEveryForcedWriteSaysSo is §4.4's other half: a write made with
-// If-Match: * overwrote somebody's change without seeing it, and the
-// result has to say which. Two of the four writes that take `force`
-// were silent about it, cancel_event among them — the one where what
-// is overwritten is gone.
+// TestEveryForcedWriteSaysSo: a write made with If-Match: * overwrites
+// somebody's change without seeing it, and the result has to say so —
+// on cancel_event most of all, where what is overwritten is gone.
 func TestEveryForcedWriteSaysSo(t *testing.T) {
 	svc, _ := writeSeed(t)
 	ctx := context.Background()
@@ -2067,7 +2051,7 @@ func TestEveryForcedWriteSaysSo(t *testing.T) {
 	}
 }
 
-// §11: events.move is a POST that is not retried, so a move Google
+// events.move is a POST that is not retried, so a move Google
 // answered with a 5xx may have landed. Plain [unavailable] tells a model
 // to retry; the class has to send it to look on the destination first.
 func TestAMoveThatMayHaveLandedIsAmbiguous(t *testing.T) {
@@ -2489,7 +2473,7 @@ func TestAStatusEventWithGuestsIsRefusedForThem(t *testing.T) {
 // create_event refuses auto_decline all, naming the tool that makes one,
 // on any calendar and before anything is written: an always-allowed
 // create_event would otherwise decline every accepted meeting in the
-// window unseen (§7.4).
+// window unseen.
 func TestCreateEventRefusesDecliningEveryMeeting(t *testing.T) {
 	for _, c := range []struct{ name, calendar, eventType, word string }{
 		{"out of office", "primary", "outOfOffice", "all"},

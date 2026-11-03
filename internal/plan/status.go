@@ -14,21 +14,25 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
-// Status asks for a status event (§7.4): out of office, focus time or a
-// working location. Insert only, because Google does not let an event's
-// type change after it is made; a patch or a split of one is held to the
-// same rules by statusGuests and statusPatch.
+// Status asks for a status event: out of office, focus time or a working
+// location. Insert only, because Google does not let an event's type
+// change after it is made; a patch or a split of one is held to the same
+// rules by statusGuests and statusPatch.
 //
 // The fields are the caller's words. The rules they are held to are
-// Google's, from its status-events guide, and the guards on what Google
-// does not document are this server's (§18 row 99).
+// Google's status-events guide, which Google enforces: a status event on
+// a secondary calendar is refused with 400 malformedOutOfOfficeEvent. The
+// guide is silent on guests, rooms and a Meet link, so the guards on
+// those are this server's. Checked by the live step "status event reads
+// back".
+// https://developers.google.com/workspace/calendar/api/guides/calendar-status
 type Status struct {
 	// Type is outOfOffice, focusTime or workingLocation, spelled as a
 	// read reports it. Empty or default is an ordinary event.
 	Type string
 	// AutoDecline is none, new or all. Required on out of office and
 	// focus time, with no default: a decline reaches the organizer of
-	// every meeting it touches, so it is a choice like notify (§4.3).
+	// every meeting it touches, so it is a choice like notify.
 	AutoDecline string
 	// DeclineMessage goes with each decline.
 	DeclineMessage string
@@ -43,7 +47,7 @@ type Status struct {
 	OnPrimary bool
 	// DeclineAll is set by create_event_declining_all, the one tool that
 	// may make an event declining every meeting it overlaps. Anywhere
-	// else auto_decline all is refused (§7.4).
+	// else auto_decline all is refused.
 	DeclineAll bool
 }
 
@@ -158,7 +162,7 @@ func (s Status) declinesAllHere(kind, what string) error {
 // statusGuests refuses guests, rooms and a Meet link on a status event of
 // eventType, new or existing, at any scope and on a split's new series.
 // Google documents nothing about them there, so nothing is sent until a
-// live probe shows what it does (§18 row 99). Removing a guest is not
+// live probe shows what it does. Removing a guest is not
 // refused. Any other type passes.
 func (d Draft) statusGuests(eventType string) error {
 	what, ok := statusNames[eventType]
@@ -241,9 +245,12 @@ func statusPatch(before gcal.Event, p gcal.EventPatch) error {
 // focus-time event declining every meeting it overlaps over time it did
 // not before: moved, made longer, repeated more, or newly set to decline
 // all. Google may decline the meetings in that time, the accepted ones
-// too, and the result says so. Whether such a write is refused waits on
-// the live probe of §18 row 102. A write that only shrinks the time
-// counts as no more. A change this cannot show to shrink counts as more.
+// too, and the result says so. The reference says such an event declines
+// "all conflicting meeting invitations" and is silent on whether a change
+// declines again, so the write is reported rather than refused. A write
+// that only shrinks the time counts as no more. A change this cannot show
+// to shrink counts as more.
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 func DeclinesMore(before, after gcal.Event) bool {
 	switch {
 	case !declinesAll(after):

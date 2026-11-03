@@ -15,7 +15,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
-// These hold §9.1's guard without a network or an account, so they run
+// These hold the primary guard without a network or an account, so they run
 // in `make test` beside the unit tests rather than only in a live run.
 
 const self = "person@example.test"

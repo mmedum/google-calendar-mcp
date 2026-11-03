@@ -18,7 +18,8 @@ import (
 	// Go's own copy of the IANA zone database, used only when the
 	// machine has none. Windows has none Go can read: without this,
 	// every zone is refused on a machine without Go installed, and
-	// nearly every tool here needs one (§4.1).
+	// nearly every tool here needs one.
+	// https://pkg.go.dev/time#LoadLocation
 	_ "time/tzdata"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -152,9 +153,9 @@ func (nopWriteCloser) Close() error { return nil }
 
 // isDisconnect reports whether err is the end of a stdio session.
 //
-// The trap the standard's §11 names: errors.Is(err, io.EOF) does NOT
-// catch this. The SDK reports a closed connection as a JSON-RPC error
-// with code -32004 (or -32003) and the EOF only as message text, so an
+// errors.Is(err, io.EOF) does NOT catch this. The SDK reports a closed
+// connection as a JSON-RPC error with code -32004 (or -32003) and the
+// EOF only as message text, so an
 // unmatched error makes the process exit non-zero on an ordinary
 // disconnect — which every host logs as a crash. Match the code, not
 // the text.

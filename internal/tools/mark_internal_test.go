@@ -11,7 +11,7 @@ import (
 )
 
 // The mark makes Claude Code prompt on every call, so it goes only on a
-// tool the destructive flag registers (§9a). One that asks for it on any
+// tool the destructive flag registers. One that asks for it on any
 // other kind fails when the server starts, not when a person first meets
 // a prompt on every call.
 func TestOnlyAFlaggedToolMayPromptEveryCall(t *testing.T) {

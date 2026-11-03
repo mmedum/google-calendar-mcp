@@ -40,7 +40,7 @@ func timed(t *testing.T, start, end string, loc string) model.Event {
 	}
 }
 
-// TestAllDayNeverRendersATime is the renderer's half of §4.1. Printing
+// TestAllDayNeverRendersATime: a date is not a time here either. Printing
 // "00:00" for an all-day event is the sentence a reader turns into a
 // bug, and the next implementer turns into an instant.
 func TestAllDayNeverRendersATime(t *testing.T) {
@@ -243,14 +243,15 @@ func TestScheduleSaysWhichRecurrenceShapeItReturned(t *testing.T) {
 	expanded := render.Schedule{Window: w, Zone: z, Expanded: true}.Text()
 	series := render.Schedule{Window: w, Zone: z, Expanded: false}.Text()
 	if expanded == series {
-		t.Fatal("the two recurrence shapes render identically; §2.9 makes them different answers")
+		t.Fatal("the two recurrence shapes render identically; Google returns them as different answers")
 	}
 	if !strings.Contains(series, "series") {
 		t.Fatalf("the unexpanded read does not say so:\n%s", series)
 	}
 }
 
-// TestAvailabilityNeverCallsAnUnreadableCalendarFree is §4.6.
+// TestAvailabilityNeverCallsAnUnreadableCalendarFree: unknown is never
+// free.
 func TestAvailabilityNeverCallsAnUnreadableCalendarFree(t *testing.T) {
 	z := zone(t, "UTC")
 	start, _ := when.ParseZoned("2026-03-16T00:00:00Z", z.Loc)

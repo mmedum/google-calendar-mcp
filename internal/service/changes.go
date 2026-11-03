@@ -13,7 +13,7 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/when"
 )
 
-// Incremental sync (§17.1).
+// Incremental sync.
 //
 // This is the one read that answers "what changed", and it is the only
 // correct way to ask: a list with a window cannot tell you an event was
@@ -21,7 +21,7 @@ import (
 // it as a canceled tombstone, which is the whole reason the tool exists
 // rather than being a second way to list.
 //
-// The server holds no replica (§1) and does not store the token either.
+// The server holds no replica and does not store the token either.
 // The token is handed back to the caller and passed in next time, the
 // same contract as a page token: it is Google's to mint and opaque to
 // everything here. Storing it would make the server stateful about a
@@ -39,28 +39,29 @@ import (
 //     read has no token to give, and saying otherwise would hand the
 //     caller a token that skips everything it did not see.
 //
-// And the invalidation story §17.1 asked for: an expired token is 410,
-// which reaches the caller as `[stale]` naming the one cure — ask again
-// with no token at all.
+// An expired token is 410, which reaches the caller as `[stale]` naming
+// the one cure — ask again with no token at all.
 //
 // `updated_since` is the other way in: what changed since a moment, sent
 // as `updatedMin`. Google's sync guide calls it the legacy way and says
 // it misses updates; an event's `updated` does not move when only its
 // reminders change. It is refused alongside a token, as Google refuses
-// `updatedMin` there. Its last page hands back a sync token like any
-// other read's: spike O synced with one and was told of a change made
-// after it (§18 row 91).
+// `updatedMin` there, and a moment too far back is 410
+// updatedMinTooLongAgo. Its last page hands back a sync token that
+// follows the calendar from there, which the reference does not say.
+// Checked by the live step "list_changes from the updated_since token".
+// https://developers.google.com/workspace/calendar/api/guides/sync
 //
 // A page token from any of the three reads — a baseline, a read from a
 // sync token, a read since a moment — carries which it was, and a
 // continuation must ask the same. Without that, a read since a moment
-// continued with only its page token became a baseline, which counts the
-// rows past its budget instead of reporting them.
+// continued with only its page token becomes a baseline, which counts
+// the rows past its budget instead of reporting them.
 
 // baselineRequests caps the pages a baseline will walk for its token.
 //
 // A baseline keeps paging past the event budget because the token is the
-// point of the call, but it cannot page forever: §11 budgets requests
+// point of the call, but it cannot page forever: requests are budgeted
 // per call, and a calendar that needs more than this is a fact the
 // caller has to be told rather than a reason to keep spending.
 const baselineRequests = 25
@@ -139,24 +140,23 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 		opts.UpdatedMin = since.T.UTC().Format(time.RFC3339)
 	}
 
-	// A baseline and an incremental read stop for different reasons, and
-	// the difference is not a nicety — a live run found a baseline that
-	// could never produce a token at all.
+	// A baseline and an incremental read stop for different reasons.
 	//
 	// On a BASELINE the rows are not changes. The result says so: nothing
 	// changed, this is the starting point. What the caller actually wants
 	// is the token, and the token arrives on the LAST page only — so on a
-	// calendar with a long deletion history (a real one had 507 rows
-	// across 3 pages, most of them tombstones from deleted events) the
-	// event budget stops the read before the last page and no token ever
-	// comes back. Paging past the budget loses nothing there, because the
-	// token means "everything up to here is known".
+	// calendar with a long deletion history, where most rows are
+	// tombstones, the event budget would stop the read pages before the
+	// token, and no request parameter brings it sooner. Paging past the
+	// budget loses nothing there, because the token means "everything up
+	// to here is known". Checked by the live step "spike N: what
+	// suppresses nextSyncToken".
 	//
 	// On an INCREMENTAL read every row IS a change the caller needs, so
 	// the budget stops it and the token is withheld: handing one over
 	// would mark changes as seen that were never delivered.
 	//
-	// Paging is §4.7's exception, named here and counted in the result.
+	// Paging past one request is named here and counted in the result.
 	for {
 		page, perr := s.API.ListEvents(ctx, c.ID, opts)
 		out.Requests++
@@ -185,7 +185,11 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 			}
 			out.Changed = append(out.Changed, e)
 		}
-		// The token arrives with the last page and only there.
+		// The token arrives with the last page and only there: the
+		// reference says nextSyncToken comes with "the last page of
+		// results". Checked by the live step "list_changes baseline and
+		// round-trip".
+		// https://developers.google.com/workspace/calendar/api/v3/reference/events/list
 		if page.NextSyncToken != "" {
 			out.SyncToken = page.NextSyncToken
 		}
@@ -196,7 +200,7 @@ func (s *Service) ListChanges(ctx context.Context, o ChangesOptions) (render.Cha
 			out.Complete = true
 		case out.Baseline && out.Requests >= baselineRequests:
 			// A cap, so a calendar nobody can baseline fails loudly
-			// rather than spending §11's whole budget on one call.
+			// rather than spending the whole request budget on one call.
 			out.Complete = false
 		case !out.Baseline && len(out.Changed)+len(out.Deleted) >= budget:
 			out.Complete = false

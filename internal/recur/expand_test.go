@@ -60,8 +60,8 @@ func wantWalls(t *testing.T, got []when.Zoned, want []string) {
 	}
 }
 
-// TestWeeklyHoldsItsWallClockAcrossSpringForward is §3's second row and
-// the reason this package expands dates rather than instants.
+// TestWeeklyHoldsItsWallClockAcrossSpringForward is the reason this
+// package expands dates rather than instants.
 //
 // The European transition is 29 March 2026. A weekly 09:00 must stay
 // 09:00 on both sides of it.
@@ -165,8 +165,8 @@ func TestNonHourOffsetZoneWithoutTransitions(t *testing.T) {
 
 // TestOccurrenceInASkippedHourIsReported. A daily 02:30 in Copenhagen
 // meets 29 March, a morning with no 02:30. The occurrence still exists —
-// Google produces one — and §4.1 says the server names what the zone
-// did rather than resolving it quietly.
+// Google produces one — and the server names what the zone did rather
+// than resolving it quietly.
 func TestOccurrenceInASkippedHourIsReported(t *testing.T) {
 	loc := mustLoad(t, tzCopenhagen)
 	set := mustParse(t, "RRULE:FREQ=DAILY;COUNT=3")
@@ -327,8 +327,7 @@ func TestExpandOpenRuleTruncates(t *testing.T) {
 }
 
 // TestExpandRefusesWithoutAZone: a timed series cannot be expanded
-// against an instant alone, which is §2.2 as a compile-time-adjacent
-// guard.
+// against an instant alone, because a recurrence needs its zone's rule.
 func TestExpandRefusesWithoutAZone(t *testing.T) {
 	set := mustParse(t, "RRULE:FREQ=DAILY;COUNT=3")
 	_, err := set.ExpandTimes(when.Zoned{T: time.Now()}, when.Zoned{}, when.Zoned{}, 0)
@@ -555,10 +554,10 @@ func TestYearlyHonorsAnOrdinalByDay(t *testing.T) {
 
 // TestASeriesThatEndsAtTheLimitIsNotTruncated.
 //
-// Truncated was set whenever the count reached the limit, including when
-// the rule ended there. Reach keys on it, so a complete ten-occurrence
-// series was described to the caller as "no end date — at least 10
-// occurrences", in the refusal text §4.2 uses to make a scope decision.
+// Truncated must not be set when the rule ends exactly at the limit.
+// Reach keys on it, so a complete ten-occurrence series would be
+// described as "no end date — at least 10 occurrences", in the refusal
+// that asks the caller to choose a scope.
 func TestASeriesThatEndsAtTheLimitIsNotTruncated(t *testing.T) {
 	loc := mustLoad(t, tzCopenhagen)
 	set := mustParse(t, "RRULE:FREQ=DAILY;COUNT=10")

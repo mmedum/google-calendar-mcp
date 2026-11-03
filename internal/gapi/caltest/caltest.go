@@ -1,7 +1,7 @@
 // Package caltest is an in-memory Google Calendar, served over HTTP, for
 // tests.
 //
-// Everything it returns is GENERATED (§9.1). Nothing here was recorded
+// Everything it returns is GENERATED (D-05). Nothing here was recorded
 // from a real account, and nothing may be: a fixture copied from a live
 // response is itself the leak, whatever a secret scanner says about it.
 // The names below are invented, the domains are .test (RFC 2606, which
@@ -9,8 +9,8 @@
 //
 // It models the parts of the API this server reads, including the parts
 // that are easy to get wrong and therefore worth having a fake for: the
-// singleEvents split (§2.9), canceled events being hidden by default
-// (§2.13), per-calendar free/busy errors (§4.6) and paging.
+// singleEvents split, canceled events being hidden by default,
+// per-calendar free/busy errors and paging.
 package caltest
 
 import (
@@ -42,7 +42,7 @@ type Server struct {
 	// Busy intervals, keyed by calendar id.
 	Busy map[string][]gcal.TimePeriod
 	// FreeBusyErrors makes a calendar answer with an error instead of a
-	// busy list, which is what §4.6 must distinguish from "free".
+	// busy list, which the server must never read as "free".
 	FreeBusyErrors map[string]string
 	// FreeBusyOmit leaves a calendar out of the response altogether,
 	// which is what a query truncated by calendarExpansionMax looks
@@ -56,8 +56,8 @@ type Server struct {
 	GroupErrors map[string]string
 	// PastCapAsErrors answers a calendar past calendarExpansionMax with
 	// the error tooManyCalendarsRequested, where by default it is left
-	// out. Google documents the reason and not which it does (§18 row
-	// 100), so the server is tested against both.
+	// out. Google documents the reason and not which it does, so the
+	// server is tested against both.
 	PastCapAsErrors bool
 	// FreeBusyAsked is the last free/busy request served.
 	FreeBusyAsked gcal.FreeBusyRequest
@@ -65,8 +65,8 @@ type Server struct {
 	Settings []gcal.Setting
 
 	// ConferenceFails makes a conference create request come back
-	// failed instead of pending, which is the arm of §17.3 a caller has
-	// to be told about: the event exists and has no meeting link.
+	// failed instead of pending, which is the answer a caller has to be
+	// told about: the event exists and has no meeting link.
 	ConferenceFails bool
 	// ConferenceStaysPending keeps a pending conference pending however
 	// often it is read, so the "still being made" path can be tested.
@@ -87,17 +87,16 @@ type Server struct {
 	// calendar" is a 403 like any other until you read it.
 	FailMessage map[string]string
 	// Writes records every write served: the method, the path, and the
-	// sendUpdates the caller asked for. §4.3 has no default, so a test
+	// sendUpdates the caller asked for. notify has no default, so a test
 	// has to be able to assert that the server sent what the caller
 	// chose and nothing when nobody chose.
 	Writes []Write
 	// Requests records every path served, so a test can assert how many
-	// requests a fan-out spent (§11).
+	// requests a fan-out spent.
 	//
 	// Guarded by mu: the service fans out across calendars concurrently,
 	// so the handler runs on several goroutines at once. Without the
-	// lock this field is a data race, and the race detector found it the
-	// first time `make check` ran the fan-out test.
+	// lock this field is a data race.
 	Requests []string
 
 	// SyncTokenExpired makes the next sync request answer 410, which is
@@ -136,8 +135,8 @@ type Server struct {
 	syncSeq map[string]int
 	changed map[string]map[string]syncChange
 
-	// ACLScopeRequired makes acl.list refuse, which is how §2.15 is
-	// exercised offline: calendar.readonly does not cover it.
+	// ACLScopeRequired makes acl.list refuse, as Google does without an
+	// ACL scope: calendar.readonly does not cover it.
 	ACLScopeRequired bool
 
 	ts *httptest.Server
@@ -205,7 +204,7 @@ func (s *Server) AddEvent(calendarID string, e *gcal.Event) {
 }
 
 // Timed builds a timed event. Start and end are RFC3339; tz is the IANA
-// name that goes alongside, as §4.1 requires on every write.
+// name that goes alongside, as this server sends on every write.
 func Timed(id, summary, start, end, tz string) *gcal.Event {
 	return &gcal.Event{
 		ID: id, Summary: summary, Status: gcal.StatusConfirmed,
@@ -216,8 +215,8 @@ func Timed(id, summary, start, end, tz string) *gcal.Event {
 }
 
 // AllDay builds an all-day event. Note what it does NOT take: a zone.
-// An all-day event has no instant, so there is nothing for a zone to do
-// (§4.1). A fake that accepted one here would let a test pass that the
+// An all-day event has no instant, so there is nothing for a zone to do.
+// A fake that accepted one here would let a test pass that the
 // real type system forbids.
 func AllDay(id, summary, startDate, endDate string) *gcal.Event {
 	return &gcal.Event{
@@ -273,7 +272,7 @@ func Seed() *Server {
 	// exceptions a series picks up, and the two things list_instances
 	// exists to show. A canceled instance is how a single date is
 	// removed, so it is hidden by default like any other canceled
-	// event (§2.13) and the result says it is hiding them.
+	// event and the result says it is hiding them.
 	s.AddEvent("primary", Instance("ev-weekly_20260331T130000Z", "ev-weekly", "Weekly review",
 		"2026-03-31T15:00:00+02:00", "2026-03-31T16:00:00+02:00", tz, "2026-03-31T14:00:00+02:00"))
 	dropped := Instance("ev-weekly_20260407T120000Z", "ev-weekly", "Weekly review",
@@ -281,14 +280,14 @@ func Seed() *Server {
 	dropped.Status = gcal.StatusCanceled
 	s.AddEvent("primary", dropped)
 
-	// Canceled: hidden unless showDeleted (§2.13).
+	// Canceled: hidden unless showDeleted.
 	canceled := Timed("ev-canceled", "Canceled thing",
 		"2026-03-18T10:00:00+01:00", "2026-03-18T11:00:00+01:00", tz)
 	canceled.Status = gcal.StatusCanceled
 	s.AddEvent("primary", canceled)
 
 	// Transparent: on the calendar, but not busy. This is why
-	// availability cannot come from an event list (§4.6).
+	// availability cannot come from an event list.
 	free := Timed("ev-transparent", "Blocked but free",
 		"2026-03-16T13:00:00+01:00", "2026-03-16T14:00:00+01:00", tz)
 	free.Transparency = gcal.TransparencyTransparent
@@ -324,9 +323,9 @@ type Write struct {
 	// RuleID is the ACL rule a sharing write addressed.
 	RuleID      string
 	SendUpdates string
-	// SendNotifications is the ACL half of §4.3, and a separate field
-	// because it is a separate parameter with the opposite default
-	// (§2.5). Recorded as the string that went over the wire — "true",
+	// SendNotifications is the ACL half of notify, and a separate field
+	// because it is a separate parameter with the opposite default.
+	// Recorded as the string that went over the wire — "true",
 	// "false" or "" — so a test can tell "the server chose false" from
 	// "the server sent nothing and let Google's true stand".
 	SendNotifications string
@@ -354,10 +353,9 @@ func (s *Server) recordWrite(w Write) {
 //
 // Two things here are the ones worth having a fake for. A client-supplied
 // id is validated as base32hex, because Google answers an illegal one
-// with "Invalid resource id value" naming neither the field nor the rule
-// — which cost a live run (§18 row 21). And a duplicate id is a 409,
-// which is what makes a retry after an ambiguous failure safe rather than
-// a second meeting (§2.11, spike F).
+// with "Invalid resource id value" naming neither the field nor the
+// rule. And a duplicate id is a 409, which is what makes a retry after an
+// ambiguous failure safe rather than a second meeting.
 func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID string) {
 	if _, ok := s.Calendars[calID]; !ok {
 		writeErr(w, http.StatusNotFound, "notFound", "no calendar with that id")
@@ -401,7 +399,7 @@ func (s *Server) insertEvent(w http.ResponseWriter, r *http.Request, calID strin
 	}
 	// "In order to modify attachments the supportsAttachments request
 	// parameter should be set to true." That they are dropped without it,
-	// rather than refused, is believed rather than probed (§18 row 88).
+	// rather than refused, is believed rather than probed.
 	if r.URL.Query().Get("supportsAttachments") != "true" {
 		e.Attachments = nil
 	}
@@ -465,8 +463,9 @@ func refusedEventFields(visibility string, r *gcal.EventReminders) string {
 }
 
 // visibilityRank orders visibility from least to most restrictive.
-// Default in the middle is the server's belief, not Google's word (§18
-// row 101), so the fake cannot tell the two apart.
+// Google ranks default above public; that it ranks below private is the
+// server's belief, not Google's word, so the fake cannot tell the two
+// apart.
 func visibilityRank(v string) int {
 	switch v {
 	case gcal.VisibilityPublic:
@@ -493,7 +492,7 @@ func (s *Server) askedForConference(calID, eventID, requestID string) {
 // the messages are this fake's own.
 //
 // That a create without its details block is refused is believed rather
-// than probed (§18 row 88).
+// than probed.
 func statusRefusal(onPrimary bool, e gcal.Event) string {
 	block := statusBlocks[e.EventType]
 	if block == "" {
@@ -571,8 +570,8 @@ func onlyReminders(p gcal.EventPatch) bool {
 // patchEvent is events.patch, under If-Match.
 //
 // The etag moves on every write, so a second patch carrying the first
-// one's etag is a 412 — which is the whole point of §4.4 and the thing a
-// fake that ignored If-Match would let pass.
+// one's etag is a 412 — which is the whole point of writing under an
+// etag, and the thing a fake that ignored If-Match would let pass.
 func (s *Server) patchEvent(w http.ResponseWriter, r *http.Request, calID, eventID string) {
 	cur, ok := s.event(calID, eventID)
 	if !ok {
@@ -695,8 +694,7 @@ func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventI
 	match := r.Header.Get("If-Match")
 	s.recordWrite(Write{Method: "move", CalendarID: calID, EventID: eventID,
 		SendUpdates: r.URL.Query().Get("sendUpdates"), IfMatch: match})
-	// events.move honors If-Match, which nothing Google publishes says
-	// and spike J established live (§18 row 49).
+	// events.move honors If-Match, which nothing Google publishes says.
 	if !etagOK(match, cur.ETag) {
 		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
 		return
@@ -711,10 +709,10 @@ func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventI
 	s.mu.Unlock()
 
 	// The RESPONSE says canceled; the stored event does not. That is
-	// what Google does, found live: a successful move answers with
-	// status:cancelled while the event sits confirmed on the destination
-	// (§18 row 48). A fake that answered with the destination's state
-	// would hide the reason the server reads the event back.
+	// what Google does: a successful move answers with status:cancelled
+	// while the event sits confirmed on the destination. A fake that
+	// answered with the destination's state would hide the reason the
+	// server reads the event back.
 	answer := moved
 	answer.Status = gcal.StatusCanceled
 	writeJSON(w, answer)
@@ -726,10 +724,10 @@ func (s *Server) moveEvent(w http.ResponseWriter, r *http.Request, calID, eventI
 // resource, refuse if it is not there, record what was asked for, and
 // apply If-Match.
 //
-// One copy, because the five had it written out and the etag rule is
-// exactly the thing a fake must not get subtly different in one of them:
-// a handler that forgot the check would accept a stale write and make
-// the server's §4.4 promise untestable on that path. It returns false
+// One copy, because the etag rule is exactly the thing a fake must not
+// get subtly different in one of five handlers: a handler that forgot
+// the check would accept a stale write and make the server's etag
+// promise untestable on that path. It returns false
 // having already answered the request.
 func underETag[T any](s *Server, w http.ResponseWriter, r *http.Request,
 	method, id string, find func() (T, bool), missing string,
@@ -746,7 +744,7 @@ func underETag[T any](s *Server, w http.ResponseWriter, r *http.Request,
 }
 
 // aclScopeRefused answers the three ACL handlers when the grant is
-// missing, which is §2.15 exercised offline.
+// missing, as Google does when it lacks an ACL scope.
 func (s *Server) aclScopeRefused(w http.ResponseWriter) bool {
 	if !s.ACLScopeRequired {
 		return false
@@ -864,10 +862,9 @@ func (s *Server) clearCalendar(w http.ResponseWriter, r *http.Request, calID str
 		writeErr(w, http.StatusPreconditionFailed, "conditionNotMet", "Precondition Failed")
 		return
 	}
-	// Google's description says "Clears a primary calendar". Whether it
-	// also clears a secondary one is spike K, and this fake empties
-	// whichever it is given rather than inventing a refusal the API may
-	// not make.
+	// Google clears only a primary calendar and answers a secondary one
+	// with 400. The server refuses a secondary before the call, so this
+	// fake empties whichever it is given.
 	s.mu.Lock()
 	s.Events[calID] = map[string]*gcal.Event{}
 	s.mu.Unlock()
@@ -1119,11 +1116,8 @@ func (s *Server) entry(id string) func() (*gcal.CalendarListEntry, bool) {
 
 // event reads one event under the lock.
 //
-// Under the lock because the write handlers mutate the same map: the
-// service issues writes one at a time today, so this is a race the
-// detector would find the first time anything fanned out rather than a
-// bug anybody has hit — which is the kind that arrives in the phase
-// after the one that wrote it.
+// Under the lock because the write handlers mutate the same map, and a
+// read that fans out would race with them.
 func (s *Server) event(calID, eventID string) (*gcal.Event, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1134,7 +1128,7 @@ func (s *Server) event(calID, eventID string) (*gcal.Event, bool) {
 // etagOK applies If-Match.
 //
 // An absent header is allowed, because this server sends none when the
-// read carried no etag. "*" matches anything, which is §4.4's explicit
+// read carried no etag. "*" matches anything, which is the explicit
 // override and never a default.
 func etagOK(match, current string) bool {
 	return match == "" || match == "*" || match == current
@@ -1333,29 +1327,29 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request, calID string
 		if !since.IsZero() && !changedSince(*e, since) {
 			continue
 		}
-		// §2.9: singleEvents decides which of the two shapes comes back.
+		// singleEvents decides which of the two shapes comes back.
 		// Without it, parents; with it, instances.
 		isInstance := e.RecurringEventID != ""
 		isParent := len(e.Recurrence) > 0
-		// A canceled instance is the exception to both rules below,
-		// and this fake used to hide it where Google does not. The
-		// discovery document: "Cancelled instances of recurring events
+		// A canceled instance is the exception to both rules below, and
+		// the fake must not hide it where Google does not. The discovery
+		// document: "Cancelled instances of recurring events
 		// (but not the underlying recurring event) will still be
 		// included if showDeleted and singleEvents are both False."
 		//
 		// Google sends it bare: an id, a status, the series it belongs
-		// to and the date it was, with no start and no summary. That is
-		// why the server rendered one as a row with no date and no
-		// title. The shape is not modeled here; that it arrives at all
-		// is what the server has to handle.
+		// to and the date it was, with no start and no summary, which a
+		// renderer must not show as a row with no date and no title. The
+		// shape is not modeled here; that it arrives at all is what the
+		// server has to handle.
 		keptCanceledInstance := !single && isInstance && e.Status == gcal.StatusCanceled
 		switch {
 		case keptCanceledInstance:
 			// Returned regardless of showDeleted, which is the point.
 		case e.Status == gcal.StatusCanceled && !showDeleted && since.IsZero():
-			continue // §2.13
+			continue // hidden by default
 		case single && isParent, !single && isInstance:
-			continue // §2.9: one shape or the other, never both
+			continue // one shape or the other, never both
 		}
 		if len(types) > 0 && !slices.Contains(types, typeOf(*e)) {
 			continue
@@ -1529,11 +1523,11 @@ func (s *Server) listInstances(w http.ResponseWriter, r *http.Request, calID, ev
 	q := r.URL.Query()
 	showDeleted := q.Get("showDeleted") == "true"
 
-	// An occurrence's own id is not refused: the live driver probed this
-	// and Google answered 200, expanding the occurrence the id names
-	// (§18). A CANCELED occurrence expands to nothing, so the answer is
-	// an empty list and a success — which is why the server has to
-	// recognize the id itself rather than wait to be told.
+	// An occurrence's own id is not refused: Google answers 200,
+	// expanding the occurrence the id names. A CANCELED occurrence
+	// expands to nothing, so the answer is an empty list and a success
+	// — which is why the server has to recognize the id itself rather
+	// than wait to be told.
 	if parent.RecurringEventID != "" {
 		items := []gcal.Event{}
 		if parent.Status != gcal.StatusCanceled || showDeleted {
@@ -1618,10 +1612,9 @@ func (s *Server) getEvent(w http.ResponseWriter, calID, eventID string) {
 
 // ChangeAfterRead changes an event once, right after the next read of
 // it, as a write between that read and the one that follows would: its
-// etag moves, and edit, when not nil, changes it too. Google did this by
-// itself to an event moments after moving it (§18 row 103), so a write
-// under the read's etag is refused with 412 and the next read sees the
-// change.
+// etag moves, and edit, when not nil, changes it too. Google does this
+// by itself to an event moments after moving it, so a write under the
+// read's etag is refused with 412 and the next read sees the change.
 func (s *Server) ChangeAfterRead(calID, eventID string, edit func(*gcal.Event)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1632,8 +1625,8 @@ func (s *Server) ChangeAfterRead(calID, eventID string, edit func(*gcal.Event)) 
 }
 
 func (s *Server) listACL(w http.ResponseWriter, calID string) {
-	// §2.15, offline: acl.list is not covered by calendar.readonly, and
-	// Google answers a missing scope with 403 insufficientPermissions.
+	// acl.list is not covered by calendar.readonly, and Google answers a
+	// missing scope with 403 insufficientPermissions.
 	if s.aclScopeRefused(w) {
 		return
 	}
@@ -1650,7 +1643,7 @@ func (s *Server) freeBusy(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "parseError", "bad freeBusy body")
 		return
 	}
-	// §2.10: the API caps expansion at 50.
+	// The API caps a query at 50 calendars.
 	if len(req.Items) > 50 {
 		writeErr(w, http.StatusBadRequest, "invalid", "too many calendars in one freeBusy query")
 		return
@@ -1795,12 +1788,11 @@ func startsAfter(e *gcal.Event, timeMax string) bool {
 
 // primaryID resolves Google's "primary" alias to the calendar it names.
 //
-// The API accepts `primary` wherever a calendar id goes, and this fake
-// did not — which was invisible only because Seed gave a calendar the
-// literal id "primary". No real account has one: a primary calendar's id
-// is the account's email address, which is also what §4.3.5 splits the
-// guest count on. A fixture that dodges the alias makes the alias
-// untestable.
+// The API accepts `primary` wherever a calendar id goes. No real
+// account has a calendar whose literal id is "primary": a primary
+// calendar's id is the account's email address, which is also what the
+// guest count is split on, inside the organizer's domain or outside it.
+// A fixture that dodges the alias makes the alias untestable.
 func (s *Server) primaryID(id string) string {
 	if id != "primary" {
 		return id
@@ -1884,7 +1876,7 @@ func palette() gcal.Colors {
 // for a conference: the request echoed back with a status, and no entry
 // points yet.
 //
-// Generated, never recorded (§9.1): the meeting code below is made up
+// Generated, never recorded: the meeting code below is made up
 // here, in the shape Meet uses, and no real one appears in this
 // repository.
 func conferenceAnswer(request json.RawMessage, fails bool) json.RawMessage {

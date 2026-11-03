@@ -14,7 +14,7 @@ import (
 // and the guards on it.
 //
 // One distinction runs through all of it, because the API splits across
-// two resources what a person thinks of as one thing (§7.5). The
+// two resources what a person thinks of as one thing. The
 // CALENDAR is shared — its title, description, location and time zone
 // are what everybody subscribed to it sees. The SUBSCRIPTION is this
 // user's alone — the color, the name they gave it, whether it is hidden
@@ -45,9 +45,8 @@ func (d CalendarDraft) Empty() bool {
 // A field whose new value equals the old one is not sent and not listed.
 // The reason is the change list rather than the etag: a result that said
 // it changed the title to the title it already had would be reporting a
-// write that did not happen. (The etag argument this used to give was
-// refuted live — Google left a calendar's etag alone when a patch wrote
-// the value already there, §18 row 58.)
+// write that did not happen. (It is not about the etag: Google leaves a
+// calendar's etag alone when a patch writes the value already there.)
 func (d CalendarDraft) Patch(before gcal.Calendar) (gcal.CalendarPatch, []Change, error) {
 	var p gcal.CalendarPatch
 	var changes []Change
@@ -88,7 +87,7 @@ type ListDraft struct {
 	ColorID *string
 	Hidden  *bool
 	// Selected is whether its events are drawn in the Calendar UI, which
-	// is not the same as hidden and confuses people (§7.1).
+	// is not the same as hidden and confuses people.
 	Selected *bool
 	// Notifications replaces the whole list, because that is what Google
 	// does with the object. A non-nil pointer to an empty slice turns
@@ -148,7 +147,13 @@ func (d ListDraft) Patch(before gcal.CalendarListEntry) (gcal.CalendarListPatch,
 
 // setField and setFlag apply one field of a patch: nothing is sent and
 // nothing is listed when the value is already what was asked for, so the
-// change list says what the write actually did (§18 row 58).
+// change list says what the write actually did.
+//
+// The etag is no reason either way. A calendars.patch that writes the
+// value a field already holds leaves the calendar's etag unchanged, which
+// the reference does not mention; events.patch is not known to do the
+// same. Checked by the live step "spike L: calendar and acl If-Match".
+// https://developers.google.com/workspace/calendar/api/v3/reference/calendars/patch
 //
 // Both drafts go through them, which is what keeps the change list and
 // the request body describing the same write. The four copies this
@@ -280,7 +285,7 @@ func yesNo(v bool) string {
 }
 
 // Confirm holds the destructive tools and the two wider shares to their
-// explicit confirmation (§9). The flag that registers them is a
+// explicit confirmation. The flag that registers them is a
 // deployment decision; this is the call's own, and both have to be
 // made. It is a witness that the caller meant this write, never
 // approval: the model writes it.

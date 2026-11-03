@@ -30,7 +30,7 @@ type session struct {
 	mu     sync.Mutex
 	nextID int
 	// asked counts the questions the server put to the person. The
-	// server asks nobody (§9a), so every one fails the step it came in.
+	// server asks nobody, so every one fails the step it came in.
 	asked int
 }
 
@@ -51,7 +51,7 @@ func startServer(ctx context.Context, bin, profile string) (*session, error) {
 	// two halves of the run would be looking at different accounts.
 	//
 	// The destructive flag is set here and nowhere else. delete_calendar
-	// and clear_calendar do not REGISTER without it (§9), so a driver
+	// and clear_calendar do not REGISTER without it, so a driver
 	// that left it unset could not drive them at all and would leave the
 	// probe calendar behind on every run. What makes arming it safe is
 	// not care: every step that could reach one names a calendar this
@@ -84,7 +84,7 @@ func startServer(ctx context.Context, bin, profile string) (*session, error) {
 
 	// The driver declares form elicitation, as a client with a person at
 	// it does, so a question the server put would reach it. The server
-	// asks nobody (§9a), and a question is declined and fails its step.
+	// asks nobody, and a question is declined and fails its step.
 	// On 2025-06-18 a server asks inside the call, with
 	// elicitation/create.
 	if _, err := s.request(ctx, "initialize", map[string]any{
@@ -201,8 +201,8 @@ func (s *session) answer(id json.RawMessage, method string) error {
 // call invokes one tool and returns the text half plus whether the
 // result was an error.
 func (s *session) call(ctx context.Context, tool string, args map[string]any) (callResult, error) {
-	// §9.1, held here rather than by each step: every tool call passes
-	// these guards, so no step can write on the primary calendar but the
+	// Held here rather than by each step: every tool call passes these
+	// guards, so no step can write on the primary calendar but the
 	// one status event the owner allowed, or reach a person the run was
 	// not armed to reach.
 	// The primary guard goes last: letting the status event through
@@ -238,7 +238,7 @@ func (s *session) call(ctx context.Context, tool string, args map[string]any) (c
 }
 
 // readResource reads one resource, the way a client that attaches
-// rather than calls would (§8).
+// rather than calls would.
 //
 // A resource read answers with a protocol error rather than an error
 // result, so a refusal arrives here as a transport failure and is

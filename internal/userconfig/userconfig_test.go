@@ -93,7 +93,7 @@ func TestSaveWritesOwnerOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		// A mode means nothing here. internal/fileperm restricts the
 		// file with an access list instead, and its own test reads that
-		// list back (§18 row 47).
+		// list back.
 		return
 	}
 	if mode := fi.Mode().Perm(); mode&0o077 != 0 {

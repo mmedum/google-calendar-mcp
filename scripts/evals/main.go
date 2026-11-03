@@ -1,17 +1,16 @@
 //go:build evals
 
 // Command evals scores whether a model can complete a task through this
-// server's tools (§13).
+// server's tools.
 //
 // It is the other half of the live driver, and it asks a different
 // question. The driver asks whether the server does what it says; this
 // asks whether a model reading only the tool descriptions can get the
-// right answer out of it. Both have found things unit tests cannot, and
-// the standard's §12 names the one this is for: a tool the model never
-// discovered.
+// right answer out of it. Both find things unit tests cannot, and this
+// one finds a tool the model never discovers.
 //
-// The three tasks are the three failures of §3 — the ones this whole
-// design exists to avoid:
+// Each task is a failure seen in other calendar servers, one this design
+// exists to avoid:
 //
 //  1. an all-day event created by a user in a negative-offset zone;
 //  2. a weekly recurrence that must survive a daylight-saving change;
@@ -329,8 +328,9 @@ func toolDefs(ctx context.Context, cs *mcp.ClientSession) ([]toolDef, error) {
 //
 // A refusal comes back as a tool result with is_error, exactly as it
 // would in a client, because recovering from one is part of what these
-// tasks measure: §4.3 and §4.2 refuse a write that has not chosen, and a
-// model that cannot read the refusal cannot finish the task.
+// tasks measure: the server refuses a write that has not chosen whom to
+// notify or which occurrences it changes, and a model that cannot read
+// the refusal cannot finish the task.
 func callTool(ctx context.Context, cs *mcp.ClientSession, name string, input json.RawMessage) (string, bool) {
 	var args map[string]any
 	if len(input) > 0 {

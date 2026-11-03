@@ -12,19 +12,19 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/render"
 )
 
-// The sharing tools (§7.6): list_sharing, share_calendar,
-// publish_calendar, widen_calendar_access and unshare_calendar.
+// The sharing tools: list_sharing, share_calendar, publish_calendar,
+// widen_calendar_access and unshare_calendar.
 //
 // Every one of them reads the rules before it writes, and the read is not
-// incidental: §7.6 requires a share to show who could see the calendar
-// before and who can see it now, and "shared with somebody" is not an
+// incidental: a share shows who could see the calendar before and who
+// can see it now, and "shared with somebody" is not an
 // answer to "who can see this". The same read decides the scope type of
 // an address this calendar already knows, so the server infers less.
 
 // sharingRules reads the ACL and turns it into the server's own type.
 //
 // A missing scope comes back as a named error rather than an empty list,
-// because §2.15 makes the ACL read a separate grant and an empty list
+// because the ACL read needs a scope of its own and an empty list
 // reads as "shared with nobody" — the wrong answer rather than a missing
 // one.
 func (s *Service) sharingRules(ctx context.Context, calendarID string) ([]model.Sharing, error) {
@@ -147,7 +147,7 @@ type ShareOptions struct {
 }
 
 // ShareCalendar grants a person or a group inside the organization
-// access below owner (§7.6). The public, a domain, somebody outside and
+// access below owner. The public, a domain, somebody outside and
 // an owner are refused, naming publish_calendar or widen_calendar_access.
 func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.SharingReport, error) {
 	ctx, cal, before, err := s.openSharing(ctx, o.Calendar)
@@ -200,7 +200,7 @@ type PublishOptions struct {
 }
 
 // PublishCalendar opens a calendar to the public or to everybody in a
-// domain, or changes the access such a rule gives (§7.6). Registered only
+// domain, or changes the access such a rule gives. Registered only
 // with the destructive flag, and it needs confirm.
 func (s *Service) PublishCalendar(ctx context.Context, o PublishOptions) (render.SharingReport, error) {
 	ctx, cal, err := s.openWide(ctx, o.Calendar, o.CalendarTitle)
@@ -253,7 +253,7 @@ type WidenOptions struct {
 }
 
 // WidenCalendarAccess shares a calendar with a person or a group outside
-// the organization, or makes somebody an owner (§7.6). Registered only
+// the organization, or makes somebody an owner. Registered only
 // with the destructive flag, and it needs confirm.
 func (s *Service) WidenCalendarAccess(ctx context.Context, o WidenOptions) (render.SharingReport, error) {
 	ctx, cal, err := s.openWide(ctx, o.Calendar, o.CalendarTitle)
@@ -335,7 +335,7 @@ func (s *Service) openSharing(ctx context.Context, ref string) (context.Context,
 // title held to the one the caller gave. The title is the name a person
 // knows the calendar by, so a client that asks before the call shows
 // which calendar it opens, where an id or a fragment of a title would
-// not (§7.6). It is checked before any other argument, so no refusal
+// not. It is checked before any other argument, so no refusal
 // supplies it.
 func (s *Service) openWide(ctx context.Context, ref, title string) (context.Context, model.Calendar, error) {
 	ctx, cal, err := s.ownCalendar(ctx, ref)
@@ -368,7 +368,7 @@ func (s *Service) outside(ctx context.Context, a plan.Audience) bool {
 }
 
 // grant writes a sharing rule, or says it is already there, with the
-// exposure before and after (§7.6). notes come first in the result, as
+// exposure before and after. notes come first in the result, as
 // the reason the share was taken by the tool that took it.
 func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.Sharing, audience plan.Audience,
 	role string, notify, dryRun bool, notes []string,
@@ -380,7 +380,7 @@ func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.
 	}
 	if audience.Scope.Type == gcal.ScopeTypeGroup {
 		// This server does not read a group's members or settings, so
-		// the rule's reach is said rather than counted (§7.6, §17 item 7).
+		// the rule's reach is said rather than counted.
 		report.Notes = append(report.Notes, plan.GroupReach)
 	}
 	if audience.Source != plan.SourceGiven && audience.Source != plan.SourcePublic {
@@ -399,8 +399,8 @@ func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.
 	if audience.Scope.IsPublic() && !within {
 		// Tense-neutral, because this same note prints under a dry run.
 		// "This calendar is now PUBLIC" beneath the words "nothing was
-		// written" is the contradiction phase 2 found on a cancellation,
-		// on the one note here that would frighten somebody.
+		// written" would contradict itself, on the one note here that
+		// would frighten somebody.
 		report.Notes = append(report.Notes,
 			"This rule makes the calendar PUBLIC: anybody at all, signed in or not, can see it. Removing it "+
 				"later stops new readers and takes nothing back from whoever already looked, so this is "+
@@ -433,9 +433,8 @@ func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.
 		// Changed is set here as well as on the real path, and that is
 		// not decoration: the result renders exposure before and after
 		// only when it knows which rule the write was about, so a dry run
-		// without it printed a different SHAPE from the call it is
-		// supposed to be showing. Phase 2 shipped that exact defect on a
-		// cancellation and the transcript caught it.
+		// without it would print a different SHAPE from the call it is
+		// supposed to be showing.
 		would := model.Sharing{
 			RuleID: existing.RuleID, ScopeType: audience.Scope.Type,
 			Value: audience.Scope.Value, Role: role,
@@ -470,7 +469,7 @@ func (s *Service) grant(ctx context.Context, cal model.Calendar, before []model.
 }
 
 // shareError produces [ambiguous_outcome] for an acl.insert that may
-// have landed. It is a POST and is not retried (§11): a repeat with
+// have landed. It is a POST and is not retried: a repeat with
 // notify on emails the person a second time.
 func shareError(err error, calendarID string) error {
 	if err == nil {
@@ -495,7 +494,7 @@ type UnshareOptions struct {
 	DryRun    bool
 }
 
-// UnshareCalendar takes access away (§7.6).
+// UnshareCalendar takes access away.
 //
 // It has no notify parameter, and that is Google's shape rather than an
 // omission: acl.delete publishes no sendNotifications, and acl.patch's

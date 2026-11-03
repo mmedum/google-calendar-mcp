@@ -41,12 +41,12 @@ var (
 	// REDACTS: it has to find a link wherever it appears, and anchoring
 	// it would stop it matching a link in the middle of a sentence —
 	// which is where every link in a transcript appears.
+	// https://codeql.github.com/codeql-query-help/go/go-regex-missing-regexp-anchor/
 	//
-	// The real risk here is the opposite one, under-matching, and the
-	// first version had three of those: it missed an upper-case URL,
-	// missed http://, and stopped at the first slash so
-	// `meet.google.com/lookup/<code>` was redacted down to the code
-	// itself. All three leaked a joinable meeting into a transcript.
+	// The real risk here is the opposite one, under-matching. An
+	// upper-case URL, an http:// one and `meet.google.com/lookup/<code>`
+	// must each be matched whole, or a joinable meeting reaches a
+	// transcript.
 	meetRe = regexp.MustCompile(`(?i)https?://meet\.google\.com/[^\s"'<>)\]]*`)
 	// A Drive or Docs link carries the file's id, and a file attached to
 	// an event is somebody's document. Unanchored for the same reason as
@@ -100,8 +100,8 @@ func maskEmail(addr string) string {
 }
 
 // ID truncates an identifier to a correlation key that cannot be looked
-// up or pasted into a URL. The standard's §4 rule: a log must not
-// identify or reconstruct the subject, not that identifiers are banned.
+// up or pasted into a URL. A log may correlate by an identifier; it must
+// not identify the subject or let anyone reconstruct it.
 func ID(id string) string {
 	if len(id) <= 6 {
 		return "[id]"

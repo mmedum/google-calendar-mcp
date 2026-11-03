@@ -2,9 +2,9 @@
 // clock of its own: the clock is injected, so a test can stand at a
 // daylight-saving boundary and stay there.
 //
-// The package exists because of one rule, and the rule is the reason
-// half the calendar integrations surveyed render all-day events on the
-// wrong day (docs/architecture.md §3):
+// The package exists because of one rule (D-10), and the rule is the
+// reason half the calendar integrations surveyed render all-day events on
+// the wrong day:
 //
 // # A date is not a time
 //
@@ -25,8 +25,8 @@
 // enough to place a single instant and not enough to expand a
 // recurrence, because the next occurrence may fall the other side of a
 // transition. Google requires timeZone on a recurring event's start and
-// end for exactly this reason (§2.2), so Zoned carries the IANA name
-// and not just the offset.
+// end for exactly this reason, so Zoned carries the IANA name and not
+// just the offset.
 package when
 
 import (
@@ -64,7 +64,11 @@ func FixedClock(t time.Time) Clock { return func() time.Time { return t } }
 //
 // It is deliberately not a time.Time. A time.Time is an instant, and
 // every bug this package exists to prevent begins with storing a day as
-// one.
+// one. An all-day event read as midnight UTC lands a day early for every
+// reader west of UTC; Google's reference gives the date with no zone and
+// says nothing of how to read it. Checked by the live step "spike D:
+// all-day west of UTC".
+// https://developers.google.com/workspace/calendar/api/v3/reference/events
 type Date struct {
 	Year  int
 	Month time.Month
@@ -154,7 +158,11 @@ func (d Date) EndExclusiveIn(loc *time.Location) time.Time {
 // Both halves are load-bearing. The instant places it on the timeline;
 // the zone is what lets a recurrence be expanded correctly across a
 // daylight-saving transition, and what lets a read say which Thursday it
-// was looking at.
+// was looking at. Google expands a series written with an IANA zone on
+// its wall clock, so a weekly 14:00 stays 14:00 across a transition. A
+// bare offset cannot express that. Checked by the live step "DST: wall
+// clock holds".
+// https://developers.google.com/workspace/calendar/api/concepts/events-calendars#recurring-events
 type Zoned struct {
 	// T is the instant. Its own location is set to Loc, so t.Format
 	// renders in the right wall clock.
@@ -167,8 +175,8 @@ type Zoned struct {
 //
 // It rejects the empty string and it rejects "Local". "Local" is the
 // process's zone, which on a user's laptop is plausible and in a
-// container is UTC, and §4.1 says the zone is read from the call, the
-// calendar or the user's settings — never from the process. A zone that
+// container is UTC. The zone is read from the call, the calendar or the
+// user's settings, never from the process. A zone that
 // silently means "wherever this happens to be running" is exactly the
 // bug.
 func LoadLocation(name string) (*time.Location, error) {
@@ -228,8 +236,8 @@ func (z Zoned) IsZero() bool { return z.T.IsZero() }
 // String renders RFC3339 with the offset, which is the wire format.
 func (z Zoned) String() string { return z.T.Format(DateTimeLayout) }
 
-// ZoneName is the IANA name, for the timeZone field Google wants
-// alongside dateTime on every write (§4.1).
+// ZoneName is the IANA name, for the timeZone field this server sends
+// alongside dateTime on every write.
 func (z Zoned) ZoneName() string {
 	if z.Loc == nil {
 		return ""
@@ -389,7 +397,7 @@ func (w Window) Overlaps(other Window) bool {
 }
 
 // String renders the window the way a result should state it: absolute,
-// zoned, and naming the zone (§4.5).
+// zoned, and naming the zone.
 func (w Window) String() string {
 	return fmt.Sprintf("%s to %s (%s)", w.Start.String(), w.End.String(), w.ZoneName())
 }

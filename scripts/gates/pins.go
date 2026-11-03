@@ -135,10 +135,9 @@ func pinGate() error {
 //
 // Pinning one of these to a SHA pins the WRAPPER. Without the input
 // beside it the action fetches whatever is current that morning, and the
-// step reads exactly like a pinned one. The standard records this
-// breaking a release on two servers the same afternoon: cosign 3 landed,
-// `--bundle` had become required, and the config passed the arguments
-// version 2 wanted.
+// step reads exactly like a pinned one. A new major version then runs
+// under a config written for the old one: cosign 3 made `--bundle`
+// required, and a release configured for version 2 fails.
 var toolInstallers = []struct {
 	action string
 	input  string

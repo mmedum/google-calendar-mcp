@@ -82,6 +82,10 @@ func registerRead(s *mcp.Server, d Deps) {
 		},
 	})
 
+	// Google documents the fields q is matched against, not how it
+	// matches words, and q has no field syntax. Checked by the live step
+	// "search_events matches a location".
+	// https://developers.google.com/workspace/calendar/api/v3/reference/events/list
 	add(s, d, Def[searchEventsIn, service.ScheduleResult]{
 		Name: "search_events",
 		Description: "Find events matching free text in a window. " + windowHelp + " " +
@@ -231,7 +235,7 @@ func registerRead(s *mcp.Server, d Deps) {
 }
 
 // Inputs. Flat structs, snake_case, no unions — a model fills in a flat
-// schema reliably (the standard's §2).
+// schema reliably, and a union it often does not.
 
 type listCalendarsIn struct {
 	IncludeHidden bool `json:"include_hidden,omitempty" jsonschema:"Include calendars hidden in the Calendar UI."`

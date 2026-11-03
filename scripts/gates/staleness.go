@@ -6,10 +6,8 @@ import (
 	"maps"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/mmedum/google-calendar-mcp/v5/internal/auth"
@@ -18,11 +16,10 @@ import (
 
 // staleness holds the documentation against the code.
 //
-// Its scope is deliberately narrow and named, because the failure this
-// family of gates keeps describing applies to the checker too: a
+// Its scope is deliberately narrow and named, because the failure these
+// gates describe applies to the checker too: a
 // staleness gate whose scope is a hand-maintained list is the same
-// problem one level up. A sibling's checked four things and passed on
-// every release while four other claims were wrong.
+// problem one level up, passing while claims outside its list go wrong.
 //
 // What it holds:
 //
@@ -32,12 +29,13 @@ import (
 //  2. every GCAL_* variable the server reads is documented by name, a
 //     removed one included, no other is, and the configuration page
 //     states the profile rule;
-//  3. every repository path the docs name still exists;
-//  4. no version number is written in prose in the README — a badge
+//  3. no version number is written in prose in the README — a badge
 //     cannot go stale, a copy of a fact can;
-//  5. docs/gcp-setup.md's Read-only and Read-write blocks each list,
+//  4. docs/gcp-setup.md's Read-only and Read-write blocks each list,
 //     one to a line, exactly the scopes login asks for in that mode, and
 //     no scope line sits outside them.
+//
+// The paths the docs name are the docs gate's to hold.
 func staleness(bin string) error {
 	var problems []string
 
@@ -53,12 +51,6 @@ func staleness(bin string) error {
 	}
 	problems = append(problems, settingProblems...)
 
-	pathProblems, paths, err := checkPaths()
-	if err != nil {
-		return err
-	}
-	problems = append(problems, pathProblems...)
-
 	problems = append(problems, checkNoVersionInProse()...)
 
 	scopeProblems, scopes, err := checkSetupScopes()
@@ -69,22 +61,16 @@ func staleness(bin string) error {
 
 	// Floors.
 	if tools < 5 {
-		return fmt.Errorf("the binary published %d tools; that is not the phase 0 surface", tools)
+		return fmt.Errorf("the binary published %d tools; that is not the surface", tools)
 	}
 	if settings < 8 {
 		return fmt.Errorf("found %d settings in the code; that is not the configuration surface", settings)
-	}
-	// Raised from 5 when the roots became derived rather than listed:
-	// the docs name dozens of paths, and a floor an accident could clear
-	// is not a floor.
-	if paths < 25 {
-		return fmt.Errorf("checked %d documented paths; the extractor is not reading the docs", paths)
 	}
 
 	if len(problems) > 0 {
 		return fmt.Errorf("%s", strings.Join(problems, "\n"))
 	}
-	fmt.Printf("  %d tools, %d settings, %d documented paths, %d setup scopes: all current\n", tools, settings, paths, scopes)
+	fmt.Printf("  %d tools, %d settings, %d setup scopes: all current\n", tools, settings, scopes)
 	return nil
 }
 
@@ -228,121 +214,11 @@ func settingNames(text string) []string {
 	return names
 }
 
-// pathRe finds anything shaped like a repository path in prose.
-//
-// Expect the naive version of this to be mostly false positives and
-// budget for the triage: a sibling's first pass reported 13 broken
-// references and every one was the extractor's fault. The exclusions
-// below are that triage, not a widening.
-// pathRe matches a repository path in backticks: a file under one of the
-// source directories, or a root file recognized by its SHAPE.
-//
-// Shape, never existence. The obvious "derive the roots from the
-// repository's own top-level entries" is circular and was tried here: a
-// token is treated as a path only if its root exists, so a file that
-// does not exist is filed as prose and excuses itself. That is the exact
-// case this widening was for — `.goreleaser.yaml` was named in the docs
-// while no such file existed, and §16 called the release built for four
-// phases.
-//
-// So the root half is an extension list, kept to the extensions a
-// repository file actually has at the top level. `.txt` and `.json` are
-// deliberately absent: `checksums.txt` and `manifest.json` are named in
-// the docs and live inside a release archive and a bundle, not here.
-var pathRe = regexp.MustCompile(
-	"`((?:cmd|internal|scripts|docs|testdata|packaging|\\.github)/[A-Za-z0-9_./-]+" +
-		"|[A-Za-z0-9_.-]+\\.(?:md|ya?ml|toml|mod|sum)" +
-		"|Makefile|LICENSE)`")
-
-// pathExists resolves a documented path.
-//
-// A bare workflow name is also tried under .github/workflows, because
-// the docs name `ci.yml` the way a person says it. It is still a
-// reference that has to resolve: a doc naming a workflow nobody wrote
-// fails here rather than reading as prose.
-func pathExists(p string) bool {
-	if _, err := os.Stat(p); err == nil {
-		return true
-	}
-	if strings.Contains(p, "/") {
-		return false
-	}
-	if ext := filepath.Ext(p); ext != ".yml" && ext != ".yaml" {
-		return false
-	}
-	_, err := os.Stat(filepath.Join(".github", "workflows", p))
-	return err == nil
-}
-
-// plannedRe marks a path a later phase builds: `internal/plan/` (phase 2).
-var plannedRe = regexp.MustCompile("^`[^`]+`[,]? \\(phase [0-9]+\\)")
-
-func checkPaths() ([]string, int, error) {
-	files, err := docFiles()
-	if err != nil {
-		return nil, 0, err
-	}
-	var problems []string
-	checked := 0
-	seen := map[string]bool{}
-
-	for _, doc := range files {
-		data, err := os.ReadFile(doc)
-		if err != nil {
-			continue
-		}
-		text := string(data)
-		for _, m := range pathRe.FindAllStringSubmatchIndex(text, -1) {
-			p := strings.TrimSuffix(text[m[2]:m[3]], "/")
-			key := doc + "|" + p
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			checked++
-			if pathExists(p) {
-				continue
-			}
-			// A path that does not exist yet is fine if the document
-			// says which phase owes it. Without this the gate cannot
-			// tell a plan from a stale reference, and §5 legitimately
-			// describes packages later phases build.
-			//
-			// It stays strict in the direction that matters: the marker
-			// has to name a phase, and it has to sit immediately after
-			// the path, so "this will exist one day" is not enough.
-			if plannedRe.MatchString(text[m[0]:]) {
-				continue
-			}
-			problems = append(problems, fmt.Sprintf(
-				"%s names %s, which does not exist and is not marked with the phase that builds it", doc, p))
-		}
-	}
-	sort.Strings(problems)
-	return problems, checked, nil
-}
-
-func docFiles() ([]string, error) {
-	out := []string{"README.md", "CONTRIBUTING.md"}
-	entries, err := os.ReadDir("docs")
-	if err != nil {
-		return out, nil //nolint:nilerr // no docs directory is not a staleness failure
-	}
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".md") {
-			out = append(out, "docs/"+e.Name())
-		}
-	}
-	return out, nil
-}
-
 // versionInProseRe catches a version written into the README's text.
 //
 // A badge shows the version, updates itself and cannot be wrong. A
-// number in prose is a copy of a fact, and a copy goes stale: a
-// sibling's README said v0.5.0 five releases later, and the first fix
-// was a gate to keep the copy correct — machinery to maintain a
-// duplicate instead of deleting it.
+// number in prose is a copy of a fact, and a copy goes stale. The fix is
+// to delete the copy, not to build a gate that keeps it correct.
 var versionInProseRe = regexp.MustCompile(`(?m)^[^|\[]*\bv[0-9]+\.[0-9]+\.[0-9]+\b`)
 
 func checkNoVersionInProse() []string {
@@ -422,12 +298,14 @@ func checkSetupScopes() ([]string, int, error) {
 func setupScopeProblems(text string) []string {
 	blocks := map[string][]string{}
 	var stray []string
-	heading, fenced := "", false
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
+	heading := ""
+	raw := strings.Split(text, "\n")
+	// prose blanks every line of a fence, its markers included, so this
+	// gate and the docs gate agree on what is code.
+	for i, outside := range prose(text) {
+		line := strings.TrimSpace(raw[i])
+		fenced := outside == "" && line != ""
 		switch {
-		case strings.HasPrefix(line, "```"):
-			fenced = !fenced
 		case !fenced && strings.HasPrefix(line, "#"):
 			heading = strings.TrimSpace(strings.TrimLeft(line, "#"))
 		case strings.HasPrefix(line, "https://www.googleapis.com/auth/"):

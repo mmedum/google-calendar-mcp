@@ -10,9 +10,8 @@ import (
 	"github.com/mmedum/google-calendar-mcp/v5/internal/redact"
 )
 
-// Phase 3's two spikes. Both are the shape rule 13 asks for: a
-// convention this design adopted from the documentation, probed before
-// it ships, with the verdict written into §18 by hand.
+// Two spikes, each a convention taken from the documentation and probed
+// live before it is relied on, with the verdict recorded by hand.
 
 // spikeK — does calendars.clear work on a SECONDARY calendar?
 //
@@ -22,7 +21,8 @@ import (
 // one, and the three possible answers need different code:
 //
 //   - REFUSED. clear_calendar's refusal of a secondary calendar is the
-//     API's rule and not this server's invention, and §7.5 can say so.
+//     API's rule and not this server's invention, and the tool can say
+//     so.
 //   - CLEARED. The refusal is this server's own and should be lifted:
 //     emptying a calendar without deleting it is a thing people want,
 //     and delete_calendar is not the same operation.
@@ -32,8 +32,8 @@ import (
 //     reason with evidence behind it.
 //
 // It is NOT run against the account's primary calendar, ever: that is
-// the single most destructive call this API offers (§9), and no answer
-// is worth it.
+// the single most destructive call this API offers, and no answer is
+// worth it.
 //
 // It is not run against the SCRATCH calendar either, and that is the
 // less obvious half. Spikes A and B leave events there deliberately, for
@@ -76,7 +76,7 @@ func spikeK(ctx context.Context, out *redact.Printer, api *liveAPI, _ string) (v
 
 	if status >= 400 {
 		return pass, fmt.Sprintf("REFUSED (%d): clear does not work on a secondary calendar, so "+
-			"clear_calendar's refusal is the API's rule rather than this server's caution. §7.5 may say so",
+			"clear_calendar's refusal is the API's rule rather than this server's caution, and the tool may say so",
 			status)
 	}
 	if clearErr != nil {
@@ -94,7 +94,7 @@ func spikeK(ctx context.Context, out *redact.Printer, api *liveAPI, _ string) (v
 	// deleted, and "accepted and did nothing" is a real possibility here.
 	if after == 0 {
 		return pass, fmt.Sprintf("CLEARED: %d events on a secondary calendar became 0, so clear is not "+
-			"primary-only and clear_calendar's refusal should be lifted (§7.5)", before)
+			"primary-only and clear_calendar's refusal should be lifted", before)
 	}
 	return pass, fmt.Sprintf("ACCEPTED AND DID NOTHING: clear answered %d and %d of %d events are still "+
 		"there. A call that reports success and changes nothing — clear_calendar must keep refusing a "+
@@ -103,12 +103,11 @@ func spikeK(ctx context.Context, out *redact.Printer, api *liveAPI, _ string) (v
 
 // spikeL — is If-Match honored on the calendar and sharing writes?
 //
-// §2.4 says ETags and If-Match are supported across this API, and §4.4
-// puts every write under one. Spike J found that the general rule held
-// in a place nothing published said it would — events.move — and the
-// same question is open here for four methods this phase calls:
-// calendars.patch, calendars.delete, acl.patch and acl.delete. The
-// server sends the header on all of them; whether Google enforces it is
+// Google says ETags and If-Match are supported across this API, and the
+// server puts every write under one. events.move honors the header, though
+// nothing published says it does, and the same question is open for four
+// more methods: calendars.patch, calendars.delete, acl.patch and acl.delete.
+// The server sends the header on all of them; whether Google enforces it is
 // what this asks.
 //
 // The discriminator is a STALE etag, as in spike J. A current one
@@ -127,12 +126,10 @@ func spikeL(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 	// The description is the driver's own text and changes nothing a
 	// reader of this repository could not already see.
 	//
-	// It carries the run's own mark, and that is not decoration: the
-	// first draft wrote one fixed string, so the SECOND run patched the
-	// description to the value it already held, Google did not move the
-	// etag, and the spike could not build a stale one — it reported
-	// undetermined on a question it had answered the day before (§18 row
-	// 58). A probe that works once is not a probe.
+	// It carries the run's own mark, and that is not decoration: a patch
+	// writing the value a field already holds does not move the
+	// calendar's etag, so a fixed string would build no stale etag on any
+	// run after the first.
 	if err := api.patchCalendar(ctx, scratch, map[string]any{
 		"description": "Created by the google-calendar-mcp live driver. Safe to delete. " +
 			"(etag probe " + runMark + ")",
@@ -166,7 +163,7 @@ func spikeL(ctx context.Context, out *redact.Printer, api *liveAPI, scratch stri
 			status, aclNote)
 	case calendarHonored && aclHonored:
 		return pass, "HONORED on both: a stale If-Match is refused with 412 by calendars.patch and " +
-			"acl.patch, so §4.4 covers the calendar and sharing writes as it covers the event ones"
+			"acl.patch, so the etag guards the calendar and sharing writes as it guards the event ones"
 	case !calendarHonored && !aclHonored:
 		return pass, fmt.Sprintf("IGNORED on both: calendars.patch answered %d and acl.patch %d with a "+
 			"STALE etag, so neither offers optimistic concurrency and the results must stop implying it",

@@ -8,6 +8,7 @@ linters:
     - staticcheck
     - unused
     - bodyclose
+    - depguard
     - errorlint
     - forbidigo
     - gosec
@@ -34,6 +35,16 @@ linters:
         - pattern: '^os\.Stdout$'
           msg: "only main names the process's streams; take an io.Writer instead"
       analyze-types: true
+    depguard:
+      rules:
+        # Own wire types over raw REST (D-06). Check the message text when
+        # verifying this works: a settings block that fails to load
+        # leaves depguard on its default rule, which refuses every
+        # import outside the standard library with a message of its own.
+        own-wire-types:
+          deny:
+            - pkg: "google.golang.org/api"
+              desc: "it drags in gRPC and telemetry for the subset of the API this repository hand-writes in internal/gcal and internal/gapi (D-06)"
     revive:
       rules:
         - name: exported

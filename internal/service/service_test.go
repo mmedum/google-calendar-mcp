@@ -50,7 +50,7 @@ func TestCalendarsListsAndSorts(t *testing.T) {
 		t.Fatalf("first calendar is %q, not the primary one", cals[0].Title)
 	}
 	if cals[0].TimeZone == "" {
-		t.Fatal("the list must carry each calendar's zone; §4.1 resolves against it")
+		t.Fatal("the list must carry each calendar's zone; a call's zone is resolved against it")
 	}
 }
 
@@ -77,8 +77,7 @@ func TestResolveCalendar(t *testing.T) {
 	}
 }
 
-// TestResolveCalendarRefusesAmbiguity is §6.1: never take the first
-// match. Two calendars sharing a word is the ordinary case, and a server
+// TestResolveCalendarRefusesAmbiguity: never take the first match. Two calendars sharing a word is the ordinary case, and a server
 // that guesses will read the wrong person's schedule.
 func TestResolveCalendarRefusesAmbiguity(t *testing.T) {
 	fake := caltest.Seed()
@@ -166,7 +165,8 @@ func TestListEventsRejectsABackwardsWindow(t *testing.T) {
 	}
 }
 
-// TestCanceledEventsAreHiddenByDefault is §2.13.
+// TestCanceledEventsAreHiddenByDefault: Google hides canceled events
+// from a list unless asked, and so does this server.
 func TestCanceledEventsAreHiddenByDefault(t *testing.T) {
 	svc, _ := seeded(t)
 	ctx := context.Background()
@@ -198,8 +198,8 @@ func TestCanceledEventsAreHiddenByDefault(t *testing.T) {
 	}
 }
 
-// TestExpandChoosesBetweenSeriesAndInstances is §2.9: the two return
-// genuinely different things, and the caller picks.
+// TestExpandChoosesBetweenSeriesAndInstances: the two return genuinely
+// different things, and the caller picks.
 func TestExpandChoosesBetweenSeriesAndInstances(t *testing.T) {
 	svc, _ := seeded(t)
 	ctx := context.Background()
@@ -241,7 +241,8 @@ func TestExpandChoosesBetweenSeriesAndInstances(t *testing.T) {
 	}
 }
 
-// TestAllDayEventStaysADate is the defect from §3, end to end.
+// TestAllDayEventStaysADate holds, end to end, that an all-day event is
+// never read as midnight UTC, which puts it on the wrong day west of UTC.
 func TestAllDayEventStaysADate(t *testing.T) {
 	svc, _ := seeded(t)
 	// Read it from a zone far west of the calendar's own. A server that
@@ -265,7 +266,7 @@ func TestAllDayEventStaysADate(t *testing.T) {
 			t.Fatalf("all-day event moved to %s when read from America/Chicago; want 2026-03-20", got)
 		}
 		if !e.Start.At.IsZero() {
-			t.Fatal("the all-day event acquired an instant; §4.1 forbids the conversion")
+			t.Fatal("the all-day event acquired an instant; a date is not a time")
 		}
 	}
 	if !found {
@@ -564,8 +565,7 @@ func TestBudgetTruncatesAndSaysSo(t *testing.T) {
 		t.Fatalf("a budget of 1 returned %d events", len(sched.Events))
 	}
 	// A read that stops at its budget with more to come has to say so
-	// and hand back a way to continue. It used to report itself
-	// complete, because truncation was decided from the overflow alone.
+	// and hand back a way to continue, whatever the overflow says.
 	if sched.NextPageToken == "" {
 		t.Fatal("a truncated read gave no page token to continue from")
 	}
@@ -656,9 +656,10 @@ func TestGetEventNotFound(t *testing.T) {
 	}
 }
 
-// TestCalendarDetailReportsAMissingACLScope is §2.15: an empty sharing
-// list and an unreadable one are different answers, and conflating them
-// tells the caller the calendar is private when it may not be.
+// TestCalendarDetailReportsAMissingACLScope: the ACL read needs a scope
+// of its own. An empty sharing list and an unreadable one are different
+// answers, and conflating them tells the caller the calendar is private
+// when it may not be.
 func TestCalendarDetailReportsAMissingACLScope(t *testing.T) {
 	fake := caltest.Seed()
 	fake.ACLScopeRequired = true
@@ -744,7 +745,8 @@ func TestSettingsSummary(t *testing.T) {
 	}
 }
 
-// TestZoneFallsBackToTheAccountSettings is §4.1's third source.
+// TestZoneFallsBackToTheAccountSettings: the account's settings are the
+// third source of a zone, after the call and the calendar.
 func TestZoneFallsBackToTheAccountSettings(t *testing.T) {
 	fake := caltest.Seed()
 	// A calendar with no zone of its own.
@@ -766,8 +768,8 @@ func TestZoneFallsBackToTheAccountSettings(t *testing.T) {
 	}
 }
 
-// TestNoZoneAnywhereRefuses: §4.1 refuses rather than picking UTC or the
-// machine's own zone.
+// TestNoZoneAnywhereRefuses: no zone anywhere is a refusal, never UTC or
+// the machine's own zone.
 func TestNoZoneAnywhereRefuses(t *testing.T) {
 	fake := caltest.Seed()
 	fake.Entries["primary"].TimeZone = ""
@@ -922,9 +924,9 @@ func TestSettingsAreReadOnce(t *testing.T) {
 //
 // Resolution looks at every calendar, hidden ones included: a calendar
 // hidden in the Calendar UI is still one this account can read, and
-// "not found" for it would be a lie (§6.1). The list is now read once
-// and filtered, so this is the assertion that the filter is applied
-// where it should be and not to the resolution.
+// "not found" for it would be a lie. The list is read once and
+// filtered, so this is the assertion that the filter is applied where it
+// should be and not to the resolution.
 func TestHiddenCalendarStillResolvesByTitle(t *testing.T) {
 	fake := caltest.Seed()
 	fake.Entries["readonly@group.calendar.example.test"].Hidden = true
@@ -950,15 +952,12 @@ func TestHiddenCalendarStillResolvesByTitle(t *testing.T) {
 	}
 }
 
-// TestCanceledInstancesAreHiddenInSeriesMode is the live run's second
-// defect, as the reproduction that found it.
-//
-// The server passed showDeleted=false and trusted Google to filter.
-// The discovery document says otherwise: "Canceled instances of
+// TestCanceledInstancesAreHiddenInSeriesMode: showDeleted=false does not
+// make Google filter. The discovery document: "Canceled instances of
 // recurring events (but not the underlying recurring event) will still
-// be included if showDeleted and singleEvents are both False." One came
-// back with no start and no summary, so a series listing rendered a row
-// with no date and no title, and counted it among the results.
+// be included if showDeleted and singleEvents are both False." One comes
+// back with no start and no summary, and must not render as a row with
+// no date and no title, or count among the results.
 func TestCanceledInstancesAreHiddenInSeriesMode(t *testing.T) {
 	fake := caltest.Seed()
 	// The shape Google actually sends, which is the half a populated
@@ -1023,12 +1022,10 @@ func TestCanceledInstancesAreHiddenInSeriesMode(t *testing.T) {
 // TestFilteringCanceledDoesNotBuyExtraPages.
 //
 // The budget is a bound on what the read SPENDS, not on what survives a
-// filter. Counting kept events made every filtered row leave the budget
-// one short, so the loop fetched another page: a window whose first
-// twenty rows are canceled cost twenty-one requests to return one
-// event. That is §4.7 failing in the direction the result cannot show,
-// and it is the second time in this phase — check_availability spent 168
-// requests to report 2.
+// filter. Counting kept events makes every filtered row leave the budget
+// one short, so the loop fetches another page: a window whose first
+// twenty rows are canceled costs twenty-one requests to return one
+// event, and the result cannot show it.
 func TestFilteringCanceledDoesNotBuyExtraPages(t *testing.T) {
 	fake := caltest.Seed()
 	tz := "Europe/Copenhagen"
@@ -1055,7 +1052,7 @@ func TestFilteringCanceledDoesNotBuyExtraPages(t *testing.T) {
 	}
 	if got.Requests > 2 {
 		t.Fatalf("spent %d requests to read one event past twenty canceled rows; "+
-			"the budget bounds what is drained, not what survives (§4.7)", got.Requests)
+			"the budget bounds what is drained, not what survives", got.Requests)
 	}
 }
 
@@ -1121,11 +1118,10 @@ func TestAnImpossibleZoneIsInvalidNotRetryable(t *testing.T) {
 
 // TestPageTokenResumesEachCalendarSeparately.
 //
-// A Google page token is scoped to one calendar. The fan-out used to
-// keep whichever calendar produced a token last and hand that single
-// token back, so continuing a two-calendar read resumed the wrong
-// calendar from an unrelated offset and dropped the other's pages
-// entirely — while the result said it was resumable.
+// A Google page token is scoped to one calendar. A single token handed
+// back for a two-calendar read would resume the wrong calendar from an
+// unrelated offset and drop the other's pages entirely — while the
+// result said it was resumable.
 func TestPageTokenResumesEachCalendarSeparately(t *testing.T) {
 	fake := caltest.Seed()
 	fake.PageSize = 1
