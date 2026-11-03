@@ -1,8 +1,6 @@
 package main
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,8 +27,6 @@ const (
 	fxGates      = "scripts/gates/main.go"
 	fxDriver     = "scripts/livecal/main.go"
 	fxDriverTest = "scripts/livecal/main_test.go"
-	fxFiller     = "scripts/livecal/filler.go"
-	fxRefFiller  = "docs/filler.md"
 )
 
 // textLines is a file of these lines, so a fixture's line numbers can be
@@ -46,15 +42,6 @@ const (
 	fxRow03 = "| D-03 | Retry three times | accepted | forbidigo, lint, review |"
 )
 
-// fxDriverSteps is how many steps the fixture's driver file declares.
-// The filler brings the total to the floor exactly.
-const fxDriverSteps = 3
-
-// fxMarkdownRefs is how many links and code-span paths the fixture's
-// Markdown pages hold besides its filler page, which brings the total to
-// the floor exactly.
-const fxMarkdownRefs = 22
-
 // docsFixture is a checkout the docs gate accepts as it stands. Between
 // them its files hold one of everything the gate must stay quiet about:
 // each kind of Held by item, a superseded decision cited only where that
@@ -64,14 +51,6 @@ const fxMarkdownRefs = 22
 // fence, a string literal, a testdata page and a released changelog
 // section.
 func docsFixture() map[string]string {
-	var filler strings.Builder
-	for i := 1; i <= liveStepFloor-fxDriverSteps; i++ {
-		fmt.Fprintf(&filler, "\t{name: \"filler step %d\"},\n", i)
-	}
-	var refs strings.Builder
-	for i := 1; i <= markdownRefFloor-fxMarkdownRefs; i++ {
-		fmt.Fprintf(&refs, "- Reference %d is `go.mod`.\n", i)
-	}
 	return map[string]string{
 		fxMakefile: textLines(
 			"# The checks CI runs (D-03).",
@@ -184,8 +163,6 @@ func docsFixture() map[string]string {
 			"",
 			`var testSteps = []step{{name: "a test-only step"}}`,
 		),
-		fxFiller:    "//go:build live\n\npackage main\n\nvar filler = []step{\n" + filler.String() + "}\n",
-		fxRefFiller: "# Filler\n\n" + refs.String(),
 		// Ignored, so neither a package nor a file to parse.
 		"internal/generated/broken.go": "this is not Go\n",
 		"internal/gapi/testdata/pg.md": textLines("A fixture page citing E-777 and §5, and `internal/gone`."),
@@ -333,19 +310,26 @@ func docsCheckout(t *testing.T, files map[string]string) func(args ...string) {
 	return git
 }
 
-// docsProblemsIn runs the docs gate in the working directory and returns
-// the problems it reported, one to a line. A gate that could not run
-// fails the test.
-func docsProblemsIn(t *testing.T) []string {
+// fixtureFloors keeps the floors out of the rows whose subject is not a
+// floor. The fixture is far smaller than the repository, and a pass that
+// reads nothing still fails.
+var fixtureFloors = docsFloors{liveSteps: 1, links: 1, spanPaths: 1}
+
+// docsProblemsIn runs the docs gate over the checkout in the working
+// directory, held to floors, and returns the problems it reported, one to
+// a line. A checkout git cannot list fails the test.
+func docsProblemsIn(t *testing.T, floors docsFloors) []string {
 	t.Helper()
-	err := docsGate()
-	if err == nil {
-		return nil
-	}
-	if errors.As(err, new(couldNotRun)) {
+	files, err := checkoutFiles()
+	if err != nil {
 		t.Fatalf("the gate could not run: %v", err)
 	}
-	return strings.Split(err.Error(), "\n")
+	g := newDocsCheck(files)
+	g.floors = floors
+	if err := g.verdict(); err != nil {
+		return strings.Split(err.Error(), "\n")
+	}
+	return nil
 }
 
 // docsCase is one checkout and every problem the gate reports for it. A
@@ -362,11 +346,18 @@ func checkDocsCases(t *testing.T, cases []docsCase) {
 	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			docsCheckout(t, docsEdited(t, tc.edits...))
-			if got := docsProblemsIn(t); !slices.Equal(got, tc.want) {
-				t.Errorf("problems\n got %q\nwant %q", got, tc.want)
-			}
+			checkDocsGate(t, fixtureFloors, tc.edits, tc.want)
 		})
+	}
+}
+
+// checkDocsGate runs the gate, held to floors, over the fixture with edits,
+// and wants exactly the problems want, or none when want is nil.
+func checkDocsGate(t *testing.T, floors docsFloors, edits []docsEdit, want []string) {
+	t.Helper()
+	docsCheckout(t, docsEdited(t, edits...))
+	if got := docsProblemsIn(t, floors); !slices.Equal(got, want) {
+		t.Errorf("problems\n got %q\nwant %q", got, want)
 	}
 }
 
@@ -393,6 +384,13 @@ func TestDocsGateAcceptsAConsistentCheckout(t *testing.T) {
 			replace(fxClient, "as measured live.", "as measured live; ./scripts/livecal/NOTES.md#setup says how.\n"+
 				"// Each run writes out/summary.md, as https://example.com/x/blob/main/MANIFEST.md says."),
 		}, nil},
+		{"a doc in a Go comment read from the file's directory, up and out of it", []docsEdit{
+			replace(fxClient, "as measured live.", "as measured live; testdata/pg.md, ../../README.md#fixture and ../../../outside.md say so."),
+		}, nil},
+		{"a doc path inside a URL or a query string in a Go comment", []docsEdit{
+			replace(fxClient, "as measured live.", "as measured live, at https://pkg.go.dev/example.com/fixture@v1.0.0/RUNBOOK.md#setup\n"+
+				"// and at /render?page=docs/gone.md."),
+		}, nil},
 		{"a root doc's anchor, and a lowercase file name, in a Go comment", []docsEdit{
 			replace(fxClient, "§15.4 allows.", "§15.4 allows, as README.md#fixture says.\n// Each retry is logged to retries.md."),
 		}, nil},
@@ -413,6 +411,13 @@ func TestDocsGateAcceptsAConsistentCheckout(t *testing.T) {
 		{"a workflow by its bare name, and an archive's file, which is not a path here", []docsEdit{
 			add(".github/workflows/ci.yml", textLines("name: ci")),
 			replace(fxAgent, "`go.mod` names the module", "`go.mod` names the module, `ci.yml` checks it and `checksums.txt` lists an archive"),
+		}, nil},
+		{"a bare file name in a nested doc, read from its directory, then the root, then as a workflow", []docsEdit{
+			add(".github/workflows/ci.yml", textLines("name: ci")),
+			replace(fxRunbook, "The retry is in", "As `architecture.md#codemap`, `go.mod` and `ci.yml` say, the retry is in"),
+		}, nil},
+		{"a generated table under a package's testdata, which is not a record", []docsEdit{
+			add("internal/gapi/testdata/golden.tsv", textLines("method\tnote", "events.get\tD-99 and E-12")),
 		}, nil},
 		{"IDs in a YAML or TOML value, after a # with no space before it, and in a Makefile recipe", []docsEdit{
 			add(".github/workflows/ci.yml", textLines(
@@ -436,7 +441,7 @@ func TestDocsGateSkipsAFileDeletedButStillStaged(t *testing.T) {
 	if err := os.Remove(filepath.Join("internal", "old", "old.go")); err != nil {
 		t.Fatal(err)
 	}
-	if problems := docsProblemsIn(t); problems != nil {
+	if problems := docsProblemsIn(t, fixtureFloors); problems != nil {
 		t.Errorf("problems %q, want none", problems)
 	}
 }
@@ -669,6 +674,12 @@ func TestDocsGateResolvesCitations(t *testing.T) {
 			"internal/gapi/client.go:3: cites packaging/README.md, which does not exist",
 			"internal/gapi/client.go:3: cites scripts/livecal/NOTES.md#teardown, and scripts/livecal/NOTES.md has no heading with that slug",
 		}},
+		{"a doc in a Go comment missing from the file's directory, or up from it", []docsEdit{
+			replace(fxClient, "as measured live.", "as measured live, testdata/gone.md and ../gone.md."),
+		}, []string{
+			"internal/gapi/client.go:3: cites internal/gapi/testdata/gone.md, which does not exist",
+			"internal/gapi/client.go:3: cites internal/gone.md, which does not exist",
+		}},
 		{"a root doc in a Go comment that does not exist, or has no such heading", []docsEdit{
 			replace(fxClient, "as measured live.", "as measured live, RUNBOOK.md and README.md#retries."),
 		}, []string{
@@ -708,6 +719,16 @@ func TestDocsGateResolvesCitations(t *testing.T) {
 			".gitleaks.toml:4: cites D-08, which is not a decision",
 			".golangci.yml:12: cites D-07, which is not a decision",
 		}},
+		{"a TOML multi-line string's # is text, and a comment after it is read", []docsEdit{
+			replace(fxGitleaks, "as D-01 says\n", "as D-01 says\n"+textLines(
+				"description = '''",
+				"# D-99 is text in a literal string,",
+				"'''",
+				`note = """`,
+				"as is a # before D-97 in a basic one.",
+				`""" # as D-08 says`,
+			)),
+		}, []string{".gitleaks.toml:10: cites D-08, which is not a decision"}},
 	})
 }
 
@@ -781,8 +802,8 @@ func TestDocsGateHoldsPathsToTheRepository(t *testing.T) {
 		{"a file:line pointer to a file that does not exist", []docsEdit{
 			replace(fxRunbook, "`internal/gapi/client.go`", "`internal/gapi/retry.go:12`"),
 		}, []string{"docs/runbook.md:6: names internal/gapi/retry.go:12, which does not exist"}},
-		{"a Go name in a package that exists", []docsEdit{
-			replace(fxRunbook, "`internal/gapi/client.go`", "`internal/gapi.Retry`"),
+		{"a Go name, plain or qualified, in a package that exists", []docsEdit{
+			replace(fxRunbook, "`internal/gapi/client.go`", "`internal/gapi.Retry` and `internal/gapi.Client.Do`"),
 		}, nil},
 		{"a missing file whose name less its extension is a directory", []docsEdit{
 			add("internal/gapi/caltest/caltest.go", "package caltest\n"),
@@ -803,6 +824,12 @@ func TestDocsGateHoldsPathsToTheRepository(t *testing.T) {
 		{"a bare workflow name no workflow has", []docsEdit{
 			replace(fxAgent, "`go.mod` names the module", "`go.mod` names the module, and `release.yml` releases it"),
 		}, []string{"CLAUDE.md:4: names release.yml, which does not exist"}},
+		{"a bare file name in a nested doc, with no such heading in its directory, or found nowhere", []docsEdit{
+			replace(fxRunbook, "The retry is in", "As `architecture.md#codemaps` and `gone.md` say, the retry is in"),
+		}, []string{
+			"docs/runbook.md:6: names docs/architecture.md#codemaps, and docs/architecture.md has no heading with that slug",
+			"docs/runbook.md:6: names gone.md, which does not exist",
+		}},
 		{"a file named as a directory", []docsEdit{
 			replace(fxAgent, "`go.mod`", "`go.mod/`"),
 		}, []string{"CLAUDE.md:4: names go.mod/, which is not a directory"}},
@@ -814,10 +841,7 @@ func TestDocsGateHoldsPathsToTheRepository(t *testing.T) {
 		}, []string{"CLAUDE.md:5: names scripts/gates smok, which is not a gates command"}},
 		{"no CLAUDE.md", []docsEdit{
 			drop(fxAgent),
-		}, []string{
-			"CLAUDE.md is missing",
-			"68 Markdown references checked, fewer than 75: the links and code-span paths are not being read",
-		}},
+		}, []string{"CLAUDE.md is missing"}},
 	})
 }
 
@@ -827,11 +851,11 @@ func TestDocsGateRefusesToReadNothing(t *testing.T) {
 	const notAHolder = "which is not live, review, a make target, a gates command, an enabled linter or a test function"
 	checkDocsCases(t, []docsCase{
 		{"no Go files", []docsEdit{
-			drop(fxClient), drop(fxClientTest), drop(fxServer), drop(fxGates), drop(fxDriver), drop(fxDriverTest), drop(fxFiller),
+			drop(fxClient), drop(fxClientTest), drop(fxServer), drop(fxGates), drop(fxDriver), drop(fxDriverTest),
 		}, []string{
 			"no .go files read: this gate would be looking at nothing",
 			"scripts/gates/main.go: no gates commands read: a Held by naming one would never match",
-			"scripts/livecal: 0 live steps read, fewer than 50: the step tables are not being read",
+			"scripts/livecal: 0 live steps read, fewer than 1: the step tables are not being read",
 			`docs/architecture.md:12: D-01 is held by "TestRetry", ` + notAHolder,
 			`docs/architecture.md:12: D-01 is held by "smoke", ` + notAHolder,
 			"CLAUDE.md:5: names scripts/gates docs, which is not a gates command",
@@ -857,17 +881,6 @@ func TestDocsGateRefusesToReadNothing(t *testing.T) {
 			"CLAUDE.md:5: names scripts/gates smoke, which is not a gates command",
 			"CLAUDE.md:5: names scripts/gates, which does not exist",
 		}},
-		// The fixture's driver holds exactly the floor; one step fewer is
-		// under it, and no citation of a step is then held to the driver.
-		{"one live step fewer than the floor", []docsEdit{
-			replace(fxFiller, "\t{name: \"filler step 1\"},\n", ""),
-			replace(fxClient, `"reminders set".`, `"a file downloads".`),
-		}, []string{"scripts/livecal: 49 live steps read, fewer than 50: the step tables are not being read"}},
-		// The fixture's pages hold exactly the floor of links and code-span
-		// paths; one fewer is under it.
-		{"one Markdown reference fewer than the floor", []docsEdit{
-			replace(fxRefFiller, "- Reference 1 is `go.mod`.\n", ""),
-		}, []string{"74 Markdown references checked, fewer than 75: the links and code-span paths are not being read"}},
 		{"an index with no rows", []docsEdit{
 			replace(fxArch, fxRow01+"\n"+fxRow02+"\n"+fxRow03+"\n", ""),
 		}, []string{
@@ -906,12 +919,39 @@ func TestDocsGateRefusesToReadNothing(t *testing.T) {
 			"README.md:4: names docs/architecture.md#d-01-retries-back-off, which does not exist",
 			"docs/runbook.md:5: links to docs/architecture.md, which does not exist",
 			"docs/runbook.md:14: links to docs/architecture.md, which does not exist",
-			"71 Markdown references checked, fewer than 75: the links and code-span paths are not being read",
 		}},
 		{"a Go file that does not parse", []docsEdit{
 			add("internal/gapi/broken.go", "package gapi\n\nfunc {\n"),
 		}, []string{"gates cannot parse internal/gapi/broken.go: internal/gapi/broken.go:3:6: expected 'IDENT', found '{'"}},
 	})
+}
+
+// Live steps, links and code-span paths each have a floor, so one cannot
+// make up for another that stops being read. The fixture's driver holds 3
+// live steps, and its pages 8 links and 14 code-span paths.
+func TestDocsGateHoldsEachPassToItsFloor(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		floors docsFloors
+		edits  []docsEdit
+		want   []string
+	}{
+		{"each pass at its floor", docsFloors{liveSteps: 3, links: 8, spanPaths: 14}, nil, nil},
+		// Under its floor the driver holds no citation of a step to itself.
+		{"live steps one under their floor", docsFloors{liveSteps: 4, links: 8, spanPaths: 14}, []docsEdit{
+			replace(fxClient, `"reminders set".`, `"a file downloads".`),
+		}, []string{"scripts/livecal: 3 live steps read, fewer than 4: the step tables are not being read"}},
+		{"links one under their floor", docsFloors{liveSteps: 3, links: 9, spanPaths: 14}, nil, []string{
+			"8 Markdown links checked, fewer than 9: the links are not being read",
+		}},
+		{"code-span paths one under their floor", docsFloors{liveSteps: 3, links: 8, spanPaths: 15}, nil, []string{
+			"14 code-span paths checked, fewer than 15: the code spans are not being read",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkDocsGate(t, tc.floors, tc.edits, tc.want)
+		})
+	}
 }
 
 // Outside a git checkout the gate has no file list, which is a gate that
