@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 
@@ -150,7 +151,11 @@ func releaseGate() error {
 		return fmt.Errorf("%s: %w (the release this repository ships has to exist as a file "+
 			"before anything can hold it to anything)", releaseWorkflowPath, err)
 	}
-	out, err := makeVariable(makefilePath, "MCPB_OUT")
+	makefile, err := os.ReadFile(makefilePath)
+	if err != nil {
+		return err
+	}
+	out, err := makeVariable(makeVars(string(makefile)), "MCPB_OUT")
 	if err != nil {
 		return err
 	}
@@ -337,7 +342,7 @@ func validateRelease(cfg goreleaserConfig, files []staged, mcpbOut string, flow 
 			continue
 		}
 		for _, u := range cfg.UniversalBinaries {
-			if contains(a.IDs, u.ID) {
+			if slices.Contains(a.IDs, u.ID) {
 				problems = append(problems, fmt.Sprintf(
 					"archives[%d] includes the universal id %q", i, u.ID))
 			}
@@ -346,7 +351,7 @@ func validateRelease(cfg goreleaserConfig, files []staged, mcpbOut string, flow 
 
 	// 6. Reproducibility: rebuilding a tag reproduces it.
 	for _, b := range cfg.Builds {
-		if !contains(b.Flags, "-trimpath") {
+		if !slices.Contains(b.Flags, "-trimpath") {
 			problems = append(problems, fmt.Sprintf(
 				"build %q does not pass -trimpath, so the binary carries this machine's paths", b.ID))
 		}
@@ -390,6 +395,40 @@ func validateRelease(cfg goreleaserConfig, files []staged, mcpbOut string, flow 
 	return problems, targets
 }
 
+// releaseSubjectProblems holds the attestation's subject-path to what a
+// release publishes: an entry for the archives of each format, the bundle
+// and the checksum file, whose name the config owns. The action splits the
+// value as CSV, at commas and newlines, and trims each glob, so a list
+// separated by spaces is one glob
+// (https://github.com/actions/attest/blob/508db95dd578ae2727ebd6217d5ba78e4fbda05d/src/subject.ts#L303,
+// actions/attest v4.2.1, which attest-build-provenance v4.2.2 runs).
+func releaseSubjectProblems(subjects, checksum string) []string {
+	var problems []string
+	entries := strings.FieldsFunc(subjects, func(r rune) bool { return r == ',' || r == '\n' })
+	for i, entry := range entries {
+		entries[i] = strings.TrimSpace(entry)
+	}
+	if slices.ContainsFunc(entries, func(e string) bool { return strings.ContainsAny(e, " \t") }) {
+		problems = append(problems, fmt.Sprintf("subject-path %q separates with a space, which is read as one "+
+			"glob; separate with commas or newlines", subjects))
+	}
+	// Without a name_template goreleaser names the checksum file for the
+	// project and version, which a fixed subject-path does not match.
+	if checksum == "" {
+		problems = append(problems, "the config names no checksum file, so nothing holds the subject-path "+
+			"to the file every other artifact is verified through")
+	}
+	// An entry ends with the file it covers: dist/*.mcpb.sigstore.json
+	// attests a signature, not the bundle.
+	for _, want := range []string{".tar.gz", ".zip", ".mcpb", checksum} {
+		if want != "" && !slices.ContainsFunc(entries, func(e string) bool { return strings.HasSuffix(e, want) }) {
+			problems = append(problems, fmt.Sprintf("subject-path %q does not name %s, so it carries no attestation",
+				subjects, want))
+		}
+	}
+	return problems
+}
+
 // checkWorkflow holds the release workflow against the config.
 //
 // Read as structure rather than as text. The first version asked
@@ -427,18 +466,7 @@ func checkWorkflow(cfg goreleaserConfig, flow workflow) []string {
 		}
 		attests = true
 		subjects, _ := step.input("subject-path")
-		// The checksum file is the one everything else is verified
-		// through, and its name lives in the config. Two files naming
-		// one artifact, so they are held against each other.
-		if want := cfg.Checksum.NameTemplate; want != "" && !strings.Contains(subjects, want) {
-			problems = append(problems, fmt.Sprintf(
-				"the provenance covers %q and the checksum file is called %q, so the file every "+
-					"other artifact is verified through carries no attestation", subjects, want))
-		}
-		if !strings.Contains(subjects, ".mcpb") {
-			problems = append(problems, "the provenance does not cover the bundle, which is the file "+
-				"most people install")
-		}
+		problems = append(problems, releaseSubjectProblems(subjects, cfg.Checksum.NameTemplate)...)
 	}
 	if !passesNotes {
 		problems = append(problems, releaseWorkflowPath+" does not pass --release-notes to goreleaser, "+
@@ -600,37 +628,6 @@ func readGoreleaser(p string) (goreleaserConfig, error) {
 	return cfg, nil
 }
 
-// makeVariable reads one `NAME ?= value` from the Makefile, so the path
-// the hook packs to has a single owner.
-//
-// A line scan rather than a regexp built per call: the neighboring gates
-// hoist their patterns to package level, and a pattern that has to be
-// composed from an argument cannot be.
-func makeVariable(p, name string) (string, error) {
-	data, err := os.ReadFile(p) //nolint:gosec // a repository path from a constant
-	if err != nil {
-		return "", err
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		rest, ok := strings.CutPrefix(line, name)
-		if !ok {
-			continue
-		}
-		rest = strings.TrimLeft(rest, " \t")
-		rest, ok = strings.CutPrefix(rest, "?=")
-		if !ok {
-			if rest, ok = strings.CutPrefix(rest, "="); !ok {
-				continue
-			}
-		}
-		value, _, _ := strings.Cut(strings.TrimSpace(rest), " #")
-		if value = strings.TrimSpace(value); value != "" {
-			return value, nil
-		}
-	}
-	return "", fmt.Errorf("%s defines no %s", p, name)
-}
-
 // normalizeVersion reduces the two ways the version is spelled to one,
 // so the Makefile's path and the hook's path can be compared as
 // patterns. make expands $(VERSION) and goreleaser expands
@@ -646,10 +643,10 @@ func normalizeVersion(s string) string {
 // buildsDarwin reports whether any of the named builds targets darwin.
 func buildsDarwin(cfg goreleaserConfig, ids []string) bool {
 	for _, b := range cfg.Builds {
-		if len(ids) > 0 && !contains(ids, b.ID) {
+		if len(ids) > 0 && !slices.Contains(ids, b.ID) {
 			continue
 		}
-		if contains(b.Goos, "darwin") {
+		if slices.Contains(b.Goos, "darwin") {
 			return true
 		}
 	}

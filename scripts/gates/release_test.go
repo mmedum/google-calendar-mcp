@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ jobs:
 // repeated: a copy here would let the two drift and still pass.
 func goodOut(t *testing.T) string {
 	t.Helper()
-	out, err := makeVariable(repoPath(t, makefilePath), "MCPB_OUT")
+	out, err := makeVariable(makeVars(string(repoFile(t, makefilePath))), "MCPB_OUT")
 	if err != nil {
 		t.Fatalf("read MCPB_OUT: %v", err)
 	}
@@ -263,14 +264,14 @@ func TestTheWaysTheReleaseWiringBreaks(t *testing.T) {
 			breaks: func(_ *goreleaserConfig, _ *[]staged, _ *string, workflow *string) {
 				*workflow = strings.ReplaceAll(*workflow, "dist/*.mcpb,", "")
 			},
-			want: "does not cover the bundle",
+			want: "does not name .mcpb, so it carries no attestation",
 		},
 		{
 			name: "a checksum file the provenance does not name",
 			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
 				cfg.Checksum.NameTemplate = "SHA256SUMS"
 			},
-			want: "verified through carries no attestation",
+			want: "does not name SHA256SUMS, so it carries no attestation",
 		},
 		{
 			name: "a packer staging too few files to be a bundle",
@@ -374,4 +375,65 @@ func setGlob(files *[]staged, path, glob string) {
 		}
 	}
 	panic("no staged file at " + path)
+}
+
+// The attestation covers every file the release publishes, read as
+// actions/attest reads subject-path: a list split at commas and newlines,
+// with an entry for each file.
+func TestTheAttestationCoversEveryPublishedFile(t *testing.T) {
+	const all = `"dist/*.tar.gz,dist/*.zip,dist/*.mcpb,dist/checksums.txt"`
+	for _, tc := range []struct {
+		name, subjects string
+		noChecksum     bool // the config names no checksum file
+		want           []string
+	}{
+		{name: "a comma list", subjects: all + "  # what the release publishes"},
+		{name: "a literal block, one glob a line", subjects: "|\n            dist/*.tar.gz\n            dist/*.zip\n" +
+			"            dist/*.mcpb\n            dist/checksums.txt"},
+		// The action trims each glob it splits out.
+		{name: "a literal block with a space after a glob", subjects: "|\n            dist/*.tar.gz \n            dist/*.zip\n" +
+			"            dist/*.mcpb\n            dist/checksums.txt"},
+		// YAML folds the lines of a > block into one, with spaces.
+		{name: "a folded block", subjects: ">\n            dist/*.tar.gz\n            dist/*.zip\n" +
+			"            dist/*.mcpb\n            dist/checksums.txt", want: []string{
+			`subject-path "dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt" separates with a space, ` +
+				"which is read as one glob; separate with commas or newlines",
+			`subject-path "dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt" does not name .tar.gz, so it carries no attestation`,
+			`subject-path "dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt" does not name .zip, so it carries no attestation`,
+			`subject-path "dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt" does not name .mcpb, so it carries no attestation`,
+		}},
+		{name: "the Windows archives left out", subjects: `"dist/*.tar.gz,dist/*.mcpb,dist/checksums.txt"`, want: []string{
+			`subject-path "dist/*.tar.gz,dist/*.mcpb,dist/checksums.txt" does not name .zip, so it carries no attestation`,
+		}},
+		{name: "the bundle's signature and not the bundle", subjects: `"dist/*.tar.gz,dist/*.zip,dist/*.mcpb.sigstore.json,dist/checksums.txt"`, want: []string{
+			`subject-path "dist/*.tar.gz,dist/*.zip,dist/*.mcpb.sigstore.json,dist/checksums.txt" does not name .mcpb, ` +
+				"so it carries no attestation",
+		}},
+		{name: "a config that names no checksum file", subjects: all, noChecksum: true, want: []string{
+			"the config names no checksum file, so nothing holds the subject-path to the file every other " +
+				"artifact is verified through",
+		}},
+		{name: "no subject-path at all", want: []string{
+			`subject-path "" does not name .tar.gz, so it carries no attestation`,
+			`subject-path "" does not name .zip, so it carries no attestation`,
+			`subject-path "" does not name .mcpb, so it carries no attestation`,
+			`subject-path "" does not name checksums.txt, so it carries no attestation`,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := goodConfig(t)
+			cfg.Checksum.NameTemplate = "checksums.txt"
+			if tc.noChecksum {
+				cfg.Checksum.NameTemplate = ""
+			}
+			line := "          show-summary: true\n"
+			if tc.subjects != "" {
+				line = "          subject-path: " + tc.subjects + "\n" + line
+			}
+			workflow := replaceOnce(t, goodWorkflow, "          subject-path: "+all+"\n", line)
+			if got := checkWorkflow(cfg, asWorkflow(t, workflow)); !slices.Equal(got, tc.want) {
+				t.Errorf("problems\n got %q\nwant %q", got, tc.want)
+			}
+		})
+	}
 }

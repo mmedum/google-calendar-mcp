@@ -8,7 +8,8 @@ on:
 
 permissions: {}
 
-# The pins gate wants this block in every workflow; see ci.yml for why.
+# An explicit bash also turns on pipefail, so a failure in the left half
+# of a pipe fails the step.
 defaults:
   run:
     shell: bash

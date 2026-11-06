@@ -42,8 +42,9 @@ func TestDumpSchemas(t *testing.T) {
 	if dump.Server != server.Name {
 		t.Fatalf("server = %q", dump.Server)
 	}
-	if dump.SDKVersion == "" {
-		t.Fatal("the dump records no SDK version; an SDK upgrade would look like a surface change")
+	if linked := linkedVersion(t, "github.com/modelcontextprotocol/go-sdk"); dump.SDKVersion != linked {
+		t.Fatalf("the dump records SDK %q and the binary links %q; an SDK upgrade would look like a surface change",
+			dump.SDKVersion, linked)
 	}
 	if len(dump.Tools) < 6 {
 		t.Fatalf("the dump lists %d tools", len(dump.Tools))
