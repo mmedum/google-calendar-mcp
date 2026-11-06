@@ -26,7 +26,7 @@ const sampleChangelog = `# Changelog
 - The working-hours mask.
 
 ` + "```bash" + `
-# not a heading
+### not a heading
 make check
 ` + "```" + `
 
@@ -103,17 +103,20 @@ func TestTheOldestSectionStopsAtTheLinkFooter(t *testing.T) {
 }
 
 // GitHub renders the tag as the page's h1, so an unlifted section starts
-// at h3 under it — a skipped rank.
+// at h3 under it — a skipped rank. A line in fenced code is an example
+// under either fence.
 func TestHeadingsAreLiftedAndFencedCodeIsNot(t *testing.T) {
-	body := notes(t, "v1.1.0", write(t, sampleChangelog))
-	if !hasLine(body, "## Added") {
-		t.Fatalf("### Added was not lifted to ##:\n%s", body)
-	}
-	if hasLine(body, "### Added") {
-		t.Fatalf("### Added survived the lift:\n%s", body)
-	}
-	if !strings.Contains(body, "# not a heading") {
-		t.Fatalf("a comment inside a fenced block was treated as a heading:\n%s", body)
+	for _, fence := range []string{"```", "~~~"} {
+		body := notes(t, "v1.1.0", write(t, strings.ReplaceAll(sampleChangelog, "```", fence)))
+		if !hasLine(body, "## Added") {
+			t.Fatalf("### Added was not lifted to ##:\n%s", body)
+		}
+		if hasLine(body, "### Added") {
+			t.Fatalf("### Added survived the lift:\n%s", body)
+		}
+		if !hasLine(body, "### not a heading") {
+			t.Fatalf("a line inside a %s fence was lifted as a heading:\n%s", fence, body)
+		}
 	}
 }
 

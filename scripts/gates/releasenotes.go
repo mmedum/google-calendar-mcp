@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -41,48 +42,48 @@ func releaseNotes(version, file string, out io.Writer) error {
 }
 
 // sectionFor returns the body under `## [version]`, topped and tailed.
+func sectionFor(changelog, version string) string {
+	lines := strings.Split(changelog, "\n")
+	from, to := changelogSection(lines, version)
+	return trimBlank(lines[from:to])
+}
+
+// changelogSection is the range of lines under `## [version]`, empty when
+// there is no such heading. The docs gate scans the [Unreleased] range it
+// gives, so the scan reads what a release note will say.
 //
 // It stops at the next heading and at the link footer. The footer is not
 // part of any section, but it follows the OLDEST one with no heading in
 // between — so without that second stop the oldest release's notes end
 // with a block of compare links.
-func sectionFor(changelog, version string) string {
+func changelogSection(lines []string, version string) (from, to int) {
 	want := "## [" + version + "]"
-	var body []string
-	inside, fenced := false, false
-	for _, line := range strings.Split(changelog, "\n") {
-		// Inside a fenced block nothing is a heading. promoteHeadings
-		// already knew that and this did not, so an entry showing a
-		// markdown example or a link definition truncated the release
-		// body at that line with every step still green.
-		if inside && strings.HasPrefix(strings.TrimSpace(line), "```") {
-			fenced = !fenced
-			body = append(body, line)
-			continue
-		}
-		switch {
-		case !fenced && strings.HasPrefix(line, want):
-			inside = true
-			continue
-		case !inside:
-			continue
-		case fenced:
-			// Taken verbatim.
-		case strings.HasPrefix(line, "## "), isLinkDefinition(line):
-			return trimBlank(body)
-		case len(body) == 0 && strings.TrimSpace(line) == "":
-			continue // the blank lines under the heading
-		}
-		body = append(body, line)
+	start := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, want) })
+	if start < 0 {
+		return 0, 0
 	}
-	return trimBlank(body)
+	var fence fenced
+	for to = start + 1; to < len(lines); to++ {
+		line := lines[to]
+		// Inside a fenced block nothing is a heading, so an entry showing a
+		// markdown example or a link definition does not end the section.
+		if !fence.code(line) && (strings.HasPrefix(line, "## ") || isLinkDefinition(line)) {
+			break
+		}
+	}
+	return start + 1, to
 }
 
-func trimBlank(body []string) string {
-	for len(body) > 0 && strings.TrimSpace(body[len(body)-1]) == "" {
-		body = body[:len(body)-1]
+// trimBlank joins lines without the blank ones at either end.
+func trimBlank(lines []string) string {
+	blank := func(line string) bool { return strings.TrimSpace(line) == "" }
+	for len(lines) > 0 && blank(lines[0]) {
+		lines = lines[1:]
 	}
-	return strings.Join(body, "\n")
+	for len(lines) > 0 && blank(lines[len(lines)-1]) {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // isLinkDefinition reports whether the line is a markdown link
@@ -109,13 +110,9 @@ func isLinkDefinition(line string) bool {
 // are lifted, so this can never emit a second h1.
 func promoteHeadings(body string) string {
 	lines := strings.Split(body, "\n")
-	fenced := false
+	var fence fenced
 	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			fenced = !fenced
-			continue
-		}
-		if !fenced && strings.HasPrefix(line, "###") {
+		if !fence.code(line) && strings.HasPrefix(line, "###") {
 			lines[i] = line[1:]
 		}
 	}

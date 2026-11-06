@@ -429,7 +429,7 @@ primary calendar beyond its one status event (D-72).
 | D-74 | Releases are `go install` and signed archives | accepted | release, pins, TestTagMajor, TestTheTagMajorMustBeTheModules, TestTheCommittedReleaseConfigIsValid, TestTheReleaseWorkflowTriggersOnATag |
 | D-75 | The bundle ships inside the signature, and the release wiring is checked on every commit | accepted | release, TestTheWaysTheReleaseWiringBreaks, TestTheBuildMatrixIsTheOneDocumented, TestPackRunsEveryCheckTheGateRuns, TestThePackedManifestCarriesTheRealVersion |
 | D-76 | The registry entry is published after the release, from its signed checksums | accepted | server-json, TestTheRegistryEntryIsBuiltFromTheRepository, TestTheRegistryEntryReadsTheVettedManifest, TestTheBundleRowMustBeExactlyOne, TestTheEntryRefusesATagOfAnotherMajor |
-| D-77 | Every tool the release runs is pinned, and the rehearsal runs the same one | accepted | pins, TestATooledRehearsalRunsTheReleasesVersion, TestAnActionThatInstallsAToolMustPinTheTool, TestAWorkflowWrittenInFlowStyleIsStillRead, TestAPairedToolNoWorkflowInstallsIsReported |
+| D-77 | Every tool the release runs is pinned, and the rehearsal runs the same one | accepted | pins, TestATooledRehearsalRunsTheReleasesVersion, TestAnActionThatInstallsAToolMustPinTheTool, TestEveryActionIsClassified, TestGoIsPinnedByAnExactVersionInGoMod, TestAWorkflowWrittenInFlowStyleIsStillRead, TestAPairedToolNoWorkflowInstallsIsReported |
 | D-78 | The bundle asks for every setting the server reads, and its defaults configure nothing | accepted | mcpb, TestBundleVarsAreDerivedFromTheSettings, TestTheRefusalsTurnASwitchOnUnlessItDefaultsOn, TestTheRefusalsTurnSharingOff, TestTheConfigDiffNamesTheFieldsThatDiffer, TestDefaultsProblemsReportsEveryUnreadableDefaultAndTheRest, TestACredentialsFieldIsSensitive |
 | D-79 | The bundle passes settings by `env` alone and starts its staged program from `${__dirname}` | accepted | mcpb, TestTheSixWaysAManifestBreaks, TestTheBundleSettingsRefuseEachBreak |
 | D-80 | The gate, the packer and the registry entry read one vetted manifest | accepted | mcpb, TestRepeatedKeysNameEachPathOnce, TestTheManifestIsTheJSONThePackerWrites, TestTheStampedManifestIsHeldToTheSchema, TestAVendoredSchemaIsHeldToItsRecordedDigest, TestTheFloorComparesVersionsAsNumbers |
@@ -2299,12 +2299,18 @@ release replaces it.
 The Makefile pins goreleaser beside the other tools, and
 `make release-rehearse` runs that version locally, unsigned. The release
 workflow pins its own. `make pins` compares the two, both of them code,
-and the runbook names a make target rather than a version.
+and the runbook names a make target rather than a version. CI runs its
+other tools through make targets, so `make pins` holds each tool the
+Makefile runs with `go run` to an exact version, and to a count.
 
 An action that installs a tool is pinned, and so is the tool it
-installs: cosign's release, syft's version and goreleaser's own. A newer
-cosign made `--bundle` required, and a pinned action installing an
-unpinned cosign fails rather than degrades. The check reads only a
+installs: cosign's release, syft's version, goreleaser's own and Go's,
+through `go-version-file`, whose `toolchain` or else `go` line names an
+x.y.z release. A newer cosign made `--bundle` required, and a
+pinned action installing an unpinned cosign fails rather than degrades.
+An action the table does not classify, as an installer or as one that
+installs nothing, fails until it is: an installer nobody listed is a
+tool nobody pinned. The check reads only a
 step's `with:` block, so a `version:` under `env:` does not satisfy it.
 It reads a workflow in either of YAML's list styles, and fails on one it
 cannot read rather than reporting no problems.

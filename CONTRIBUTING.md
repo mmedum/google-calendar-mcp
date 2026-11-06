@@ -36,7 +36,9 @@ make check
 
 `make check` runs the gates CI runs, and the `check` target in the
 `Makefile` is the list. `make parity` fails when that list and `ci.yml`
-differ, so a gate you add goes in both. Among them: gofmt, `go vet` with
+differ, so a gate you add goes in both. Each gates command names its
+pipeline in `scripts/gates/main.go`, and `make parity` holds that too.
+Among them: gofmt, `go vet` with
 the `live` and `evals` tags, golangci-lint, and race tests with an 80%
 coverage floor per package. The others include govulncheck, a license
 allow-list, gitleaks, a stdio smoke test, the schema diff, the
