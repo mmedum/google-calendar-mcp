@@ -158,9 +158,7 @@ func TestCalendarsResultRendersAndCarriesBothHalves(t *testing.T) {
 }
 
 func TestCalendarResultWithNoSharing(t *testing.T) {
-	res := service.CalendarResult{
-		Calendar: service.CalendarOut{ID: "primary", Title: "Mine", Role: gcal.RoleOwner},
-	}
+	res := service.NewCalendarResult(model.Calendar{ID: "primary", Title: "Mine", Role: gcal.RoleOwner}, nil, "")
 	if !strings.Contains(res.Render(), "nobody else") {
 		t.Fatalf("an unshared calendar does not say so:\n%s", res.Render())
 	}
@@ -170,13 +168,8 @@ func TestCalendarResultWithNoSharing(t *testing.T) {
 // internet, and it is the one ACL value that cannot be undone from the
 // other side.
 func TestPublicSharingIsShouted(t *testing.T) {
-	res := service.CalendarResult{
-		Calendar: service.CalendarOut{ID: "primary", Title: "Mine", Role: gcal.RoleOwner},
-		Sharing: []service.SharingOut{
-			{Who: "anyone", ScopeType: gcal.ScopeTypeDefault, Role: gcal.RoleReader,
-				RoleMeans: gcal.RoleMeans(gcal.RoleReader), Public: true},
-		},
-	}
+	res := service.NewCalendarResult(model.Calendar{ID: "primary", Title: "Mine", Role: gcal.RoleOwner},
+		[]model.Sharing{{ScopeType: gcal.ScopeTypeDefault, Role: gcal.RoleReader}}, "")
 	got := res.Render()
 	if !strings.Contains(got, "ANYONE") {
 		t.Fatalf("a public calendar is not called out:\n%s", got)
