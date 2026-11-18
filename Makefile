@@ -79,7 +79,9 @@ tidy: ## go.mod and go.sum are what `go mod tidy` would write
 
 .PHONY: vuln
 vuln:
-	$(GO) run $(GOVULNCHECK) ./...
+	# A distro build such as go1.27.3-X:nodwarf5 matches no standard-library
+	# advisory, so the scan runs on the official release go.mod names.
+	GOTOOLCHAIN=go$$($(GO) list -m -f '{{.GoVersion}}') $(GO) run $(GOVULNCHECK) ./...
 
 .PHONY: licenses
 licenses:
