@@ -64,7 +64,10 @@ func leakGate(history bool) error {
 	}
 	scope := "working tree"
 	if history {
-		scope = fmt.Sprintf("working tree and full history (%d co-author trailers name an author)", trailers)
+		scope = "working tree and full history"
+		if trailers > 0 {
+			scope += fmt.Sprintf(", passing %d co-author trailer(s) that name an author", trailers)
+		}
 	}
 	fmt.Printf("  %d files, %d rules, %s: clean\n", len(files), len(rules), scope)
 	return nil
@@ -249,7 +252,7 @@ func scanHistory(rules []leakRule) ([]string, int, error) {
 	// publishes nothing.
 	people, err := exec.Command("git", "log", "HEAD", "--format=%ae%n%ce").Output()
 	if err != nil {
-		return nil, 0, fmt.Errorf("read commit authors: %w", err)
+		return nil, 0, fmt.Errorf("read the authors HEAD reaches: %w; the history scan needs a commit", err)
 	}
 	authors := map[string]bool{}
 	for _, address := range strings.Split(string(people), "\n") {

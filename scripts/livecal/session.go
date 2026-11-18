@@ -40,10 +40,11 @@ type callResult struct {
 }
 
 // refused judges a call that must be refused with class, its message
-// holding each of words, so that a refusal for another reason, even of
-// the same class, fails the step. accepted is the failure when the call
-// went through.
-func refused(r callResult, accepted, class string, words ...string) (verdict, string) {
+// holding word and each of more, so that a refusal for another reason,
+// even of the same class, fails the step. accepted is the failure when
+// the call went through.
+func refused(r callResult, accepted, class, word string, more ...string) (verdict, string) {
+	words := append([]string{word}, more...)
 	if !r.isError {
 		return fail, accepted
 	}
@@ -54,9 +55,6 @@ func refused(r callResult, accepted, class string, words ...string) (verdict, st
 		if !strings.Contains(r.text, w) {
 			return fail, fmt.Sprintf("the [%s] refusal does not say %q: %s", class, w, truncate(r.text, 200))
 		}
-	}
-	if len(words) == 0 {
-		return pass, "refused with [" + class + "]"
 	}
 	quoted := make([]string, len(words))
 	for i, w := range words {

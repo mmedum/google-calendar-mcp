@@ -534,14 +534,14 @@ repository existing, so a leak here is a disclosure.
 The leak gate is an allow-list anchored on shapes the server's own
 fields cannot take: an `@` before a dotted domain, a known URL prefix, a
 keyword before an id. `make leaks-history` reads every blob, commit
-message and annotated tag. It allows exactly three shapes: GitHub's
+message and annotated tag. What it passes there includes GitHub's
 support address alone, which Dependabot's sign-off carries; an
 annotated tag's tagger line, which git writes from the tagger's
 identity; and a `Co-authored-by:` trailer's address when it authors or
 commits a commit HEAD reaches, since git publishes that address in the
 commit's header, and a GitHub squash merge can add one for an author of
-a squashed commit. A tag's message is still read. gitleaks covers credentials,
-which `make secrets` runs.
+a squashed commit. A tag's message is still read. gitleaks covers
+credentials, which `make secrets` runs.
 
 Rejected: a test that counts the exemption list, which would detect only
 that the list changed.

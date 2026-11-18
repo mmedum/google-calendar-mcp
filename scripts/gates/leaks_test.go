@@ -229,7 +229,10 @@ func TestTheHistoryScanPassesATrailerNamingAnAuthor(t *testing.T) {
 
 	git := setup(t)
 	git("commit", "-q", "--allow-empty", "--author", "Ada <"+ada+">", "-m", "work")
-	git("commit", "-q", "--allow-empty", "-m", "Squash\n\nCo-authored-by: Ada < "+strings.ToUpper(ada)+" >\r")
+	// verbatim, since git's default cleanup strips the trailing CR a
+	// message pasted from Windows carries.
+	git("commit", "-q", "--allow-empty", "--cleanup=verbatim", "-m",
+		"Squash\n\nCo-authored-by: Ada < "+strings.ToUpper(ada)+" >\r\n")
 	got, trailers, err := scanHistory(leakRules())
 	if err != nil || len(got) != 0 || trailers != 1 {
 		t.Fatalf("a trailer naming an author gave %q, %d trailers, %v; want none, 1, nil", got, trailers, err)
