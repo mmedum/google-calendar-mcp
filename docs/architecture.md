@@ -356,7 +356,7 @@ primary calendar beyond its one status event (D-72).
 | D-01 | One stdio binary per person, on the deployer's own OAuth client | accepted | smoke, leaks, TestLoginRejectsAWebClient, review |
 | D-02 | Stdout carries only MCP JSON-RPC frames | accepted | forbidigo, smoke, TestServeOverTheInjectedStreams, TestDumpSchemasWritesJSONToStdout |
 | D-03 | Logs record the call, never the payload | accepted | TestLogsNeverCarryThePayload, TestAnUnregisteredToolIsLoggedAsAFailure, TestTransportErrorsCarryNoURL, TestURLErrorIsStripped, TestInspectDoesNotLeakTheTokenOnATransportError |
-| D-04 | Nothing in the repository identifies a real account, calendar or person | accepted | leaks, leaks-history, secrets, TestLeakRulesCatchTheirShapeAndAllowTheReserved, TestTheHistoryScanReadsATagButNotItsTagger, TestLeakGateRefusesATreeBelowTheFloor |
+| D-04 | Nothing in the repository identifies a real account, calendar or person | accepted | leaks, leaks-history, secrets, TestLeakRulesCatchTheirShapeAndAllowTheReserved, TestTheHistoryScanReadsATagButNotItsTagger, TestTheHistoryScanPassesATrailerNamingAnAuthor, TestLeakGateRefusesATreeBelowTheFloor |
 | D-05 | Fixtures are generated, and the fake reproduces Google's quirks | accepted | TestSeedIsSynthetic, TestSeedCoversTheShapesThatGoWrong, TestConferenceDataIsIgnoredWithoutTheVersion, TestStatusEventsFollowGooglesGuide, TestUpdatedMinIncludesDeletionsAndRefusesASyncToken |
 | D-06 | Own wire types over raw REST | accepted | depguard, api-fields |
 | D-07 | An event keeps every field it does not model | accepted | TestAnEventKeepsWhatItDoesNotModel, TestASplitCarriesWhatThisServerDoesNotModel, TestConferenceRoundTripKeepsWhatItDoesNotModel |
@@ -534,10 +534,13 @@ repository existing, so a leak here is a disclosure.
 The leak gate is an allow-list anchored on shapes the server's own
 fields cannot take: an `@` before a dotted domain, a known URL prefix, a
 keyword before an id. `make leaks-history` reads every blob, commit
-message and annotated tag. It allows exactly two shapes: GitHub's
-support address alone, which Dependabot's sign-off carries, and an
+message and annotated tag. It allows exactly three shapes: GitHub's
+support address alone, which Dependabot's sign-off carries; an
 annotated tag's tagger line, which git writes from the tagger's
-identity. A tag's message is still read. gitleaks covers credentials,
+identity; and a `Co-authored-by:` trailer's address when it authors or
+commits a commit HEAD reaches, since git publishes that address in the
+commit's header, and a GitHub squash merge can add one for an author of
+a squashed commit. A tag's message is still read. gitleaks covers credentials,
 which `make secrets` runs.
 
 Rejected: a test that counts the exemption list, which would detect only
