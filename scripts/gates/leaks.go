@@ -127,7 +127,7 @@ func leakRules() []leakRule {
 		},
 		{
 			name: "OAuth client id",
-			re:   regexp.MustCompile(`\b\d{10,}-[a-z0-9]{20,}\.apps\.googleusercontent\.com\b`),
+			re:   regexp.MustCompile(`\b\d{10,}-[a-z0-9]{20,}\.(?i:apps\.googleusercontent\.com)\b`),
 		},
 		{
 			name: "Google API key",
@@ -137,11 +137,11 @@ func leakRules() []leakRule {
 			// A calendar id for a secondary calendar. Anchored on the
 			// literal Google suffix, which nothing generated here emits.
 			name: "Google group calendar id",
-			re:   regexp.MustCompile(`\b[a-z0-9]{20,}@group\.calendar\.google\.com\b`),
+			re:   regexp.MustCompile(`\b[a-z0-9]{20,}@(?i:group\.calendar\.google\.com)\b`),
 		},
 		{
 			name: "Google Calendar event URL",
-			re:   regexp.MustCompile(`https://(www\.)?google\.com/calendar/event\?eid=[A-Za-z0-9_\-]+`),
+			re:   regexp.MustCompile(`(?i:https://(www\.)?google\.com)/calendar/event\?eid=[A-Za-z0-9_\-]+`),
 		},
 		{
 			// A Drive or Docs link names somebody's file by its id, and an

@@ -20,6 +20,11 @@ defaults:
   run:
     shell: bash
 
+env:
+  # One goreleaser for every step below. `make pins` holds it equal to
+  # the Makefile's GORELEASER, which is what `release-rehearse` runs.
+  GORELEASER_VERSION: v2.18.2
+
 jobs:
   # A tag is only a pointer, and nothing stops one landing on a commit
   # whose CI never ran or ran red. Everything below publishes somewhere
@@ -109,11 +114,35 @@ jobs:
         with:
           syft-version: v1.51.1
 
+      # The release claims a tag rebuilds byte for byte. This is what
+      # proves it: one target, built twice by the same config, hashes
+      # compared.
+      - name: Reproducible build, first
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de  # v7.3.0
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-1
+      - name: Reproducible build, second
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de  # v7.3.0
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-2
+      - name: Compare the two builds
+        run: |
+          set -euo pipefail
+          a=$(sha256sum "${RUNNER_TEMP}/repro-1" | cut -d' ' -f1)
+          b=$(sha256sum "${RUNNER_TEMP}/repro-2" | cut -d' ' -f1)
+          if [ "${a}" != "${b}" ]; then
+            echo "::error::The same commit built twice gave ${a} and ${b}; the release is not reproducible."
+            exit 1
+          fi
+          echo "reproducible: ${a}"
+
       # Same rule: the action is pinned, so the goreleaser it runs is
       # pinned too. "~> v2" would float within the major version.
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de  # v7.3.0
         with:
-          version: v2.18.1
+          version: ${{ env.GORELEASER_VERSION }}
           args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

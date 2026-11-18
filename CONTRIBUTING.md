@@ -225,6 +225,9 @@ changes only contributors see, unless they must act on them.
   one sentence saying what to do, in the imperative. Anything needing a
   new OAuth consent, a fresh login or a config change is breaking.
 - **Security fixes** name the CVE or GHSA.
+- **An entry is a bullet at the margin.** `gates release-notes` counts
+  nothing else, and nothing in fenced code, so a section without one
+  stops the release.
 
 `release.yml` lifts the matching section verbatim into the GitHub release
 notes, so the entry is the release note. Versioning follows

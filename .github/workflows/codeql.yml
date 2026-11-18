@@ -12,6 +12,12 @@ on:
 permissions:
   contents: read
 
+# Every run step goes to a shell, Windows included, so bash is named
+# once here rather than per job: a job added later inherits it.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   analyze:
     name: analyze

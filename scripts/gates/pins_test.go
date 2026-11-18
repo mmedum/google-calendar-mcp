@@ -4,495 +4,449 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
-// Pinning an action pins the WRAPPER. The steps below fetch a tool, and a
-// SHA on the `uses:` line says nothing about which version of that tool
-// arrives — which is why this half reads as complete when it is not.
-//
-// The last two cases of the table, and the flow-style test below it, are
-// not hypothetical: they are the two ways the first version of this check
-// was wrong. It was a hand-rolled step splitter, it read every line of a
-// step rather than the `with:` block, and it understood only one of
-// YAML's two list styles. Both were found by probing it.
-
-// asWorkflow parses a workflow fragment the way the gate does.
-func asWorkflow(t *testing.T, src string) workflow {
-	t.Helper()
-	var w workflow
-	if err := yaml.Unmarshal([]byte(src), &w); err != nil {
-		t.Fatalf("fixture is not valid YAML: %v", err)
-	}
-	return w
-}
-
-// job wraps steps in the smallest workflow that carries them.
-func job(steps string) string {
-	return "jobs:\n  release:\n    steps:\n" + steps
-}
-
-func TestAnActionThatInstallsAToolMustPinTheTool(t *testing.T) {
-	pinned := job(`      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-        with:
-          cosign-release: v3.1.3
-      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
-        with:
-          syft-version: v1.51.1
-`)
-	problems, pins := unpinnedTools(asWorkflow(t, pinned))
-	if len(problems) > 0 {
-		t.Fatalf("a correctly pinned pair was refused:\n%s", strings.Join(problems, "\n"))
-	}
-	if len(pins) != 2 {
-		t.Fatalf("saw %d installers in a fixture with two", len(pins))
-	}
-
-	cases := []struct {
-		name string
-		body string
-		want string
-	}{
-		{
-			name: "a SHA with no tool version beside it",
-			body: job("      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6\n"),
-			want: "cosign-release",
-		},
-		{
-			name: "a tool version that floats",
-			body: job(`      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
-        with:
-          version: "~> v2"
-`),
-			want: "floats",
-		},
-		{
-			name: "a tool version that names only its major",
-			body: job(`      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
-        with:
-          version: v2
-`),
-			want: "floats",
-		},
-		{
-			name: "a tool version that is latest",
-			body: job(`      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
-        with:
-          syft-version: latest
-`),
-			want: "floats",
-		},
-		{
-			// The first check read every line of the step, so this
-			// passed. `version` is the most collidable input name there
-			// is, and env is where it collides.
-			name: "a version under env, which is not an input",
-			body: job(`      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
-        env:
-          version: v2.18.1
-`),
-			want: "does not set version",
-		},
-		{
-			// A `with:` block belongs to the step above it. Reading the
-			// file as a whole would call this pinned, because the input
-			// the first step lacks is present under another action.
-			name: "a version borrowed from the next step",
-			body: job(`      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-        with:
-          cosign-release: v3.1.3
-`),
-			want: "cosign-release",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			problems, _ := unpinnedTools(asWorkflow(t, tc.body))
-			if len(problems) == 0 {
-				t.Fatalf("%s was accepted", tc.name)
-			}
-			if !mentions(problems, tc.want) {
-				t.Fatalf("wanted %q, got:\n%s", tc.want, strings.Join(problems, "\n"))
-			}
-		})
-	}
-}
-
-// An action that installs a tool and names no version is an absence the
-// other claims cannot see, so every action is classified, and one nobody
-// classified fails until somebody does.
-func TestEveryActionIsClassified(t *testing.T) {
-	t.Chdir(t.TempDir())
-	put(t, ".", "go.mod", "module x\n\ngo 1.27.3\n")
-	const sha = "@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
-	for _, tc := range []struct {
-		name, steps string
-		want        []string
-	}{
-		{"known actions, a local one and a container", "" +
-			"      - uses: actions/checkout" + sha + "\n" +
-			"      - uses: actions/setup-go" + sha + "\n        with:\n          go-version-file: go.mod\n" +
-			"      - uses: ./.github/actions/local\n" +
-			"      - uses: docker://alpine:3.20\n" +
-			"      - run: make check\n", nil},
-		{"an action nobody classified", "      - uses: actions/cache" + sha + "\n", []string{
-			"actions/cache is not classified in scripts/gates/pins.go: add it to toolInstallers with the input " +
-				"that pins its tool, or to notInstallers with the reason. A SHA pins the wrapper, not the tool",
-		}},
-		{"an action named like an installer it is not", "      - uses: actions/setup-go-extra" + sha + "\n", []string{
-			"actions/setup-go-extra is not classified in scripts/gates/pins.go: add it to toolInstallers with the input " +
-				"that pins its tool, or to notInstallers with the reason. A SHA pins the wrapper, not the tool",
-		}},
-		{"Go installed from whatever the runner has", "      - uses: actions/setup-go" + sha + "\n", []string{
-			"actions/setup-go is pinned to a SHA and does not set go-version-file, so the TOOL it installs is " +
-				"whatever is current that morning",
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			problems, _ := unpinnedTools(asWorkflow(t, job(tc.steps)))
-			if !slices.Equal(problems, tc.want) {
-				t.Errorf("problems\n got %q\nwant %q", problems, tc.want)
-			}
-		})
-	}
-}
-
-// CI runs its tools through make targets, so the Makefile's version is
-// CI's: a recipe's `go run` is at an exact version, read through the
-// variables it is spelled with and across a continued line, and a
-// commented-out one runs nothing. A problem names the line it is on, and a
-// rule's two targets share one recipe, which is reported once.
-func TestTheMakefileRunsEachToolAtAnExactVersion(t *testing.T) {
-	const makefile = "GO ?= go\n" +
-		"LINT ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0\n" +
-		"\n" +
-		"lint lint-ci:\n" +
-		"\t$(GO) run $(LINT) run\n" +
-		"vuln:\n" +
-		"\t# $(GO) run honnef.co/go/tools/cmd/staticcheck@latest ./...\n" +
-		"\tgo run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...\n" +
-		"licenses:\n" +
-		"\t$(GO) run \\\n" +
-		"\t\tgithub.com/google/go-licenses@v1.6.0 check ./...\n"
-	for _, tc := range []struct {
-		name, old, new string
-		tools          int
-		want           []string
-	}{
-		{name: "as written", tools: 3},
-		{"a variable at latest", "golangci-lint@v2.14.0", "golangci-lint@latest", 3, []string{
-			"Makefile:5 runs github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest, which is not an exact " +
-				"version, and CI runs it through make",
-		}},
-		{"a branch", "govulncheck@v1.8.0", "govulncheck@master", 3, []string{
-			"Makefile:8 runs golang.org/x/vuln/cmd/govulncheck@master, which is not an exact version, and CI runs it through make",
-		}},
-		{"a continued line at latest", "go-licenses@v1.6.0", "go-licenses@latest", 3, []string{
-			"Makefile:10 runs github.com/google/go-licenses@latest, which is not an exact version, and CI runs it through make",
-		}},
-		{"a tool from the PATH", "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0", "govulncheck", 2, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			edited := makefile
-			if tc.old != "" {
-				edited = replaceOnce(t, makefile, tc.old, tc.new)
-			}
-			tools, problems := makefileTools(edited, makeVars(edited))
-			if tools != tc.tools || !slices.Equal(problems, tc.want) {
-				t.Errorf("makefileTools = %d, %q; want %d, %q", tools, problems, tc.tools, tc.want)
-			}
-		})
-	}
-	committed := string(repoFile(t, makefilePath))
-	if tools, problems := makefileTools(committed, makeVars(committed)); tools < minMakefileTools || problems != nil {
-		t.Errorf("the committed Makefile: %d tools, %q", tools, problems)
-	}
-}
-
-// setup-go installs what go.mod's toolchain directive names, or else its
-// go line, so that is the version held exact.
-func TestGoIsPinnedByAnExactVersionInGoMod(t *testing.T) {
-	const step = "      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e\n" +
-		"        with:\n          go-version-file: go.mod\n"
-	const sets = `actions/setup-go sets go-version-file to "go.mod", `
-	for _, tc := range []struct {
-		name, gomod string
-		want        []string
-	}{
-		{"an exact go line", "module x\n\ngo 1.27.3\n", nil},
-		{"an exact toolchain over a go line that floats", "module x\n\ngo 1.27\n\ntoolchain go1.27.3\n", nil},
-		{"a go line that floats", "module x\n\ngo 1.27\n", []string{sets + "whose Go version 1.27 is not an exact release, x.y.z"}},
-		{"a release candidate over an exact go line", "module x\n\ngo 1.27.3\n\ntoolchain go1.28rc1\n",
-			[]string{sets + "whose Go version 1.28rc1 is not an exact release, x.y.z"}},
-		{"no go line", "module x\n", []string{sets + "which names no Go version"}},
-		{"no such file", "", []string{sets + "which does not exist"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Chdir(t.TempDir())
-			if tc.gomod != "" {
-				put(t, ".", "go.mod", tc.gomod)
-			}
-			if problems, _ := unpinnedTools(asWorkflow(t, job(step))); !slices.Equal(problems, tc.want) {
-				t.Errorf("problems\n got %q\nwant %q", problems, tc.want)
-			}
-		})
-	}
-}
-
-// pinsSHA is a pinned ref with the comment the pins gate wants beside it.
-const pinsSHA = "@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v1.0.0\n"
-
-// pinsMakefile runs five tools at exact versions, and goreleaser at the
-// version pinsCheckout's release workflow runs.
-const pinsMakefile = "GO ?= go\nGORELEASER ?= github.com/goreleaser/goreleaser/v2@v2.18.1\n\n" +
-	"lint:\n\t$(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run\n" +
-	"vuln:\n\t$(GO) run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...\n" +
-	"licenses:\n\t$(GO) run github.com/google/go-licenses@v1.6.0 check ./...\n" +
-	"secrets:\n\t$(GO) run github.com/zricethezav/gitleaks/v8@v8.30.1 dir .\n" +
-	"release-rehearse:\n\t$(GO) run $(GORELEASER) release --snapshot\n"
-
-// The release workflow's steps in pinsCheckout, which use every installer
-// the table names.
 const (
-	pinsCosign = "      - uses: sigstore/cosign-installer" + pinsSHA + "        with:\n          cosign-release: v3.1.3\n"
-	pinsSyft   = "      - uses: anchore/sbom-action/download-syft" + pinsSHA + "        with:\n          syft-version: v1.51.1\n"
-	pinsGo     = "      - uses: actions/setup-go" + pinsSHA + "        with:\n          go-version-file: go.mod\n"
-	pinsSteps  = "      - uses: actions/checkout" + pinsSHA + pinsGo + pinsCosign + pinsSyft +
-		"      - uses: goreleaser/goreleaser-action" + pinsSHA + "        with:\n          version: v2.18.1\n"
+	pinsTestSHA   = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+	pinsTestCQL   = "1c5b675653bb5c22dbe9b12b556ec555138e09fd"
+	pinsTestSteps = `      - uses: actions/checkout@` + pinsTestSHA + ` # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@` + pinsTestSHA + ` # v7.0.0
+        with:
+          go-version-file: go.mod
+`
+	pinsTestShell = "defaults:\n  run:\n    shell: bash\n"
 )
 
-// pinsCheckout makes the working directory a checkout the pins gate
-// accepts, but for ciSteps, which follow ci.yml's checkout step from its
-// line 5, and the Makefile given.
-func pinsCheckout(t *testing.T, ciSteps, makefile string) {
-	t.Helper()
-	t.Chdir(t.TempDir())
-	put(t, ".", ciWorkflowPath, "jobs:\n  test:\n    steps:\n      - uses: actions/checkout"+pinsSHA+ciSteps)
-	put(t, ".", releaseWorkflowPath, "jobs:\n  release:\n    steps:\n"+pinsSteps)
-	put(t, ".", makefilePath, makefile)
-	put(t, ".", "go.mod", "module x\n\ngo 1.27.3\n")
-}
-
-// Every action is pinned to a 40-character SHA with the version it is in a
-// comment beside it. A local action is a path in this checkout, and a
-// container image is pinned by its sha256 digest.
-func TestEveryActionIsPinnedToACommentedSHA(t *testing.T) {
-	for _, tc := range []struct{ name, step, want string }{
-		{"a local action", "      - uses: ./.github/actions/local\n", ""},
-		{"a container image by digest",
-			"      - uses: docker://alpine@sha256:" + strings.Repeat("0123456789abcdef", 4) + "\n", ""},
-		{"a tag", "      - uses: actions/checkout@v7.0.1\n",
-			".github/workflows/ci.yml:5: actions/checkout@v7.0.1 is pinned to a tag or branch, not a 40-character SHA"},
-		{"no ref", "      - uses: actions/checkout\n", ".github/workflows/ci.yml:5: actions/checkout has no version at all"},
-		{"a SHA with no comment", "      - uses: actions/checkout@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e\n",
-			".github/workflows/ci.yml:5: actions/checkout is pinned but has no trailing comment saying which version that SHA is"},
-		{"a container image by tag", "      - uses: docker://alpine:3.20\n",
-			".github/workflows/ci.yml:5: docker://alpine:3.20 is a container image with no sha256 digest, so the image it runs can change"},
-		{"a container image by name alone", "      - uses: docker://alpine\n",
-			".github/workflows/ci.yml:5: docker://alpine is a container image with no sha256 digest, so the image it runs can change"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pinsCheckout(t, tc.step, pinsMakefile)
-			if err := pinGate(); tc.want == "" && err != nil || tc.want != "" && (err == nil || err.Error() != tc.want) {
-				t.Errorf("pinGate() = %v, want %q", err, tc.want)
-			}
-		})
+// pinsFixture is a repository every rule passes on. A test replaces one
+// file to break one thing.
+func pinsFixture() map[string]string {
+	return map[string]string{
+		"go.mod": "module example.com/m\n\ngo 1.27.1\n\nrequire (\n\tgithub.com/modelcontextprotocol/go-sdk v1.8.0\n)\n",
+		"Makefile": "GO ?= go\n" +
+			"GOLANGCI_LINT ?= github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2\n" +
+			"GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0\n" +
+			"GOLICENSES ?= github.com/google/go-licenses@v1.6.0\n" +
+			"GITLEAKS ?= github.com/zricethezav/gitleaks/v8@v8.30.1\n" +
+			"GORELEASER ?= github.com/goreleaser/goreleaser/v2@v2.18.2\n" +
+			"\nlint:\n\t$(GO) run $(GOLANGCI_LINT) run\n" +
+			"\nvuln:\n\t$(GO) run $(GOVULNCHECK) ./...\n" +
+			"\nlicenses:\n\t$(GO) run $(GOLICENSES) check ./...\n" +
+			"\nsecrets:\n\t$(GO) run $(GITLEAKS) dir .\n\t$(GO) run $(GITLEAKS) git .\n" +
+			"\ngoreleaser-check:\n\t$(GO) run $(GORELEASER) check\n",
+		".github/workflows/ci.yml": "on: [push]\n" + pinsTestShell + "jobs:\n  test:\n    steps:\n" + pinsTestSteps +
+			"      - name: test\n        run: make test\n",
+		".github/workflows/codeql.yml": "on: [push]\n" + pinsTestShell + "jobs:\n  analyze:\n    steps:\n" + pinsTestSteps +
+			"      - uses: github/codeql-action/init@" + pinsTestCQL + " # v4.38.1\n" +
+			"      - uses: github/codeql-action/analyze@" + pinsTestCQL + " # v4.38.1\n",
+		".github/workflows/release.yml": "on:\n  push:\n    tags: [\"v*\"]\n" + pinsTestShell + "env:\n  GORELEASER_VERSION: v2.18.2\n" +
+			"jobs:\n  release:\n    steps:\n" + pinsTestSteps +
+			"      - uses: sigstore/cosign-installer@" + pinsTestSHA + " # v4.1.2\n        with:\n          cosign-release: v3.1.3\n" +
+			"      - uses: anchore/sbom-action/download-syft@" + pinsTestSHA + " # v0.24.2\n        with:\n          syft-version: v1.52.0\n" +
+			"      - uses: goreleaser/goreleaser-action@" + pinsTestSHA + " # v7.2.3\n        with:\n" +
+			"          version: ${{ env.GORELEASER_VERSION }}\n          args: release --clean\n",
+		".github/workflows/publish-mcp.yml": "on: [workflow_dispatch]\n" + pinsTestShell + "jobs:\n  publish:\n    steps:\n" + pinsTestSteps +
+			"      - uses: sigstore/cosign-installer@" + pinsTestSHA + " # v4.1.2\n        with:\n          cosign-release: v3.1.3\n" +
+			"      - name: publish\n        env:\n          PUBLISHER_VERSION: v1.8.1\n        run: ./mcp-publisher publish\n",
+		".goreleaser.yaml":      "version: 2\nbefore:\n  hooks:\n    - go mod download\n",
+		"scripts/gates/main.go": "package main\n",
 	}
 }
 
-// The floor counts the installers the table names, not the steps that use
-// them: setup-go in every job would meet a count of steps by itself.
-func TestThePinsGateSeesEveryInstallerTheTableNames(t *testing.T) {
-	pinsCheckout(t, pinsGo+pinsGo, pinsMakefile)
-	put(t, ".", releaseWorkflowPath, "jobs:\n  release:\n    steps:\n"+
-		replaceOnce(t, replaceOnce(t, pinsSteps, pinsCosign, ""), pinsSyft, ""))
-	const want = "found 2 of the 4 tool-installing actions the table names across 2 workflows; " +
-		"a workflow that cannot be read reports no problems"
-	if err := pinGate(); err == nil || err.Error() != want {
-		t.Errorf("pinGate() = %v, want %q", err, want)
-	}
-}
+// pinsFixturePlaces is how many pins the fixture writes: go.mod two, the
+// Makefile five, ci.yml one, codeql.yml three, release.yml five and
+// publish-mcp.yml three, a setup-go step's go.mod among each workflow's.
+const pinsFixturePlaces = 19
 
-// A tool moved to the PATH leaves no version to judge, so the gate holds
-// the Makefile to a count of the tools it runs at one.
-func TestThePinsGateCountsTheMakefilesTools(t *testing.T) {
-	pinsCheckout(t, "", pinsMakefile)
-	if err := pinGate(); err != nil {
-		t.Fatalf("five tools at exact versions: %v", err)
-	}
-	pinsCheckout(t, "", replaceOnce(t, pinsMakefile, "$(GO) run golang.org/x/vuln/cmd/govulncheck@v1.8.0", "govulncheck"))
-	const want = "the Makefile runs 4 tools at a version, fewer than 5: a tool runs from the PATH, " +
-		"or the `go run module@version` reader has stopped finding them"
-	if err := pinGate(); err == nil || err.Error() != want {
-		t.Errorf("pinGate() = %v, want %q", err, want)
-	}
-}
+// pinsFixtureInstallers is how many installing steps the fixture has: a
+// setup-go in each of the four workflows, cosign in release.yml and
+// publish-mcp.yml, and syft and goreleaser in release.yml.
+const pinsFixtureInstallers = 8
 
-// The other half of a gate that reads a file: one it cannot read must not
-// come back clean. The first version understood block sequences only, so
-// this workflow produced no steps, no installers and no problems.
-func TestAWorkflowWrittenInFlowStyleIsStillRead(t *testing.T) {
-	w := asWorkflow(t, "jobs: {release: {steps: [{uses: 'sigstore/cosign-installer@abc'}]}}\n")
-	problems, pins := unpinnedTools(w)
-	if len(pins) != 1 {
-		t.Fatalf("saw %d installers in a flow-style workflow that has one", len(pins))
-	}
-	if !mentions(problems, "cosign-release") {
-		t.Fatalf("the unpinned tool was not reported: %v", problems)
-	}
-}
-
-// The committed workflows are the case that matters. They name go.mod,
-// which is read from the repository's root.
-func TestTheCommittedWorkflowsPinWhatTheyInstall(t *testing.T) {
-	root, err := repoRoot()
+func TestPinsPassesOnAPinnedRepository(t *testing.T) {
+	r, err := pinsCheck(writeTree(t, pinsFixture()), pinsFixturePlaces)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(root)
-	for _, path := range []string{ciWorkflowPath, releaseWorkflowPath} {
-		problems, _ := unpinnedTools(asWorkflow(t, string(repoFile(t, path))))
-		if len(problems) > 0 {
-			t.Errorf("%s:\n%s", path, strings.Join(problems, "\n"))
-		}
+	if len(r.problems) > 0 {
+		t.Fatalf("problems on a clean fixture:\n%s", strings.Join(r.problems, "\n"))
+	}
+	if r.installers != pinsFixtureInstallers || r.places != pinsFixturePlaces || len(r.tools) != len(pinsTools) {
+		t.Errorf("read %d installers, %d places, %d tools; want %d, %d, %d",
+			r.installers, r.places, len(r.tools), pinsFixtureInstallers, pinsFixturePlaces, len(pinsTools))
 	}
 }
 
-// Every installer the table names is actually used, or pinGate's floor is
-// asserting a number nothing can reach.
-func TestEveryInstallerInTheTableIsUsed(t *testing.T) {
-	seen := map[string]bool{}
-	for _, path := range []string{ciWorkflowPath, releaseWorkflowPath} {
-		for _, step := range asWorkflow(t, string(repoFile(t, path))).steps() {
-			action, _ := usesAction(step.Uses)
-			seen[action] = true
-		}
-	}
-	for _, want := range toolInstallers {
-		if !seen[want.action] {
-			t.Errorf("the table names %s and no workflow uses it, so the floor counts a step nobody runs",
-				want.action)
-		}
-	}
-}
-
-// A workflow only a person can start is one nobody remembers to start.
-func TestTheReleaseWorkflowTriggersOnATag(t *testing.T) {
-	w := asWorkflow(t, string(repoFile(t, releaseWorkflowPath)))
-	if !w.triggersOnTag("v") {
-		t.Fatal("the release workflow does not trigger on a v* tag")
-	}
-	ci := asWorkflow(t, string(repoFile(t, ciWorkflowPath)))
-	if ci.triggersOnTag("v") {
-		t.Fatal("ci triggers on a tag, so a release would run its gates twice and this check proves nothing")
-	}
-}
-
-// The rehearsal is a copy of the release, and a copy goes stale. The
-// Makefile pins the goreleaser `make release-rehearse` runs, the
-// workflow pins the goreleaser the tag runs, and neither file mentions
-// the other: the difference would show up as a release behaving unlike
-// every rehearsal of it.
-//
-// The pair is named in the table rather than derived from the two
-// strings. Deriving it looks free and gets `anchore/sbom-action` wrong,
-// which installs syft.
-
-// pinnedIn is the workflow side of the comparison, keyed the way
-// pinGate keys it.
-func pinnedIn(version string) map[int][]installerPin {
-	for i, want := range toolInstallers {
-		if want.makeVar != "" {
-			return map[int][]installerPin{i: {{row: i, version: version, pinned: true}}}
-		}
-	}
-	return nil
-}
-
-// unpinnedIn is the same row with a step that exists and sets no
-// version: claim 2's sentence, not this check's.
-func unpinnedIn() map[int][]installerPin {
-	for i, want := range toolInstallers {
-		if want.makeVar != "" {
-			return map[int][]installerPin{i: {{row: i}}}
-		}
-	}
-	return nil
-}
-
-func TestATooledRehearsalRunsTheReleasesVersion(t *testing.T) {
-	makefile := makeVars(string(repoFile(t, makefilePath)))
-
-	local, err := makeVariable(makefile, "GORELEASER")
+// Every pin a reader finds counts toward the floor, so one pin less is
+// one under it: a reader that stops seeing its file cannot pass.
+func TestPinsHoldsTheReadersToAFloor(t *testing.T) {
+	r, err := pinsCheck(writeTree(t, pinsFixture()), pinsFixturePlaces+1)
 	if err != nil {
-		t.Fatalf("the table pairs goreleaser-action with GORELEASER: %v", err)
+		t.Fatal(err)
 	}
-	_, version, _ := strings.Cut(local, "@")
+	want := []string{"read 19 pins across the workflows, Makefile and go.mod, want at least 20; a reader is not seeing its file"}
+	if !slices.Equal(r.problems, want) {
+		t.Errorf("problems %q, want %q", r.problems, want)
+	}
+}
 
-	// The repository as it stands, read from BOTH files.
-	//
-	// The first version of this built the workflow side out of the
-	// Makefile's own value and then asserted the two agreed, which is a
-	// comparison with itself: it passes on any pin, including two that
-	// have drifted apart. The expected value has to come from somewhere
-	// other than the thing under test, so the workflow is parsed.
-	flow, err := readWorkflow(repoPath(t, releaseWorkflowPath))
+// Each case breaks one thing and names the sentence that must say so.
+func TestPinsRefuses(t *testing.T) {
+	cases := []struct {
+		name, file, old, new, want string
+	}{
+		{"a tag instead of a SHA", ".github/workflows/ci.yml", "checkout@" + pinsTestSHA, "checkout@v7",
+			`actions/checkout is pinned to "v7"`},
+		{"a SHA with no comment", ".github/workflows/ci.yml", pinsTestSHA + " # v7.0.1", pinsTestSHA,
+			"with no comment saying"},
+		{"an installer that names no tool version", ".github/workflows/release.yml", "          cosign-release: v3.1.3\n", "",
+			"does not set cosign-release"},
+		{"an unknown action", ".github/workflows/ci.yml", "      - name: test\n",
+			"      - uses: someone/thing@" + pinsTestSHA + " # v1.0.0\n      - name: test\n", "someone/thing is not classified"},
+		{"a range", ".github/workflows/release.yml", "syft-version: v1.52.0", "syft-version: ~v1.52",
+			"not one exact version"},
+		{"latest", "Makefile", "go-licenses@v1.6.0", "go-licenses@latest", "pinned to @latest"},
+		{"an env reference nobody set", ".github/workflows/release.yml", "  GORELEASER_VERSION: v2.18.2\n", "  OTHER: x\n",
+			"${{ env.GORELEASER_VERSION }}"},
+		{"the rehearsal and the release disagree", "Makefile", "goreleaser/v2@v2.18.2", "goreleaser/v2@v2.18.1",
+			"goreleaser is"},
+		{"gitleaks differs between the Makefile and CI", ".github/workflows/ci.yml", "        run: make test\n",
+			"        run: go run github.com/zricethezav/gitleaks/v8@v8.29.0 dir .\n", "gitleaks is"},
+		{"cosign differs between the release and the publish", ".github/workflows/publish-mcp.yml",
+			"cosign-release: v3.1.3", "cosign-release: v3.1.4", "cosign is v3.1.4 at"},
+		{"a Go version that is not one exact version", "go.mod", "go 1.27.1", "go 1.27",
+			`go is pinned to "1.27", which is not one exact version`},
+		{"a tool pinned nowhere", ".github/workflows/publish-mcp.yml", "PUBLISHER_VERSION: v1.8.1", "X: y",
+			"mcp-publisher is pinned nowhere"},
+		{"an unknown version env", ".github/workflows/ci.yml", "        run: make test\n",
+			"        env:\n          THING_VERSION: v1.0.0\n        run: make test\n", "THING_VERSION"},
+		{"a uses: on the next line, by tag", ".github/workflows/ci.yml", "      - name: test\n",
+			"      - name: cache\n        uses:\n          actions/checkout@v7\n      - name: test\n", `actions/checkout is pinned to "v7"`},
+		{"a step in a flow mapping, by tag", ".github/workflows/ci.yml", "      - name: test\n",
+			"      - {uses: actions/checkout@v7}\n      - name: test\n", `actions/checkout is pinned to "v7"`},
+		{"a flow mapping's SHA with no comment", ".github/workflows/ci.yml", "      - name: test\n",
+			"      - {uses: actions/checkout@" + pinsTestSHA + "}\n      - name: test\n", "with no comment saying"},
+		{"an env version name in another case", ".github/workflows/ci.yml", "        run: make test\n",
+			"        env:\n          Gitleaks_Version: latest\n        run: make test\n", `gitleaks is pinned to "latest"`},
+		{"a version input in another case", ".github/workflows/release.yml", "syft-version: v1.52.0", "Syft-Version: latest",
+			`Syft-Version is "latest", which is not one exact version`},
+		{"one input written twice, in two cases", ".github/workflows/release.yml", "          syft-version: v1.52.0\n",
+			"          syft-version: v1.52.0\n          SYFT-VERSION: v1.52.0\n", "are one input to the runner"},
+		{"a local reusable call given latest", ".github/workflows/ci.yml", "jobs:\n  test:\n",
+			"jobs:\n  call:\n    uses: ./.github/workflows/publish-mcp.yml\n    with:\n      tool-version: latest\n  test:\n",
+			`with tool-version "latest", which is not one exact version`},
+		{"a remote reusable call given latest", ".github/workflows/ci.yml", "jobs:\n  test:\n",
+			"jobs:\n  call:\n    uses: some-org/some-repo/.github/workflows/x.yml@" + pinsTestSHA + " # v1.0.0\n" +
+				"    with:\n      tool-version: latest\n  test:\n",
+			`with tool-version "latest", which is not one exact version`},
+		{"go-version beside go-version-file", ".github/workflows/ci.yml", "          go-version-file: go.mod\n",
+			"          go-version-file: go.mod\n          go-version: 1.20.1\n", "sets go-version, which setup-go reads before"},
+		{"a workflow with no shell", ".github/workflows/ci.yml", pinsTestShell, "",
+			"no workflow-level `defaults: run: shell: bash`"},
+		{"a step in another shell", ".github/workflows/ci.yml", "        run: make test\n",
+			"        shell: pwsh\n        run: make test\n", "has a step in pwsh"},
+		{"an env value naming a tool at another version", ".github/workflows/ci.yml", "        run: make test\n",
+			"        env:\n          GOVULNCHECK: golang.org/x/vuln/cmd/govulncheck@v1.1.0\n        run: make test\n",
+			"govulncheck is v1.1.0 at .github/workflows/ci.yml"},
+		{"a recipe that runs a known tool from the PATH", "Makefile", "\t$(GO) run $(GOVULNCHECK) ./...\n",
+			"\t$(GO) run $(GOVULNCHECK) ./...\n\tgolangci-lint run\n", "names golangci-lint as a word of its own"},
+		{"a recipe that downloads the latest release", "Makefile", "\t$(GO) run $(GOVULNCHECK) ./...\n",
+			"\t$(GO) run $(GOVULNCHECK) ./...\n\tcurl -fsSLO https://github.com/x/y/releases/latest/download/z\n",
+			"releases/latest/download installs whatever is newest"},
+		{"a substitution that runs a tool at another version", "Makefile", "\t$(GO) run $(GOVULNCHECK) ./...\n",
+			"\t$(GO) run $(GOVULNCHECK) ./...\n\techo $$(go run golang.org/x/vuln/cmd/govulncheck@v1.1.0 -version)\n",
+			"govulncheck is"},
+		{"a Makefile line the reader does not read", "Makefile", "GO ?= go\n", "GO ?= go\ninclude other.mk\n",
+			"is a directive or an assignment"},
+		{"a goreleaser hook that runs an unknown tool", ".goreleaser.yaml", "    - go mod download\n",
+			"    - go mod download\n    - go run example.org/tool@v1.0.0\n", "names a tool pinsTools does not know"},
+		{"a goreleaser hook whose else branch runs another tool", ".goreleaser.yaml", "    - go mod download\n",
+			"    - go mod download\n    - '{{ if .IsSnapshot }}true{{ else }}go run example.org/tool@main{{ end }}'\n",
+			"a template control action"},
+		{"a goreleaser hook that runs a tool at another version through bash -c", ".goreleaser.yaml",
+			"    - go mod download\n", "    - go mod download\n    - bash -c \"go run golang.org/x/vuln/cmd/govulncheck@v1.1.0 ./...\"\n",
+			"govulncheck is"},
+		{"a goreleaser merge key", ".goreleaser.yaml", "before:\n", "before:\n  <<: {skip: true}\n", "a merge key"},
+		{"goreleaser at a version the reader was not checked against", ".github/workflows/release.yml",
+			"GORELEASER_VERSION: v2.18.2", "GORELEASER_VERSION: v2.18.3", "reader is checked against v2.18.2's source"},
+		{"a Go literal under scripts at another version", "scripts/gates/main.go", "package main\n",
+			"package main\n\nconst x = \"golang.org/x/vuln/cmd/govulncheck@v1.1.0\"\n", "govulncheck is"},
+		// A shape the reader does not parse hides the file's steps, and
+		// with them every pin in it.
+		{"a workflow whose pins the reader stops seeing", ".github/workflows/publish-mcp.yml",
+			"  publish:\n    steps:\n", "  publish:\n    stages:\n",
+			".github/workflows/publish-mcp.yml: no pins read, though it pins a tool"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			files := pinsFixture()
+			applyEdits(t, files, replace(tc.file, tc.old, tc.new))
+			r, err := pinsCheck(writeTree(t, files), pinsFixturePlaces)
+			if err != nil {
+				t.Fatal(err)
+			}
+			joined := strings.Join(r.problems, "\n")
+			if !strings.Contains(joined, tc.want) {
+				t.Errorf("want %q among the problems, got:\n%s", tc.want, joined)
+			}
+		})
+	}
+}
+
+// Each row edits the fixture and wants exactly these problems, or none.
+// The floor on places is off: a row that drops a pin is about something
+// else.
+func TestPinsNamesEachProblem(t *testing.T) {
+	const (
+		ci      = ".github/workflows/ci.yml"
+		release = ".github/workflows/release.yml"
+		vuln    = "\t$(GO) run $(GOVULNCHECK) ./...\n"
+		goStep  = "          go-version-file: go.mod\n"
+		digest  = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		pathRun = "Makefile: GOVULNCHECK pins golang.org/x/vuln/cmd/govulncheck@v1.8.0 and no recipe runs it with go run, " +
+			"so the tool runs from the PATH"
+	)
+	gorelease := "      - uses: goreleaser/goreleaser-action@" + pinsTestSHA + " # v7.2.3\n        with:\n" +
+		"          version: ${{ env.GORELEASER_VERSION }}\n          args: release --clean\n"
+	for _, tc := range []struct {
+		name  string
+		edits []docsEdit
+		want  []string
+	}{
+		{name: "a container image by its digest, quoted", edits: []docsEdit{
+			replace(ci, "      - name: test\n", "      - uses: \"docker://alpine@sha256:"+digest+"\"\n      - name: test\n"),
+		}},
+		{name: "a container image by tag, quoted, and by name alone", edits: []docsEdit{
+			replace(ci, "      - name: test\n", "      - uses: \"docker://alpine:3.20\"\n      - uses: docker://alpine\n      - name: test\n"),
+		}, want: []string{
+			".github/workflows/ci.yml: job test: docker://alpine:3.20 is a container image with no sha256 digest, so the image it runs can change",
+			".github/workflows/ci.yml: job test: docker://alpine is a container image with no sha256 digest, so the image it runs can change",
+		}},
+		{name: "a container image a line scan cannot see: on the next line, and in a flow mapping", edits: []docsEdit{
+			replace(ci, "      - name: test\n", "      - name: unpinned image\n        uses:\n          docker://ghcr.io/example/img:main\n"+
+				"      - {uses: \"docker://alpine:3.20\"}\n      - name: test\n"),
+		}, want: []string{
+			".github/workflows/ci.yml: job test: docker://ghcr.io/example/img:main is a container image with no sha256 digest, " +
+				"so the image it runs can change",
+			".github/workflows/ci.yml: job test: docker://alpine:3.20 is a container image with no sha256 digest, so the image it runs can change",
+		}},
+		{name: "a container image on the next line, by its digest", edits: []docsEdit{
+			replace(ci, "      - name: test\n", "      - uses:\n          docker://alpine@sha256:"+digest+"\n      - name: test\n"),
+		}},
+		{name: "an action by SHA in single quotes", edits: []docsEdit{
+			replace(ci, "      - uses: actions/checkout@"+pinsTestSHA+" # v7.0.1\n", "      - uses: 'actions/checkout@"+pinsTestSHA+"' # v7.0.1\n"),
+		}},
+		{name: "a job's container and service by digest", edits: []docsEdit{
+			replace(ci, "  test:\n    steps:\n", "  test:\n    container: alpine@sha256:"+digest+"\n    services:\n      db:\n"+
+				"        image: postgres@sha256:"+digest+"\n    steps:\n"),
+		}},
+		{name: "a job's container by tag, as a string and under image:, and a service by tag", edits: []docsEdit{
+			replace(ci, "  test:\n    steps:\n", "  test:\n    container: node:18\n    services:\n      db:\n        image: postgres:16\n    steps:\n"),
+			replace(".github/workflows/codeql.yml", "  analyze:\n    steps:\n", "  analyze:\n    container:\n      image: alpine:3.20\n    steps:\n"),
+		}, want: []string{
+			".github/workflows/ci.yml: job test runs the container from node:18, which has no sha256 digest, so the image it runs can change",
+			".github/workflows/ci.yml: job test runs the service db from postgres:16, which has no sha256 digest, so the image it runs can change",
+			".github/workflows/codeql.yml: job analyze runs the container from alpine:3.20, which has no sha256 digest, " +
+				"so the image it runs can change",
+		}},
+		{name: "a job's container and its image by an alias", edits: []docsEdit{
+			replace(ci, "jobs:\n  test:\n    steps:\n", "env:\n  IMAGE: &img node:18\njobs:\n  test:\n    container: *img\n    steps:\n"),
+			replace(".github/workflows/codeql.yml", "  analyze:\n    steps:\n", "  analyze:\n    container:\n      image: &tag alpine:3.20\n"+
+				"    services:\n      db:\n        image: *tag\n    steps:\n"),
+		}, want: []string{
+			".github/workflows/ci.yml: job test runs the container from node:18, which has no sha256 digest, so the image it runs can change",
+			".github/workflows/codeql.yml: job analyze runs the container from alpine:3.20, which has no sha256 digest, " +
+				"so the image it runs can change",
+			".github/workflows/codeql.yml: job analyze runs the service db from alpine:3.20, which has no sha256 digest, " +
+				"so the image it runs can change",
+		}},
+		{name: "a Makefile pin whose version is another variable", edits: []docsEdit{
+			replace("Makefile", "GORELEASER ?= github.com/goreleaser/goreleaser/v2@v2.18.2\n",
+				"GORELEASER_VERSION ?= v2.18.2\nGORELEASER ?= github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)\n"),
+		}},
+		{name: "a Makefile pin whose version is another variable, at another version", edits: []docsEdit{
+			replace("Makefile", "GORELEASER ?= github.com/goreleaser/goreleaser/v2@v2.18.2\n",
+				"GORELEASER_VERSION ?= v2.18.1\nGORELEASER ?= github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)\n"),
+		}, want: []string{"goreleaser is v2.18.2 at .github/workflows/release.yml: goreleaser/goreleaser-action and " +
+			"v2.18.1 at Makefile: GORELEASER: one tool, one version"}},
+		{name: "setup-go with no go-version-file", edits: []docsEdit{replace(ci, goStep, "")}, want: []string{
+			".github/workflows/ci.yml: actions/setup-go is pinned by SHA and does not set go-version-file, " +
+				"so the tool it installs is whatever is current that morning",
+		}},
+		{name: "an exact toolchain over a go line that floats", edits: []docsEdit{
+			replace("go.mod", "go 1.27.1\n", "go 1.27\n\ntoolchain go1.27.1\n"),
+		}},
+		{name: "a toolchain that floats over an exact go line", edits: []docsEdit{
+			replace("go.mod", "go 1.27.1\n", "go 1.27.1\n\ntoolchain go1.27\n"),
+		}, want: []string{
+			`.github/workflows/ci.yml: actions/setup-go: go is pinned to "1.27", which is not one exact version`,
+			`.github/workflows/codeql.yml: actions/setup-go: go is pinned to "1.27", which is not one exact version`,
+			`.github/workflows/publish-mcp.yml: actions/setup-go: go is pinned to "1.27", which is not one exact version`,
+			`.github/workflows/release.yml: actions/setup-go: go is pinned to "1.27", which is not one exact version`,
+			`go.mod: go: go is pinned to "1.27", which is not one exact version`,
+		}},
+		{name: "a go.mod that names no Go version", edits: []docsEdit{replace("go.mod", "go 1.27.1\n", "")}, want: []string{
+			`.github/workflows/ci.yml: actions/setup-go sets go-version-file to "go.mod", which names no Go version`,
+			`.github/workflows/codeql.yml: actions/setup-go sets go-version-file to "go.mod", which names no Go version`,
+			`.github/workflows/publish-mcp.yml: actions/setup-go sets go-version-file to "go.mod", which names no Go version`,
+			`.github/workflows/release.yml: actions/setup-go sets go-version-file to "go.mod", which names no Go version`,
+			`go.mod: go: go is pinned to "", which is not one exact version`,
+		}},
+		{name: "setup-go reading a file that is not a go.mod", edits: []docsEdit{
+			replace(ci, goStep, "          go-version-file: .go-version\n"),
+		}, want: []string{
+			`.github/workflows/ci.yml: actions/setup-go sets go-version-file to ".go-version", which is not the repository's go.mod`,
+		}},
+		{name: "setup-go reading another go.mod", edits: []docsEdit{
+			replace(ci, goStep, "          go-version-file: tools/go.mod\n"),
+			add("tools/go.mod", "module example.com/tools\n\ngo 1.26.0\n"),
+		}, want: []string{
+			`.github/workflows/ci.yml: actions/setup-go sets go-version-file to "tools/go.mod", which is not the repository's go.mod`,
+		}},
+		{name: "a tool the Makefile runs from the PATH", edits: []docsEdit{
+			replace("Makefile", vuln, "\tgovulncheck ./...\n"),
+		}, want: []string{
+			"Makefile:12: names govulncheck as a word of its own, which runs it from the PATH at whatever " +
+				"version is installed there; run it with $(GO) run and the variable that pins it",
+			pathRun,
+		}},
+		{name: "a tool the Makefile runs after build flags", edits: []docsEdit{
+			replace("Makefile", vuln, "\t$(GO) run -modfile=tools.mod -mod mod $(GOVULNCHECK) ./...\n"),
+		}},
+		{name: "a package of this module, run by the Makefile and by CI", edits: []docsEdit{
+			replace("Makefile", vuln, vuln+"\ndocs:\n\t$(GO) run ./scripts/gates docs\n"),
+			replace(ci, "        run: make test\n", "        run: go run ./scripts/gates docs\n"),
+		}},
+		{name: "a tool CI runs through the go command's full path", edits: []docsEdit{
+			replace(ci, "        run: make test\n", "        run: $GOROOT/bin/go run golang.org/x/vuln/cmd/govulncheck@main ./...\n"),
+		}, want: []string{
+			`.github/workflows/ci.yml: go run golang.org/x/vuln/cmd/govulncheck: govulncheck is pinned to "main", which is not one exact version`,
+			"govulncheck is main at .github/workflows/ci.yml: go run golang.org/x/vuln/cmd/govulncheck and v1.8.0 at " +
+				"Makefile: GOVULNCHECK: one tool, one version",
+		}},
+		{name: "a tool CI runs after a build flag, at another version", edits: []docsEdit{
+			replace(ci, "        run: make test\n", "        run: go run -mod=mod github.com/zricethezav/gitleaks/v8@v8.29.0 dir .\n"),
+		}, want: []string{
+			"gitleaks is v8.29.0 at .github/workflows/ci.yml: go run github.com/zricethezav/gitleaks/v8 and v8.30.1 at " +
+				"Makefile: GITLEAKS: one tool, one version",
+		}},
+		{name: "a recipe that runs a tool at latest", edits: []docsEdit{
+			replace("Makefile", vuln, "\t$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...\n"),
+		}, want: []string{
+			`Makefile: vuln: govulncheck is pinned to "latest", which is not one exact version`,
+			pathRun,
+			"govulncheck is v1.8.0 at Makefile: GOVULNCHECK and latest at Makefile: vuln: one tool, one version",
+		}},
+		{name: "a variable at latest that a recipe runs, reported once", edits: []docsEdit{
+			replace("Makefile", "govulncheck@v1.8.0", "govulncheck@latest"),
+		}, want: []string{
+			"Makefile: GOVULNCHECK is pinned to @latest",
+			"govulncheck is pinned nowhere: a tool the table names that no file pins is either gone or unread",
+		}},
+		{name: "a recipe line continued onto the next, at latest", edits: []docsEdit{
+			replace("Makefile", vuln, "\t$(GO) run \\\n\t\tgolang.org/x/vuln/cmd/govulncheck@latest ./...\n"),
+		}, want: []string{
+			`Makefile: vuln: govulncheck is pinned to "latest", which is not one exact version`,
+			pathRun,
+			"govulncheck is v1.8.0 at Makefile: GOVULNCHECK and latest at Makefile: vuln: one tool, one version",
+		}},
+		{name: "a recipe that runs a tool the table does not know", edits: []docsEdit{
+			replace("Makefile", vuln, vuln+"\t$(GO) run honnef.co/go/tools/cmd/staticcheck@v0.6.1 ./...\n"),
+		}, want: []string{
+			"Makefile: vuln runs go run honnef.co/go/tools/cmd/staticcheck@v0.6.1, a tool pinsTools does not know",
+		}},
+		{name: "a Makefile pin that is not one exact version", edits: []docsEdit{
+			replace("Makefile", "govulncheck@v1.8.0", "govulncheck@v1.8"),
+		}, want: []string{`Makefile: GOVULNCHECK: govulncheck is pinned to "v1.8", which is not one exact version`}},
+		// One installer used in every job meets a count of steps.
+		{name: "an installer no step uses, with another used twice", edits: []docsEdit{
+			replace(release, gorelease, ""),
+			replace(ci, "      - name: test\n", "      - uses: sigstore/cosign-installer@"+pinsTestSHA+" # v4.1.2\n"+
+				"        with:\n          cosign-release: v3.1.3\n      - name: test\n"),
+		}, want: []string{
+			"no workflow step installs goreleaser through goreleaser/goreleaser-action; the reader is not seeing " +
+				"the step, or the table names an installer nothing uses",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := pinsFixture()
+			applyEdits(t, files, tc.edits...)
+			r, err := pinsCheck(writeTree(t, files), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(r.problems, tc.want) {
+				t.Errorf("problems\n got %q\nwant %q", r.problems, tc.want)
+			}
+		})
+	}
+}
+
+func TestPinsNamesAMissingWorkflow(t *testing.T) {
+	files := pinsFixture()
+	delete(files, ".github/workflows/codeql.yml")
+	r, err := pinsCheck(writeTree(t, files), pinsFixturePlaces)
 	if err != nil {
-		t.Fatalf("read the release workflow: %v", err)
+		t.Fatal(err)
 	}
-	real := map[int][]installerPin{}
-	pins, _ := installerPins(flow)
-	for _, pin := range pins {
-		real[pin.row] = append(real[pin.row], pin)
+	if !strings.Contains(strings.Join(r.problems, "\n"), "codeql.yml does not exist") {
+		t.Errorf("a missing workflow was not named: %v", r.problems)
 	}
-	problems, compared := rehearsalDrift(real, makefile)
-	if len(problems) != 0 || compared != 1 {
-		t.Fatalf("the Makefile pins %s and release.yml disagrees: %v (%d comparison(s))",
-			version, problems, compared)
-	}
+}
 
-	// One version behind is the whole failure: both numbers are valid.
-	problems, _ = rehearsalDrift(pinnedIn("v0.0.1"), makefile)
-	if len(problems) != 1 {
-		t.Fatalf("a drifted workflow pin must be reported: %v", problems)
-	}
-	for _, want := range []string{"GORELEASER", version, "v0.0.1"} {
-		if !strings.Contains(problems[0], want) {
-			t.Errorf("the message does not name %q: %s", want, problems[0])
+func TestWorkflowResolveEnv(t *testing.T) {
+	w := workflow{Env: map[string]string{"V": "v1.2.3"}}
+	for in, want := range map[string]string{
+		"${{ env.V }}": "v1.2.3", "${{env.V}}": "v1.2.3", "${{ env.W }}": "${{ env.W }}", "v9.9.9": "v9.9.9",
+	} {
+		if got := w.resolveEnv(in); got != want {
+			t.Errorf("resolveEnv(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
 
-// A paired row nobody runs any more compares nothing, and a check that
-// compares nothing prints the same clean line as one that found nothing
-// wrong.
-func TestAPairedToolNoWorkflowInstallsIsReported(t *testing.T) {
-	problems, compared := rehearsalDrift(map[int][]installerPin{}, makeVars(string(repoFile(t, makefilePath))))
-	if compared != 1 {
-		t.Fatalf("the table pairs %d tool(s) with a Makefile variable, want 1", compared)
+// The runner reads input names in upper case, so an installer's version
+// input written in another case is the input.
+func TestPinsReadsAnInputInAnyCase(t *testing.T) {
+	files := pinsFixture()
+	applyEdits(t, files, replace(".github/workflows/release.yml", "cosign-release: v3.1.3", "Cosign-Release: v3.1.3"))
+	r, err := pinsCheck(writeTree(t, files), 1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(problems) != 1 || !strings.Contains(problems[0], "nothing was compared") {
-		t.Fatalf("an unused pairing must be reported: %v", problems)
-	}
-}
-
-// A step that installs the tool and pins nothing is claim 2's business.
-// Reporting it here as "no workflow step uses this" would send the
-// reader to the wrong file for a defect the gate has already named.
-func TestAnUnpinnedStepIsLeftToTheClaimThatOwnsIt(t *testing.T) {
-	problems, _ := rehearsalDrift(unpinnedIn(), makeVars(string(repoFile(t, makefilePath))))
-	if len(problems) != 0 {
-		t.Fatalf("the rehearsal check spoke for a defect claim 2 owns: %v", problems)
+	if len(r.problems) > 0 {
+		t.Errorf("problems:\n%s", strings.Join(r.problems, "\n"))
 	}
 }
 
-// The Makefile variable named in the table has to exist, or the
-// comparison reads one side of two.
-func TestAMissingMakefilePinIsReported(t *testing.T) {
-	problems, _ := rehearsalDrift(pinnedIn("v2.18.1"), makeVars("all:\n\ttrue\n"))
-	if len(problems) != 1 || !strings.Contains(problems[0], "GORELEASER") {
-		t.Fatalf("a Makefile with no pin must be reported: %v", problems)
+// A reusable workflow of this repository may be given one context's value,
+// which it holds where it uses it.
+func TestPinsPassesALocalCallsContext(t *testing.T) {
+	files := pinsFixture()
+	applyEdits(t, files, replace(".github/workflows/ci.yml", "jobs:\n  test:\n",
+		"jobs:\n  call:\n    uses: ./.github/workflows/publish-mcp.yml\n    with:\n      tool-version: ${{ inputs.v }}\n  test:\n"))
+	r, err := pinsCheck(writeTree(t, files), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.problems) > 0 {
+		t.Errorf("problems:\n%s", strings.Join(r.problems, "\n"))
+	}
+}
+
+// A line break YAML parsers do not all read alike is refused before the
+// file is read, wherever it sits.
+func TestReadWorkflowRefusesAStrayLineBreak(t *testing.T) {
+	for name, brk := range map[string]string{"a lone CR": "\r", "NEL": "\u0085", "LS": "\u2028", "PS": "\u2029"} {
+		t.Run(name, func(t *testing.T) {
+			files := pinsFixture()
+			applyEdits(t, files, replace(".github/workflows/ci.yml", "      - name: test\n",
+				"      - name: test"+brk+"      - uses: evil-org/x@main\n"))
+			_, err := pinsCheck(writeTree(t, files), 1)
+			if err == nil || !strings.Contains(err.Error(), ".github/workflows/ci.yml:") {
+				t.Errorf("err = %v, want the line named", err)
+			}
+		})
 	}
 }
