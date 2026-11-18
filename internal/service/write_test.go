@@ -630,6 +630,67 @@ func TestAnOccurrenceIsAddressableByItsScheduledStart(t *testing.T) {
 	}
 }
 
+// A move into a calendar that shows the event to someone outside the
+// organization is refused, and writes nothing; one whose sharing cannot
+// be read goes through, saying so (#43).
+func TestMoveEventComparesWhoCanSeeTheTwoCalendars(t *testing.T) {
+	t.Run("wider", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+			gcal.AclRule{ID: "user:partner@elsewhere.test", Role: gcal.RoleReader,
+				Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "partner@elsewhere.test"}})
+		for _, dry := range []bool{true, false} {
+			_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team", DryRun: dry,
+			})
+			if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "partner@elsewhere.test") {
+				t.Errorf("dry_run=%v: a move into a calendar an outsider reads = %v, want [blocked] naming them", dry, err)
+			}
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("a refused move wrote %+v", w)
+		}
+	})
+	t.Run("the source unreadable", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+			gcal.AclRule{ID: "default", Role: gcal.RoleReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}})
+		fake.Fail["GET /calendars/me@example.test/acl"] = 403
+		_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "could not be read to compare") {
+			t.Errorf("a wider move from a calendar whose sharing cannot be read = %v, want [blocked] saying so", err)
+		}
+	})
+	t.Run("a transient failure", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.Fail["GET /calendars/team@group.calendar.example.test/acl"] = 503
+		_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if classOf(t, err) != gapi.ClassUnavailable {
+			t.Errorf("a move whose sharing read failed transiently = %v, want [unavailable], not a skipped check", err)
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("the move went through: %+v", w)
+		}
+	})
+	t.Run("unreadable", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.Fail["GET /calendars/team@group.calendar.example.test/acl"] = 403
+		out, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if err != nil {
+			t.Fatalf("a move into a calendar whose sharing cannot be read: %v", err)
+		}
+		if !strings.Contains(strings.Join(out.Notes, "\n"), "Could not read who can see \"Sample Team\"") {
+			t.Errorf("the move does not say it could not compare: %v", out.Notes)
+		}
+	})
+}
+
 // A rule whose occurrences fall by the local date, BYMONTHDAY=31, is
 // counted in the series' own zone however the call reads it: from Tokyo,
 // 20:00 in Los Angeles is already the next day, and a count walked there
@@ -1094,16 +1155,17 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 			})
 			return err
 		}, "list, settings, read, delete"},
-		// Five, not four: the event is read back from the destination,
-		// because a successful move answers with status:cancelled and
-		// the result would otherwise report a moved meeting as a
-		// canceled one.
-		{"move", 5, func(s *service.Service) error {
+		// The event is read back from the destination, because a
+		// successful move answers with status:cancelled, and the
+		// destination's sharing is read to compare who can see it; the
+		// source's is read only when the destination has a wide rule
+		// (D-91).
+		{"move", 6, func(s *service.Service) error {
 			_, err := s.MoveEvent(context.Background(), service.MoveOptions{
 				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
 			})
 			return err
-		}, "list, settings, read, move, read back"},
+		}, "list, settings, read, the destination's sharing, move, read back"},
 		{"respond", 4, func(s *service.Service) error {
 			_, err := s.RespondToEvent(context.Background(), service.RespondOptions{
 				Calendar: "primary", EventID: "evinvite001", Response: "accepted", Notify: "all",
@@ -1742,9 +1804,10 @@ func TestAMoveStraightBackIsMadeAfterOneFreshRead(t *testing.T) {
 		"server read it") {
 		t.Fatalf("the result does not say the move was made on its second try:\n%s", out.Text())
 	}
-	// Read, refused move, read, move, read back: both tries are counted.
-	if out.Requests != 5 {
-		t.Fatalf("api_requests = %d, want 5", out.Requests)
+	// Read, the destination's sharing, refused move, the same again, move,
+	// read back: both tries are counted.
+	if out.Requests != 7 {
+		t.Fatalf("api_requests = %d, want 7", out.Requests)
 	}
 }
 
