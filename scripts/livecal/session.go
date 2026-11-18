@@ -39,6 +39,30 @@ type callResult struct {
 	isError bool
 }
 
+// refused judges a call that must be refused with class, its message
+// holding word and each of more, so that a refusal for another reason,
+// even of the same class, fails the step. accepted is the failure when
+// the call went through.
+func refused(r callResult, accepted, class, word string, more ...string) (verdict, string) {
+	words := append([]string{word}, more...)
+	if !r.isError {
+		return fail, accepted
+	}
+	if !strings.Contains(r.text, "["+class+"]") {
+		return fail, "the refusal is not classified " + class + ": " + truncate(r.text, 200)
+	}
+	for _, w := range words {
+		if !strings.Contains(r.text, w) {
+			return fail, fmt.Sprintf("the [%s] refusal does not say %q: %s", class, w, truncate(r.text, 200))
+		}
+	}
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = strconv.Quote(w)
+	}
+	return pass, "refused with [" + class + "], saying " + strings.Join(quoted, ", ")
+}
+
 func startServer(ctx context.Context, bin, profile string) (*session, error) {
 	// Not tied to ctx, and in a process group of its own: an interrupt
 	// stops the driver's steps, and the server must outlive it, so the

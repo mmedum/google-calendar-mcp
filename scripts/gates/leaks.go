@@ -40,6 +40,7 @@ func leakGate(history bool) error {
 	}
 
 	var findings []string
+	trailers := 0
 	for _, path := range files {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -49,11 +50,12 @@ func leakGate(history bool) error {
 	}
 
 	if history {
-		more, err := scanHistory(rules)
+		more, n, err := scanHistory(rules)
 		if err != nil {
 			return err
 		}
 		findings = append(findings, more...)
+		trailers = n
 	}
 
 	if len(findings) > 0 {
@@ -63,6 +65,9 @@ func leakGate(history bool) error {
 	scope := "working tree"
 	if history {
 		scope = "working tree and full history"
+		if trailers > 0 {
+			scope += fmt.Sprintf(", passing %d co-author trailer(s) that name an author", trailers)
+		}
 	}
 	fmt.Printf("  %d files, %d rules, %s: clean\n", len(files), len(rules), scope)
 	return nil
@@ -224,7 +229,9 @@ func scannableFiles() ([]string, error) {
 
 func isExecutable(info os.FileInfo) bool { return info.Mode().Perm()&0o111 != 0 }
 
-func scanHistory(rules []leakRule) ([]string, error) {
+// scanHistory returns its findings and how many co-author trailers it
+// passed for naming an author of HEAD's history.
+func scanHistory(rules []leakRule) ([]string, int, error) {
 	var out []string
 
 	// An annotated tag is an object of its own, listed by its name below.
@@ -232,7 +239,7 @@ func scanHistory(rules []leakRule) ([]string, error) {
 	// identity, which every published tag carries by construction.
 	tagRefs, err := exec.Command("git", "for-each-ref", "--format=%(objectname) %(objecttype)", "refs/tags").Output()
 	if err != nil {
-		return nil, fmt.Errorf("list tags: %w", err)
+		return nil, 0, fmt.Errorf("list tags: %w", err)
 	}
 	tags := map[string]bool{}
 	for _, line := range strings.Split(string(tagRefs), "\n") {
@@ -241,15 +248,29 @@ func scanHistory(rules []leakRule) ([]string, error) {
 		}
 	}
 
+	// HEAD's history, not --all: a local branch that is never pushed
+	// publishes nothing.
+	people, err := exec.Command("git", "log", "HEAD", "--format=%ae%n%ce").Output()
+	if err != nil {
+		return nil, 0, fmt.Errorf("read the authors HEAD reaches: %w; the history scan needs a commit", err)
+	}
+	authors := map[string]bool{}
+	for _, address := range strings.Split(string(people), "\n") {
+		if address = strings.ToLower(strings.TrimSpace(address)); address != "" {
+			authors[address] = true
+		}
+	}
+
 	msgs, err := exec.Command("git", "log", "--all", "--format=%H%n%B").Output()
 	if err != nil {
-		return nil, fmt.Errorf("read commit messages: %w", err)
+		return nil, 0, fmt.Errorf("read commit messages: %w", err)
 	}
-	out = append(out, scanOne("git log", string(msgs), rules)...)
+	kept, trailers := withoutAuthorTrailers(string(msgs), authors)
+	out = append(out, scanOne("git log", kept, rules)...)
 
 	blobs, err := exec.Command("git", "rev-list", "--objects", "--all").Output()
 	if err != nil {
-		return nil, fmt.Errorf("list objects: %w", err)
+		return nil, 0, fmt.Errorf("list objects: %w", err)
 	}
 	seen := 0
 	for _, line := range strings.Split(string(blobs), "\n") {
@@ -269,9 +290,31 @@ func scanHistory(rules []leakRule) ([]string, error) {
 		out = append(out, scanOne("blob "+fields[1], string(content), rules)...)
 	}
 	if seen == 0 {
-		return nil, fmt.Errorf("history scan read no blobs; that is not a real repository")
+		return nil, 0, fmt.Errorf("history scan read no blobs; that is not a real repository")
 	}
-	return out, nil
+	return out, trailers, nil
+}
+
+// coAuthorTrailer is a Co-authored-by trailer line: what precedes the
+// address, and the address.
+var coAuthorTrailer = regexp.MustCompile(`(?im)^(co-authored-by:[^<\n]*)<([^>\n]+)>[ \t]*\r?$`)
+
+// withoutAuthorTrailers drops the address of each Co-authored-by trailer
+// that authors or commits a commit HEAD reaches, keeps the rest of the
+// line to scan, and counts what it dropped. Git publishes that address
+// in the commit's header, so the trailer, which a GitHub squash merge
+// can add for an author of a squashed commit, reveals nothing new.
+func withoutAuthorTrailers(messages string, authors map[string]bool) (string, int) {
+	n := 0
+	kept := coAuthorTrailer.ReplaceAllStringFunc(messages, func(line string) string {
+		m := coAuthorTrailer.FindStringSubmatch(line)
+		if !authors[strings.ToLower(strings.TrimSpace(m[2]))] {
+			return line
+		}
+		n++
+		return m[1]
+	})
+	return kept, n
 }
 
 // withoutTagger is an annotated tag as git cat-file prints it, less the

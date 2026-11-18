@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -127,16 +128,12 @@ func TestLeakGateFailsOnAFinding(t *testing.T) {
 // so a person's hooks, signing or default branch never reach a test.
 func gitIn(t *testing.T, dir string) func(args ...string) {
 	t.Helper()
-	global := filepath.Join(t.TempDir(), "gitconfig")
-	if err := os.WriteFile(global, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
 	return func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-c", "user.name=Pat", "-c", "user.email=pat" + "@" + "acme-sample.com"},
 			args...)...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+global, "GIT_CONFIG_NOSYSTEM=1")
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -151,8 +148,17 @@ func isolatedRepo(t *testing.T) (string, func(args ...string)) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	// git reads $XDG_CONFIG_HOME/git/ignore even with the global
-	// configuration off.
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// configuration off. A gate's go command keeps its telemetry there on
+	// Linux and can still be writing when the temporary directory is
+	// removed; mode "off" stops it (https://go.dev/doc/telemetry#config).
+	config := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(config, "go", "telemetry"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "go", "telemetry", "mode"), []byte("off"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", config)
 	dir := t.TempDir()
 	t.Chdir(dir)
 	git := gitIn(t, dir)
@@ -174,12 +180,96 @@ func TestTheHistoryScanReadsATagButNotItsTagger(t *testing.T) {
 	git("commit", "-q", "-m", "first")
 	git("tag", "-a", "v0.1.0", "-m", "a release")
 	t.Chdir(dir)
-	if got, err := scanHistory(leakRules()); err != nil || len(got) != 0 {
+	if got, _, err := scanHistory(leakRules()); err != nil || len(got) != 0 {
 		t.Errorf("a tag's tagger line was read: %q, %v", got, err)
 	}
 	git("tag", "-a", "v0.2.0", "-m", "for carol"+at+"acme-sample.com")
 	want := []string{`tag v0.2.0: email address "caro*************.com"`}
-	if got, err := scanHistory(leakRules()); err != nil || !slices.Equal(got, want) {
+	if got, _, err := scanHistory(leakRules()); err != nil || !slices.Equal(got, want) {
 		t.Errorf("a tag's message gave %q, %v; want %q", got, err, want)
 	}
+}
+
+// TestIsolatedRepoTurnsGoTelemetryOff holds that the go command reads the
+// mode file where isolatedRepo writes it; a moved file would leave
+// telemetry writing into the temporary directory while a test removes it.
+func TestIsolatedRepoTurnsGoTelemetryOff(t *testing.T) {
+	isolatedRepo(t)
+	if dir, err := os.UserConfigDir(); err != nil || dir != os.Getenv("XDG_CONFIG_HOME") {
+		t.Skip("the go command does not read its config from XDG_CONFIG_HOME on " + runtime.GOOS)
+	}
+	out, err := exec.Command("go", "telemetry").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go telemetry: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != "off" {
+		t.Errorf("go telemetry under isolatedRepo = %q, want %q", got, "off")
+	}
+}
+
+// A Co-authored-by trailer naming an address that authors a commit HEAD
+// reaches passes, since git already publishes it in that commit's header.
+// Any other address, the same one outside a trailer, and an address only
+// an unmerged branch authors are still findings, and an empty address is
+// never an author.
+func TestTheHistoryScanPassesATrailerNamingAnAuthor(t *testing.T) {
+	at := "@"
+	ada := "ada" + at + "acme-sample.com"
+	bea := "bea" + at + "acme-sample.com"
+	setup := func(t *testing.T) func(args ...string) {
+		t.Helper()
+		_, git := isolatedRepo(t)
+		if err := os.WriteFile("f.txt", []byte("nothing here\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "f.txt")
+		git("commit", "-q", "-m", "first")
+		return git
+	}
+
+	git := setup(t)
+	git("commit", "-q", "--allow-empty", "--author", "Ada <"+ada+">", "-m", "work")
+	// verbatim, since git's default cleanup strips the trailing CR a
+	// message pasted from Windows carries.
+	git("commit", "-q", "--allow-empty", "--cleanup=verbatim", "-m",
+		"Squash\n\nCo-authored-by: Ada < "+strings.ToUpper(ada)+" >\r\n")
+	got, trailers, err := scanHistory(leakRules())
+	if err != nil || len(got) != 0 || trailers != 1 {
+		t.Fatalf("a trailer naming an author gave %q, %d trailers, %v; want none, 1, nil", got, trailers, err)
+	}
+
+	for name, message := range map[string]string{
+		"another address":        "Squash\n\nCo-authored-by: Bea <" + bea + ">",
+		"the author outside one": "Thanks to " + ada,
+		"another in the name":    "Squash\n\nCo-authored-by: " + bea + " <" + ada + ">",
+	} {
+		t.Run(name, func(t *testing.T) {
+			git := setup(t)
+			git("commit", "-q", "--allow-empty", "--author", "Ada <"+ada+">", "-m", "work")
+			git("commit", "-q", "--allow-empty", "-m", message)
+			if got, _, err := scanHistory(leakRules()); err != nil || len(got) == 0 {
+				t.Errorf("%q gave %q, %v; want a finding", message, got, err)
+			}
+		})
+	}
+
+	t.Run("an empty address", func(t *testing.T) {
+		git := setup(t)
+		git("commit", "-q", "--allow-empty", "--author", "Nobody <>", "-m", "work")
+		git("commit", "-q", "--allow-empty", "-m", "Squash\n\nCo-authored-by: Nobody < >")
+		if _, trailers, err := scanHistory(leakRules()); err != nil || trailers != 0 {
+			t.Errorf("an empty trailer address gave %d trailers, %v; want 0, nil", trailers, err)
+		}
+	})
+
+	t.Run("an author only another branch reaches", func(t *testing.T) {
+		git := setup(t)
+		git("switch", "-q", "-c", "side")
+		git("commit", "-q", "--allow-empty", "--author", "Ada <"+ada+">", "-m", "work")
+		git("switch", "-q", "main")
+		git("commit", "-q", "--allow-empty", "-m", "Squash\n\nCo-authored-by: Ada <"+ada+">")
+		if got, _, err := scanHistory(leakRules()); err != nil || len(got) == 0 {
+			t.Errorf("a trailer naming an author only side reaches gave %q, %v; want a finding", got, err)
+		}
+	})
 }

@@ -1304,11 +1304,8 @@ func steps(scratch string, state seedState) []step {
 				"calendar": scratch, "sync_token": "livecal-not-a-token", "updated_since": "2026-03-16",
 			},
 			check: func(r callResult) (verdict, string) {
-				if !r.isError || !strings.Contains(r.text, "[invalid]") {
-					return fail, "updated_since and sync_token together were not refused as invalid: " +
-						truncate(r.text, 200)
-				}
-				return pass, "refused with [invalid]"
+				return refused(r, "updated_since and sync_token together were accepted",
+					"invalid", "cannot be used together")
 			},
 		},
 		{
@@ -1497,13 +1494,7 @@ func steps(scratch string, state seedState) []step {
 				"working_from": "22:00", "working_to": "06:00",
 			},
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "a mask crossing midnight was accepted"
-				}
-				if !strings.Contains(r.text, "[invalid]") {
-					return fail, "the refusal is not classified invalid: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [invalid]"
+				return refused(r, "a mask crossing midnight was accepted", "invalid", "crosses midnight")
 			},
 		},
 		{
@@ -1538,13 +1529,7 @@ func steps(scratch string, state seedState) []step {
 			tool: "get_calendar",
 			args: map[string]any{"calendar": unknownCalendarRef},
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "an unknown calendar resolved to something"
-				}
-				if !strings.Contains(r.text, "[not_found]") {
-					return fail, "the refusal is not classified not_found"
-				}
-				return pass, "refused with [not_found]"
+				return refused(r, "an unknown calendar resolved to something", "not_found", "no calendar called")
 			},
 		},
 		{
@@ -1552,10 +1537,15 @@ func steps(scratch string, state seedState) []step {
 			tool: "list_events",
 			args: map[string]any{"calendars": []string{scratch}, "from": "2026-03-15"},
 			check: func(r callResult) (verdict, string) {
+				// The SDK refuses it against the schema, where `to` is
+				// required, before the handler runs, so it carries no class.
 				if !r.isError {
 					return fail, "a read without a full window succeeded"
 				}
-				return pass, "refused"
+				if !strings.Contains(r.text, `missing properties: ["to"]`) {
+					return fail, "the refusal does not name the missing to: " + truncate(r.text, 200)
+				}
+				return pass, `refused by the schema, naming the missing "to"`
 			},
 		},
 		{
@@ -1563,13 +1553,8 @@ func steps(scratch string, state seedState) []step {
 			tool: "list_events",
 			args: map[string]any{"calendars": []string{scratch}, "from": "next tuesday", "to": "2026-03-31"},
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "a relative expression was accepted; this server does not guess"
-				}
-				if !strings.Contains(r.text, "[invalid]") {
-					return fail, "the refusal is not classified invalid"
-				}
-				return pass, "refused with [invalid]"
+				return refused(r, "a relative expression was accepted; this server does not guess",
+					"invalid", "neither a yyyy-mm-dd date nor an RFC3339 timestamp")
 			},
 		},
 		{
@@ -1577,17 +1562,11 @@ func steps(scratch string, state seedState) []step {
 			tool: "list_events",
 			args: cal(map[string]any{"time_zone": "Mars/Olympus_Mons"}),
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "an invented zone was accepted"
-				}
 				// [invalid], not [unavailable]: a zone that does not
 				// exist will not start existing, and [unavailable] is
 				// retryable, so the caller was told to retry a request
 				// that can never succeed.
-				if !strings.Contains(r.text, "[invalid]") {
-					return fail, "an impossible zone is not classified invalid: " + truncate(r.text, 160)
-				}
-				return pass, "refused with [invalid]"
+				return refused(r, "an invented zone was accepted", "invalid", "not an IANA zone name")
 			},
 		},
 	}
