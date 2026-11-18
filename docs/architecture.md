@@ -426,10 +426,10 @@ primary calendar beyond its one status event (D-72).
 | D-71 | The live driver reads only what it made, prints nothing it did not write, and by default reaches nobody | accepted | TestOnlyACalendarTheDriverMadeIsAdopted, TestEmptyingMailsNobodyUnlessASweepAsks, TestSyncAndPageTokensAreRedacted, transcript, TestAnUnarmedRunSendsNoRequestThatReachesAPerson, TestAnUnarmedRunCallsNoToolThatReachesAPerson, TestAnUnarmedRunCallsNoRealGuestStep, TestBothPathsToGooglePassTheReachGuard, TestSpikeNotifyNeedsEveryInviteeNamed, TestAnArmedRunReachesOnlyTheNamedInvitees |
 | D-72 | One status event per run may live on the primary calendar, and nothing else is written there | accepted | TestTheGuardHoldsTheDriversOwnCalls, TestTheGuardLetsOneStatusEventOntoThePrimaryCalendar, TestTheStatusEventIsRecordedBeforeItIsAskedFor, TestTheCleanupReadsTheStatusEventBackGone, TestEveryStopSignalEndsTheStepsNotTheDriver, TestAClosedTranscriptPipeDoesNotEndTheDriver |
 | D-73 | Evals score the calendar, never the model's account of it | accepted | evals-check |
-| D-74 | Releases are `go install` and signed archives | accepted | release, pins, TestTagMajor, TestTheTagMajorMustBeTheModules, TestTheCommittedReleaseConfigIsValid, TestTheReleaseWorkflowTriggersOnATag |
-| D-75 | The bundle ships inside the signature, and the release wiring is checked on every commit | accepted | release, TestTheWaysTheReleaseWiringBreaks, TestTheBuildMatrixIsTheOneDocumented, TestPackRunsEveryCheckTheGateRuns, TestThePackedManifestCarriesTheRealVersion |
+| D-74 | Releases are `go install` and signed archives | accepted | release, pins, TestTagMajor, TestTheTagMajorMustBeTheModules, TestReleasePassesOnAWiredRelease, TestReleaseWantsTheTagCheckedBeforeGoreleaser |
+| D-75 | The bundle ships inside the signature, and the release wiring is checked on every commit | accepted | release, TestReleaseRefuses, TestReleaseRefusesABadGlob, TestReleaseReadsTheJobsPermissions, TestTheCommittedBuildMatrixIsTheOneDocumented, TestPackRunsEveryCheckTheGateRuns, TestThePackedManifestCarriesTheRealVersion |
 | D-76 | The registry entry is published after the release, from its signed checksums | accepted | server-json, TestTheRegistryEntryIsBuiltFromTheRepository, TestTheRegistryEntryReadsTheVettedManifest, TestTheBundleRowMustBeExactlyOne, TestTheEntryRefusesATagOfAnotherMajor |
-| D-77 | Every tool the release runs is pinned, and the rehearsal runs the same one | accepted | pins, TestATooledRehearsalRunsTheReleasesVersion, TestAnActionThatInstallsAToolMustPinTheTool, TestEveryActionIsClassified, TestGoIsPinnedByAnExactVersionInGoMod, TestAWorkflowWrittenInFlowStyleIsStillRead, TestAPairedToolNoWorkflowInstallsIsReported |
+| D-77 | Every tool the release runs is pinned, and the rehearsal runs the same one | accepted | pins, TestPinsPassesOnAPinnedRepository, TestPinsHoldsTheReadersToAFloor, TestPinsRefuses, TestPinsNamesEachProblem, TestReadWorkflowRefusesAStrayLineBreak |
 | D-78 | The bundle asks for every setting the server reads, and its defaults configure nothing | accepted | mcpb, TestBundleVarsAreDerivedFromTheSettings, TestTheRefusalsTurnASwitchOnUnlessItDefaultsOn, TestTheRefusalsTurnSharingOff, TestTheConfigDiffNamesTheFieldsThatDiffer, TestDefaultsProblemsReportsEveryUnreadableDefaultAndTheRest, TestACredentialsFieldIsSensitive |
 | D-79 | The bundle passes settings by `env` alone and starts its staged program from `${__dirname}` | accepted | mcpb, TestTheSixWaysAManifestBreaks, TestTheBundleSettingsRefuseEachBreak |
 | D-80 | The gate, the packer and the registry entry read one vetted manifest | accepted | mcpb, TestRepeatedKeysNameEachPathOnce, TestTheManifestIsTheJSONThePackerWrites, TestTheStampedManifestIsHeldToTheSchema, TestAVendoredSchemaIsHeldToItsRecordedDigest, TestTheFloorComparesVersionsAsNumbers |
@@ -542,7 +542,7 @@ identity; and a `Co-authored-by:` trailer's address when it authors or
 commits a commit HEAD reaches, since git publishes that address in the
 commit's header, and a GitHub squash merge can add one for an author of
 a squashed commit. A tag's message is still read. gitleaks covers
-credentials, which `make secrets` runs.
+credentials in the tree and in HEAD's history, which `make secrets` runs.
 
 Rejected: a test that counts the exemption list, which would detect only
 that the list changed.
@@ -2241,14 +2241,16 @@ runs by hand.
 There are two ways to install: `go install` of the module, and a signed
 release archive. A tag runs `.github/workflows/release.yml`, which
 builds an archive per platform with `-trimpath` and a `mod_timestamp`
-from the commit, so rebuilding a tag reproduces it. It writes
+from the commit, so rebuilding a tag reproduces it, and it builds one
+target twice and compares the hashes before it releases. It writes
 `checksums.txt` and an SBOM per archive, signs the checksums with a
 keyless cosign signature, and attests the build's provenance over every
 published file.
 
 The module path carries the major version, and a tag's major must be
 the module's, so `go install …@latest` resolves to the release it
-names. The procedure, what to check after the tag and how to recover
+names. `gates release-tag` refuses another major before goreleaser
+builds anything. The procedure, what to check after the tag and how to recover
 are in [release.md](release.md).
 
 The reason for signing in the workflow is that only a workflow run holds
@@ -2274,8 +2276,11 @@ until a tag. So `scripts/gates release` holds it on every commit. Each
 staged glob must resolve to exactly one directory the build matrix
 produces. The post hook must pack to the path `MCPB_OUT` names. The
 bundle must be both checksummed and uploaded, the archives must leave
-out the universal binary, and the signature must write a bundle. Each
-way of breaking it is watched failing in a test.
+out the universal binary, and the signature must write a bundle. The
+attest step sits in the job that runs goreleaser, which grants
+`id-token` and `attestations` write, and its `subject-path` names each
+file the release writes and nothing else. Each way of breaking it is
+watched failing in a test.
 
 The version is stamped from goreleaser's `{{ .Version }}`, so a snapshot
 agrees with itself in every place a version shows.
@@ -2328,6 +2333,11 @@ tool nobody pinned. The check reads only a
 step's `with:` block, so a `version:` under `env:` does not satisfy it.
 It reads a workflow in either of YAML's list styles, and fails on one it
 cannot read rather than reporting no problems.
+
+One tool has one version on every line that names it: the workflows,
+the Makefile, the goreleaser commands and the Go under `scripts/`. A
+recipe that runs a known tool from the PATH, or fetches whatever release
+is newest, fails, and every level of a workflow runs bash.
 
 Each action is paired with its tool in a table. The pairing is not
 derived from the two names, since that looks free and gets
