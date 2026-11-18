@@ -373,13 +373,8 @@ func writeSteps(scratch string, w *writeState) []step {
 				"guests": []string{outsideGuest}, "notify": "none",
 			}),
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "notify:none was accepted for a guest outside the organizer's domain"
-				}
-				if !strings.Contains(r.text, "[blocked]") {
-					return fail, "the refusal is not classified blocked: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [blocked]"
+				return refused(r, "notify:none was accepted for a guest outside the organizer's domain",
+					"blocked", "notify:none is refused there")
 			},
 		},
 		{
@@ -591,13 +586,8 @@ func writeSteps(scratch string, w *writeState) []step {
 				return on(map[string]any{"event_id": w.created, "add_guests": []string{outsideGuest}, "notify": "none"})
 			},
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "notify:none was accepted for an outside guest the update adds"
-				}
-				if !strings.Contains(r.text, "[blocked]") {
-					return fail, "the refusal is not classified blocked: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [blocked]"
+				return refused(r, "notify:none was accepted for an outside guest the update adds",
+					"blocked", "notify:none is refused there")
 			},
 		},
 		{
@@ -635,10 +625,7 @@ func writeSteps(scratch string, w *writeState) []step {
 				})
 			},
 			check: func(r callResult) (verdict, string) {
-				if !r.isError || !strings.Contains(r.text, "[invalid]") {
-					return fail, "a list in one entry was not refused as invalid: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [invalid]"
+				return refused(r, "a list in one entry was accepted", "invalid", "addresses in one entry")
 			},
 		},
 		// A reminders patch replaces the whole set, by an overrides list
@@ -724,10 +711,7 @@ func writeSteps(scratch string, w *writeState) []step {
 				return ""
 			},
 			check: func(r callResult) (verdict, string) {
-				if !r.isError || !strings.Contains(r.text, "[blocked]") {
-					return fail, "a second conference request was not refused: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [blocked]"
+				return refused(r, "a second conference request was accepted", "blocked", "already has a conference")
 			},
 		},
 		{
@@ -741,13 +725,8 @@ func writeSteps(scratch string, w *writeState) []step {
 				})
 			},
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "a write against a superseded etag overwrote somebody"
-				}
-				if !strings.Contains(r.text, "[stale]") {
-					return fail, "the refusal is not classified stale: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [stale], not retried"
+				return refused(r, "a write against a superseded etag overwrote somebody",
+					"stale", "changed since the version you passed as etag")
 			},
 		},
 		{
@@ -937,10 +916,8 @@ func writeSteps(scratch string, w *writeState) []step {
 				"scope": "instance", "visibility": "public",
 			}),
 			check: func(r callResult) (verdict, string) {
-				if !r.isError || !strings.Contains(r.text, "[unsupported]") {
-					return fail, "a public occurrence of a private series was not refused: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [unsupported]"
+				return refused(r, "a public occurrence of a private series was accepted",
+					"unsupported", "less restrictive visibility on one occurrence")
 			},
 		},
 		{
