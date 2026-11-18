@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- The login's loopback server could crash on a header race in `net/http`, which `govulncheck` found reachable; built with Go 1.27.4, fixing GO-2026-6859 (CVE-2026-97054).
+
 ## [5.1.1] - 2026-11-03
 
 ### Changed
