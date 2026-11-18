@@ -2,6 +2,7 @@ package plan
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -177,10 +178,6 @@ func gatedTool(name string) string {
 		"is for the person running it to decide"
 }
 
-// consumerDomains are the domains of personal Google accounts. They name
-// no organization.
-var consumerDomains = map[string]bool{"gmail.com": true, "googlemail.com": true}
-
 // GroupReach is what a group rule reaches, said on every group share and
 // in share_calendar's description. Google's own help says access follows
 // membership, later members included, and that a member outside the
@@ -192,17 +189,25 @@ const GroupReach = "A group rule reaches everyone in the group, including people
 
 // Outside reports whether a person's or a group's address is outside the
 // organization of account, the signed-in account's own address. The
-// organization is taken as the account's domain. A personal account has
-// none, so every address is outside it, and so is every address when
-// the account is unknown. A secondary domain of the same organization
-// counts as outside too, and so does a domain with a character past
-// ASCII, which Unicode case folding can make equal to the account's
-// while Google is sent it unchanged: each errs toward one refusal too
-// many, never one share too many.
-func Outside(address, account string) bool {
+// organization is org, the domains the operator named, or with none the
+// account's own domain, so a personal account at a provider other than
+// Gmail can say its provider's customers are not colleagues (#45).
+//
+// Every doubt is outside: every address when the account is unknown; on
+// a personal Gmail account with no org, every address; with no org, a
+// secondary domain of the same organization; and a domain with a
+// character past ASCII, which Unicode case folding can make equal to an
+// inside one while Google is sent it unchanged. Each errs toward one
+// refusal too many, never one share too many.
+func Outside(address, account string, org []string) bool {
 	theirs, mine := domainOf(address), domainOf(account)
-	return theirs == "" || mine == "" || consumerDomains[mine] || theirs != mine ||
-		!ascii(address[strings.LastIndex(address, "@")+1:])
+	if theirs == "" || mine == "" || !ascii(address[strings.LastIndex(address, "@")+1:]) {
+		return true
+	}
+	if len(org) > 0 {
+		return !slices.Contains(org, theirs)
+	}
+	return config.ConsumerDomains[mine] || theirs != mine
 }
 
 // DetailsRole is the weakest role that shows an event's details on a
@@ -230,8 +235,9 @@ func DetailsRole(visibility string) string {
 // needs an organization to be outside of: on a personal or unknown
 // account every person would be, and every move into a shared calendar
 // refused. source and dest are the two calendars' rules, destID dest's
-// id, account the signed-in account and role DetailsRole's answer (D-91).
-func WiderReaders(source, dest []model.Sharing, destID, account, role string) []string {
+// id, account the signed-in account, org the domains GCAL_ORG_DOMAINS
+// names, and role DetailsRole's answer (D-91).
+func WiderReaders(source, dest []model.Sharing, destID, account string, org []string, role string) []string {
 	reads := func(r model.Sharing) bool { return gcal.AtLeast(r.Role, role) }
 	covered := func(d model.Sharing) bool {
 		for _, s := range source {
@@ -247,13 +253,13 @@ func WiderReaders(source, dest []model.Sharing, destID, account, role string) []
 		return false
 	}
 	mine := domainOf(account)
-	organization := mine != "" && !consumerDomains[mine]
+	organization := mine != "" && (len(org) > 0 || !config.ConsumerDomains[mine])
 	var out []string
 	for _, d := range dest {
 		if !reads(d) || strings.EqualFold(d.Value, destID) {
 			continue
 		}
-		wide := d.Public() || d.ScopeType == gcal.ScopeTypeDomain || organization && Outside(d.Value, account)
+		wide := d.Public() || d.ScopeType == gcal.ScopeTypeDomain || organization && Outside(d.Value, account, org)
 		if wide && !covered(d) {
 			out = append(out, d.Who())
 		}
@@ -287,9 +293,9 @@ func OrdinaryAudience(a Audience, outside bool) error {
 			"use unshare_calendar", ErrBlocked, a.Scope.Value, gatedTool("publish_calendar"))
 	case outside:
 		return fmt.Errorf("%w: %s is outside your organization as far as this server can tell: an address "+
-			"is inside only when its domain is your account's own, and a personal Google account has no "+
-			"organization. share_calendar shares inside it; sharing outside is %s", ErrBlocked,
-			Describe(a), gatedTool("widen_calendar_access"))
+			"is inside only when its domain is one %sORG_DOMAINS names, or with that unset your account's own, "+
+			"and a personal Google account has no organization. share_calendar shares inside it; sharing "+
+			"outside is %s", ErrBlocked, Describe(a), config.EnvPrefix, gatedTool("widen_calendar_access"))
 	}
 	return nil
 }

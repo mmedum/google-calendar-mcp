@@ -110,6 +110,10 @@ type Config struct {
 	HTTPTimeout      time.Duration
 	WriteTimeout     time.Duration
 	ClientSecretPath string
+	// OrgDomains are the organization's mail domains, lowercased. Empty
+	// means the signed-in account's own domain is the organization, and a
+	// personal Google account has none (#45).
+	OrgDomains []string
 }
 
 // Settings holds the raw string values before validation. Flags and the
@@ -128,6 +132,7 @@ type Settings struct {
 	HTTPTimeout       string
 	WriteTimeout      string
 	ClientSecretPath  string
+	OrgDomains        string
 	// removed are the settings a release took out, in removedSettings'
 	// order, read only to refuse one still set.
 	removed []string
@@ -239,6 +244,7 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-attempt timeout for a read")
 	def(&s.WriteTimeout, "write-timeout", "WRITE_TIMEOUT", "120s", "timeout for a write")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
+	def(&s.OrgDomains, "org-domains", "ORG_DOMAINS", "", "the organization's mail domains, comma-separated; empty means the account's own domain")
 	for i, r := range removedSettings {
 		s.removed[i] = Lookup(env, EnvPrefix+r.key)
 		s.vars = append(s.vars, Var{Name: EnvPrefix + r.key, Removed: true})
@@ -365,6 +371,9 @@ func (s *Settings) Build() (Config, error) {
 	}
 
 	c.ClientSecretPath = strings.TrimSpace(s.ClientSecretPath)
+	if c.OrgDomains, err = parseDomains("org-domains", s.OrgDomains); err != nil {
+		errs = append(errs, err)
+	}
 
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
@@ -426,4 +435,40 @@ func NewLogger(c Config, w io.Writer) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(w, opts))
 	}
 	return slog.New(slog.NewTextHandler(w, opts))
+}
+
+// ConsumerDomains are the domains of personal Google accounts. They name
+// no organization, so none can be one of GCAL_ORG_DOMAINS: naming one
+// would make every stranger on it a colleague.
+var ConsumerDomains = map[string]bool{"gmail.com": true, "googlemail.com": true}
+
+// domainName is a mail domain as GCAL_ORG_DOMAINS takes it: two or more
+// dot-separated ASCII labels of letters, digits and inner hyphens, and
+// nothing else, so a wildcard, a port or an empty label is refused rather
+// than silently matching nobody.
+var domainName = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$`)
+
+// parseDomains reads a comma-separated list of mail domains, lowercased
+// and each once. The check runs before lowercasing, which folds U+0130
+// to "i", and refuses Gmail's domains, which name no organization.
+func parseDomains(name, v string) ([]string, error) {
+	var out []string
+	for _, given := range strings.Split(v, ",") {
+		given = strings.TrimSpace(given)
+		if given == "" {
+			continue
+		}
+		if !domainName.MatchString(given) {
+			return nil, fmt.Errorf("%s: %q is not a mail domain such as example.com", name, given)
+		}
+		d := strings.ToLower(given)
+		if ConsumerDomains[d] {
+			return nil, fmt.Errorf("%s: %q is personal Google accounts' domain, which names no organization; "+
+				"name a domain your organization owns, or leave it unset", name, given)
+		}
+		if !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }

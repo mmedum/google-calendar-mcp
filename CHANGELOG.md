@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `GCAL_ORG_DOMAINS` names your organization's mail domains for `share_calendar`, so a personal account at another mail provider stops sharing with its customers as colleagues.
+
 ### Changed
 
 - `move_event` refuses a move that would show an event to anyone, a whole domain, or someone outside your organization who could not read it before.
@@ -14,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A spent Google quota no longer reads as a short rate limit; `create_calendar` names the calendar-creation quota, which deleting calendars does not reset.
+- A `this_and_following` update or cancel read in another zone keeps every occurrence on its day for a date-based rule, such as the 31st of each month.
 
 ### Security
 

@@ -250,8 +250,32 @@ func (s *Service) seriesReach(ctx context.Context, env *writeEnv, raw gcal.Event
 		if pe.Start.AllDay {
 			return set.ReachDates(pe.Start.Date, 0)
 		}
-		return set.Reach(pe.Start.At, 0)
+		loc, lerr := seriesLoc(parent)
+		if lerr != nil {
+			return ""
+		}
+		return set.Reach(pe.Start.At.In(loc), 0)
 	}
+}
+
+// seriesLoc is the zone a series repeats in. For a recurring event the
+// discovery document says start.timeZone "is required and specifies the
+// time zone in which the recurrence is expanded" (EventDateTime.timeZone,
+// revision 20261113, https://calendar-json.googleapis.com/$discovery/rest?version=v3).
+// A series read in another zone counts other days for a rule whose local
+// date depends on it, such as BYMONTHDAY=31 (#46), so one with no zone
+// to load is refused rather than miscounted. Checked by the live step
+// "this_and_following splits".
+func seriesLoc(series gcal.Event) (*time.Location, error) {
+	if series.Start == nil || series.Start.TimeZone == "" {
+		return nil, gapi.Errf(gapi.ClassInvalid, "this series names no time zone, and Google expands a "+
+			"recurrence in its start's zone, so this server cannot count its occurrences")
+	}
+	loc, err := when.LoadLocation(series.Start.TimeZone)
+	if err != nil {
+		return nil, classifyPlan(err)
+	}
+	return loc, nil
 }
 
 // ifMatch decides what goes in the If-Match header (D-28).
@@ -1031,16 +1055,19 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	// and a COUNT counts what the rule generated.
 	split := scheduledStart(target)
 
-	// The parent is read in the zone this call resolved, which need not
-	// be the event's own, and the rule is expanded from that anchor. A
-	// weekly or a daily rule splits the same either way; one whose local
-	// day walk depends on the zone, such as BYMONTHDAY=31, may not.
-
+	// A timed series is counted, and the new one written, in the series'
+	// own zone, so the rule walks the wall clock it always walked.
 	var beforeRule, afterRule string
+	seriesZone := env.zone
 	if parent.Start.AllDay {
 		beforeRule, afterRule, err = set.SplitDates(parent.Start.Date, split.Date)
 	} else {
-		beforeRule, afterRule, err = set.Split(parent.Start.At, split.At)
+		loc, lerr := seriesLoc(parentRaw)
+		if lerr != nil {
+			return render.WriteReport{}, lerr
+		}
+		seriesZone = when.Zone{Loc: loc, Source: env.zone.Source}
+		beforeRule, afterRule, err = set.Split(parent.Start.At.In(loc), split.At.In(loc))
 	}
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
@@ -1048,7 +1075,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 
 	// The new series is the parent with this draft applied, starting at
 	// the target occurrence and carrying the remainder of the rule.
-	newBody, changes, droppedConference, err := splitBody(parentRaw, target, draft, afterRule, env.zone)
+	newBody, changes, droppedConference, err := splitBody(parentRaw, target, draft, afterRule, seriesZone)
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -1486,7 +1513,11 @@ func (s *Service) cancelFollowing(ctx context.Context, env *writeEnv, parentRaw 
 	if parent.Start.AllDay {
 		rule, _, err = set.SplitDates(parent.Start.Date, split.Date)
 	} else {
-		rule, _, err = set.Split(parent.Start.At, split.At)
+		loc, lerr := seriesLoc(parentRaw)
+		if lerr != nil {
+			return render.WriteReport{}, lerr
+		}
+		rule, _, err = set.Split(parent.Start.At.In(loc), split.At.In(loc))
 	}
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
@@ -1620,7 +1651,7 @@ func (s *Service) moveReach(ctx context.Context, env *writeEnv, dest model.Calen
 		return note, nil //nolint:nilerr // a destination this account may not read is a note, not a refusal (D-91)
 	}
 	account, role := s.primaryID(ctx), plan.DetailsRole(e.Visibility)
-	if len(plan.WiderReaders(nil, destRules, dest.ID, account, role)) == 0 {
+	if len(plan.WiderReaders(nil, destRules, dest.ID, account, s.Cfg.OrgDomains, role)) == 0 {
 		return "", nil
 	}
 	sourceRules, err := s.sharingRules(ctx, env.cal.ID)
@@ -1630,7 +1661,7 @@ func (s *Service) moveReach(ctx context.Context, env *writeEnv, dest model.Calen
 			return "", err
 		}
 	}
-	wider := plan.WiderReaders(sourceRules, destRules, dest.ID, account, role)
+	wider := plan.WiderReaders(sourceRules, destRules, dest.ID, account, s.Cfg.OrgDomains, role)
 	if len(wider) == 0 {
 		return "", nil
 	}

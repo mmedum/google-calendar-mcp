@@ -141,11 +141,21 @@ func TestWiderReadersAreTheTiersTheSourceDoesNotCover(t *testing.T) {
 			[]model.Sharing{public}, "", []string{"ANYONE, signed in or not"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got := plan.WiderReaders(c.source, c.rule, dest, c.account, plan.DetailsRole(c.visibility))
+			got := plan.WiderReaders(c.source, c.rule, dest, c.account, nil, plan.DetailsRole(c.visibility))
 			if !slices.Equal(got, c.want) {
 				t.Errorf("WiderReaders = %q, want %q", got, c.want)
 			}
 		})
+	}
+	// The named domains decide who is outside, even on a personal account:
+	// a colleague past them is wide, and one in them is not (#45).
+	org := []string{"second.test"}
+	if got := plan.WiderReaders(nil, []model.Sharing{colleague}, dest, "me"+gmail, org, gcal.RoleReader); !slices.Equal(got, []string{"colleague@example.test"}) {
+		t.Errorf("a person past the named domains gave %q, want them named", got)
+	}
+	inside := rule(gcal.ScopeTypeUser, "colleague@second.test", gcal.RoleReader)
+	if got := plan.WiderReaders(nil, []model.Sharing{inside}, dest, "me"+gmail, org, gcal.RoleReader); got != nil {
+		t.Errorf("a person in the named domains gave %q, want nobody", got)
 	}
 }
 
@@ -177,8 +187,33 @@ func TestOutsideIsAnyDomainButTheAccountsOwn(t *testing.T) {
 		{"somebody@\u0130nside.test", "me@inside.test", true},
 		{"j\u00f6rg@inside.test", "me@inside.test", false},
 	} {
-		if got := plan.Outside(c.address, c.account); got != c.outside {
+		if got := plan.Outside(c.address, c.account, nil); got != c.outside {
 			t.Errorf("Outside(%q, %q) = %v, want %v", c.address, c.account, got, c.outside)
+		}
+	}
+}
+
+// With the operator's organization domains set, an address is inside
+// only when its domain is one of them, whatever the account's own is: a
+// personal account on a provider's domain shares nothing as inside, and
+// an organization's second domain is inside (#45).
+func TestOutsideFollowsTheNamedOrganizationDomains(t *testing.T) {
+	org := []string{"example.test", "second.test"}
+	for _, c := range []struct {
+		address, account string
+		outside          bool
+	}{
+		{"colleague@example.test", "me@example.test", false},
+		{"Colleague@SECOND.test", "me@example.test", false},
+		{"somebody@mailhost.test", "me@mailhost.test", true},
+		{"somebody@sub.example.test", "me@example.test", true},
+		// An unknown account is still doubt, and doubt is outside.
+		{"colleague@example.test", "", true},
+		{"example.test", "me@example.test", true},
+		{"somebody@\u0130nside.test", "me@inside.test", true},
+	} {
+		if got := plan.Outside(c.address, c.account, org); got != c.outside {
+			t.Errorf("Outside(%q, %q, %v) = %v, want %v", c.address, c.account, org, got, c.outside)
 		}
 	}
 }
