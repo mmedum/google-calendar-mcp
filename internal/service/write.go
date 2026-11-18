@@ -1602,6 +1602,36 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 	})
 }
 
+// moveReach refuses a move that would show the event's details to an
+// audience past the source's, in the tiers the wider sharing tools take
+// (#43), and returns a note when the destination's sharing cannot be
+// read. That is a note, not a refusal: writing to a calendar does not
+// need its sharing rules, and refusing every move into a calendar this
+// account writes but does not own would refuse the ordinary move. A
+// source whose rules cannot be read counts as shared with nobody.
+func (s *Service) moveReach(ctx context.Context, env *writeEnv, dest model.Calendar, e model.Event) (string, error) {
+	destRules, err := s.sharingRules(ctx, dest.ID)
+	if err != nil {
+		note := fmt.Sprintf("Could not read who can see %q, so this move did not compare it with who can see %q: "+
+			"anyone who can read %q sees this event there.", dest.Title, env.cal.Title, dest.Title)
+		return note, nil //nolint:nilerr // an unreadable destination is a note, not a refusal (D-91)
+	}
+	sourceRules, err := s.sharingRules(ctx, env.cal.ID)
+	if err != nil {
+		sourceRules = nil
+	}
+	wider := plan.WiderReaders(sourceRules, destRules, dest.ID, s.primaryID(ctx), plan.DetailsRole(e.Visibility))
+	if len(wider) == 0 {
+		return "", nil
+	}
+	return "", gapi.Errf(gapi.ClassBlocked,
+		"moving this event to %q would show its details to %s, who cannot read it on %q. Nothing was moved. "+
+			"To move it anyway, first narrow who can read %q with unshare_calendar, or make the event private "+
+			"with update_event, which hides it from readers there; a deliberate move to a wider calendar is "+
+			"Google Calendar's to make",
+		dest.Title, strings.Join(wider, ", "), env.cal.Title, dest.Title)
+}
+
 // moveEvent is one try at MoveEvent.
 func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (render.WriteReport, error) {
 	// There is nothing to split when an event simply changes calendars,
@@ -1653,6 +1683,10 @@ func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (re
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
+	readersNote, err := s.moveReach(ctx, env, dest, targetModel)
+	if err != nil {
+		return render.WriteReport{}, err
+	}
 
 	etag, err := ifMatch(raw.ETag, target.ETag, o.ETag, o.Force)
 	if err != nil {
@@ -1669,6 +1703,9 @@ func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (re
 	}
 	if o.Force {
 		report.Notes = append(report.Notes, forcedNote)
+	}
+	if readersNote != "" {
+		report.Notes = append(report.Notes, readersNote)
 	}
 	report.Notes = append(report.Notes,
 		fmt.Sprintf("Moving an event changes its organizer to %q. Its id does not change, but the calendar "+

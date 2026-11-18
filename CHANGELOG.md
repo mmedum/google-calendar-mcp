@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `move_event` refuses a move that would show an event to anyone, a whole domain, or someone outside your organization who could not read it before.
+
 ### Fixed
 
 - A spent Google quota no longer reads as a short rate limit; `create_calendar` names the calendar-creation quota, which deleting calendars does not reset.

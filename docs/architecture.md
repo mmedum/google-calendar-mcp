@@ -443,6 +443,7 @@ primary calendar beyond its one status event (D-72).
 | D-88 | One table-driven gate holds the method, field and live-step records | rejected | — |
 | D-89 | `live-cover`'s exemptions live in a TSV | rejected | — |
 | D-90 | A generic wrapper serves the write tools' handlers | rejected | — |
+| D-91 | A move that shows an event to a wider tier than its calendar did is refused | accepted | TestWiderReadersAreTheTiersTheSourceDoesNotCover, TestMoveEventComparesWhoCanSeeTheTwoCalendars |
 
 ### D-01 One stdio binary per person, on the deployer's own OAuth client
 
@@ -2591,4 +2592,32 @@ more there than the lines saved.
 Rejected: a generic wrapper around the write tools' handlers.
 Cost: each write handler repeats a few lines of the same shape.
 
-Next ID: D-91
+### D-91 A move that shows an event to a wider tier than its calendar did is refused
+
+Moving an event changes who can read it: everyone the destination is
+shared with. `move_event` reads both calendars' sharing rules and
+refuses `[blocked]` a move that would show the event's details to a
+tier the source did not: anyone, a whole domain, or a person or group
+outside the organization (D-51), the tiers the wider sharing tools
+take (D-49). A person or group inside the organization is the ordinary
+reach a move has, as it is `share_calendar`'s. Which role shows
+details follows the event's visibility: a reader for a default event, a
+writer for a private one, and a free/busy reader too for a public one,
+which errs toward a refusal while that is unverified live (#49).
+
+A destination whose rules this account cannot read is a note on the
+result, not a refusal. Writing to a calendar does not need its sharing
+rules, and refusing every move into a calendar the account writes but
+does not own would refuse the ordinary move. A source whose rules
+cannot be read counts as shared with nobody.
+
+There is no tool that makes the wider move. The refusal says how to make
+it deliberately: narrow the destination's sharing, make the event
+private, or move it in Google Calendar.
+
+Rejected: a gated tool for the wider move, which adds a tool for an
+act Google Calendar already makes deliberately; comparing every person
+and group, which refuses moving a personal event into a team calendar.
+Cost: two ACL reads per move.
+
+Next ID: D-92
