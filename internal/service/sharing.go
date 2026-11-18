@@ -364,7 +364,7 @@ func (s *Service) outside(ctx context.Context, a plan.Audience) bool {
 	if a.Scope.Value == "" || a.Scope.Type == gcal.ScopeTypeDomain {
 		return false
 	}
-	return plan.Outside(a.Scope.Value, s.primaryID(ctx))
+	return plan.Outside(a.Scope.Value, s.primaryID(ctx), s.Cfg.OrgDomains)
 }
 
 // grant writes a sharing rule, or says it is already there, with the

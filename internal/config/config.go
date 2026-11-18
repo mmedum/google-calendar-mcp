@@ -110,6 +110,10 @@ type Config struct {
 	HTTPTimeout      time.Duration
 	WriteTimeout     time.Duration
 	ClientSecretPath string
+	// OrgDomains are the organization's mail domains, lowercased. Empty
+	// means the signed-in account's own domain is the organization, and a
+	// personal Google account has none (#45).
+	OrgDomains []string
 }
 
 // Settings holds the raw string values before validation. Flags and the
@@ -128,6 +132,7 @@ type Settings struct {
 	HTTPTimeout       string
 	WriteTimeout      string
 	ClientSecretPath  string
+	OrgDomains        string
 	// removed are the settings a release took out, in removedSettings'
 	// order, read only to refuse one still set.
 	removed []string
@@ -239,6 +244,7 @@ func Define(fs *flag.FlagSet, env func(string) string) *Settings {
 	def(&s.HTTPTimeout, "http-timeout", "HTTP_TIMEOUT", "60s", "per-attempt timeout for a read")
 	def(&s.WriteTimeout, "write-timeout", "WRITE_TIMEOUT", "120s", "timeout for a write")
 	def(&s.ClientSecretPath, "client-secret", "CLIENT_SECRET", "", "path to the OAuth Desktop client JSON (overrides the stored profile setting)")
+	def(&s.OrgDomains, "org-domains", "ORG_DOMAINS", "", "the organization's mail domains, comma-separated; empty means the account's own domain")
 	for i, r := range removedSettings {
 		s.removed[i] = Lookup(env, EnvPrefix+r.key)
 		s.vars = append(s.vars, Var{Name: EnvPrefix + r.key, Removed: true})
@@ -365,6 +371,9 @@ func (s *Settings) Build() (Config, error) {
 	}
 
 	c.ClientSecretPath = strings.TrimSpace(s.ClientSecretPath)
+	if c.OrgDomains, err = parseDomains("org-domains", s.OrgDomains); err != nil {
+		errs = append(errs, err)
+	}
 
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
@@ -426,4 +435,32 @@ func NewLogger(c Config, w io.Writer) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(w, opts))
 	}
 	return slog.New(slog.NewTextHandler(w, opts))
+}
+
+// parseDomains reads a comma-separated list of mail domains, lowercased
+// and each once. A domain is ASCII, holds a dot and no @ or blank, and
+// neither starts nor ends with a dot: Unicode case folding could make a
+// non-ASCII name equal to another while Google is sent it unchanged.
+func parseDomains(name, v string) ([]string, error) {
+	var out []string
+	for _, d := range strings.Split(v, ",") {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		valid := strings.Contains(d, ".") && !strings.ContainsAny(d, "@ \t") &&
+			!strings.HasPrefix(d, ".") && !strings.HasSuffix(d, ".")
+		// ASCII before lowercasing: strings.ToLower folds U+0130 to "i".
+		for i := 0; i < len(d) && valid; i++ {
+			valid = d[i] < 0x80
+		}
+		d = strings.ToLower(d)
+		if !valid {
+			return nil, fmt.Errorf("%s: %q is not a mail domain such as example.com", name, d)
+		}
+		if !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }

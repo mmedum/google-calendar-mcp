@@ -403,7 +403,7 @@ primary calendar beyond its one status event (D-72).
 | D-48 | Access is checked against the role Google documents, before `confirm` | accepted | TestShareCalendarRefusesWithoutOwnerAccess, TestManageRefusesTheSharedHalfWithoutAccess, TestManageOverridesWorkOnAReadOnlyCalendar, TestDeleteCalendarRefusesWhatThisAccountDoesNotOwn, TestCanWrite |
 | D-49 | A risky form of a write is a tool of its own, never an argument | accepted | TestCreateEventRefusesDecliningEveryMeeting, TestAnOrdinaryShareStopsAtTheOrganization, TestTheGatedToolsNeedTheFlag |
 | D-50 | Sharing is three tools by how far it reaches | accepted | TestAnOrdinaryShareStopsAtTheOrganization, TestAWideShareIsOutsideOrAnOwner, TestShareCalendarStopsAtTheOrganization, TestWidenCalendarAccessTakesOutsidersAndOwners, TestPublishCalendarOpensADomainAndTakesNoPerson, TestAPublicRuleIsNeverOwner, TestShareCalendarLowersAWiderRule, TestWithinRuleOnlyLowersOrKeepsAnExistingRule |
-| D-51 | Inside the organization is the account's own domain, and any doubt counts as outside | accepted | TestOutsideIsAnyDomainButTheAccountsOwn, TestShareCalendarOnAPersonalAccountTakesNobody, TestAnUnknownOrganizerDomainCountsEverybodyAsOutside |
+| D-51 | Inside the organization is the account's own domain, and any doubt counts as outside | accepted | TestOutsideIsAnyDomainButTheAccountsOwn, TestOutsideFollowsTheNamedOrganizationDomains, TestTheNamedOrganizationDecidesWhoIsExternal, TestShareCalendarOnAPersonalAccountTakesNobody, TestAnUnknownOrganizerDomainCountsEverybodyAsOutside |
 | D-52 | The wider shares name the calendar by the title they read | accepted | TestAWideShareRequiresTheCalendarTitle, TestAWideShareNamesTheCalendarItOpens |
 | D-53 | A share reads the rules first, and says who could see the calendar before and after | accepted | TestShareCalendarGrantsAccessAndShowsExposureBothWays, TestShareCalendarPatchesAnExistingRule, TestParseAudienceReusesTheScopeTypeOfAnExistingRule, TestShareCalendarSaysHowItReadTheAddress, TestAGroupShareSaysWhoItReaches, TestListSharingExplainsEveryRole |
 | D-54 | A tool's `Kind` decides its annotations and whether it registers | accepted | TestAnnotationsMatchTheKind, TestGatesAreServerSide, TestFullSurfaceRegistersEverything, TestFullSurfaceOpensEveryGate, TestSharingOffRemovesEverySharingTool |
@@ -1666,8 +1666,11 @@ Cost: lowering the rule of somebody outside the organization with
 ### D-51 Inside the organization is the account's own domain, and any doubt counts as outside
 
 `share_calendar` and the `none` refusal both need to know who is inside
-the organization. Inside is the account's own domain, read from the
-primary calendar's id, which is the account's address.
+the organization. Inside is a domain `GCAL_ORG_DOMAINS` names, or with
+that unset the account's own domain, read from the primary calendar's
+id, which is the account's address. For an event another person
+organizes, the `none` refusal reads the organizer's domain, since that
+organization's domains are not known here.
 
 Every doubt resolves to outside. A personal Google account has no
 organization, so every address is outside it. So is every address when
@@ -1682,9 +1685,10 @@ error is a second call, while a share too many is access nobody meant
 to give.
 
 Rejected: asking Google whether the account is a Workspace account,
-which needs a scope beyond Calendar's.
-Cost: a personal account on a mail provider other than Gmail counts as
-an organization, so its own provider's domain reads as inside (#45).
+which needs a scope beyond Calendar's, so a breaking new consent.
+Cost: unset, a personal account on a mail provider other than Gmail
+counts as an organization, so its own provider's domain reads as inside;
+the operator names the domains to change that (#45).
 
 ### D-52 The wider shares name the calendar by the title they read
 

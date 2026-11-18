@@ -2,6 +2,7 @@ package plan
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -192,17 +193,24 @@ const GroupReach = "A group rule reaches everyone in the group, including people
 
 // Outside reports whether a person's or a group's address is outside the
 // organization of account, the signed-in account's own address. The
-// organization is taken as the account's domain. A personal account has
-// none, so every address is outside it, and so is every address when
-// the account is unknown. A secondary domain of the same organization
+// organization is org, the domains the operator named, or else the
+// account's domain. A personal account has none, so every address is
+// outside it, and so is every address when the account is unknown. A
+// personal account on a domain other than Gmail's cannot be told from an
+// organization, which is what org is for (#45). A secondary domain of the same organization
 // counts as outside too, and so does a domain with a character past
 // ASCII, which Unicode case folding can make equal to the account's
 // while Google is sent it unchanged: each errs toward one refusal too
 // many, never one share too many.
-func Outside(address, account string) bool {
+func Outside(address, account string, org []string) bool {
 	theirs, mine := domainOf(address), domainOf(account)
-	return theirs == "" || mine == "" || consumerDomains[mine] || theirs != mine ||
-		!ascii(address[strings.LastIndex(address, "@")+1:])
+	if theirs == "" || !ascii(address[strings.LastIndex(address, "@")+1:]) {
+		return true
+	}
+	if len(org) > 0 {
+		return !slices.Contains(org, theirs)
+	}
+	return mine == "" || consumerDomains[mine] || theirs != mine
 }
 
 // ascii reports whether s holds only ASCII characters.
@@ -231,9 +239,9 @@ func OrdinaryAudience(a Audience, outside bool) error {
 			"use unshare_calendar", ErrBlocked, a.Scope.Value, gatedTool("publish_calendar"))
 	case outside:
 		return fmt.Errorf("%w: %s is outside your organization as far as this server can tell: an address "+
-			"is inside only when its domain is your account's own, and a personal Google account has no "+
-			"organization. share_calendar shares inside it; sharing outside is %s", ErrBlocked,
-			Describe(a), gatedTool("widen_calendar_access"))
+			"is inside only when its domain is one %sORG_DOMAINS names, or with that unset your account's own, "+
+			"and a personal Google account has no organization. share_calendar shares inside it; sharing "+
+			"outside is %s", ErrBlocked, Describe(a), config.EnvPrefix, gatedTool("widen_calendar_access"))
 	}
 	return nil
 }

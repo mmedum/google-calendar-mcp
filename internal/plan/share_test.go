@@ -120,8 +120,32 @@ func TestOutsideIsAnyDomainButTheAccountsOwn(t *testing.T) {
 		{"somebody@\u0130nside.test", "me@inside.test", true},
 		{"j\u00f6rg@inside.test", "me@inside.test", false},
 	} {
-		if got := plan.Outside(c.address, c.account); got != c.outside {
+		if got := plan.Outside(c.address, c.account, nil); got != c.outside {
 			t.Errorf("Outside(%q, %q) = %v, want %v", c.address, c.account, got, c.outside)
+		}
+	}
+}
+
+// With the operator's organization domains set, an address is inside
+// only when its domain is one of them, whatever the account's own is: a
+// personal account on a provider's domain shares nothing as inside, and
+// an organization's second domain is inside (#45).
+func TestOutsideFollowsTheNamedOrganizationDomains(t *testing.T) {
+	org := []string{"example.test", "second.test"}
+	for _, c := range []struct {
+		address, account string
+		outside          bool
+	}{
+		{"colleague@example.test", "me@example.test", false},
+		{"Colleague@SECOND.test", "me@example.test", false},
+		{"somebody@mailhost.test", "me@mailhost.test", true},
+		{"somebody@sub.example.test", "me@example.test", true},
+		{"colleague@example.test", "", false},
+		{"example.test", "me@example.test", true},
+		{"somebody@\u0130nside.test", "me@inside.test", true},
+	} {
+		if got := plan.Outside(c.address, c.account, org); got != c.outside {
+			t.Errorf("Outside(%q, %q, %v) = %v, want %v", c.address, c.account, org, got, c.outside)
 		}
 	}
 }

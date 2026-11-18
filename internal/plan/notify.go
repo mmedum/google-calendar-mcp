@@ -2,6 +2,7 @@ package plan
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
@@ -91,8 +92,10 @@ type Reach struct {
 	// External is how many of those are outside the organizer's domain,
 	// which is the axis `external_only` actually splits on.
 	External int
-	// domain is the organizer's, kept for the split and never printed.
+	// domain is the organizer's, kept for the split and never printed,
+	// and org the organization's domains when the operator named them.
 	domain string
+	org    []string
 }
 
 // Any reports whether this write can reach a person at all, which is
@@ -112,9 +115,13 @@ func (r Reach) Any() bool { return r.Guests > 0 }
 // account is the signed-in account's own address, which is never a
 // guest. Google's `self` flag alone does not establish that (see
 // model.Event.Guests).
-func ReachOfEvent(organizer, account string, e model.Event, adding ...string) Reach {
+//
+// org is the organization's domains when the organizer is the signed-in
+// account and the operator named them, else nil, and the organizer's
+// domain stands for its organization (D-51).
+func ReachOfEvent(organizer, account string, org []string, e model.Event, adding ...string) Reach {
 	guests := e.Guests(account)
-	r := Reach{domain: domainOf(organizer), Guests: len(guests)}
+	r := Reach{domain: domainOf(organizer), org: org, Guests: len(guests)}
 	seen := map[string]bool{strings.ToLower(account): true, strings.ToLower(organizer): true}
 	for _, a := range guests {
 		seen[strings.ToLower(a.Email)] = true
@@ -142,8 +149,8 @@ func ReachOfEvent(organizer, account string, e model.Event, adding ...string) Re
 // The organizer's own address does not count: inviting yourself is not
 // reaching somebody, and a notify requirement over it would be friction
 // with no safety in it. Nor does a room.
-func ReachOfAddresses(organizer string, addresses []string) Reach {
-	r := Reach{domain: domainOf(organizer)}
+func ReachOfAddresses(organizer string, org []string, addresses []string) Reach {
+	r := Reach{domain: domainOf(organizer), org: org}
 	for _, a := range addresses {
 		a = strings.TrimSpace(a)
 		if a == "" || strings.EqualFold(a, organizer) || model.IsRoom(a) {
@@ -166,7 +173,13 @@ func ReachOfAddresses(organizer string, addresses []string) Reach {
 // Failing toward the refusal costs a caller one explicit choice.
 func (r Reach) isExternal(email string) bool {
 	d := domainOf(email)
-	return d == "" || r.domain == "" || !strings.EqualFold(d, r.domain)
+	if d == "" {
+		return true
+	}
+	if len(r.org) > 0 {
+		return !slices.Contains(r.org, d) || !ascii(email[strings.LastIndex(email, "@")+1:])
+	}
+	return r.domain == "" || !strings.EqualFold(d, r.domain)
 }
 
 func domainOf(address string) string {

@@ -545,7 +545,7 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organizer, draft.Invites()))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfAddresses(env.organizer, s.Cfg.OrgDomains, draft.Invites()))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -835,7 +835,7 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 	if draft.OnlyReminders() {
 		decision, err = plan.PersonalNotification(o.Notify)
 	} else {
-		decision, err = plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel, draft.Invites()...))
+		decision, err = plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, s.orgOf(organizerOf(targetModel, env), env), targetModel, draft.Invites()...))
 	}
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
@@ -952,6 +952,16 @@ const forcedNote = "Written with If-Match: *, so a change somebody else made sin
 // calendar can be organized by somebody else, and `external_only` splits
 // on the ORGANIZER's Workspace domain. The account is the fallback for
 // an event that names none.
+// orgOf is the organization's domains for a reach with this organizer:
+// the operator's, when the organizer is the signed-in account, else nil,
+// since another organizer's organization is not known here (D-51).
+func (s *Service) orgOf(organizer string, env *writeEnv) []string {
+	if strings.EqualFold(organizer, env.organizer) {
+		return s.Cfg.OrgDomains
+	}
+	return nil
+}
+
 func organizerOf(e model.Event, env *writeEnv) string {
 	// An event on a secondary calendar is organized by the CALENDAR, and
 	// its id is an address with a domain of its own. Splitting the guest
@@ -1052,7 +1062,7 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, parent, draft.Invites()...))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, s.orgOf(organizerOf(parent, env), env), parent, draft.Invites()...))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -1371,7 +1381,7 @@ func (s *Service) cancelEvent(ctx context.Context, o CancelOptions, at *attempt)
 		note = strings.TrimSpace(note + " " + aimed)
 	}
 
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, s.orgOf(organizerOf(targetModel, env), env), targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -1649,7 +1659,7 @@ func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (re
 		return render.WriteReport{}, err
 	}
 	note = strings.TrimSpace(note + " " + aimed)
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, s.orgOf(organizerOf(targetModel, env), env), targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
@@ -1783,7 +1793,7 @@ func (s *Service) respondToEvent(ctx context.Context, o RespondOptions, at *atte
 	if err != nil {
 		return render.WriteReport{}, err
 	}
-	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, targetModel))
+	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(targetModel, env), env.organizer, s.orgOf(organizerOf(targetModel, env), env), targetModel))
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}

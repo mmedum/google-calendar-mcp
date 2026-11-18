@@ -13,7 +13,7 @@ import (
 // Notify has no default, so the first thing to hold is that an absent
 // choice is a refusal rather than a value.
 func TestNotifyIsRequiredWhenTheWriteReachesSomebody(t *testing.T) {
-	r := plan.ReachOfAddresses("me@example.test", []string{"a@example.test", "b@example.test"})
+	r := plan.ReachOfAddresses("me@example.test", nil, []string{"a@example.test", "b@example.test"})
 	if r.Guests != 2 {
 		t.Fatalf("counted %d guests, want 2", r.Guests)
 	}
@@ -41,7 +41,7 @@ func TestNotifyIsRequiredWhenTheWriteReachesSomebody(t *testing.T) {
 // A write that reaches nobody has no decision to make, and demanding one
 // is friction with no safety in it.
 func TestNotifyIsNotAskedWhenNobodyIsReached(t *testing.T) {
-	d, err := plan.Notification("", plan.ReachOfAddresses("me@example.test", nil))
+	d, err := plan.Notification("", plan.ReachOfAddresses("me@example.test", nil, nil))
 	if err != nil {
 		t.Fatalf("an event with no guests must not demand notify: %v", err)
 	}
@@ -55,9 +55,28 @@ func TestNotifyIsNotAskedWhenNobodyIsReached(t *testing.T) {
 
 // Inviting yourself is not reaching somebody.
 func TestTheOrganizerIsNotAGuest(t *testing.T) {
-	r := plan.ReachOfAddresses("me@example.test", []string{"ME@example.test"})
+	r := plan.ReachOfAddresses("me@example.test", nil, []string{"ME@example.test"})
 	if r.Any() {
 		t.Fatalf("the organizer's own address counted as a guest: %+v", r)
+	}
+}
+
+// With the organization's domains named, a guest is inside only in one of
+// them: the account's own provider domain is outside, and the
+// organization's second domain is inside (#45, D-51).
+func TestTheNamedOrganizationDecidesWhoIsExternal(t *testing.T) {
+	org := []string{"example.test", "second.test"}
+	r := plan.ReachOfAddresses("me@mailhost.test", org,
+		[]string{"customer@mailhost.test", "colleague@example.test", "Colleague@SECOND.test", "somebody@\u0130nside.test"})
+	if r.Guests != 4 || r.External != 2 {
+		t.Fatalf("counted %d guests, %d external, want 4 and 2: %+v", r.Guests, r.External, r)
+	}
+	if _, err := plan.Notification("none", r); !errors.Is(err, plan.ErrBlocked) {
+		t.Errorf("notify:none with a guest outside the named domains = %v, want [blocked]", err)
+	}
+	ev := plan.ReachOfEvent("me@mailhost.test", "me@mailhost.test", org, model.Event{}, "customer@mailhost.test")
+	if ev.External != 1 {
+		t.Errorf("an event's added guest at the provider's domain counted %d external, want 1", ev.External)
 	}
 }
 
@@ -65,7 +84,7 @@ func TestTheOrganizerIsNotAGuest(t *testing.T) {
 // organizer's domain. That guest may have no calendar for the event to
 // land in, so mail is the only channel there is.
 func TestNoneIsRefusedForAnOutOfDomainGuest(t *testing.T) {
-	r := plan.ReachOfAddresses("me@example.test", []string{"inside@example.test", "outside@elsewhere.test"})
+	r := plan.ReachOfAddresses("me@example.test", nil, []string{"inside@example.test", "outside@elsewhere.test"})
 	if r.External != 1 {
 		t.Fatalf("counted %d external guests, want 1: %+v", r.External, r)
 	}
@@ -85,7 +104,7 @@ func TestNoneIsRefusedForAnOutOfDomainGuest(t *testing.T) {
 // The same call with every guest inside the domain is allowed: the
 // refusal is for the guest who cannot discover the event any other way.
 func TestNoneIsAllowedInsideTheDomain(t *testing.T) {
-	d, err := plan.Notification("none", plan.ReachOfAddresses("me@example.test", []string{"a@example.test"}))
+	d, err := plan.Notification("none", plan.ReachOfAddresses("me@example.test", nil, []string{"a@example.test"}))
 	if err != nil {
 		t.Fatalf("notify:none with only same-domain guests: %v", err)
 	}
@@ -101,7 +120,7 @@ func TestNoneIsAllowedInsideTheDomain(t *testing.T) {
 // An unknown organizer domain makes every guest external, which fails
 // toward the refusal rather than past it.
 func TestAnUnknownOrganizerDomainCountsEverybodyAsOutside(t *testing.T) {
-	r := plan.ReachOfAddresses("", []string{"a@example.test"})
+	r := plan.ReachOfAddresses("", nil, []string{"a@example.test"})
 	if r.External != 1 {
 		t.Fatalf("with no organizer domain every guest is external; got %+v", r)
 	}
@@ -125,7 +144,7 @@ func TestGoogleSpellingOfExternalOnly(t *testing.T) {
 }
 
 func TestUnknownNotifyIsRefusedWithTheChoices(t *testing.T) {
-	_, err := plan.Notification("maybe", plan.ReachOfAddresses("me@example.test", []string{"a@example.test"}))
+	_, err := plan.Notification("maybe", plan.ReachOfAddresses("me@example.test", nil, []string{"a@example.test"}))
 	if !errors.Is(err, plan.ErrInvalid) {
 		t.Fatalf("want [invalid], got %v", err)
 	}
@@ -142,7 +161,7 @@ func TestReachOfEventIgnoresResourcesAndSelf(t *testing.T) {
 		{Email: "colleague@example.test"},
 		{Email: "outside@elsewhere.test"},
 	}}
-	r := plan.ReachOfEvent("me@example.test", "me@example.test", e)
+	r := plan.ReachOfEvent("me@example.test", "me@example.test", nil, e)
 	if r.Guests != 2 || r.External != 1 {
 		t.Fatalf("got %+v, want 2 guests and 1 external", r)
 	}
@@ -158,7 +177,7 @@ func TestTheAccountIsNeverItsOwnGuestEvenWithoutTheSelfFlag(t *testing.T) {
 		// address, on a secondary calendar.
 		{Email: "me@example.test"},
 	}}
-	r := plan.ReachOfEvent("team@group.calendar.example.test", "me@example.test", e)
+	r := plan.ReachOfEvent("team@group.calendar.example.test", "me@example.test", nil, e)
 	if r.Any() {
 		t.Fatalf("the signed-in account counted as a guest on its own event: %+v", r)
 	}
@@ -171,7 +190,7 @@ func TestTheAccountIsNeverItsOwnGuestEvenWithoutTheSelfFlag(t *testing.T) {
 	}
 	// And somebody else on the same event is still a guest.
 	e.Attendees = append(e.Attendees, model.Attendee{Email: "colleague@example.test"})
-	if got := plan.ReachOfEvent("team@group.calendar.example.test", "me@example.test", e); got.Guests != 1 {
+	if got := plan.ReachOfEvent("team@group.calendar.example.test", "me@example.test", nil, e); got.Guests != 1 {
 		t.Fatalf("got %+v, want exactly the one real guest", got)
 	}
 }
@@ -179,7 +198,7 @@ func TestTheAccountIsNeverItsOwnGuestEvenWithoutTheSelfFlag(t *testing.T) {
 // `all` is not delivery either: one invitation can reach one of two
 // guests with nothing different in the request.
 func TestAllIsReportedAsAskedForNotAsDelivered(t *testing.T) {
-	d, err := plan.Notification("all", plan.ReachOfAddresses("me@example.test", []string{"a@example.test"}))
+	d, err := plan.Notification("all", plan.ReachOfAddresses("me@example.test", nil, []string{"a@example.test"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +216,7 @@ func TestAllIsReportedAsAskedForNotAsDelivered(t *testing.T) {
 // of 0 guests" — a warning about nothing, and an invitation to wonder
 // who the zero guests are.
 func TestAChoiceOnAWriteThatReachesNobodyStillReportsNobody(t *testing.T) {
-	d, err := plan.Notification("none", plan.ReachOfAddresses("me@example.test", nil))
+	d, err := plan.Notification("none", plan.ReachOfAddresses("me@example.test", nil, nil))
 	if err != nil {
 		t.Fatalf("Notification: %v", err)
 	}
@@ -218,14 +237,14 @@ func TestAChoiceOnAWriteThatReachesNobodyStillReportsNobody(t *testing.T) {
 // and a room is not a person: booking one reaches nobody, so it neither
 // makes notify required nor counts as a guest outside the organization.
 func TestARoomIsNotAGuest(t *testing.T) {
-	r := plan.ReachOfAddresses("me@example.test", []string{"room-sample@resource.calendar.google.com", "colleague@example.test"})
+	r := plan.ReachOfAddresses("me@example.test", nil, []string{"room-sample@resource.calendar.google.com", "colleague@example.test"})
 	if r.Guests != 1 || r.External != 0 {
 		t.Fatalf("got %+v, want 1 guest and none outside", r)
 	}
 	if _, err := plan.Notification("none", r); err != nil {
 		t.Fatalf("none with a room and a colleague: %v", err)
 	}
-	if r := plan.ReachOfAddresses("me@example.test", []string{"ROOM-SAMPLE@Resource.Calendar.Google.com"}); r.Any() {
+	if r := plan.ReachOfAddresses("me@example.test", nil, []string{"ROOM-SAMPLE@Resource.Calendar.Google.com"}); r.Any() {
 		t.Fatalf("a room alone reached %+v", r)
 	}
 	for addr, room := range map[string]bool{
@@ -244,12 +263,12 @@ func TestARoomIsNotAGuest(t *testing.T) {
 // Somebody already on the event, the account, and a room add nobody.
 func TestReachOfEventCountsTheGuestsTheWriteAdds(t *testing.T) {
 	e := model.Event{Attendees: []model.Attendee{{Email: "colleague@example.test"}}}
-	r := plan.ReachOfEvent("me@example.test", "me@example.test", e,
+	r := plan.ReachOfEvent("me@example.test", "me@example.test", nil, e,
 		"outside@elsewhere.test", "Colleague@example.test", "me@example.test", "room-sample@resource.calendar.google.com", " ", "outside@elsewhere.test")
 	if r.Guests != 2 || r.External != 1 {
 		t.Fatalf("got %+v, want 2 guests and 1 outside", r)
 	}
-	alone := plan.ReachOfEvent("me@example.test", "me@example.test", model.Event{}, "outside@elsewhere.test")
+	alone := plan.ReachOfEvent("me@example.test", "me@example.test", nil, model.Event{}, "outside@elsewhere.test")
 	if _, err := plan.Notification("", alone); !errors.Is(err, plan.ErrInvalid) {
 		t.Fatalf("adding a guest without notify: %v, want a refusal", err)
 	}
