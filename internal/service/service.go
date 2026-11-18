@@ -1471,8 +1471,10 @@ func freeBusyReason(e gcal.FreeBusyError) string {
 		return "no such calendar, or this account cannot see it"
 	case "internalError":
 		return "Google failed to read it; try again"
-	case "rateLimitExceeded", "quotaExceeded":
+	case "rateLimitExceeded":
 		return "Google is rate limiting this account"
+	case "quotaExceeded":
+		return "this account's Google usage quota is spent, and it resets on Google's schedule"
 	case tooManyCalendars:
 		return "Google answered for too many calendars at once to include this one"
 	case "":

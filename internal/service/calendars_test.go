@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -45,6 +46,37 @@ func TestCreateCalendarSendsTheResolvedZone(t *testing.T) {
 	}
 	if !strings.Contains(got.Text(), "America/Chicago") {
 		t.Fatalf("the result does not name the zone it used:\n%s", got.Text())
+	}
+}
+
+// The calendar-creation quota, 403 quotaExceeded, is named as such and
+// says a retry soon will not help; a per-minute rate limit keeps saying
+// to wait. Both stay [rate_limited] and keep Google's status.
+func TestCreateCalendarNamesTheCreationQuota(t *testing.T) {
+	for name, c := range map[string]struct {
+		status       int
+		reason       string
+		want, wantNo string
+	}{
+		"403 quotaExceeded": {403, "quotaExceeded", "calendar-creation quota is spent", "rate limiting"},
+		"403 rateLimitExceeded": {403, "rateLimitExceeded", "Google is rate limiting this account",
+			"calendar-creation quota"},
+		"429": {429, "rateLimitExceeded", "Google is rate limiting this account", "calendar-creation quota"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			fake.Fail["POST /calendars"] = c.status
+			fake.FailReason["POST /calendars"] = c.reason
+			fake.FailMessage["POST /calendars"] = "Calendar usage limits exceeded."
+			_, err := svc.CreateCalendar(context.Background(), service.CreateCalendarOptions{Title: "Project Kestrel"})
+			var e *gapi.Error
+			if !errors.As(err, &e) || e.Class != gapi.ClassRateLimited || e.Status != c.status {
+				t.Fatalf("CreateCalendar = %v, want [rate_limited] with status %d", err, c.status)
+			}
+			if !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), c.wantNo) {
+				t.Errorf("the refusal should say %q and not %q:\n%v", c.want, c.wantNo, err)
+			}
+		})
 	}
 }
 
