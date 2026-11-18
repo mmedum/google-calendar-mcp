@@ -877,7 +877,7 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 		return CalendarResult{}, err
 	}
 	if !s.Cfg.Sharing {
-		return NewCalendarResult(c, nil, "Sharing tools are off in this server ("+config.EnvPrefix+
+		return NewCalendarResultUnshared(c, "Sharing tools are off in this server ("+config.EnvPrefix+
 			"SHARING=off), so the sharing list was not read."), nil
 	}
 	rules, err := s.sharingRules(ctx, c.ID)
@@ -890,9 +890,9 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 		// card is a successful read, and an empty sharing list would say
 		// "shared with nobody", which is the wrong answer rather than a
 		// missing one.
-		return NewCalendarResult(c, nil, note), nil
+		return NewCalendarResultUnshared(c, note), nil
 	}
-	return NewCalendarResult(c, rules, ""), nil
+	return NewCalendarResult(c, rules), nil
 }
 
 // SettingsSummary is get_settings.

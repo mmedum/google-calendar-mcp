@@ -132,37 +132,43 @@ func (r CalendarResult) Rendered() string { return r.Render() }
 // Render implements Rendered.
 func (r CalendarResult) Render() string { return r.text }
 
-// NewCalendarResult builds get_calendar's reply, both halves from the
-// calendar and its rules. note stands in for the rules when they were not
-// read, and says why.
-func NewCalendarResult(c model.Calendar, rules []model.Sharing, note string) CalendarResult {
-	out := CalendarResult{
-		Calendar: newCalendarOut(c), Description: c.Description,
-		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders), Note: note,
-	}
-	if note == "" {
-		out.Sharing = sharingOut(rules)
-	}
+// NewCalendarResult builds get_calendar's reply from the calendar and
+// the rules read for it, both halves from them.
+func NewCalendarResult(c model.Calendar, rules []model.Sharing) CalendarResult {
+	out := newCalendarResult(c)
+	out.Sharing = sharingOut(rules)
+	// The same renderer list_sharing and a share result use. Three
+	// printings of "who can see this calendar" is how one result comes to
+	// contradict another.
+	out.text += "who can see it:\n" + render.Exposure(rules)
+	return out
+}
+
+// NewCalendarResultUnshared builds get_calendar's reply when the rules
+// were not read; note says why, so an empty list cannot read as "shared
+// with nobody".
+func NewCalendarResultUnshared(c model.Calendar, note string) CalendarResult {
+	out := newCalendarResult(c)
+	out.Note = note
+	out.text += note + "\n"
+	return out
+}
+
+// newCalendarResult is the calendar's half of get_calendar's reply.
+func newCalendarResult(c model.Calendar) CalendarResult {
 	var b strings.Builder
 	b.WriteString(render.CalendarLine(c))
 	if c.Description != "" {
 		fmt.Fprintf(&b, "  %s\n", c.Description)
 	}
-	if d := out.DefaultReminders; d != nil {
-		fmt.Fprintf(&b, "  default reminders: %s\n", render.Reminders(model.Reminders{Popup: d.Popup, Email: d.Email}))
+	if r := c.DefaultReminders; r != nil {
+		fmt.Fprintf(&b, "  default reminders: %s\n", render.Reminders(*r))
 	}
 	b.WriteString("\n")
-	if note != "" {
-		b.WriteString(note + "\n")
-	} else {
-		b.WriteString("who can see it:\n")
-		// The same renderer list_sharing and a share result use. Three
-		// printings of "who can see this calendar" is how one result comes
-		// to contradict another.
-		b.WriteString(render.Exposure(rules))
+	return CalendarResult{
+		Calendar: newCalendarOut(c), Description: c.Description,
+		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders), text: b.String(),
 	}
-	out.text = b.String()
-	return out
 }
 
 // ScheduleResult is list_events and search_events.
