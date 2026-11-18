@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -23,6 +24,19 @@ import (
 
 const changelogPath = "CHANGELOG.md"
 
+var (
+	// semverVersion is a release's version: semver.org's grammar with its
+	// prerelease identifiers and without build metadata, which a Go module
+	// version cannot carry
+	// (https://semver.org/spec/v2.0.0.html#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string,
+	// https://go.dev/ref/mod#versions).
+	semverVersion = regexp.MustCompile(`^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)` +
+		`(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$`)
+	// changelogEntry is an entry: a bullet at the margin. A subheading or
+	// a line of prose tells a reader nothing changed.
+	changelogEntry = regexp.MustCompile(`^[-*+][ \t]+\S`)
+)
+
 // releaseNotes writes one version's section of the changelog.
 func releaseNotes(version, file string, out io.Writer) error {
 	if file == "" {
@@ -32,10 +46,18 @@ func releaseNotes(version, file string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	body := sectionFor(string(raw), strings.TrimPrefix(version, "v"))
+	bare := strings.TrimPrefix(version, "v")
+	if !semverVersion.MatchString(bare) {
+		return fmt.Errorf("%s is not a semver version, so no CHANGELOG section can be its notes", version)
+	}
+	body := sectionFor(string(raw), bare)
 	if body == "" {
 		return fmt.Errorf("%s has no section for %s; the release body would be empty, and a tag is "+
 			"not the moment to discover the entry was never written", file, version)
+	}
+	if !hasEntry(body) {
+		return fmt.Errorf("%s's section for %s holds no entry, a bullet at the margin outside fenced code; "+
+			"the release body would say nothing changed", file, version)
 	}
 	_, err = fmt.Fprintln(out, promoteHeadings(body))
 	return err
@@ -72,6 +94,17 @@ func changelogSection(lines []string, version string) (from, to int) {
 		}
 	}
 	return start + 1, to
+}
+
+// hasEntry reports whether a section holds an entry outside fenced code.
+func hasEntry(body string) bool {
+	var fence fenced
+	for _, line := range strings.Split(body, "\n") {
+		if !fence.code(line) && changelogEntry.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 // trimBlank joins lines without the blank ones at either end.
