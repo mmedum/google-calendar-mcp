@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `move_event` refuses a move that would show an event to anyone, a whole domain, or someone outside your organization who could not read it before.
 - `visibility: public` is refused where anyone, a whole domain, or an outsider sees only free/busy, since it would show them the details.
+- `share_calendar` refuses a group with a member outside your organization, naming `widen_calendar_access`, since a group share reaches every member.
 
 ### Fixed
 

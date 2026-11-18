@@ -311,6 +311,25 @@ func ascii(s string) bool {
 	return true
 }
 
+// GroupAudience refuses, in share_calendar, a group with a member
+// outside the organization, since a group share reaches every member
+// (#44). members are the group's calendar ids as freebusy.query expands
+// it; a room among them is a resource, not a person outside.
+func GroupAudience(group string, members []string, account string, org []string) error {
+	var outside []string
+	for _, m := range members {
+		if !model.IsRoom(m) && Outside(m, account, org) {
+			outside = append(outside, m)
+		}
+	}
+	if len(outside) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s has %d of its %d members outside your organization, such as %s, and a group share "+
+		"reaches every member. share_calendar shares inside it; sharing with this group is %s",
+		ErrBlocked, group, len(outside), len(members), outside[0], gatedTool("widen_calendar_access"))
+}
+
 // OrdinaryAudience refuses, in share_calendar, an audience past named
 // people and groups inside the organization, naming the tool that takes
 // it. outside is Outside for the audience's address.

@@ -403,7 +403,7 @@ primary calendar beyond its one status event (D-72).
 | D-48 | Access is checked against the role Google documents, before `confirm` | accepted | TestShareCalendarRefusesWithoutOwnerAccess, TestManageRefusesTheSharedHalfWithoutAccess, TestManageOverridesWorkOnAReadOnlyCalendar, TestDeleteCalendarRefusesWhatThisAccountDoesNotOwn, TestCanWrite |
 | D-49 | A risky form of a write is a tool of its own, never an argument | accepted | TestCreateEventRefusesDecliningEveryMeeting, TestAnOrdinaryShareStopsAtTheOrganization, TestTheGatedToolsNeedTheFlag |
 | D-50 | Sharing is three tools by how far it reaches | accepted | TestAnOrdinaryShareStopsAtTheOrganization, TestAWideShareIsOutsideOrAnOwner, TestShareCalendarStopsAtTheOrganization, TestWidenCalendarAccessTakesOutsidersAndOwners, TestPublishCalendarOpensADomainAndTakesNoPerson, TestAPublicRuleIsNeverOwner, TestShareCalendarLowersAWiderRule, TestWithinRuleOnlyLowersOrKeepsAnExistingRule |
-| D-51 | Inside the organization is the account's own domain, and any doubt counts as outside | accepted | TestOutsideIsAnyDomainButTheAccountsOwn, TestOutsideFollowsTheNamedOrganizationDomains, TestShareCalendarFollowsTheNamedOrganizationDomains, TestShareCalendarOnAPersonalAccountTakesNobody, TestAnUnknownOrganizerDomainCountsEverybodyAsOutside |
+| D-51 | Inside the organization is the account's own domain, and any doubt counts as outside | accepted | TestOutsideIsAnyDomainButTheAccountsOwn, TestOutsideFollowsTheNamedOrganizationDomains, TestShareCalendarFollowsTheNamedOrganizationDomains, TestShareCalendarReadsAGroupsMembers, TestShareCalendarOnAPersonalAccountTakesNobody, TestAnUnknownOrganizerDomainCountsEverybodyAsOutside |
 | D-52 | The wider shares name the calendar by the title they read | accepted | TestAWideShareRequiresTheCalendarTitle, TestAWideShareNamesTheCalendarItOpens |
 | D-53 | A share reads the rules first, and says who could see the calendar before and after | accepted | TestShareCalendarGrantsAccessAndShowsExposureBothWays, TestShareCalendarPatchesAnExistingRule, TestParseAudienceReusesTheScopeTypeOfAnExistingRule, TestShareCalendarSaysHowItReadTheAddress, TestAGroupShareSaysWhoItReaches, TestListSharingExplainsEveryRole |
 | D-54 | A tool's `Kind` decides its annotations and whether it registers | accepted | TestAnnotationsMatchTheKind, TestGatesAreServerSide, TestFullSurfaceRegistersEverything, TestFullSurfaceOpensEveryGate, TestSharingOffRemovesEverySharingTool |
@@ -1687,6 +1687,16 @@ Each of these errs toward one refusal too many, never one share too
 many. A refusal names the tool that takes the share, so the cost of an
 error is a second call, while a share too many is access nobody meant
 to give.
+
+A group share reaches every member, so `share_calendar` reads a group's
+members whenever a share gives it more than it had, through
+`freebusy.query`, the one place Calendar's scope shows them, and refuses
+a group with a member outside the organization, naming
+`widen_calendar_access` (#44). A room among them is a resource, not a
+person. A group whose members cannot be read, one past what Google
+expands, one it answers with an error or with no members, is shared with
+a note saying so: the one place doubt does not count as outside, since
+refusing it would refuse every large group inside the organization.
 
 Rejected: asking Google whether the account is a Workspace account,
 which needs a scope beyond Calendar's, so a breaking new consent.

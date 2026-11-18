@@ -93,6 +93,22 @@ func TestParseAudienceValidatesWhatTheTypeImplies(t *testing.T) {
 	}
 }
 
+// A group with a member outside the organization is refused, counting
+// them and naming widen_calendar_access; a room is a resource, not a
+// person outside (#44).
+func TestGroupAudienceRefusesAnOutsideMember(t *testing.T) {
+	const account = "me@example.test"
+	err := plan.GroupAudience("team@example.test", []string{"colleague@example.test", "partner@elsewhere.test"}, account, nil)
+	if !errors.Is(err, plan.ErrBlocked) || !strings.Contains(err.Error(), "1 of its 2 members") ||
+		!strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Errorf("a group with an outside member = %v, want [blocked] counting it", err)
+	}
+	if err := plan.GroupAudience("team@example.test",
+		[]string{"colleague@example.test", "room-sample@resource.calendar.google.com"}, account, nil); err != nil {
+		t.Errorf("a group of a colleague and a room = %v, want nil", err)
+	}
+}
+
 // A move is refused only when the destination shows the event's details
 // to a wider tier than the source: anyone, a whole domain, or a person or
 // group outside the organization, with a role that shows details for the
