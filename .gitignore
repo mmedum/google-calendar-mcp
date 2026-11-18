@@ -9,6 +9,13 @@
 /gates.exe
 /livecal
 /livecal.exe
+# and inside a scripts/ package, where `go build` with no -o writes it.
+/scripts/gates/gates
+/scripts/gates/gates.exe
+/scripts/livecal/livecal
+/scripts/livecal/livecal.exe
+/scripts/evals/evals
+/scripts/evals/evals.exe
 /dist/
 
 # Test and gate artifacts
