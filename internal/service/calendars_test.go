@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -48,26 +49,32 @@ func TestCreateCalendarSendsTheResolvedZone(t *testing.T) {
 	}
 }
 
-// A usage limit on calendars.insert names the calendar-creation quota and
-// says a retry soon will not help, rather than reading as a short rate
-// limit; it stays [rate_limited], whichever way Google sends it.
+// The calendar-creation quota, 403 quotaExceeded, is named as such and
+// says a retry soon will not help; a per-minute rate limit keeps saying
+// to wait. Both stay [rate_limited] and keep Google's status.
 func TestCreateCalendarNamesTheCreationQuota(t *testing.T) {
-	for name, fail := range map[string]struct {
-		status int
-		reason string
-	}{"403 quotaExceeded": {403, "quotaExceeded"}, "429": {429, "rateLimitExceeded"}} {
+	for name, c := range map[string]struct {
+		status       int
+		reason       string
+		want, wantNo string
+	}{
+		"403 quotaExceeded": {403, "quotaExceeded", "calendar-creation quota is spent", "rate limiting"},
+		"403 rateLimitExceeded": {403, "rateLimitExceeded", "Google is rate limiting this account",
+			"calendar-creation quota"},
+		"429": {429, "rateLimitExceeded", "Google is rate limiting this account", "calendar-creation quota"},
+	} {
 		t.Run(name, func(t *testing.T) {
 			svc, fake := calendarSeed(t)
-			fake.Fail["POST /calendars"] = fail.status
-			fake.FailReason = map[string]string{"POST /calendars": fail.reason}
+			fake.Fail["POST /calendars"] = c.status
+			fake.FailReason["POST /calendars"] = c.reason
+			fake.FailMessage["POST /calendars"] = "Calendar usage limits exceeded."
 			_, err := svc.CreateCalendar(context.Background(), service.CreateCalendarOptions{Title: "Project Kestrel"})
-			if class, _ := gapi.ClassOf(err); class != gapi.ClassRateLimited {
-				t.Fatalf("CreateCalendar = %v, want [rate_limited]", err)
+			var e *gapi.Error
+			if !errors.As(err, &e) || e.Class != gapi.ClassRateLimited || e.Status != c.status {
+				t.Fatalf("CreateCalendar = %v, want [rate_limited] with status %d", err, c.status)
 			}
-			for _, want := range []string{"how many calendars one account can create", "Retrying soon will likely be refused"} {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("the refusal does not say %q:\n%v", want, err)
-				}
+			if !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), c.wantNo) {
+				t.Errorf("the refusal should say %q and not %q:\n%v", c.want, c.wantNo, err)
 			}
 		})
 	}

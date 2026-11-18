@@ -159,6 +159,7 @@ func New() *Server {
 		GroupErrors:    map[string]string{},
 		Fail:           map[string]int{},
 		FailMessage:    map[string]string{},
+		FailReason:     map[string]string{},
 	}
 }
 

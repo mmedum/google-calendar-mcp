@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- `create_calendar` names Google's calendar-creation limit when it refuses, which deleting calendars does not reset, instead of a short rate limit to retry.
+- A spent Google quota no longer reads as a short rate limit; `create_calendar` names the calendar-creation quota, which deleting calendars does not reset.
 
 ### Security
 
