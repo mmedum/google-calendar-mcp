@@ -630,6 +630,67 @@ func TestAnOccurrenceIsAddressableByItsScheduledStart(t *testing.T) {
 	}
 }
 
+// A move into a calendar that shows the event to someone outside the
+// organization is refused, and writes nothing; one whose sharing cannot
+// be read goes through, saying so (#43).
+func TestMoveEventComparesWhoCanSeeTheTwoCalendars(t *testing.T) {
+	t.Run("wider", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+			gcal.AclRule{ID: "user:partner@elsewhere.test", Role: gcal.RoleReader,
+				Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "partner@elsewhere.test"}})
+		for _, dry := range []bool{true, false} {
+			_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team", DryRun: dry,
+			})
+			if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "partner@elsewhere.test") {
+				t.Errorf("dry_run=%v: a move into a calendar an outsider reads = %v, want [blocked] naming them", dry, err)
+			}
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("a refused move wrote %+v", w)
+		}
+	})
+	t.Run("the source unreadable", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+			gcal.AclRule{ID: "default", Role: gcal.RoleReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}})
+		fake.Fail["GET /calendars/me@example.test/acl"] = 403
+		_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "could not be read to compare") {
+			t.Errorf("a wider move from a calendar whose sharing cannot be read = %v, want [blocked] saying so", err)
+		}
+	})
+	t.Run("a transient failure", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.Fail["GET /calendars/team@group.calendar.example.test/acl"] = 503
+		_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if classOf(t, err) != gapi.ClassUnavailable {
+			t.Errorf("a move whose sharing read failed transiently = %v, want [unavailable], not a skipped check", err)
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("the move went through: %+v", w)
+		}
+	})
+	t.Run("unreadable", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.Fail["GET /calendars/team@group.calendar.example.test/acl"] = 403
+		out, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if err != nil {
+			t.Fatalf("a move into a calendar whose sharing cannot be read: %v", err)
+		}
+		if !strings.Contains(strings.Join(out.Notes, "\n"), "Could not read who can see \"Sample Team\"") {
+			t.Errorf("the move does not say it could not compare: %v", out.Notes)
+		}
+	})
+}
+
 // A rule whose occurrences fall by the local date, BYMONTHDAY=31, is
 // counted in the series' own zone however the call reads it: from Tokyo,
 // 20:00 in Los Angeles is already the next day, and a count walked there
@@ -754,6 +815,68 @@ func TestCancelThisAndFollowingCountsInTheSeriesZone(t *testing.T) {
 	if want := "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6 → RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=2"; !strings.Contains(out.Text(), want) {
 		t.Errorf("the cancel does not truncate to the two occurrences before 31 May in Los Angeles, %q:\n%s", want, out.Text())
 	}
+}
+
+// visibility:public is refused on a calendar whose free/busy is shared
+// with anyone, on create and on an update that makes an event public; on
+// a calendar shared only with readers it goes through (#42).
+func TestPublicVisibilityIsRefusedWhereOnlyFreeBusyWasShared(t *testing.T) {
+	freeBusy := gcal.AclRule{ID: "default", Role: gcal.RoleFreeBusyReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}}
+	public := gcal.VisibilityPublic
+	create := service.CreateOptions{Calendar: "primary", Title: "Planning",
+		Start: "2026-03-19T10:00:00+01:00", End: "2026-03-19T11:00:00+01:00", Visibility: public}
+	t.Run("create", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"], freeBusy)
+		_, err := svc.CreateEvent(context.Background(), create)
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "ANYONE") {
+			t.Errorf("a public event where anyone sees free/busy = %v, want [blocked] naming them", err)
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("the refused create wrote %+v", w)
+		}
+	})
+	t.Run("create, in another case", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"], freeBusy)
+		o := create
+		o.Visibility = " Public "
+		if _, err := svc.CreateEvent(context.Background(), o); classOf(t, err) != gapi.ClassBlocked {
+			t.Errorf("visibility %q where anyone sees free/busy = %v, want [blocked]", o.Visibility, err)
+		}
+	})
+	for name, o := range map[string]service.UpdateOptions{
+		"update": {Calendar: "primary", EventID: "evsolo00001", Visibility: ptr("PUBLIC")},
+		"this and following": {Calendar: "primary", EventID: "evseries001", OriginalStart: "2026-03-31T14:00:00+02:00",
+			Scope: "this_and_following", Visibility: &public},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, fake := writeSeed(t)
+			fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"], freeBusy)
+			if _, err := svc.UpdateEvent(context.Background(), o); classOf(t, err) != gapi.ClassBlocked {
+				t.Errorf("making an event public where anyone sees free/busy = %v, want [blocked]", err)
+			}
+			if w := fake.Wrote(); len(w) != 0 {
+				t.Errorf("the refused update wrote %+v", w)
+			}
+		})
+	}
+	t.Run("unreadable", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.Fail["GET /calendars/me@example.test/acl"] = 403
+		out, err := svc.CreateEvent(context.Background(), create)
+		if err != nil || !strings.Contains(strings.Join(out.Notes, "\n"), "did not check whether a public event") {
+			t.Errorf("a public event where the sharing cannot be read = %v, %v; want it made, saying so", err, out.Notes)
+		}
+	})
+	t.Run("readers only", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"],
+			gcal.AclRule{ID: "default", Role: gcal.RoleReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}})
+		if _, err := svc.CreateEvent(context.Background(), create); err != nil {
+			t.Errorf("a public event where anyone reads already: %v", err)
+		}
+	})
 }
 
 func TestAnOriginalStartThatNamesNoOccurrenceSaysWhy(t *testing.T) {
@@ -1094,16 +1217,17 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 			})
 			return err
 		}, "list, settings, read, delete"},
-		// Five, not four: the event is read back from the destination,
-		// because a successful move answers with status:cancelled and
-		// the result would otherwise report a moved meeting as a
-		// canceled one.
-		{"move", 5, func(s *service.Service) error {
+		// The event is read back from the destination, because a
+		// successful move answers with status:cancelled, and the
+		// destination's sharing is read to compare who can see it; the
+		// source's is read only when the destination has a wide rule
+		// (D-91).
+		{"move", 6, func(s *service.Service) error {
 			_, err := s.MoveEvent(context.Background(), service.MoveOptions{
 				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
 			})
 			return err
-		}, "list, settings, read, move, read back"},
+		}, "list, settings, read, the destination's sharing, move, read back"},
 		{"respond", 4, func(s *service.Service) error {
 			_, err := s.RespondToEvent(context.Background(), service.RespondOptions{
 				Calendar: "primary", EventID: "evinvite001", Response: "accepted", Notify: "all",
@@ -1742,9 +1866,10 @@ func TestAMoveStraightBackIsMadeAfterOneFreshRead(t *testing.T) {
 		"server read it") {
 		t.Fatalf("the result does not say the move was made on its second try:\n%s", out.Text())
 	}
-	// Read, refused move, read, move, read back: both tries are counted.
-	if out.Requests != 5 {
-		t.Fatalf("api_requests = %d, want 5", out.Requests)
+	// Read, the destination's sharing, refused move, the same again, move,
+	// read back: both tries are counted.
+	if out.Requests != 7 {
+		t.Fatalf("api_requests = %d, want 7", out.Requests)
 	}
 }
 

@@ -573,10 +573,19 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
+	// A working-location event, which plan makes public as Google needs
+	// it to be, is not asked about: its visibility is not the caller's.
+	publicNote, err := s.publicCheck(ctx, env.cal, &o.Visibility, "")
+	if err != nil {
+		return render.WriteReport{}, err
+	}
 
 	report := render.WriteReport{
 		Verb: render.VerbCreate, Calendar: env.cal.Title, Zone: env.zone,
 		Notify: decision.Report(), DryRun: o.DryRun,
+	}
+	if publicNote != "" {
+		report.Notes = append(report.Notes, publicNote)
 	}
 	if len(body.Recurrence) > 0 {
 		report.Notes = append(report.Notes,
@@ -868,6 +877,10 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 	if err != nil {
 		return render.WriteReport{}, err
 	}
+	publicNote, err := s.publicCheck(ctx, env.cal, draft.Visibility, target.Visibility)
+	if err != nil {
+		return render.WriteReport{}, err
+	}
 
 	report := render.WriteReport{
 		Verb: render.VerbUpdate, Calendar: env.cal.Title, Zone: env.zone,
@@ -882,6 +895,9 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 	}
 	if visibilityNote != "" {
 		report.Notes = append(report.Notes, visibilityNote)
+	}
+	if publicNote != "" {
+		report.Notes = append(report.Notes, publicNote)
 	}
 	if o.AddConference && o.DryRun {
 		report.Notes = append(report.Notes, dryRunConferenceNote)
@@ -1087,11 +1103,18 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if err != nil {
 		return render.WriteReport{}, err
 	}
+	publicNote, err := s.publicCheck(ctx, env.cal, draft.Visibility, parentRaw.Visibility)
+	if err != nil {
+		return render.WriteReport{}, err
+	}
 
 	report := render.WriteReport{
 		Verb: render.VerbUpdate, Calendar: env.cal.Title, Zone: env.zone,
 		Before: &target, Changes: changes, Scope: string(recur.ScopeThisAndFollowing),
 		Notify: decision.Report(), DryRun: o.DryRun,
+	}
+	if publicNote != "" {
+		report.Notes = append(report.Notes, publicNote)
 	}
 	if note != "" {
 		report.Notes = append(report.Notes, note)
@@ -1633,6 +1656,83 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 	})
 }
 
+// publicCheck runs publicReach when asked makes an event public that is
+// not public already: asked as plan reads it, in any case and padding,
+// and already the event's visibility before the write.
+func (s *Service) publicCheck(ctx context.Context, cal model.Calendar, asked *string, already string) (string, error) {
+	if !plan.AsksPublic(asked) || already == gcal.VisibilityPublic {
+		return "", nil
+	}
+	return s.publicReach(ctx, cal)
+}
+
+// publicReach refuses a public visibility on a calendar whose free/busy
+// is shared with a wider tier, which a public event would show its
+// details to (#42), and returns a note when the calendar's sharing cannot
+// be read for want of a scope or of owner access, as moveReach does.
+func (s *Service) publicReach(ctx context.Context, cal model.Calendar) (string, error) {
+	rules, err := s.sharingRules(ctx, cal.ID)
+	if err != nil {
+		if _, ok := unreadableSharing(err); !ok {
+			return "", err
+		}
+		note := fmt.Sprintf("Could not read who can see %q, so this did not check whether a public event shows "+
+			"its details to someone who sees only free/busy there.", cal.Title)
+		return note, nil //nolint:nilerr // a calendar this account may not read is a note, not a refusal (D-91)
+	}
+	who := plan.PublicReaders(rules, cal.ID, s.primaryID(ctx), s.Cfg.OrgDomains)
+	if len(who) == 0 {
+		return "", nil
+	}
+	return "", gapi.Errf(gapi.ClassBlocked,
+		"visibility:public would show this event's details to %s, who see only free/busy on %q. Nothing was "+
+			"written. Leave visibility at default, which keeps them seeing busy, or narrow who sees free/busy "+
+			"on %q first with unshare_calendar", strings.Join(who, ", "), cal.Title, cal.Title)
+}
+
+// moveReach refuses a move that would show the event's details to an
+// audience past the source's, in the tiers the wider sharing tools take,
+// and returns a note when the destination's sharing cannot be read for
+// want of a scope or of owner access (D-91). Any other failure to read it
+// fails the move rather than skipping the check. The source is read only
+// when the destination has a wide rule, and one that cannot be read
+// counts as shared with nobody.
+func (s *Service) moveReach(ctx context.Context, env *writeEnv, dest model.Calendar, e model.Event) (string, error) {
+	destRules, err := s.sharingRules(ctx, dest.ID)
+	if err != nil {
+		if _, ok := unreadableSharing(err); !ok {
+			return "", err
+		}
+		note := fmt.Sprintf("Could not read who can see %q, so this move did not compare it with who can see %q: "+
+			"anyone who can read %q sees this event there.", dest.Title, env.cal.Title, dest.Title)
+		return note, nil //nolint:nilerr // a destination this account may not read is a note, not a refusal (D-91)
+	}
+	account, role := s.primaryID(ctx), plan.DetailsRole(e.Visibility)
+	if len(plan.WiderReaders(nil, destRules, dest.ID, account, s.Cfg.OrgDomains, role)) == 0 {
+		return "", nil
+	}
+	sourceRules, err := s.sharingRules(ctx, env.cal.ID)
+	known := err == nil
+	if err != nil {
+		if _, ok := unreadableSharing(err); !ok {
+			return "", err
+		}
+	}
+	wider := plan.WiderReaders(sourceRules, destRules, dest.ID, account, s.Cfg.OrgDomains, role)
+	if len(wider) == 0 {
+		return "", nil
+	}
+	compared := fmt.Sprintf("who cannot read it on %q", env.cal.Title)
+	if !known {
+		compared = fmt.Sprintf("and who can read it on %q could not be read to compare, so this counts it as "+
+			"shared with nobody", env.cal.Title)
+	}
+	return "", gapi.Errf(gapi.ClassBlocked,
+		"moving this event to %q would show its details to %s, %s. Nothing was moved. To move it, an owner of "+
+			"%q can first narrow who reads it with unshare_calendar, or you can move it in Google Calendar, "+
+			"where showing it to them is your decision to make", dest.Title, strings.Join(wider, ", "), compared, dest.Title)
+}
+
 // moveEvent is one try at MoveEvent.
 func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (render.WriteReport, error) {
 	// There is nothing to split when an event simply changes calendars,
@@ -1684,6 +1784,10 @@ func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (re
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
+	readersNote, err := s.moveReach(ctx, env, dest, targetModel)
+	if err != nil {
+		return render.WriteReport{}, err
+	}
 
 	etag, err := ifMatch(raw.ETag, target.ETag, o.ETag, o.Force)
 	if err != nil {
@@ -1700,6 +1804,9 @@ func (s *Service) moveEvent(ctx context.Context, o MoveOptions, at *attempt) (re
 	}
 	if o.Force {
 		report.Notes = append(report.Notes, forcedNote)
+	}
+	if readersNote != "" {
+		report.Notes = append(report.Notes, readersNote)
 	}
 	report.Notes = append(report.Notes,
 		fmt.Sprintf("Moving an event changes its organizer to %q. Its id does not change, but the calendar "+

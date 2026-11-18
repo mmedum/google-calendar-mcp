@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -8,432 +9,312 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Break the release config every way it breaks and watch each be
-// refused, for the same reason the bundle gate does it: a check nobody
-// has watched fail is a check nobody knows the shape of.
-//
-// The first case matters most: the packer runs only at release time, so a
-// wrong glob passes every other gate.
+const releaseTestConfig = `version: 2
+project_name: google-calendar-mcp
+before:
+  hooks:
+    - go mod download
+builds:
+  - id: google-calendar-mcp
+    binary: google-calendar-mcp
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X example.com/internal/version.Version={{ .Version }}
+universal_binaries:
+  - id: google-calendar-mcp-universal
+    ids: [google-calendar-mcp]
+    replace: false
+    hooks:
+      post: go run ./scripts/gates mcpb-pack dist {{ .Version }} dist/google-calendar-mcp_{{ .Version }}.mcpb
+archives:
+  - id: archive
+    ids: [google-calendar-mcp]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: ./dist/*.mcpb
+sboms:
+  - artifacts: archive
+signs:
+  - cmd: cosign
+    signature: "${artifact}.bundle"
+    args: [sign-blob, "--bundle=${signature}", "--yes", "${artifact}"]
+    artifacts: checksum
+release:
+  draft: false
+  extra_files:
+    - glob: ./dist/*.mcpb
+`
 
-// goodWorkflow is a release workflow with nothing wrong with it, so a
-// case testing the config is not also failing on the workflow.
-const goodWorkflow = `name: release
-on:
+const releaseTestWorkflow = `on:
   push:
-    tags: ['v*.*.*']
+    tags: ["v*.*.*"]
 jobs:
   goreleaser:
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - run: go run ./scripts/gates release-tag "${REF_NAME}"
-      - run: go run ./scripts/gates release-notes "${REF_NAME}" > notes.md
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+      - name: The tag's major version is go.mod's
+        run: go run ./scripts/gates release-tag "${REF}"
+      - name: Test
+        run: go test ./...
+      - name: notes
+        run: go run ./scripts/gates release-notes "${REF}" > "${RUNNER_TEMP}/notes.md"
+      - uses: sigstore/cosign-installer@x
+        with:
+          cosign-release: v3.1.3
+      - uses: anchore/sbom-action/download-syft@x
+        with:
+          syft-version: v1.52.0
+      - uses: goreleaser/goreleaser-action@x
+        with:
+          args: build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-1
+      - uses: goreleaser/goreleaser-action@x
+        env:
+          GOCACHE: ${{ runner.temp }}/gocache-repro
+        with:
+          args: build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-2
+      - name: Compare
+        run: cmp "${RUNNER_TEMP}/repro-1" "${RUNNER_TEMP}/repro-2"
+      - uses: goreleaser/goreleaser-action@x
         with:
           args: release --clean --release-notes=notes.md
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+      - uses: actions/attest-build-provenance@x
         with:
           subject-path: "dist/*.tar.gz,dist/*.zip,dist/*.mcpb,dist/checksums.txt"
 `
 
-// goodOut is the bundle path the Makefile owns, read rather than
-// repeated: a copy here would let the two drift and still pass.
-func goodOut(t *testing.T) string {
+const releaseTestOut = "dist/google-calendar-mcp_$(VERSION).mcpb"
+
+func releaseTestStaged() []staged {
+	return []staged{
+		{path: "server/m-darwin", glob: "*_darwin_all/google-calendar-mcp", platform: "darwin"},
+		{path: "server/m.exe", glob: "*_windows_amd64*/google-calendar-mcp.exe", platform: "win32"},
+		{path: "server/launch-linux.sh", platform: "linux"},
+		{path: "server/m-linux-amd64", glob: "*_linux_amd64*/google-calendar-mcp", launched: true, goos: "linux", goarch: "amd64"},
+		{path: "server/m-linux-arm64", glob: "*_linux_arm64*/google-calendar-mcp", launched: true, goos: "linux", goarch: "arm64"},
+	}
+}
+
+func releaseTestRun(t *testing.T, config, flowText string, staged []staged, out string) []string {
 	t.Helper()
-	out, err := makeVariable(makeVars(string(repoFile(t, makefilePath))), "MCPB_OUT")
+	var cfg releaseConfig
+	if err := yaml.Unmarshal([]byte(config), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	var flow workflow
+	if err := yaml.Unmarshal([]byte(flowText), &flow); err != nil {
+		t.Fatal(err)
+	}
+	flow.path = "release.yml"
+	problems, _ := releaseValidate(cfg, staged, out, flow)
+	return problems
+}
+
+func TestReleasePassesOnAWiredRelease(t *testing.T) {
+	if p := releaseTestRun(t, releaseTestConfig, releaseTestWorkflow, releaseTestStaged(), releaseTestOut); len(p) > 0 {
+		t.Fatalf("problems on a wired fixture:\n%s", strings.Join(p, "\n"))
+	}
+}
+
+func TestReleaseRefuses(t *testing.T) {
+	cases := []struct {
+		name, inConfig, old, new, want string
+	}{
+		{"no universal binary ids in the archives", "config", "  - id: archive\n    ids: [google-calendar-mcp]\n",
+			"  - id: archive\n", "archives[0] names no ids"},
+		{"the bundle not checksummed", "config", "checksum:\n  name_template: checksums.txt\n  extra_files:\n    - glob: ./dist/*.mcpb\n",
+			"checksum:\n  name_template: checksums.txt\n", "checksum.extra_files does not cover"},
+		{"the bundle not uploaded", "config", "  draft: false\n  extra_files:\n    - glob: ./dist/*.mcpb\n",
+			"  draft: false\n", "release.extra_files does not cover"},
+		{"a hook packing elsewhere", "config", "dist/google-calendar-mcp_{{ .Version }}.mcpb", "out/x.mcpb",
+			"the post hook packs to a path"},
+		{"no trimpath", "config", "flags: [-trimpath]", "flags: []", "does not pass -trimpath"},
+		{"a tidy hook", "config", "go mod download", "go mod tidy", "dirties the tree"},
+		{"cosign without --bundle", "config", `"--bundle=${signature}", `, "", "does not pass --bundle"},
+		{"a changelog block", "config", "release:\n", "changelog:\n  disable: true\nrelease:\n", "there is a changelog block"},
+		{"a short matrix", "config", "goarch: [amd64, arm64]", "goarch: [amd64]", "builds 3 platform targets"},
+		{"no tag trigger", "flow", "  push:\n    tags: [\"v*.*.*\"]\n", "  workflow_dispatch:\n", "does not trigger on a v* tag"},
+		{"a space-separated subject path", "flow", `"dist/*.tar.gz,dist/*.zip,dist/*.mcpb,dist/checksums.txt"`,
+			`"dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt"`, "separates with a space"},
+		{"the bundle not attested", "flow", ",dist/*.mcpb", "", "names nothing matching dist/google-calendar-mcp_1.2.3.mcpb"},
+		{"the Windows archives not attested", "flow", ",dist/*.zip", "",
+			"names nothing matching dist/google-calendar-mcp_1.2.3_linux_amd64.zip"},
+		{"a signature attested in the bundle's place", "flow", ",dist/*.mcpb,", ",dist/*.mcpb.sigstore.json,",
+			`entry "dist/*.mcpb.sigstore.json" matches no file the release writes`},
+		{"the bundle attested in another directory", "flow", ",dist/*.mcpb,", ",dist/unused/*.mcpb,",
+			"names nothing matching dist/google-calendar-mcp_1.2.3.mcpb"},
+		{"the checksum file not attested", "flow", ",dist/checksums.txt", ",dist/checksums.txt.bundle",
+			"names nothing matching dist/checksums.txt"},
+		{"the attest step in a job of its own", "flow", "      - uses: actions/attest-build-provenance@x\n",
+			"  attest:\n    permissions:\n      id-token: write\n      attestations: write\n    steps:\n" +
+				"      - uses: actions/attest-build-provenance@x\n",
+			"job attest attests, and runs no goreleaser"},
+		{"no attestations scope", "flow", "      attestations: write\n", "", "job goreleaser does not grant attestations: write"},
+		{"a second job running goreleaser bare", "flow", "dist/checksums.txt\"\n",
+			"dist/checksums.txt\"\n  nightly:\n    steps:\n      - run: goreleaser --clean\n",
+			"job nightly runs goreleaser and attests nothing it wrote"},
+		{"no checksum name", "config", "  name_template: checksums.txt\n", "", "checksum.name_template is empty"},
+		{"one reproducible build", "flow", "build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-2",
+			"build --snapshot --clean --output ${{ runner.temp }}/repro-2", "builds one target 1 time(s)"},
+		{"two reproducible builds to one output", "flow", "--output ${{ runner.temp }}/repro-2",
+			"--output ${{ runner.temp }}/repro-1", "write one --output"},
+		{"two reproducible builds on one cache", "flow", "        env:\n          GOCACHE: ${{ runner.temp }}/gocache-repro\n", "",
+			"share a GOCACHE"},
+		{"the second reproducible build with no output", "flow", " --output ${{ runner.temp }}/repro-2", "",
+			"write one --output"},
+		{"two reproducible builds named but not compared", "flow", "        run: cmp \"${RUNNER_TEMP}/repro-1\" \"${RUNNER_TEMP}/repro-2\"\n",
+			"        run: ls \"${RUNNER_TEMP}/repro-1\" \"${RUNNER_TEMP}/repro-2\"\n", "never compares the two reproducible builds"},
+		{"two reproducible builds on one cache the job sets", "flow", "    steps:\n",
+			"    env:\n      GOCACHE: ${{ runner.temp }}/gocache-repro\n    steps:\n", "share a GOCACHE"},
+		{"two reproducible builds never compared", "flow", "        run: cmp \"${RUNNER_TEMP}/repro-1\" \"${RUNNER_TEMP}/repro-2\"\n",
+			"        run: echo done\n", "never compares the two reproducible builds"},
+		{"no release notes passed", "flow", "--release-notes=notes.md", "", "does not pass --release-notes"},
+		{"no release-tag", "flow", "      - name: The tag's major version is go.mod's\n        run: go run ./scripts/gates release-tag \"${REF}\"\n", "",
+			"does not run `gates release-tag` before goreleaser"},
+		{"no syft pin", "flow", "          syft-version: v1.52.0\n", "", "installs no syft"},
+		{"no go test", "flow", "run: go test ./...", "run: echo", "runs no `go test`"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			config, flow := releaseTestConfig, releaseTestWorkflow
+			target := &config
+			if tc.inConfig == "flow" {
+				target = &flow
+			}
+			if !strings.Contains(*target, tc.old) {
+				t.Fatalf("no %q to break", tc.old)
+			}
+			*target = strings.Replace(*target, tc.old, tc.new, 1)
+			joined := strings.Join(releaseTestRun(t, config, flow, releaseTestStaged(), releaseTestOut), "\n")
+			if !strings.Contains(joined, tc.want) {
+				t.Errorf("want %q, got:\n%s", tc.want, joined)
+			}
+		})
+	}
+}
+
+// The action splits subject-path at commas and newlines and trims each
+// glob, so space around an entry is not a separator.
+func TestReleaseAcceptsASubjectList(t *testing.T) {
+	const old = `subject-path: "dist/*.tar.gz,dist/*.zip,dist/*.mcpb,dist/checksums.txt"`
+	for name, subjects := range map[string]string{
+		"commas and a space after each": `subject-path: "dist/*.tar.gz, dist/*.zip, dist/*.mcpb, dist/checksums.txt"`,
+		"a block, one glob with a trailing space": "subject-path: |\n            dist/*.tar.gz \n            dist/*.zip\n" +
+			"            dist/*.mcpb\n            dist/checksums.txt",
+	} {
+		t.Run(name, func(t *testing.T) {
+			flow := strings.Replace(releaseTestWorkflow, old, subjects, 1)
+			if flow == releaseTestWorkflow {
+				t.Fatalf("no %q to replace", old)
+			}
+			if p := releaseTestRun(t, releaseTestConfig, flow, releaseTestStaged(), releaseTestOut); len(p) > 0 {
+				t.Errorf("problems:\n%s", strings.Join(p, "\n"))
+			}
+		})
+	}
+}
+
+func TestReleaseRefusesABadGlob(t *testing.T) {
+	cases := map[string]struct {
+		edit func([]staged)
+		want string
+	}{
+		"matches nothing": {func(s []staged) { s[0].glob = "*darwin*universal*/google-calendar-mcp" },
+			"matches 0 build directories"},
+		"matches two": {func(s []staged) { s[3].glob = "*_linux_*/google-calendar-mcp" }, "matches 2 build directories"},
+		"hardcodes a variant": {func(s []staged) { s[3].glob = "*_linux_amd64_v1/google-calendar-mcp" },
+			"matches 0 build directories"},
+		"wrong binary name": {func(s []staged) { s[1].glob = "*_windows_amd64*/google-calendar-mcp" },
+			`writes "google-calendar-mcp.exe"`},
+		"wrong platform":     {func(s []staged) { s[1].platform = "linux" }, `entry point for "linux"`},
+		"wrong architecture": {func(s []staged) { s[4].goarch = "amd64" }, "says it runs on linux/amd64"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			staged := releaseTestStaged()
+			tc.edit(staged)
+			joined := strings.Join(releaseTestRun(t, releaseTestConfig, releaseTestWorkflow, staged, releaseTestOut), "\n")
+			if !strings.Contains(joined, tc.want) {
+				t.Errorf("want %q, got:\n%s", tc.want, joined)
+			}
+		})
+	}
+}
+
+// A job's permissions block replaces the workflow's, and write-all grants
+// every scope.
+func TestReleaseReadsTheJobsPermissions(t *testing.T) {
+	const jobBlock = "    permissions:\n      contents: write\n      id-token: write\n      attestations: write\n"
+	for name, tc := range map[string]struct {
+		workflowLevel, jobLevel string
+		want                    []string
+	}{
+		"write-all at the workflow": {"permissions: write-all\n", "", nil},
+		"the job's block replaces write-all": {"permissions: write-all\n", "    permissions:\n      contents: write\n",
+			[]string{"does not grant attestations: write", "does not grant id-token: write"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			flow := strings.Replace(releaseTestWorkflow, jobBlock, tc.jobLevel, 1)
+			flow = strings.Replace(flow, "jobs:\n", tc.workflowLevel+"jobs:\n", 1)
+			if flow == releaseTestWorkflow {
+				t.Fatal("no permissions to replace")
+			}
+			joined := strings.Join(releaseTestRun(t, releaseTestConfig, flow, releaseTestStaged(), releaseTestOut), "\n")
+			for _, want := range tc.want {
+				if !strings.Contains(joined, want) {
+					t.Errorf("want %q, got:\n%s", want, joined)
+				}
+			}
+			if tc.want == nil && joined != "" {
+				t.Errorf("problems:\n%s", joined)
+			}
+		})
+	}
+}
+
+// release-tag must refuse before goreleaser builds anything, since every
+// step after it publishes; the same step after goreleaser does not count.
+func TestReleaseWantsTheTagCheckedBeforeGoreleaser(t *testing.T) {
+	step := "      - name: The tag's major version is go.mod's\n        run: go run ./scripts/gates release-tag \"${REF}\"\n"
+	release := "          args: release --clean --release-notes=notes.md\n"
+	if !strings.Contains(releaseTestWorkflow, step) || !strings.Contains(releaseTestWorkflow, release) {
+		t.Fatal("the fixture moved; this test edits its release-tag and release steps")
+	}
+	flow := strings.Replace(strings.Replace(releaseTestWorkflow, step, "", 1), release, release+step, 1)
+	joined := strings.Join(releaseTestRun(t, releaseTestConfig, flow, releaseTestStaged(), releaseTestOut), "\n")
+	if !strings.Contains(joined, "does not run `gates release-tag` before goreleaser") {
+		t.Errorf("release-tag after goreleaser passed; got:\n%s", joined)
+	}
+}
+
+// The committed build matrix produces the six platform archives a release
+// ships, and the universal binary that is the bundle's macOS entry.
+func TestTheCommittedBuildMatrixIsTheOneDocumented(t *testing.T) {
+	g, err := readGoreleaser("../..")
 	if err != nil {
-		t.Fatalf("read MCPB_OUT: %v", err)
+		t.Fatal(err)
 	}
-	return out
-}
-
-// goodConfig is the committed config, which every case starts from.
-func goodConfig(t *testing.T) goreleaserConfig {
-	t.Helper()
-	var cfg goreleaserConfig
-	if err := yaml.Unmarshal(repoFile(t, goreleaserPath), &cfg); err != nil {
-		t.Fatalf("the committed %s is not valid YAML: %v", goreleaserPath, err)
+	got := map[string]bool{}
+	for _, tg := range releaseTargets(g.cfg) {
+		got[tg.goos+"/"+tg.goarch] = true
 	}
-	return cfg
-}
-
-func TestTheCommittedReleaseConfigIsValid(t *testing.T) {
-	cfg := goodConfig(t)
-	flow := asWorkflow(t, string(repoFile(t, releaseWorkflowPath)))
-	problems, targets := validateRelease(cfg, bundleFiles, goodOut(t), flow)
-	if len(problems) > 0 {
-		t.Fatalf("the committed release wiring does not describe the bundle it ships:\n%s",
-			strings.Join(problems, "\n"))
-	}
-	if len(targets) < 6 {
-		t.Fatalf("read %d build targets from the committed config", len(targets))
-	}
-}
-
-// The build matrix has to produce the six platform archives a release ships,
-// plus the universal binary the bundle's macOS slot is.
-func TestTheBuildMatrixIsTheOneDocumented(t *testing.T) {
-	targets := buildTargets(goodConfig(t))
 	want := map[string]bool{
 		"linux/amd64": true, "linux/arm64": true,
 		"darwin/amd64": true, "darwin/arm64": true,
 		"windows/amd64": true, "windows/arm64": true,
 		"darwin/all": true,
 	}
-	got := map[string]bool{}
-	for _, tg := range targets {
-		got[tg.goos+"/"+tg.goarch] = true
-	}
-	for name := range want {
-		if !got[name] {
-			t.Errorf("the build matrix does not produce %s", name)
-		}
-	}
-	for name := range got {
-		if !want[name] {
-			t.Errorf("the build matrix produces %s, which nothing documents", name)
-		}
-	}
-}
-
-func TestTheWaysTheReleaseWiringBreaks(t *testing.T) {
-	cases := []struct {
-		name   string
-		breaks func(cfg *goreleaserConfig, files *[]staged, out *string, workflow *string)
-		want   string
-	}{
-		{
-			// goreleaser names the directory
-			// <id>_darwin_all, so the id comes first.
-			name: "the universal glob written the obvious way round",
-			breaks: func(_ *goreleaserConfig, files *[]staged, _ *string, _ *string) {
-				setGlob(files, "server/google-calendar-mcp-darwin",
-					"dist/*darwin*universal*/google-calendar-mcp")
-			},
-			want: "matches no directory",
-		},
-		{
-			name: "a glob that matches both macOS architectures",
-			breaks: func(_ *goreleaserConfig, files *[]staged, _ *string, _ *string) {
-				setGlob(files, "server/google-calendar-mcp-darwin", "dist/*darwin*/google-calendar-mcp")
-			},
-			want: "must name exactly one",
-		},
-		{
-			name: "a Windows glob that forgets the extension",
-			breaks: func(_ *goreleaserConfig, files *[]staged, _ *string, _ *string) {
-				setGlob(files, "server/google-calendar-mcp.exe", "dist/*windows_amd64*/google-calendar-mcp")
-			},
-			want: "writes \"google-calendar-mcp.exe\"",
-		},
-		{
-			name: "a platform spawning another platform's directory",
-			breaks: func(_ *goreleaserConfig, files *[]staged, _ *string, _ *string) {
-				setGlob(files, "server/google-calendar-mcp.exe", "dist/*linux_amd64*/google-calendar-mcp")
-			},
-			want: "staged for the manifest platform",
-		},
-		{
-			name: "a build matrix that drops an architecture the launcher picks",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Builds[0].Goarch = []string{"amd64"}
-			},
-			want: "matches no directory",
-		},
-		{
-			// lipo over nothing. The macOS glob still resolves, because
-			// the universal directory comes from this block rather than
-			// from the matrix, so only this names it.
-			name: "a universal binary with no darwin build to join",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Builds[0].Goos = []string{"linux", "windows"}
-			},
-			want: "nothing for it to join",
-		},
-		{
-			name: "nothing packing the bundle",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.UniversalBinaries[0].Hooks.Post = ""
-			},
-			want: "no post hook",
-		},
-		{
-			name: "a hook packing where the Makefile does not look",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.UniversalBinaries[0].Hooks.Post = "go run ./scripts/gates mcpb-pack dist 1.0.0 dist/bundle.mcpb"
-			},
-			want: "the Makefile does not name",
-		},
-		{
-			// Hashed and never published, or published and never hashed.
-			// Neither looks any different on the release page.
-			name: "a bundle nobody checksums",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Checksum.ExtraFiles = nil
-			},
-			want: "not under the signature",
-		},
-		{
-			name: "a bundle nobody uploads",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Release.ExtraFiles = nil
-			},
-			want: "hashed and never uploaded",
-		},
-		{
-			name: "archives that pick up the universal binary too",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Archives[0].IDs = nil
-			},
-			want: "names no ids",
-		},
-		{
-			name: "a universal binary that replaces the macOS archives",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.UniversalBinaries[0].Replace = true
-			},
-			want: "removes the per-architecture",
-		},
-		{
-			name: "a build that carries this machine's paths",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Builds[0].Flags = nil
-			},
-			want: "-trimpath",
-		},
-		{
-			name: "a build whose timestamp is the build's, not the commit's",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Builds[0].ModTimestamp = ""
-			},
-			want: "does not reproduce it",
-		},
-		{
-			name: "no SBOM beside the archives",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.SBOMs = nil
-			},
-			want: "no sboms block",
-		},
-		{
-			name: "nothing signing the checksum file",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Signs = nil
-			},
-			want: "nothing signs the checksum file",
-		},
-		{
-			// cosign 3 made --bundle required. With only the version-2
-			// flags it is given no output path at all.
-			name: "a signature written the way cosign 2 wanted",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Signs[0].Args = []string{"sign-blob", "--output-signature=${signature}", "--yes", "${artifact}"}
-			},
-			want: "--bundle",
-		},
-		{
-			// The trap three servers wrote down: it reads like the way to
-			// leave --release-notes in charge and is the opposite.
-			name: "a changelog block, which collapses the body to the footer",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Changelog = &yaml.Node{Kind: yaml.MappingNode}
-			},
-			want: "Deleting the block",
-		},
-		{
-			name: "a release that publishes a draft nobody presses publish on",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Release.Draft = true
-			},
-			want: "remembers to press a button",
-		},
-		{
-			name: "a signature written by something other than cosign",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Signs[0].Cmd = "gpg"
-			},
-			want: "rather than cosign",
-		},
-		{
-			name: "a glob that hardcodes goreleaser's variant suffix",
-			breaks: func(_ *goreleaserConfig, files *[]staged, _ *string, _ *string) {
-				setGlob(files, "server/google-calendar-mcp-linux-amd64", "dist/*linux_amd64_v1/google-calendar-mcp")
-			},
-			want: "matches no directory",
-		},
-		{
-			name: "a bundle the provenance does not cover",
-			breaks: func(_ *goreleaserConfig, _ *[]staged, _ *string, workflow *string) {
-				*workflow = strings.ReplaceAll(*workflow, "dist/*.mcpb,", "")
-			},
-			want: "does not name .mcpb, so it carries no attestation",
-		},
-		{
-			name: "a checksum file the provenance does not name",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Checksum.NameTemplate = "SHA256SUMS"
-			},
-			want: "does not name SHA256SUMS, so it carries no attestation",
-		},
-		{
-			name: "a packer staging too few files to be a bundle",
-			breaks: func(_ *goreleaserConfig, files *[]staged, _ *string, _ *string) {
-				*files = (*files)[:2]
-			},
-			want: "that is not the bundle",
-		},
-		{
-			// Probed: with the two renamed apart, goreleaser writes the
-			// PROJECT name into the universal directory and the build's
-			// `binary` into every other one. So changing the project name
-			// alone moves the macOS file and nothing else — which the
-			// first version of this gate could not see, because it took
-			// that name from the build.
-			name: "a project renamed out from under the macOS slot",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.ProjectName = "calendar-mcp"
-			},
-			want: "darwin/all writes \"calendar-mcp\"",
-		},
-		{
-			// And the other half: the build's binary names every
-			// directory except the universal one.
-			name: "a build binary renamed out from under the rest",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Builds[0].Binary = "gcal-probe"
-			},
-			want: "writes \"gcal-probe\"",
-		},
-		{
-			name: "a matrix that ignores a platform the release page claims",
-			breaks: func(cfg *goreleaserConfig, _ *[]staged, _ *string, _ *string) {
-				cfg.Builds[0].Ignore = append(cfg.Builds[0].Ignore, struct {
-					Goos   string `yaml:"goos"`
-					Goarch string `yaml:"goarch"`
-				}{Goos: "windows", Goarch: "arm64"})
-			},
-			want: "a release ships six archives",
-		},
-		{
-			name: "a workflow that lets goreleaser write the notes",
-			breaks: func(_ *goreleaserConfig, _ *[]staged, _ *string, workflow *string) {
-				*workflow = strings.ReplaceAll(*workflow, "--release-notes", "--rm-dist")
-			},
-			want: "generated from commit subjects",
-		},
-		{
-			name: "a workflow that never checks the tag's major version",
-			breaks: func(_ *goreleaserConfig, _ *[]staged, _ *string, workflow *string) {
-				*workflow = strings.ReplaceAll(*workflow, "gates release-tag", "gates pins")
-			},
-			want: "does not run `gates release-tag` before goreleaser",
-		},
-		{
-			// After goreleaser is after the publish.
-			name: "a workflow that checks the tag once it has shipped",
-			breaks: func(_ *goreleaserConfig, _ *[]staged, _ *string, workflow *string) {
-				*workflow = strings.Replace(*workflow, "      - run: go run ./scripts/gates release-tag \"${REF_NAME}\"\n", "", 1)
-				*workflow += "      - run: go run ./scripts/gates release-tag \"${REF_NAME}\"\n"
-			},
-			want: "does not run `gates release-tag` before goreleaser",
-		},
-		{
-			name: "a release nothing but a human can start",
-			breaks: func(_ *goreleaserConfig, _ *[]staged, _ *string, workflow *string) {
-				*workflow = strings.ReplaceAll(*workflow, "tags: ['v*.*.*']", "branches: [main]")
-			},
-			want: "does not trigger on a v* tag",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := goodConfig(t)
-			files := append([]staged(nil), bundleFiles...)
-			out := goodOut(t)
-			workflow := goodWorkflow
-			tc.breaks(&cfg, &files, &out, &workflow)
-
-			problems, _ := validateRelease(cfg, files, out, asWorkflow(t, workflow))
-			if len(problems) == 0 {
-				t.Fatalf("broke the release wiring (%s) and the gate passed", tc.name)
-			}
-			// mentions rather than a joined string: a `want` that
-			// straddled two unrelated problems would pass for the wrong
-			// reason.
-			if !mentions(problems, tc.want) {
-				t.Fatalf("wanted a problem mentioning %q, got:\n%s", tc.want, strings.Join(problems, "\n"))
-			}
-		})
-	}
-}
-
-// setGlob replaces one staged file's glob, leaving the rest alone.
-func setGlob(files *[]staged, path, glob string) {
-	for i := range *files {
-		if (*files)[i].path == path {
-			(*files)[i].glob = glob
-			return
-		}
-	}
-	panic("no staged file at " + path)
-}
-
-// The attestation covers every file the release publishes, read as
-// actions/attest reads subject-path: a list split at commas and newlines,
-// with an entry for each file.
-func TestTheAttestationCoversEveryPublishedFile(t *testing.T) {
-	const all = `"dist/*.tar.gz,dist/*.zip,dist/*.mcpb,dist/checksums.txt"`
-	for _, tc := range []struct {
-		name, subjects string
-		noChecksum     bool // the config names no checksum file
-		want           []string
-	}{
-		{name: "a comma list", subjects: all + "  # what the release publishes"},
-		{name: "a literal block, one glob a line", subjects: "|\n            dist/*.tar.gz\n            dist/*.zip\n" +
-			"            dist/*.mcpb\n            dist/checksums.txt"},
-		// The action trims each glob it splits out.
-		{name: "a literal block with a space after a glob", subjects: "|\n            dist/*.tar.gz \n            dist/*.zip\n" +
-			"            dist/*.mcpb\n            dist/checksums.txt"},
-		// YAML folds the lines of a > block into one, with spaces.
-		{name: "a folded block", subjects: ">\n            dist/*.tar.gz\n            dist/*.zip\n" +
-			"            dist/*.mcpb\n            dist/checksums.txt", want: []string{
-			`subject-path "dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt" separates with a space, ` +
-				"which is read as one glob; separate with commas or newlines",
-			`subject-path "dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt" does not name .tar.gz, so it carries no attestation`,
-			`subject-path "dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt" does not name .zip, so it carries no attestation`,
-			`subject-path "dist/*.tar.gz dist/*.zip dist/*.mcpb dist/checksums.txt" does not name .mcpb, so it carries no attestation`,
-		}},
-		{name: "the Windows archives left out", subjects: `"dist/*.tar.gz,dist/*.mcpb,dist/checksums.txt"`, want: []string{
-			`subject-path "dist/*.tar.gz,dist/*.mcpb,dist/checksums.txt" does not name .zip, so it carries no attestation`,
-		}},
-		{name: "the bundle's signature and not the bundle", subjects: `"dist/*.tar.gz,dist/*.zip,dist/*.mcpb.sigstore.json,dist/checksums.txt"`, want: []string{
-			`subject-path "dist/*.tar.gz,dist/*.zip,dist/*.mcpb.sigstore.json,dist/checksums.txt" does not name .mcpb, ` +
-				"so it carries no attestation",
-		}},
-		{name: "a config that names no checksum file", subjects: all, noChecksum: true, want: []string{
-			"the config names no checksum file, so nothing holds the subject-path to the file every other " +
-				"artifact is verified through",
-		}},
-		{name: "no subject-path at all", want: []string{
-			`subject-path "" does not name .tar.gz, so it carries no attestation`,
-			`subject-path "" does not name .zip, so it carries no attestation`,
-			`subject-path "" does not name .mcpb, so it carries no attestation`,
-			`subject-path "" does not name checksums.txt, so it carries no attestation`,
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := goodConfig(t)
-			cfg.Checksum.NameTemplate = "checksums.txt"
-			if tc.noChecksum {
-				cfg.Checksum.NameTemplate = ""
-			}
-			line := "          show-summary: true\n"
-			if tc.subjects != "" {
-				line = "          subject-path: " + tc.subjects + "\n" + line
-			}
-			workflow := replaceOnce(t, goodWorkflow, "          subject-path: "+all+"\n", line)
-			if got := checkWorkflow(cfg, asWorkflow(t, workflow)); !slices.Equal(got, tc.want) {
-				t.Errorf("problems\n got %q\nwant %q", got, tc.want)
-			}
-		})
+	if !maps.Equal(got, want) {
+		t.Errorf("the committed build matrix is %v, want %v", slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 	}
 }

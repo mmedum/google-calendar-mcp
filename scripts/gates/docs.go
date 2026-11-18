@@ -620,7 +620,7 @@ func stringLines(fset *token.FileSet, f *ast.File) []sourceLine {
 func (g *docsCheck) readVocabulary() {
 	g.makeTargets = map[string]bool{}
 	if mk, ok := g.readFile(makefilePath); ok {
-		for target := range parseMakefile(mk) {
+		for target := range parseMakefile(mk).targets {
 			if !strings.HasPrefix(target, ".") {
 				g.makeTargets[target] = true
 			}

@@ -210,6 +210,97 @@ func Outside(address, account string, org []string) bool {
 	return config.ConsumerDomains[mine] || theirs != mine
 }
 
+// DetailsRole is the weakest role that shows an event's details on a
+// calendar. The discovery document (Event.visibility, revision 20261113,
+// https://calendar-json.googleapis.com/$discovery/rest?version=v3) says a public event's details "are visible to all readers of the
+// calendar" and a private one's only to its attendees. Whether a
+// free/busy reader counts among "all readers" has no live step yet
+// (#49), so a public event counts as shown to one, and a private event
+// as shown to a writer, who can change it: each errs toward a refusal.
+func DetailsRole(visibility string) string {
+	switch visibility {
+	case gcal.VisibilityPrivate, gcal.VisibilityConfidential:
+		return gcal.RoleWriter
+	case gcal.VisibilityPublic:
+		return gcal.RoleFreeBusyReader
+	}
+	return gcal.RoleReader
+}
+
+// WiderReaders names who could read an event's details on dest and not on
+// source, in the tiers the wider sharing tools take: anyone, a whole
+// domain, and a person or group outside the organization. A person or
+// group inside it is the ordinary reach a move has, as share_calendar's
+// is, and a rule naming the calendar itself is its owner. The person tier
+// needs an organization to be outside of: on a personal or unknown
+// account every person would be, and every move into a shared calendar
+// refused. source and dest are the two calendars' rules, destID dest's
+// id, account the signed-in account, org the domains GCAL_ORG_DOMAINS
+// names, and role DetailsRole's answer (D-91).
+func WiderReaders(source, dest []model.Sharing, destID, account string, org []string, role string) []string {
+	reads := func(r model.Sharing) bool { return gcal.AtLeast(r.Role, role) }
+	covered := func(d model.Sharing) bool {
+		for _, s := range source {
+			if !reads(s) {
+				continue
+			}
+			if s.Public() || s.ScopeType == d.ScopeType && strings.EqualFold(s.Value, d.Value) ||
+				s.ScopeType == gcal.ScopeTypeDomain && d.ScopeType != gcal.ScopeTypeDomain &&
+					strings.EqualFold(domainOf(d.Value), s.Value) {
+				return true
+			}
+		}
+		return false
+	}
+	wide := wideRule(destID, account, org)
+	var out []string
+	for _, d := range dest {
+		if reads(d) && wide(d) && !covered(d) {
+			out = append(out, d.Who())
+		}
+	}
+	return out
+}
+
+// wideRule is whether a rule on calendar calID is in the tiers the wider
+// sharing tools take: anyone, a whole domain, or, when the account has an
+// organization, a person or group outside it (D-91). A rule naming the
+// calendar itself is its owner.
+func wideRule(calID, account string, org []string) func(model.Sharing) bool {
+	mine := domainOf(account)
+	organization := mine != "" && (len(org) > 0 || !config.ConsumerDomains[mine])
+	return func(r model.Sharing) bool {
+		if strings.EqualFold(r.Value, calID) {
+			return false
+		}
+		return r.Public() || r.ScopeType == gcal.ScopeTypeDomain || organization && Outside(r.Value, account, org)
+	}
+}
+
+// PublicReaders names who would read an event's details on calendar
+// calID only because its visibility is public: a wide-tier rule showing
+// free/busy that no reader rule there already covers, since a reader
+// sees a default event's details anyway. The discovery document says a
+// public event's details are "visible to all readers of the calendar"
+// (Event.visibility, revision 20261113,
+// https://calendar-json.googleapis.com/$discovery/rest?version=v3); that
+// counts free/busy readers here, which no live step checks yet (#49).
+func PublicReaders(rules []model.Sharing, calID, account string, org []string) []string {
+	var readers []model.Sharing
+	for _, r := range rules {
+		if gcal.AtLeast(r.Role, gcal.RoleReader) {
+			readers = append(readers, r)
+		}
+	}
+	return WiderReaders(readers, rules, calID, account, org, gcal.RoleFreeBusyReader)
+}
+
+// AsksPublic reports whether a requested visibility is public as plan
+// reads it, in any case and with any padding.
+func AsksPublic(v *string) bool {
+	return v != nil && strings.EqualFold(strings.TrimSpace(*v), gcal.VisibilityPublic)
+}
+
 // ascii reports whether s holds only ASCII characters.
 func ascii(s string) bool {
 	for i := 0; i < len(s); i++ {
