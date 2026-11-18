@@ -49,3 +49,31 @@ type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
 func (discard) Close() error                { return nil }
+
+// A step that expects a refusal passes only on its class and its words,
+// so a refusal for another reason, even of the same class, fails it.
+func TestRefusedHoldsTheClassAndTheWords(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		r    callResult
+		want verdict
+		say  string
+	}{
+		{"the call went through", callResult{text: "created"}, fail, "accepted"},
+		{"another class", callResult{text: "[blocked] notify:none is refused there", isError: true}, fail,
+			"not classified invalid"},
+		{"the class for another reason", callResult{text: "[invalid] missing properties: [\"to\"]", isError: true},
+			fail, `does not say "crosses midnight"`},
+		{"one word of two", callResult{text: "[invalid] crosses midnight", isError: true}, fail,
+			`does not say "night shift"`},
+		{"the class and every word", callResult{text: "[invalid] a mask that crosses midnight: a night shift",
+			isError: true}, pass, `refused with [invalid], saying "crosses midnight", "night shift"`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, msg := refused(c.r, "accepted", "invalid", "crosses midnight", "night shift")
+			if got != c.want || !strings.Contains(msg, c.say) {
+				t.Errorf("refused(%q) = %v, %q; want %v and a message holding %q", c.r.text, got, msg, c.want, c.say)
+			}
+		})
+	}
+}

@@ -324,13 +324,8 @@ func calendarSteps(c *calendarState) []step {
 			}),
 			skip: c.needProbe,
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "a calendar was shared with no notification decision"
-				}
-				if !strings.Contains(r.text, "[invalid]") {
-					return fail, "the refusal is not classified invalid: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [invalid], naming the two choices"
+				return refused(r, "a calendar was shared with no notification decision",
+					"invalid", "notify is required on a sharing change")
 			},
 		},
 		{
@@ -343,13 +338,8 @@ func calendarSteps(c *calendarState) []step {
 			}),
 			skip: c.needProbe,
 			check: func(r callResult) (verdict, string) {
-				if !r.isError {
-					return fail, "external_only was accepted on a sharing change"
-				}
-				if !strings.Contains(r.text, "[unsupported]") {
-					return fail, "the refusal is not classified unsupported: " + truncate(r.text, 200)
-				}
-				return pass, "refused with [unsupported]"
+				return refused(r, "external_only was accepted on a sharing change",
+					"unsupported", "no meaning on a sharing change")
 			},
 		},
 		{
