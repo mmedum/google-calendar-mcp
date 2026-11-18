@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -626,6 +627,132 @@ func TestAnOccurrenceIsAddressableByItsScheduledStart(t *testing.T) {
 	}
 	if !strings.Contains(out.Text(), "Addressed the occurrence") {
 		t.Errorf("the result must say which address it used:\n%s", out.Text())
+	}
+}
+
+// A rule whose occurrences fall by the local date, BYMONTHDAY=31, is
+// counted in the series' own zone however the call reads it: from Tokyo,
+// 20:00 in Los Angeles is already the next day, and a count walked there
+// covers other days (#46).
+func TestThisAndFollowingCountsTheHeadInTheSeriesZone(t *testing.T) {
+	svc, fake := writeSeed(t)
+	const la = "America/Los_Angeles"
+	fake.AddEvent("me@example.test", caltest.Recurring("evmonthly01", "Month end",
+		"2026-01-31T20:00:00-08:00", "2026-01-31T21:00:00-08:00", la, "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6"))
+	fake.AddEvent("me@example.test", caltest.Instance("evmonthly01_20260601T030000Z", "evmonthly01",
+		"Month end", "2026-05-31T20:00:00-07:00", "2026-05-31T21:00:00-07:00", la, "2026-05-31T20:00:00-07:00"))
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evmonthly01", OriginalStart: "2026-05-31T20:00:00-07:00",
+		Scope: "this_and_following", Title: ptr("Month close"), TimeZone: "Asia/Tokyo",
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	// 31 January and 31 March come before the target in Los Angeles; the
+	// new series carries 31 May, July, August and October.
+	for _, want := range []string{
+		"ends before this occurrence, with the rule RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=2,",
+		"a NEW event with the rule RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=4.",
+	} {
+		if !strings.Contains(out.Text(), want) {
+			t.Errorf("the split does not say %q:\n%s", want, out.Text())
+		}
+	}
+}
+
+// The new series is written in the series' own zone at the scheduled
+// slot, so Google expands its rule on the wall clock the series always
+// walked, whatever zone the call read it in (#46).
+func TestThisAndFollowingWritesTheNewSeriesInTheSeriesZone(t *testing.T) {
+	svc, fake := writeSeed(t)
+	const la = "America/Los_Angeles"
+	fake.AddEvent("me@example.test", caltest.Recurring("evmonthly01", "Month end",
+		"2026-01-31T20:00:00-08:00", "2026-01-31T21:00:00-08:00", la, "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6"))
+	fake.AddEvent("me@example.test", caltest.Instance("evmonthly01_20260601T030000Z", "evmonthly01",
+		"Month end", "2026-05-31T20:00:00-07:00", "2026-05-31T21:00:00-07:00", la, "2026-05-31T20:00:00-07:00"))
+	before := fake.EventIDs("me@example.test")
+	if _, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evmonthly01", OriginalStart: "2026-05-31T20:00:00-07:00",
+		Scope: "this_and_following", Title: ptr("Month close"), TimeZone: "Asia/Tokyo",
+	}); err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	var added []string
+	for _, id := range fake.EventIDs("me@example.test") {
+		if !slices.Contains(before, id) {
+			added = append(added, id)
+		}
+	}
+	if len(added) != 1 {
+		t.Fatalf("the split added %v, want one new series", added)
+	}
+	got, err := svc.API.GetEvent(context.Background(), "me@example.test", added[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Start.TimeZone != la || got.Start.DateTime != "2026-05-31T20:00:00-07:00" ||
+		got.End.TimeZone != la || got.End.DateTime != "2026-05-31T21:00:00-07:00" {
+		t.Errorf("the new series starts %+v and ends %+v, want 20:00 to 21:00 on 31 May in %s", got.Start, got.End, la)
+	}
+}
+
+// A write that names no scope counts the series' reach in its own zone:
+// six occurrences, the last on 31 October in Los Angeles (#46).
+func TestTheReachOfASeriesCountsInTheSeriesZone(t *testing.T) {
+	svc, fake := writeSeed(t)
+	fake.AddEvent("me@example.test", caltest.Recurring("evmonthly01", "Month end",
+		"2026-01-31T20:00:00-08:00", "2026-01-31T21:00:00-08:00", "America/Los_Angeles",
+		"RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6"))
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evmonthly01", Title: ptr("Month close"), TimeZone: "Asia/Tokyo",
+	})
+	if err == nil || !strings.Contains(err.Error(), "6 occurrences, the last on 2026-10-31") {
+		t.Errorf("the no-scope refusal = %v, want the reach counted in Los Angeles", err)
+	}
+}
+
+// A series with no zone to expand in is refused rather than counted in
+// the call's zone, which can land on other days.
+func TestASplitRefusesASeriesWithNoZone(t *testing.T) {
+	svc, fake := writeSeed(t)
+	series := caltest.Recurring("evmonthly01", "Month end",
+		"2026-01-31T20:00:00-08:00", "2026-01-31T21:00:00-08:00", "America/Los_Angeles",
+		"RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6")
+	series.Start.TimeZone = ""
+	fake.AddEvent("me@example.test", series)
+	fake.AddEvent("me@example.test", caltest.Instance("evmonthly01_20260601T030000Z", "evmonthly01",
+		"Month end", "2026-05-31T20:00:00-07:00", "2026-05-31T21:00:00-07:00", "America/Los_Angeles",
+		"2026-05-31T20:00:00-07:00"))
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evmonthly01", OriginalStart: "2026-05-31T20:00:00-07:00",
+		Scope: "this_and_following", Title: ptr("Month close"),
+	})
+	if classOf(t, err) != gapi.ClassInvalid || !strings.Contains(err.Error(), "names no time zone") {
+		t.Errorf("a split of a series with no zone = %v, want [invalid] naming the missing zone", err)
+	}
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Errorf("the refused split wrote %+v", w)
+	}
+}
+
+// Canceling this and following truncates the series by the same count,
+// in the series' own zone (#46).
+func TestCancelThisAndFollowingCountsInTheSeriesZone(t *testing.T) {
+	svc, fake := writeSeed(t)
+	const la = "America/Los_Angeles"
+	fake.AddEvent("me@example.test", caltest.Recurring("evmonthly01", "Month end",
+		"2026-01-31T20:00:00-08:00", "2026-01-31T21:00:00-08:00", la, "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6"))
+	fake.AddEvent("me@example.test", caltest.Instance("evmonthly01_20260601T030000Z", "evmonthly01",
+		"Month end", "2026-05-31T20:00:00-07:00", "2026-05-31T21:00:00-07:00", la, "2026-05-31T20:00:00-07:00"))
+	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+		Calendar: "primary", EventID: "evmonthly01", OriginalStart: "2026-05-31T20:00:00-07:00",
+		Scope: "this_and_following", TimeZone: "Asia/Tokyo",
+	})
+	if err != nil {
+		t.Fatalf("CancelEvent: %v", err)
+	}
+	if want := "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6 → RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=2"; !strings.Contains(out.Text(), want) {
+		t.Errorf("the cancel does not truncate to the two occurrences before 31 May in Los Angeles, %q:\n%s", want, out.Text())
 	}
 }
 

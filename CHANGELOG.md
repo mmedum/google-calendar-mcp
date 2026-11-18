@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A spent Google quota no longer reads as a short rate limit; `create_calendar` names the calendar-creation quota, which deleting calendars does not reset.
+- A `this_and_following` update or cancel read in another zone keeps every occurrence on its day for a date-based rule, such as the 31st of each month.
 
 ### Security
 
