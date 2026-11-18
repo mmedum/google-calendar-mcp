@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `GCAL_ORG_DOMAINS` names your organization's mail domains for `share_calendar`, so a personal account at another mail provider stops sharing with its customers as colleagues.
+
 ### Fixed
 
 - A spent Google quota no longer reads as a short rate limit; `create_calendar` names the calendar-creation quota, which deleting calendars does not reset.

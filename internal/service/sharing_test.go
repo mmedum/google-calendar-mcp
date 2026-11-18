@@ -289,6 +289,27 @@ func TestShareCalendarOnAPersonalAccountTakesNobody(t *testing.T) {
 	}
 }
 
+// With the organization's domains named, share_calendar takes an address
+// in them and refuses one at the account's own provider domain, routing
+// it to widen_calendar_access (#45).
+func TestShareCalendarFollowsTheNamedOrganizationDomains(t *testing.T) {
+	fake := caltest.New()
+	fake.AddCalendar("me@mailhost.test", "Sample Primary", "UTC", gcal.RoleOwner, true)
+	svc := newService(t, fake)
+	svc.Cfg.OrgDomains = []string{"example.test"}
+	_, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+		Calendar: "primary", Who: "customer@mailhost.test", Role: "reader", Notify: "none",
+	})
+	if cls := classOf(t, err); cls != gapi.ClassBlocked || !strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Fatalf("a share at the provider's domain = [%s] %v, want [blocked] naming widen_calendar_access", cls, err)
+	}
+	if _, err := svc.ShareCalendar(context.Background(), service.ShareOptions{
+		Calendar: "primary", Who: "colleague@example.test", Role: "reader", Notify: "none",
+	}); err != nil {
+		t.Fatalf("a share in the named domain: %v", err)
+	}
+}
+
 // publish_calendar opens a calendar to the public, and says what that
 // cannot take back. Without confirm it writes nothing; a dry run needs
 // no confirm and writes nothing either.

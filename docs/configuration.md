@@ -25,6 +25,7 @@ client passes command, args and env to a stdio server, and nothing else.
 | `GCAL_CONCURRENCY` | `-concurrency` | `4` | Requests in flight during a fan-out. |
 | `GCAL_HTTP_TIMEOUT` | `-http-timeout` | `60s` | Per-attempt timeout for a read. |
 | `GCAL_WRITE_TIMEOUT` | `-write-timeout` | `120s` | Timeout for a write. |
+| `GCAL_ORG_DOMAINS` | `-org-domains` | — | The organization's mail domains, comma-separated, such as `example.com,example.org`. `share_calendar` shares only with addresses in them; anything else goes to `widen_calendar_access`. Gmail's domains are refused, since they name no organization, and the `notify` rule for guests keeps the organizer's domain. Unset, only the signed-in account's own domain counts, and a personal Gmail account has none. A personal account at another mail provider looks like an organization of that provider's customers: set this to a domain you own, so a share to another customer is not taken as inside. |
 | `GCAL_CLIENT_SECRET` | `-client-secret` | — | Path to the OAuth Desktop client JSON. Overrides what the profile remembers. Unset or empty, the server uses the client `login` recorded for the profile. |
 
 The removed settings below are still read, so that one left turned on
