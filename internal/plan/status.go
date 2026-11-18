@@ -245,11 +245,11 @@ func statusPatch(before gcal.Event, p gcal.EventPatch) error {
 // focus-time event declining every meeting it overlaps over time it did
 // not before: moved, made longer, repeated more, or newly set to decline
 // all. Google may decline the meetings in that time, the accepted ones
-// too, and the result says so. The reference says such an event declines
-// "all conflicting meeting invitations" and is silent on whether a change
-// declines again, so the write is reported rather than refused. A write
-// that only shrinks the time counts as no more. A change this cannot show
-// to shrink counts as more.
+// too: the reference says such an event declines "all conflicting
+// meeting invitations" and is silent on whether a change declines again,
+// so the write is refused, since only create_event_declining_all may do
+// that (D-44, #41). A write that only shrinks the time counts as no
+// more. A change this cannot show to shrink counts as more.
 // https://developers.google.com/workspace/calendar/api/v3/reference/events
 func DeclinesMore(before, after gcal.Event) bool {
 	switch {
