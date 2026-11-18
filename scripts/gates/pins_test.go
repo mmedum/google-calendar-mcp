@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -396,11 +398,18 @@ func TestPinsNamesAMissingWorkflow(t *testing.T) {
 }
 
 func TestWorkflowResolveEnv(t *testing.T) {
-	w := workflow{Env: map[string]string{"V": "v1.2.3"}}
+	var w workflow
+	if err := yaml.Unmarshal([]byte("env:\n  V: v1.2.3\n  J: v1.0.0\n  S: v1.0.0\n"+
+		"jobs:\n  j:\n    env:\n      J: v2.0.0\n      S: v2.0.0\n    steps: []\n"), &w); err != nil {
+		t.Fatal(err)
+	}
+	s := workflowStep{job: "j", Env: map[string]string{"S": "v3.0.0"}}
 	for in, want := range map[string]string{
 		"${{ env.V }}": "v1.2.3", "${{env.V}}": "v1.2.3", "${{ env.W }}": "${{ env.W }}", "v9.9.9": "v9.9.9",
+		// The job's env shadows the workflow's, and the step's both.
+		"${{ env.J }}": "v2.0.0", "${{ env.S }}": "v3.0.0",
 	} {
-		if got := w.resolveEnv(in); got != want {
+		if got := w.resolveEnv(s, in); got != want {
 			t.Errorf("resolveEnv(%q) = %q, want %q", in, got, want)
 		}
 	}

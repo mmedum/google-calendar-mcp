@@ -513,7 +513,7 @@ func pinsStep(gomod string, w workflow, s workflowStep, r *pinsReport, add func(
 			}
 			v = version
 		}
-		add(t.name, w.resolveEnv(v), at)
+		add(t.name, w.resolveEnv(s, v), at)
 		// setup-go reads go-version before go-version-file
 		// (https://github.com/actions/setup-go/blob/b7ad1dad31e06c5925ef5d2fc7ad053ef454303e/README.md#L44),
 		// so one beside go.mod is the Go the step installs.
@@ -531,7 +531,7 @@ func pinsStep(gomod string, w workflow, s workflowStep, r *pinsReport, add func(
 		if !pinsVersionInput(key) {
 			continue
 		}
-		if v, _ := s.input(key); !pinsExact.MatchString(w.resolveEnv(v)) {
+		if v, _ := s.input(key); !pinsExact.MatchString(w.resolveEnv(s, v)) {
 			r.problems = append(r.problems, fmt.Sprintf("%s: %s is %q, which is not one exact version", at, key, v))
 		}
 	}

@@ -77,10 +77,14 @@ jobs:
           syft-version: v1.52.0
       - uses: goreleaser/goreleaser-action@x
         with:
-          args: build --single-target --snapshot --clean --output a
+          args: build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-1
       - uses: goreleaser/goreleaser-action@x
+        env:
+          GOCACHE: ${{ runner.temp }}/gocache-repro
         with:
-          args: build --single-target --snapshot --clean --output b
+          args: build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-2
+      - name: Compare
+        run: cmp "${RUNNER_TEMP}/repro-1" "${RUNNER_TEMP}/repro-2"
       - uses: goreleaser/goreleaser-action@x
         with:
           args: release --clean --release-notes=notes.md
@@ -160,8 +164,14 @@ func TestReleaseRefuses(t *testing.T) {
 			"dist/checksums.txt\"\n  nightly:\n    steps:\n      - run: goreleaser --clean\n",
 			"job nightly runs goreleaser and attests nothing it wrote"},
 		{"no checksum name", "config", "  name_template: checksums.txt\n", "", "checksum.name_template is empty"},
-		{"one reproducible build", "flow", "build --single-target --snapshot --clean --output b",
-			"build --snapshot --clean --output b", "builds one target 1 time(s)"},
+		{"one reproducible build", "flow", "build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-2",
+			"build --snapshot --clean --output ${{ runner.temp }}/repro-2", "builds one target 1 time(s)"},
+		{"two reproducible builds to one output", "flow", "--output ${{ runner.temp }}/repro-2",
+			"--output ${{ runner.temp }}/repro-1", "write one --output"},
+		{"two reproducible builds on one cache", "flow", "        env:\n          GOCACHE: ${{ runner.temp }}/gocache-repro\n", "",
+			"share a GOCACHE"},
+		{"two reproducible builds never compared", "flow", "        run: cmp \"${RUNNER_TEMP}/repro-1\" \"${RUNNER_TEMP}/repro-2\"\n",
+			"        run: echo done\n", "never compares the two reproducible builds"},
 		{"no release notes passed", "flow", "--release-notes=notes.md", "", "does not pass --release-notes"},
 		{"no release-tag", "flow", "      - name: The tag's major version is go.mod's\n        run: go run ./scripts/gates release-tag \"${REF}\"\n", "",
 			"does not run `gates release-tag` before goreleaser"},

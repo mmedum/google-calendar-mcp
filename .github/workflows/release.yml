@@ -116,7 +116,8 @@ jobs:
 
       # The release claims a tag rebuilds byte for byte. This is what
       # proves it: one target, built twice by the same config, hashes
-      # compared.
+      # compared. The second build has a build cache of its own, so it
+      # compiles every package again rather than reusing the first's.
       - name: Reproducible build, first
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de  # v7.3.0
         with:
@@ -124,6 +125,8 @@ jobs:
           args: build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-1
       - name: Reproducible build, second
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de  # v7.3.0
+        env:
+          GOCACHE: ${{ runner.temp }}/gocache-repro
         with:
           version: ${{ env.GORELEASER_VERSION }}
           args: build --single-target --snapshot --clean --output ${{ runner.temp }}/repro-2

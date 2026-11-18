@@ -25,9 +25,11 @@ import (
 const changelogPath = "CHANGELOG.md"
 
 var (
-	// semverVersion is a release's version, semver with its prerelease
-	// identifiers, as semver.org gives the grammar
-	// (https://semver.org/spec/v2.0.0.html#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string).
+	// semverVersion is a release's version: semver.org's grammar with its
+	// prerelease identifiers and without build metadata, which a Go module
+	// version cannot carry
+	// (https://semver.org/spec/v2.0.0.html#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string,
+	// https://go.dev/ref/mod#versions).
 	semverVersion = regexp.MustCompile(`^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)` +
 		`(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$`)
 	// changelogEntry is an entry: a bullet at the margin. A subheading or

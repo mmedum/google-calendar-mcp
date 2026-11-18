@@ -302,8 +302,8 @@ func fail(format string, args ...any) {
 }
 
 // repoRoot walks up from the working directory to the directory holding
-// go.mod, so every command reads the repository from its root, from any
-// directory under it and from a source archive with no git.
+// go.mod, so every command reads the repository from its root, run from
+// any directory under it. The gates that list files still need git.
 func repoRoot() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {

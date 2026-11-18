@@ -340,6 +340,10 @@ func (r *parityReport) checkFloors() {
 	}
 }
 
+// parityMakeValueFlags are make's short options whose value can be the
+// next word.
+var parityMakeValueFlags = map[string]bool{"-C": true, "-f": true, "-I": true, "-j": true, "-l": true, "-o": true, "-W": true}
+
 // parityMakeTargets are the targets the `make` commands of a command line
 // name.
 func parityMakeTargets(line string) []string {
@@ -353,7 +357,14 @@ func parityMakeTargets(line string) []string {
 		if len(words) == 0 || (words[0] != "make" && words[0] != "$(MAKE)") {
 			continue
 		}
-		for _, f := range words[1:] {
+		for i := 1; i < len(words); i++ {
+			f := words[i]
+			// GNU make's options that take a value as the next word
+			// (https://www.gnu.org/software/make/manual/make.html#Options-Summary).
+			if parityMakeValueFlags[f] {
+				i++
+				continue
+			}
 			if strings.HasPrefix(f, "-") || strings.Contains(f, "=") {
 				continue
 			}
@@ -401,7 +412,15 @@ func (r *parityReport) checkFailuresStop(mk *makefile, targets []string) {
 				r.fail("%s:%d: %s's recipe line starts with -, so make goes on when it fails",
 					parityMakefile, target.lines[i], t)
 			}
-			if how := shellSwallowed(shellSplit(mk.expand(target.recipe[i]))); how != "" {
+			words := shellSplit(mk.expand(target.recipe[i]))
+			// make runs a recipe with /bin/sh and no pipefail, so a pipeline
+			// reports only its last command's status. CI's bash sets pipefail
+			// (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defaultsrunshell).
+			if slices.ContainsFunc(words, func(w shellWord) bool { return w.op && w.text == "|" }) {
+				r.fail("%s:%d: %s's recipe line pipes, and make's /bin/sh reports only the last command's status, "+
+					"so a failing check passes", parityMakefile, target.lines[i], t)
+			}
+			if how := shellSwallowed(words); how != "" {
 				r.fail("%s:%d: %s's recipe line is one where %s, so a failing check passes",
 					parityMakefile, target.lines[i], t, how)
 			}
@@ -410,9 +429,10 @@ func (r *parityReport) checkFailuresStop(mk *makefile, targets []string) {
 }
 
 // shellSwallowed names how a command line lets a failure pass, or is "":
-// || with true, : or exit 0 after it, a last command of true, : or exit 0
-// after ;, a command run in the background with &, ! before a command, and
-// set +e (https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_09).
+// || with anything after it but a command that fails (false, or exit with
+// no status or another than 0), a last command of true, : or exit 0 after
+// ;, a command run in the background with &, ! before a command, and set
+// +e or +o errexit (https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_09).
 func shellSwallowed(words []shellWord) string {
 	words = slices.DeleteFunc(slices.Clone(words), func(w shellWord) bool { return w.redir })
 	op := ""
@@ -432,16 +452,17 @@ func shellSwallowed(words []shellWord) string {
 		command := shellTexts(words[i:end])
 		last := end == len(words)
 		passes := command[0] == "true" || command[0] == ":" || command[0] == "exit" && len(command) == 2 && command[1] == "0"
+		fails := command[0] == "false" || command[0] == "exit" && (len(command) == 1 || command[1] != "0")
 		switch {
-		case op == "||" && passes:
+		case op == "||" && !fails:
 			return "`|| " + strings.Join(command, " ") + "` passes whatever came before"
 		case op == ";" && last && passes:
 			return "`; " + strings.Join(command, " ") + "` ends it with success whatever came before"
 		case command[0] == "!":
 			return "! turns a failure into success"
-		case command[0] == "set" && slices.ContainsFunc(command[1:], func(a string) bool {
-			return strings.HasPrefix(a, "+") && strings.Contains(a, "e")
-		}):
+		case command[0] == "set" && (slices.ContainsFunc(command[1:], func(a string) bool {
+			return strings.HasPrefix(a, "+") && !strings.HasPrefix(a, "+o") && strings.Contains(a, "e")
+		}) || slices.Contains(command[1:], "errexit") && slices.Contains(command[1:], "+o")):
 			return "set +e lets the commands after it fail"
 		}
 		i = end

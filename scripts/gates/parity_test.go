@@ -258,6 +258,10 @@ func TestParityReadsEveryRuleOfATarget(t *testing.T) {
 		{"a recipe that passes whatever it ran", []docsEdit{
 			replace("Makefile", "\t$(GATES) g00\n", "\t$(GATES) g00 || true\n"),
 		}, []string{"Makefile:6: g00's recipe line is one where `|| true` passes whatever came before, so a failing check passes"}},
+		{"a recipe that pipes", []docsEdit{
+			replace("Makefile", "\t$(GATES) g00\n", "\t$(GATES) g00 | tee log\n"),
+		}, []string{"Makefile:6: g00's recipe line pipes, and make's /bin/sh reports only the last command's status, " +
+			"so a failing check passes"}},
 	})
 }
 
@@ -269,6 +273,7 @@ func TestParityHoldsCheckToWhatAPushRuns(t *testing.T) {
 		"`make check` runs g00 and ci.yml never does",
 		"the g00 gate runs in check by the registry, and no job of ci.yml a push to main runs calls it",
 	}
+	matrix := replace(ci, "  gates:\n    steps:\n", "  gates:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest]\n    steps:\n")
 	checkParityCases(t, []parityCase{
 		{"a step a pull request alone runs", []docsEdit{
 			replace(ci, "      - name: g00\n", "      - name: g00\n        if: github.event_name == 'pull_request'\n"),
@@ -277,8 +282,21 @@ func TestParityHoldsCheckToWhatAPushRuns(t *testing.T) {
 			replace(ci, "      - name: g00\n", "      - name: g00\n        continue-on-error: true\n"),
 		}, notRun},
 		{"a step a matrix filter runs", []docsEdit{
-			replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'ubuntu-latest'\n"),
+			matrix, replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'ubuntu-latest'\n"),
 		}, nil},
+		{"a step a matrix filter runs on every leg but one", []docsEdit{
+			matrix, replace(ci, "      - name: g00\n", "      - name: g00\n        if: ${{ matrix.os != 'macos-latest' }}\n"),
+		}, nil},
+		{"a step whose matrix filter names an include entry", []docsEdit{
+			replace(ci, "  gates:\n    steps:\n", "  gates:\n    strategy:\n      matrix:\n        include:\n          - os: arm\n    steps:\n"),
+			replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'arm'\n"),
+		}, nil},
+		{"a step whose matrix filter names a leg the matrix lacks", []docsEdit{
+			matrix, replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'ubuntu-latst'\n"),
+		}, notRun},
+		{"a step whose matrix filter names a job with no matrix", []docsEdit{
+			replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'ubuntu-latest'\n"),
+		}, notRun},
 		{"a step that never runs", []docsEdit{
 			replace(ci, "      - name: g00\n", "      - name: g00\n        if: false\n"),
 		}, notRun},
@@ -297,20 +315,26 @@ func TestParityHoldsCheckToWhatAPushRuns(t *testing.T) {
 
 func TestShellSwallowed(t *testing.T) {
 	for line, want := range map[string]string{
-		"make leaks":                "",
-		"make leaks && make pins":   "",
-		"make leaks || true":        "`|| true` passes whatever came before",
-		"make leaks || :":           "`|| :` passes whatever came before",
-		"make leaks || exit 0":      "`|| exit 0` passes whatever came before",
-		"make leaks || exit 1":      "",
-		"make leaks; true":          "`; true` ends it with success whatever came before",
-		"make leaks; make pins":     "",
-		"make leaks &":              "& runs a command in the background, where its failure is never seen",
-		"! make leaks":              "! turns a failure into success",
-		"set +e; make leaks":        "set +e lets the commands after it fail",
-		"make leaks 2>&1 | tee log": "",
-		"out=$(gofmt -l .); exit 1": "",
-		"echo 'make x || true'":     "",
+		"make leaks":                 "",
+		"make leaks && make pins":    "",
+		"make leaks || true":         "`|| true` passes whatever came before",
+		"make leaks || :":            "`|| :` passes whatever came before",
+		"make leaks || exit 0":       "`|| exit 0` passes whatever came before",
+		"make leaks || exit 1":       "",
+		"make leaks || exit":         "",
+		"make leaks || false":        "",
+		"make leaks || echo failed":  "`|| echo failed` passes whatever came before",
+		"set +o errexit; make leaks": "set +e lets the commands after it fail",
+		"set -o errexit; make leaks": "",
+		"set +x; make leaks":         "",
+		"make leaks; true":           "`; true` ends it with success whatever came before",
+		"make leaks; make pins":      "",
+		"make leaks &":               "& runs a command in the background, where its failure is never seen",
+		"! make leaks":               "! turns a failure into success",
+		"set +e; make leaks":         "set +e lets the commands after it fail",
+		"make leaks 2>&1 | tee log":  "",
+		"out=$(gofmt -l .); exit 1":  "",
+		"echo 'make x || true'":      "",
 	} {
 		if got := shellSwallowed(shellSplit(line)); got != want {
 			t.Errorf("shellSwallowed(%q) = %q, want %q", line, got, want)
@@ -484,6 +508,10 @@ func TestParityMakeTargets(t *testing.T) {
 	got := parityMakeTargets(`make changelog CHANGELOG_BASE="origin/${BASE_REF}" -j2 cover`)
 	if !slices.Equal(got, []string{"changelog", "cover"}) {
 		t.Errorf("parityMakeTargets = %v", got)
+	}
+	got = parityMakeTargets("make -C dir -f other.mk -j 4 -k lint")
+	if !slices.Equal(got, []string{"lint"}) {
+		t.Errorf("parityMakeTargets read a flag's value as a target: %v", got)
 	}
 	if parityMakeTargets("go test ./...") != nil {
 		t.Error("a go command was read as make")

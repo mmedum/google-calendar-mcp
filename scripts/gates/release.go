@@ -315,7 +315,11 @@ func releaseWorkflowProblems(cfg releaseConfig, flow workflow, mcpbOut string) [
 		fail("%s does not trigger on a v* tag", flow.path)
 	}
 	var tested, writesNotes, passesNotes, cosign, syft, checksTag, built bool
-	repro, attested := 0, false
+	attested := false
+	// repro are the --single-target builds' outputs and build caches, and
+	// compared whether a later run step reads both outputs.
+	var reproOut, reproCache []string
+	compared := false
 	released, attestIn := releaseJobs(flow), map[string]bool{}
 	if cfg.Checksum.NameTemplate == "" {
 		fail("checksum.name_template is empty, so nothing holds the subject-path to the file every other " +
@@ -328,6 +332,10 @@ func releaseWorkflowProblems(cfg releaseConfig, flow workflow, mcpbOut string) [
 		}
 		if strings.Contains(lines, "scripts/gates release-notes") {
 			writesNotes = true
+		}
+		if len(reproOut) == 2 && reproOut[0] != reproOut[1] &&
+			strings.Contains(lines, path.Base(reproOut[0])) && strings.Contains(lines, path.Base(reproOut[1])) {
+			compared = true
 		}
 		// Before goreleaser, or the refusal comes after the publish.
 		if strings.Contains(lines, "scripts/gates release-tag") && !built {
@@ -345,7 +353,8 @@ func releaseWorkflowProblems(cfg releaseConfig, flow workflow, mcpbOut string) [
 				passesNotes = true
 			}
 			if strings.Contains(args, "--single-target") {
-				repro++
+				reproOut = append(reproOut, releaseFlagValue(args, "--output"))
+				reproCache = append(reproCache, s.Env["GOCACHE"])
 			}
 		case a == "actions/attest-build-provenance":
 			attested, attestIn[s.job] = true, true
@@ -371,8 +380,18 @@ func releaseWorkflowProblems(cfg releaseConfig, flow workflow, mcpbOut string) [
 		fail("%s does not run `gates release-tag` before goreleaser, so a tag whose major version is not "+
 			"go.mod's publishes a release `go install ...@latest` never serves", flow.path)
 	}
-	if repro < 2 {
-		fail("%s builds one target %d time(s); the reproducible-build check needs two builds to compare", flow.path, repro)
+	switch {
+	case len(reproOut) < 2:
+		fail("%s builds one target %d time(s); the reproducible-build check needs two builds to compare",
+			flow.path, len(reproOut))
+	case reproOut[0] == "" || reproOut[0] == reproOut[1]:
+		fail("%s's two reproducible builds write one --output %q, so the second overwrites what it is compared with",
+			flow.path, reproOut[0])
+	case reproCache[0] == reproCache[1]:
+		fail("%s's two reproducible builds share a GOCACHE, so the second reuses the first's packages and "+
+			"cannot differ; give one an env GOCACHE of its own", flow.path)
+	case !compared:
+		fail("%s never compares the two reproducible builds: no run step after them reads both outputs", flow.path)
 	}
 	if !cosign {
 		fail("%s installs no cosign with a cosign-release, and the config signs with cosign", flow.path)
@@ -623,4 +642,17 @@ func releaseGlobCount(files []staged) int {
 // {{ .Version }} to one spelling, so two paths can be compared.
 func releaseNormalVersion(s string) string {
 	return strings.NewReplacer("$(VERSION)", "<version>", "{{ .Version }}", "<version>", "{{.Version}}", "<version>").Replace(s)
+}
+
+// releaseFlagValue is the value of a goreleaser flag in args, given as
+// `--flag value` or `--flag=value`, up to the next flag, or empty. The
+// value can hold blanks: ${{ runner.temp }}/out is one.
+func releaseFlagValue(args, flag string) string {
+	for _, sep := range []string{flag + "=", flag + " "} {
+		if _, rest, ok := strings.Cut(" "+args, " "+sep); ok {
+			value, _, _ := strings.Cut(rest, " --")
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
