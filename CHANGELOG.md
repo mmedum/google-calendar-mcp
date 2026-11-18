@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- A `this_and_following` update or cancel read in another zone keeps the right occurrences for a date-based rule, such as the 31st of each month.
+- A `this_and_following` update or cancel read in another zone keeps every occurrence on its day for a date-based rule, such as the 31st of each month.
 
 ### Security
 
