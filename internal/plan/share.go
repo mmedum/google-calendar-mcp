@@ -252,43 +252,53 @@ func WiderReaders(source, dest []model.Sharing, destID, account string, org []st
 		}
 		return false
 	}
+	wide := wideRule(destID, account, org)
 	var out []string
 	for _, d := range dest {
-		if reads(d) && wideRule(d, destID, account, org) && !covered(d) {
+		if reads(d) && wide(d) && !covered(d) {
 			out = append(out, d.Who())
 		}
 	}
 	return out
 }
 
-// wideRule reports whether a rule on calendar calID is in the tiers the
-// wider sharing tools take: anyone, a whole domain, or, when the account
-// has an organization, a person or group outside it (D-91). A rule naming
-// the calendar itself is its owner.
-func wideRule(r model.Sharing, calID, account string, org []string) bool {
-	if strings.EqualFold(r.Value, calID) {
-		return false
-	}
+// wideRule is whether a rule on calendar calID is in the tiers the wider
+// sharing tools take: anyone, a whole domain, or, when the account has an
+// organization, a person or group outside it (D-91). A rule naming the
+// calendar itself is its owner.
+func wideRule(calID, account string, org []string) func(model.Sharing) bool {
 	mine := domainOf(account)
 	organization := mine != "" && (len(org) > 0 || !config.ConsumerDomains[mine])
-	return r.Public() || r.ScopeType == gcal.ScopeTypeDomain || organization && Outside(r.Value, account, org)
+	return func(r model.Sharing) bool {
+		if strings.EqualFold(r.Value, calID) {
+			return false
+		}
+		return r.Public() || r.ScopeType == gcal.ScopeTypeDomain || organization && Outside(r.Value, account, org)
+	}
 }
 
 // PublicReaders names who would read an event's details on calendar
-// calID only because its visibility is public: a wide-tier rule that
-// shows free/busy alone. A reader already sees a default event, and the
-// discovery document says a public event's details are "visible to all
-// readers of the calendar", read here as free/busy readers too until a
-// live step settles it (#42, #49).
+// calID only because its visibility is public: a wide-tier rule showing
+// free/busy that no reader rule there already covers, since a reader
+// sees a default event's details anyway. The discovery document says a
+// public event's details are "visible to all readers of the calendar"
+// (Event.visibility, revision 20261113,
+// https://calendar-json.googleapis.com/$discovery/rest?version=v3); that
+// counts free/busy readers here, which no live step checks yet (#49).
 func PublicReaders(rules []model.Sharing, calID, account string, org []string) []string {
-	var out []string
+	var readers []model.Sharing
 	for _, r := range rules {
-		if gcal.AtLeast(r.Role, gcal.RoleFreeBusyReader) && !gcal.AtLeast(r.Role, gcal.RoleReader) &&
-			wideRule(r, calID, account, org) {
-			out = append(out, r.Who())
+		if gcal.AtLeast(r.Role, gcal.RoleReader) {
+			readers = append(readers, r)
 		}
 	}
-	return out
+	return WiderReaders(readers, rules, calID, account, org, gcal.RoleFreeBusyReader)
+}
+
+// AsksPublic reports whether a requested visibility is public as plan
+// reads it, in any case and with any padding.
+func AsksPublic(v *string) bool {
+	return v != nil && strings.EqualFold(strings.TrimSpace(*v), gcal.VisibilityPublic)
 }
 
 // ascii reports whether s holds only ASCII characters.

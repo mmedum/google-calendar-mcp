@@ -573,11 +573,11 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	var publicNote string
-	if o.Visibility == gcal.VisibilityPublic {
-		if publicNote, err = s.publicReach(ctx, env.cal); err != nil {
-			return render.WriteReport{}, err
-		}
+	// A working-location event, which plan makes public as Google needs
+	// it to be, is not asked about: its visibility is not the caller's.
+	publicNote, err := s.publicCheck(ctx, env.cal, &o.Visibility, "")
+	if err != nil {
+		return render.WriteReport{}, err
 	}
 
 	report := render.WriteReport{
@@ -864,12 +864,6 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 			return render.WriteReport{}, classifyPlan(err)
 		}
 	}
-	var publicNote string
-	if draft.Visibility != nil && *draft.Visibility == gcal.VisibilityPublic && target.Visibility != gcal.VisibilityPublic {
-		if publicNote, err = s.publicReach(ctx, env.cal); err != nil {
-			return render.WriteReport{}, err
-		}
-	}
 	var decision plan.Decision
 	if draft.OnlyReminders() {
 		decision, err = plan.PersonalNotification(o.Notify)
@@ -880,6 +874,10 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 		return render.WriteReport{}, classifyPlan(err)
 	}
 	etag, err := ifMatch(raw.ETag, target.ETag, o.ETag, o.Force)
+	if err != nil {
+		return render.WriteReport{}, err
+	}
+	publicNote, err := s.publicCheck(ctx, env.cal, draft.Visibility, target.Visibility)
 	if err != nil {
 		return render.WriteReport{}, err
 	}
@@ -1105,11 +1103,18 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if err != nil {
 		return render.WriteReport{}, err
 	}
+	publicNote, err := s.publicCheck(ctx, env.cal, draft.Visibility, parentRaw.Visibility)
+	if err != nil {
+		return render.WriteReport{}, err
+	}
 
 	report := render.WriteReport{
 		Verb: render.VerbUpdate, Calendar: env.cal.Title, Zone: env.zone,
 		Before: &target, Changes: changes, Scope: string(recur.ScopeThisAndFollowing),
 		Notify: decision.Report(), DryRun: o.DryRun,
+	}
+	if publicNote != "" {
+		report.Notes = append(report.Notes, publicNote)
 	}
 	if note != "" {
 		report.Notes = append(report.Notes, note)
@@ -1651,6 +1656,16 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 	})
 }
 
+// publicCheck runs publicReach when asked makes an event public that is
+// not public already: asked as plan reads it, in any case and padding,
+// and already the event's visibility before the write.
+func (s *Service) publicCheck(ctx context.Context, cal model.Calendar, asked *string, already string) (string, error) {
+	if !plan.AsksPublic(asked) || already == gcal.VisibilityPublic {
+		return "", nil
+	}
+	return s.publicReach(ctx, cal)
+}
+
 // publicReach refuses a public visibility on a calendar whose free/busy
 // is shared with a wider tier, which a public event would show its
 // details to (#42), and returns a note when the calendar's sharing cannot
@@ -1671,8 +1686,8 @@ func (s *Service) publicReach(ctx context.Context, cal model.Calendar) (string, 
 	}
 	return "", gapi.Errf(gapi.ClassBlocked,
 		"visibility:public would show this event's details to %s, who see only free/busy on %q. Nothing was "+
-			"written. Leave visibility at default, which keeps them seeing busy, or have an owner of %q narrow "+
-			"its free/busy sharing first with unshare_calendar", strings.Join(who, ", "), cal.Title, cal.Title)
+			"written. Leave visibility at default, which keeps them seeing busy, or narrow who sees free/busy "+
+			"on %q first with unshare_calendar", strings.Join(who, ", "), cal.Title, cal.Title)
 }
 
 // moveReach refuses a move that would show the event's details to an

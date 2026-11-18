@@ -181,6 +181,13 @@ func TestPublicReadersAreTheWideFreeBusyRules(t *testing.T) {
 		{"anyone, reading already", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleReader)}, nil},
 		{"a colleague, free/busy", []model.Sharing{rule(gcal.ScopeTypeUser, "colleague@example.test", gcal.RoleFreeBusyReader)}, nil},
 		{"nobody", nil, nil},
+		// A reader rule that covers the free/busy one already shows the
+		// details, so public adds nobody.
+		{"a domain, free/busy, under anyone reading", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleReader),
+			rule(gcal.ScopeTypeDomain, "example.test", gcal.RoleFreeBusyReader)}, nil},
+		{"an outsider, free/busy, under their domain reading", []model.Sharing{
+			rule(gcal.ScopeTypeDomain, "elsewhere.test", gcal.RoleReader),
+			rule(gcal.ScopeTypeUser, "partner@elsewhere.test", gcal.RoleFreeBusyReader)}, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := plan.PublicReaders(c.rules, cal, account, nil); !slices.Equal(got, c.want) {
