@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - `move_event` refuses a move that would show an event to anyone, a whole domain, or someone outside your organization who could not read it before.
+- `visibility: public` is refused where anyone, a whole domain, or an outsider sees only free/busy, since it would show them the details.
 
 ### Fixed
 

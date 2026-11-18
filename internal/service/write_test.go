@@ -817,6 +817,45 @@ func TestCancelThisAndFollowingCountsInTheSeriesZone(t *testing.T) {
 	}
 }
 
+// visibility:public is refused on a calendar whose free/busy is shared
+// with anyone, on create and on an update that makes an event public; on
+// a calendar shared only with readers it goes through (#42).
+func TestPublicVisibilityIsRefusedWhereOnlyFreeBusyWasShared(t *testing.T) {
+	freeBusy := gcal.AclRule{ID: "default", Role: gcal.RoleFreeBusyReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}}
+	public := gcal.VisibilityPublic
+	create := service.CreateOptions{Calendar: "primary", Title: "Planning",
+		Start: "2026-03-19T10:00:00+01:00", End: "2026-03-19T11:00:00+01:00", Visibility: public}
+	t.Run("create", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"], freeBusy)
+		_, err := svc.CreateEvent(context.Background(), create)
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "ANYONE") {
+			t.Errorf("a public event where anyone sees free/busy = %v, want [blocked] naming them", err)
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("the refused create wrote %+v", w)
+		}
+	})
+	t.Run("update", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"], freeBusy)
+		_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+			Calendar: "primary", EventID: "evsolo00001", Visibility: &public,
+		})
+		if classOf(t, err) != gapi.ClassBlocked {
+			t.Errorf("making an event public where anyone sees free/busy = %v, want [blocked]", err)
+		}
+	})
+	t.Run("readers only", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"],
+			gcal.AclRule{ID: "default", Role: gcal.RoleReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}})
+		if _, err := svc.CreateEvent(context.Background(), create); err != nil {
+			t.Errorf("a public event where anyone reads already: %v", err)
+		}
+	})
+}
+
 func TestAnOriginalStartThatNamesNoOccurrenceSaysWhy(t *testing.T) {
 	svc, _ := writeSeed(t)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{

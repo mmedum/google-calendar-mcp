@@ -159,6 +159,37 @@ func TestWiderReadersAreTheTiersTheSourceDoesNotCover(t *testing.T) {
 	}
 }
 
+// A public event shows its details to whoever sees only free/busy on its
+// calendar; that matters only for a wide tier, and a reader already sees
+// a default event (#42).
+func TestPublicReadersAreTheWideFreeBusyRules(t *testing.T) {
+	rule := func(typ, value, role string) model.Sharing {
+		return model.Sharing{ScopeType: typ, Value: value, Role: role}
+	}
+	const cal, account = "team@group.calendar.example.test", "me@example.test"
+	for _, c := range []struct {
+		name  string
+		rules []model.Sharing
+		want  []string
+	}{
+		{"anyone, free/busy", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)},
+			[]string{"ANYONE, signed in or not"}},
+		{"a domain, free/busy", []model.Sharing{rule(gcal.ScopeTypeDomain, "example.test", gcal.RoleFreeBusyReader)},
+			[]string{"everybody in example.test"}},
+		{"an outsider, free/busy", []model.Sharing{rule(gcal.ScopeTypeUser, "partner@elsewhere.test", gcal.RoleFreeBusyReader)},
+			[]string{"partner@elsewhere.test"}},
+		{"anyone, reading already", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleReader)}, nil},
+		{"a colleague, free/busy", []model.Sharing{rule(gcal.ScopeTypeUser, "colleague@example.test", gcal.RoleFreeBusyReader)}, nil},
+		{"nobody", nil, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := plan.PublicReaders(c.rules, cal, account, nil); !slices.Equal(got, c.want) {
+				t.Errorf("PublicReaders = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 // An address is inside the organization only when its domain is the
 // account's own. A personal account has no organization, and an account
 // that could not be read leaves every address outside: both refuse a

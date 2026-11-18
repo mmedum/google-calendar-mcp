@@ -573,10 +573,19 @@ func (s *Service) CreateEvent(ctx context.Context, o CreateOptions) (render.Writ
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
+	var publicNote string
+	if o.Visibility == gcal.VisibilityPublic {
+		if publicNote, err = s.publicReach(ctx, env.cal); err != nil {
+			return render.WriteReport{}, err
+		}
+	}
 
 	report := render.WriteReport{
 		Verb: render.VerbCreate, Calendar: env.cal.Title, Zone: env.zone,
 		Notify: decision.Report(), DryRun: o.DryRun,
+	}
+	if publicNote != "" {
+		report.Notes = append(report.Notes, publicNote)
 	}
 	if len(body.Recurrence) > 0 {
 		report.Notes = append(report.Notes,
@@ -855,6 +864,12 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 			return render.WriteReport{}, classifyPlan(err)
 		}
 	}
+	var publicNote string
+	if draft.Visibility != nil && *draft.Visibility == gcal.VisibilityPublic && target.Visibility != gcal.VisibilityPublic {
+		if publicNote, err = s.publicReach(ctx, env.cal); err != nil {
+			return render.WriteReport{}, err
+		}
+	}
 	var decision plan.Decision
 	if draft.OnlyReminders() {
 		decision, err = plan.PersonalNotification(o.Notify)
@@ -882,6 +897,9 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 	}
 	if visibilityNote != "" {
 		report.Notes = append(report.Notes, visibilityNote)
+	}
+	if publicNote != "" {
+		report.Notes = append(report.Notes, publicNote)
 	}
 	if o.AddConference && o.DryRun {
 		report.Notes = append(report.Notes, dryRunConferenceNote)
@@ -1631,6 +1649,30 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 	return retrying(ctx, o.ETag, func(ctx context.Context, at *attempt) (render.WriteReport, error) {
 		return s.moveEvent(ctx, o, at)
 	})
+}
+
+// publicReach refuses a public visibility on a calendar whose free/busy
+// is shared with a wider tier, which a public event would show its
+// details to (#42), and returns a note when the calendar's sharing cannot
+// be read for want of a scope or of owner access, as moveReach does.
+func (s *Service) publicReach(ctx context.Context, cal model.Calendar) (string, error) {
+	rules, err := s.sharingRules(ctx, cal.ID)
+	if err != nil {
+		if _, ok := unreadableSharing(err); !ok {
+			return "", err
+		}
+		note := fmt.Sprintf("Could not read who can see %q, so this did not check whether a public event shows "+
+			"its details to someone who sees only free/busy there.", cal.Title)
+		return note, nil //nolint:nilerr // a calendar this account may not read is a note, not a refusal (D-91)
+	}
+	who := plan.PublicReaders(rules, cal.ID, s.primaryID(ctx), s.Cfg.OrgDomains)
+	if len(who) == 0 {
+		return "", nil
+	}
+	return "", gapi.Errf(gapi.ClassBlocked,
+		"visibility:public would show this event's details to %s, who see only free/busy on %q. Nothing was "+
+			"written. Leave visibility at default, which keeps them seeing busy, or have an owner of %q narrow "+
+			"its free/busy sharing first with unshare_calendar", strings.Join(who, ", "), cal.Title, cal.Title)
 }
 
 // moveReach refuses a move that would show the event's details to an

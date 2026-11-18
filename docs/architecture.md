@@ -444,6 +444,7 @@ primary calendar beyond its one status event (D-72).
 | D-89 | `live-cover`'s exemptions live in a TSV | rejected | — |
 | D-90 | A generic wrapper serves the write tools' handlers | rejected | — |
 | D-91 | A move that shows an event to a wider tier than its calendar did is refused | accepted | TestWiderReadersAreTheTiersTheSourceDoesNotCover, TestMoveEventComparesWhoCanSeeTheTwoCalendars |
+| D-92 | A public visibility is refused where it shows details to a tier that saw only free/busy | accepted | TestPublicReadersAreTheWideFreeBusyRules, TestPublicVisibilityIsRefusedWhereOnlyFreeBusyWasShared |
 
 ### D-01 One stdio binary per person, on the deployer's own OAuth client
 
@@ -2637,4 +2638,25 @@ act Google Calendar already makes deliberately; comparing every person
 and group, which refuses moving a personal event into a team calendar.
 Cost: one ACL read per move, two when the destination has a wide rule.
 
-Next ID: D-92
+### D-92 A public visibility is refused where it shows details to a tier that saw only free/busy
+
+A calendar shared for free/busy shows its events as busy blocks. A
+public event shows its details to "all readers of the calendar", in
+the discovery document's words, which this server reads as free/busy
+readers too until a live step settles it (#49). So `visibility:public`
+on `create_event`, and an `update_event` that makes an event public, are
+refused `[blocked]` on a calendar whose free/busy alone is shared with
+the tiers D-91 names: anyone, a whole domain, or someone outside the
+organization. A reader already sees a default event, so a reader rule
+changes nothing here.
+
+A calendar whose sharing this account cannot read is a note, and any
+other read failure fails the write, as in D-91. There is no tool that
+makes the wider event: leave the visibility at default, or have an owner
+narrow the free/busy sharing first.
+
+Rejected: a gated tool for a public event on such a calendar, for the
+reason D-91 gives for the wider move.
+Cost: one ACL read on a write that sets public.
+
+Next ID: D-93
