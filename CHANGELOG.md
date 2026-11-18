@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- `GCAL_ORG_DOMAINS` names your organization's mail domains, so a personal account at a provider other than Gmail stops treating that provider's customers as colleagues.
+- `GCAL_ORG_DOMAINS` names your organization's mail domains for `share_calendar`, so a personal account at another mail provider stops sharing with its customers as colleagues.
 
 ### Security
 

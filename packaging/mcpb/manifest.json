@@ -69,7 +69,7 @@
     "org_domains": {
       "type": "string",
       "title": "Organization domains",
-      "description": "The organization's mail domains, comma-separated, such as example.com,example.org. share_calendar shares only with addresses in them, and anything else goes to widen_calendar_access. Leave it empty to count only your account's own domain. On a personal account at a mail provider other than Gmail, set it to a domain you own, so a share to another customer of that provider is not taken as inside.",
+      "description": "The organization's mail domains, comma-separated, such as example.com,example.org. share_calendar shares only with addresses in them, and anything else goes to widen_calendar_access. Gmail's domains are refused, since they name no organization. Leave it empty to count only your account's own domain. On a personal account at a mail provider other than Gmail, set it to a domain you own, so a share to another customer of that provider is not taken as inside.",
       "default": "",
       "required": false
     },

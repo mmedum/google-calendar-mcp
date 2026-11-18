@@ -117,6 +117,10 @@ func TestInvalidValuesAreRejected(t *testing.T) {
 		{"a word for a domain", "GCAL_ORG_DOMAINS", "example.test,intranet"},
 		{"a domain past ASCII", "GCAL_ORG_DOMAINS", "\u0130nside.test"},
 		{"a leading dot", "GCAL_ORG_DOMAINS", ".example.test"},
+		{"Gmail's domain", "GCAL_ORG_DOMAINS", "example.test,Gmail.com"},
+		{"a wildcard", "GCAL_ORG_DOMAINS", "*.example.test"},
+		{"an empty label", "GCAL_ORG_DOMAINS", "example..test"},
+		{"a port", "GCAL_ORG_DOMAINS", "example.test:443"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -124,6 +128,15 @@ func TestInvalidValuesAreRejected(t *testing.T) {
 				t.Fatalf("%s=%q was accepted", c.key, c.val)
 			}
 		})
+	}
+}
+
+// A refusal quotes the domain as it was given, before lowercasing turns
+// U+0130 into something else.
+func TestAnOrgDomainRefusalQuotesWhatWasGiven(t *testing.T) {
+	_, err := build(t, map[string]string{"GCAL_ORG_DOMAINS": "\u0130nside.test"})
+	if err == nil || !strings.Contains(err.Error(), `"\u0130nside.test"`) && !strings.Contains(err.Error(), "\u0130nside.test") {
+		t.Errorf("GCAL_ORG_DOMAINS=\u0130nside.test gave %v, want a refusal quoting it as given", err)
 	}
 }
 

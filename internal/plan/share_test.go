@@ -140,7 +140,8 @@ func TestOutsideFollowsTheNamedOrganizationDomains(t *testing.T) {
 		{"Colleague@SECOND.test", "me@example.test", false},
 		{"somebody@mailhost.test", "me@mailhost.test", true},
 		{"somebody@sub.example.test", "me@example.test", true},
-		{"colleague@example.test", "", false},
+		// An unknown account is still doubt, and doubt is outside.
+		{"colleague@example.test", "", true},
 		{"example.test", "me@example.test", true},
 		{"somebody@\u0130nside.test", "me@inside.test", true},
 	} {

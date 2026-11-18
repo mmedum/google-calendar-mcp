@@ -437,26 +437,34 @@ func NewLogger(c Config, w io.Writer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, opts))
 }
 
+// ConsumerDomains are the domains of personal Google accounts. They name
+// no organization, so none can be one of GCAL_ORG_DOMAINS: naming one
+// would make every stranger on it a colleague.
+var ConsumerDomains = map[string]bool{"gmail.com": true, "googlemail.com": true}
+
+// domainName is a mail domain as GCAL_ORG_DOMAINS takes it: two or more
+// dot-separated ASCII labels of letters, digits and inner hyphens, and
+// nothing else, so a wildcard, a port or an empty label is refused rather
+// than silently matching nobody.
+var domainName = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$`)
+
 // parseDomains reads a comma-separated list of mail domains, lowercased
-// and each once. A domain is ASCII, holds a dot and no @ or blank, and
-// neither starts nor ends with a dot: Unicode case folding could make a
-// non-ASCII name equal to another while Google is sent it unchanged.
+// and each once. The check runs before lowercasing, which folds U+0130
+// to "i", and refuses Gmail's domains, which name no organization.
 func parseDomains(name, v string) ([]string, error) {
 	var out []string
-	for _, d := range strings.Split(v, ",") {
-		d = strings.TrimSpace(d)
-		if d == "" {
+	for _, given := range strings.Split(v, ",") {
+		given = strings.TrimSpace(given)
+		if given == "" {
 			continue
 		}
-		valid := strings.Contains(d, ".") && !strings.ContainsAny(d, "@ \t") &&
-			!strings.HasPrefix(d, ".") && !strings.HasSuffix(d, ".")
-		// ASCII before lowercasing: strings.ToLower folds U+0130 to "i".
-		for i := 0; i < len(d) && valid; i++ {
-			valid = d[i] < 0x80
+		if !domainName.MatchString(given) {
+			return nil, fmt.Errorf("%s: %q is not a mail domain such as example.com", name, given)
 		}
-		d = strings.ToLower(d)
-		if !valid {
-			return nil, fmt.Errorf("%s: %q is not a mail domain such as example.com", name, d)
+		d := strings.ToLower(given)
+		if ConsumerDomains[d] {
+			return nil, fmt.Errorf("%s: %q is personal Google accounts' domain, which names no organization; "+
+				"name a domain your organization owns, or leave it unset", name, given)
 		}
 		if !slices.Contains(out, d) {
 			out = append(out, d)
