@@ -134,6 +134,18 @@ func TestLeakGateFailsOnAFinding(t *testing.T) {
 	}
 }
 
+// gitQuiet is the command-scope config every git a test runs carries,
+// which every config file yields to
+// (https://git-scm.com/docs/git-config#Documentation/git-config.txt-GITCONFIGCOUNT):
+// no command starts `git maintenance run --auto` after a write
+// (https://git-scm.com/docs/git-maintenance#Documentation/git-maintenance.txt-maintenanceauto),
+// and a command that runs `git gc --auto` itself finds no work
+// (https://git-scm.com/docs/git-gc#Documentation/git-gc.txt-gcauto).
+// Automatic maintenance runs detached and can still hold a lock in the
+// repository when the test removes its temporary directory.
+var gitQuiet = []string{"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=maintenance.auto", "GIT_CONFIG_VALUE_0=false",
+	"GIT_CONFIG_KEY_1=gc.auto", "GIT_CONFIG_VALUE_1=0"}
+
 // gitIn runs git in dir as Pat, with no global or system configuration,
 // so a person's hooks, signing or default branch never reach a test.
 func gitIn(t *testing.T, dir string) func(args ...string) {
@@ -143,7 +155,7 @@ func gitIn(t *testing.T, dir string) func(args ...string) {
 		cmd := exec.Command("git", append([]string{"-c", "user.name=Pat", "-c", "user.email=pat" + "@" + "acme-sample.com"},
 			args...)...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+		cmd.Env = append(append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1"), gitQuiet...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -169,6 +181,11 @@ func isolatedRepo(t *testing.T) (string, func(args ...string)) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", config)
+	// The gate's own git calls run without automatic maintenance too.
+	for _, kv := range gitQuiet {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
 	dir := t.TempDir()
 	t.Chdir(dir)
 	git := gitIn(t, dir)
@@ -282,4 +299,16 @@ func TestTheHistoryScanPassesATrailerNamingAnAuthor(t *testing.T) {
 			t.Errorf("a trailer naming an author only side reaches gave %q, %v; want a finding", got, err)
 		}
 	})
+}
+
+// TestIsolatedRepoTurnsAutomaticMaintenanceOff holds that git reads the
+// command-scope config isolatedRepo sets, for the gate's own git calls.
+func TestIsolatedRepoTurnsAutomaticMaintenanceOff(t *testing.T) {
+	isolatedRepo(t)
+	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
+		out, err := exec.Command("git", "config", "--get", key).Output()
+		if got := strings.TrimSpace(string(out)); err != nil || got != want {
+			t.Errorf("git config --get %s under isolatedRepo = %q, %v; want %q", key, got, err, want)
+		}
+	}
 }
