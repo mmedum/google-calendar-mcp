@@ -48,6 +48,31 @@ func TestCreateCalendarSendsTheResolvedZone(t *testing.T) {
 	}
 }
 
+// A usage limit on calendars.insert names the calendar-creation quota and
+// says a retry soon will not help, rather than reading as a short rate
+// limit; it stays [rate_limited], whichever way Google sends it.
+func TestCreateCalendarNamesTheCreationQuota(t *testing.T) {
+	for name, fail := range map[string]struct {
+		status int
+		reason string
+	}{"403 quotaExceeded": {403, "quotaExceeded"}, "429": {429, "rateLimitExceeded"}} {
+		t.Run(name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			fake.Fail["POST /calendars"] = fail.status
+			fake.FailReason = map[string]string{"POST /calendars": fail.reason}
+			_, err := svc.CreateCalendar(context.Background(), service.CreateCalendarOptions{Title: "Project Kestrel"})
+			if class, _ := gapi.ClassOf(err); class != gapi.ClassRateLimited {
+				t.Fatalf("CreateCalendar = %v, want [rate_limited]", err)
+			}
+			for _, want := range []string{"how many calendars one account can create", "Retrying soon will likely be refused"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the refusal does not say %q:\n%v", want, err)
+				}
+			}
+		})
+	}
+}
+
 // A calendar created with no zone must not take the process's.
 // With none on the call and no calendar to read, the account's own
 // setting is the answer, and the result says so.

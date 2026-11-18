@@ -86,6 +86,9 @@ type Server struct {
 	// alone — "the data owner of a calendar cannot remove such a
 	// calendar" is a 403 like any other until you read it.
 	FailMessage map[string]string
+	// FailReason is the reason that failure carries, for the refusals
+	// classified by Google's reason, such as a 403 quotaExceeded.
+	FailReason map[string]string
 	// Writes records every write served: the method, the path, and the
 	// sendUpdates the caller asked for. notify has no default, so a test
 	// has to be able to assert that the server sent what the caller
@@ -1169,7 +1172,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			if m, ok := s.FailMessage[prefix]; ok {
 				message = m
 			}
-			writeErr(w, status, "forced", message)
+			reason := "forced"
+			if r, ok := s.FailReason[prefix]; ok {
+				reason = r
+			}
+			writeErr(w, status, reason, message)
 			return
 		}
 	}

@@ -153,6 +153,19 @@ func (s *Service) CreateCalendar(ctx context.Context, o CreateCalendarOptions) (
 // deleting them. So a failure that may have landed says "go and look",
 // by title, and does not retry.
 func createCalendarError(err error, title string) error {
+	// Google limits how many calendars an account can create, apart from
+	// its per-minute rate, and deleting one does not give the quota back
+	// (#47). Both arrive as a usage limit, and "rate limiting" invites a
+	// retry the quota refuses.
+	if class, _ := gapi.ClassOf(err); class == gapi.ClassRateLimited {
+		var e *gapi.Error
+		errors.As(err, &e)
+		return gapi.Wrap(gapi.ClassRateLimited, err,
+			"Google refused to create %q on a usage limit (%s). Besides its per-minute rate, Google limits how "+
+				"many calendars one account can create; deleting a calendar does not give that quota back, and "+
+				"it resets on Google's schedule, which can take up to a day. Retrying soon will likely be refused "+
+				"again: reuse an existing calendar if one fits, or try again tomorrow", title, e.Message)
+	}
 	e, maybe := maybeLanded(err)
 	if !maybe {
 		return err
