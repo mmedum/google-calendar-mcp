@@ -243,7 +243,7 @@ func decodeError(status int, data []byte) *Error {
 	}
 
 	cls, msg := classify(status, reason, message)
-	return &Error{Class: cls, Message: msg, Status: status, Reason: reason}
+	return &Error{Class: cls, Message: msg, Status: status, Reason: reason, Google: message}
 }
 
 // ---------------------------------------------------------------- reads

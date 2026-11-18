@@ -122,6 +122,31 @@ func TestErrorClassification(t *testing.T) {
 	}
 }
 
+// A spent quota says it resets on Google's schedule, and a per-minute
+// rate limit says only that Google is limiting the rate; both are
+// [rate_limited], and both keep Google's own message.
+func TestAQuotaReadsAsSpentAndARateAsLimited(t *testing.T) {
+	for reason, want := range map[string]string{
+		"quotaExceeded":      "usage quota is spent, and it resets on Google's schedule",
+		"dailyLimitExceeded": "usage quota is spent, and it resets on Google's schedule",
+		"rateLimitExceeded":  "Google is rate limiting this account: nope",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(403)
+				_, _ = w.Write([]byte(`{"error":{"code":403,"message":"nope","errors":[{"reason":"` + reason + `"}]}}`))
+			}))
+			defer srv.Close()
+			_, err := client(srv.URL).GetCalendar(context.Background(), "primary")
+			var e *gapi.Error
+			if !errors.As(err, &e) || e.Class != gapi.ClassRateLimited || e.Google != "nope" ||
+				!strings.Contains(e.Message, want) {
+				t.Errorf("reason %s gave %v (Google %q), want [rate_limited] saying %q", reason, err, e.Google, want)
+			}
+		})
+	}
+}
+
 // TestEveryEmittedClassIsInTheVocabulary keeps the enum closed from the
 // runtime side as well as from the gate's static side.
 func TestEveryEmittedClassIsInTheVocabulary(t *testing.T) {

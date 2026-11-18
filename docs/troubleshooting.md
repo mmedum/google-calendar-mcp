@@ -206,12 +206,21 @@ out of date.
 ## `[rate_limited] Google is rate limiting this account`
 
 **Cause:** Google allows each user a number of requests per minute, on a
-sliding window. From `create_calendar`, it is the separate limit on
-creating calendars.
+sliding window.
 
-**Fix (resolves it):** wait and retry. Creating calendars is the exception: deleting
-one does not give the quota back, and retrying soon does not help. It can
-take up to a day.
+**Fix (resolves it):** wait a minute and retry.
+
+## `[rate_limited] this account's Google usage quota is spent`
+
+**Cause:** Google answered `quotaExceeded` or `dailyLimitExceeded`: a
+quota, not the per-minute window. From `create_calendar` the refusal
+says `calendar-creation quota is spent`, Google's limit on how many
+calendars one account can create.
+
+**Fix (resolves it):** wait for Google to reset the quota; retrying soon
+is refused again. Deleting calendars does not give the creation quota
+back, so reuse a calendar the account has. The live driver's `-keep`
+leaves its scratch calendars for the next run for this reason.
 
 ## `[ambiguous_outcome] this event may or may not have been created`
 

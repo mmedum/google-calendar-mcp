@@ -88,6 +88,9 @@ type Error struct {
 	// Reason is Google's own machine reason, kept for classification.
 	// Never a payload.
 	Reason string
+	// Google is Google's own message, before Message framed it, for a
+	// caller that frames it again.
+	Google string
 	err    error
 }
 
@@ -148,8 +151,14 @@ func classify(status int, reason, message string) (Class, string) {
 		// 600 requests per user per minute, on a sliding window.
 		// https://developers.google.com/workspace/calendar/api/guides/quota
 		switch reason {
-		case "rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded", "dailyLimitExceeded":
+		case "rateLimitExceeded", "userRateLimitExceeded":
 			return ClassRateLimited, "Google is rate limiting this account: " + message
+		// A spent quota resets on Google's schedule, not the minute's
+		// window, so it says that rather than inviting a quick retry
+		// (#47; live: spike I, `-spike-ceiling`, met 403 quotaExceeded).
+		case "quotaExceeded", "dailyLimitExceeded":
+			return ClassRateLimited, "this account's Google usage quota is spent, and it resets on Google's " +
+				"schedule rather than within a minute, so retrying soon may be refused again: " + message
 		case "insufficientPermissions", "forbiddenForServiceAccounts", "ACCESS_TOKEN_SCOPE_INSUFFICIENT":
 			return ClassAuth, "the signed-in account has not granted a scope this call needs: run `google-calendar-mcp login` again. " + message
 		default:

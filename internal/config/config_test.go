@@ -113,6 +113,14 @@ func TestInvalidValuesAreRejected(t *testing.T) {
 		{"timeout unparseable", "GCAL_HTTP_TIMEOUT", "soon"},
 		{"timeout too long", "GCAL_HTTP_TIMEOUT", "1h"},
 		{"timeout negative", "GCAL_WRITE_TIMEOUT", "-5s"},
+		{"an address for a domain", "GCAL_ORG_DOMAINS", "me@example.test"},
+		{"a word for a domain", "GCAL_ORG_DOMAINS", "example.test,intranet"},
+		{"a domain past ASCII", "GCAL_ORG_DOMAINS", "\u0130nside.test"},
+		{"a leading dot", "GCAL_ORG_DOMAINS", ".example.test"},
+		{"Gmail's domain", "GCAL_ORG_DOMAINS", "example.test,Gmail.com"},
+		{"a wildcard", "GCAL_ORG_DOMAINS", "*.example.test"},
+		{"an empty label", "GCAL_ORG_DOMAINS", "example..test"},
+		{"a port", "GCAL_ORG_DOMAINS", "example.test:443"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -120,6 +128,31 @@ func TestInvalidValuesAreRejected(t *testing.T) {
 				t.Fatalf("%s=%q was accepted", c.key, c.val)
 			}
 		})
+	}
+}
+
+// A refusal quotes the domain as it was given, before lowercasing turns
+// U+0130 into something else.
+func TestAnOrgDomainRefusalQuotesWhatWasGiven(t *testing.T) {
+	_, err := build(t, map[string]string{"GCAL_ORG_DOMAINS": "\u0130nside.test"})
+	if err == nil || !strings.Contains(err.Error(), `"\u0130nside.test"`) && !strings.Contains(err.Error(), "\u0130nside.test") {
+		t.Errorf("GCAL_ORG_DOMAINS=\u0130nside.test gave %v, want a refusal quoting it as given", err)
+	}
+}
+
+// The organization's domains are read lowercased, each once, with blanks
+// and empty entries dropped; unset is no list, the account's own domain.
+func TestOrgDomainsAreReadAsAList(t *testing.T) {
+	for in, want := range map[string][]string{
+		"":                                       nil,
+		" , ":                                    nil,
+		"Example.TEST":                           {"example.test"},
+		"example.test, second.test,example.test": {"example.test", "second.test"},
+	} {
+		c, err := build(t, map[string]string{"GCAL_ORG_DOMAINS": in})
+		if err != nil || !slices.Equal(c.OrgDomains, want) {
+			t.Errorf("GCAL_ORG_DOMAINS=%q gave %v, %v; want %v", in, c.OrgDomains, err, want)
+		}
 	}
 }
 
@@ -358,7 +391,7 @@ func TestEnvVars(t *testing.T) {
 	want := []string{
 		"GCAL_CLIENT_SECRET", "GCAL_CONCURRENCY", "GCAL_CONFIG_DIR", "GCAL_ENABLE_DECLINE_ALL",
 		"GCAL_ENABLE_DESTRUCTIVE", "GCAL_HTTP_TIMEOUT", "GCAL_LOG_FORMAT", "GCAL_LOG_LEVEL",
-		"GCAL_MAX_CALENDARS", "GCAL_MAX_EVENTS", "GCAL_PROFILE", "GCAL_READONLY", "GCAL_READ_ONLY",
+		"GCAL_MAX_CALENDARS", "GCAL_MAX_EVENTS", "GCAL_ORG_DOMAINS", "GCAL_PROFILE", "GCAL_READONLY", "GCAL_READ_ONLY",
 		"GCAL_REFRESH_TOKEN", "GCAL_REQUIRE_PROMPT", "GCAL_SHARING", "GCAL_WRITE_TIMEOUT",
 	}
 	if got := config.EnvVars(); !slices.Equal(got, want) {
