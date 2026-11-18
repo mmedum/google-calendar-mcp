@@ -629,6 +629,57 @@ func TestAnOccurrenceIsAddressableByItsScheduledStart(t *testing.T) {
 	}
 }
 
+// A rule whose occurrences fall by the local date, BYMONTHDAY=31, is
+// counted in the series' own zone however the call reads it: from Tokyo,
+// 20:00 in Los Angeles is already the next day, and a count walked there
+// covers other days (#46).
+func TestThisAndFollowingCountsTheHeadInTheSeriesZone(t *testing.T) {
+	svc, fake := writeSeed(t)
+	const la = "America/Los_Angeles"
+	fake.AddEvent("me@example.test", caltest.Recurring("evmonthly01", "Month end",
+		"2026-01-31T20:00:00-08:00", "2026-01-31T21:00:00-08:00", la, "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6"))
+	fake.AddEvent("me@example.test", caltest.Instance("evmonthly01_20260601T030000Z", "evmonthly01",
+		"Month end", "2026-05-31T20:00:00-07:00", "2026-05-31T21:00:00-07:00", la, "2026-05-31T20:00:00-07:00"))
+	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+		Calendar: "primary", EventID: "evmonthly01", OriginalStart: "2026-05-31T20:00:00-07:00",
+		Scope: "this_and_following", Title: ptr("Month close"), TimeZone: "Asia/Tokyo",
+	})
+	if err != nil {
+		t.Fatalf("UpdateEvent: %v", err)
+	}
+	// 31 January and 31 March come before the target in Los Angeles; the
+	// new series carries 31 May, July, August and October.
+	for _, want := range []string{
+		"ends before this occurrence, with the rule RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=2,",
+		"a NEW event with the rule RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=4.",
+	} {
+		if !strings.Contains(out.Text(), want) {
+			t.Errorf("the split does not say %q:\n%s", want, out.Text())
+		}
+	}
+}
+
+// Canceling this and following truncates the series by the same count,
+// in the series' own zone (#46).
+func TestCancelThisAndFollowingCountsInTheSeriesZone(t *testing.T) {
+	svc, fake := writeSeed(t)
+	const la = "America/Los_Angeles"
+	fake.AddEvent("me@example.test", caltest.Recurring("evmonthly01", "Month end",
+		"2026-01-31T20:00:00-08:00", "2026-01-31T21:00:00-08:00", la, "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6"))
+	fake.AddEvent("me@example.test", caltest.Instance("evmonthly01_20260601T030000Z", "evmonthly01",
+		"Month end", "2026-05-31T20:00:00-07:00", "2026-05-31T21:00:00-07:00", la, "2026-05-31T20:00:00-07:00"))
+	out, err := svc.CancelEvent(context.Background(), service.CancelOptions{
+		Calendar: "primary", EventID: "evmonthly01", OriginalStart: "2026-05-31T20:00:00-07:00",
+		Scope: "this_and_following", TimeZone: "Asia/Tokyo",
+	})
+	if err != nil {
+		t.Fatalf("CancelEvent: %v", err)
+	}
+	if want := "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6 → RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=2"; !strings.Contains(out.Text(), want) {
+		t.Errorf("the cancel does not truncate to the two occurrences before 31 May in Los Angeles, %q:\n%s", want, out.Text())
+	}
+}
+
 func TestAnOriginalStartThatNamesNoOccurrenceSaysWhy(t *testing.T) {
 	svc, _ := writeSeed(t)
 	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{

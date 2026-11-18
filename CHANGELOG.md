@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A `this_and_following` update or cancel read in another zone keeps the right occurrences for a date-based rule, such as the 31st of each month.
+
 ### Security
 
 - The login's loopback server could crash on a header race in `net/http`, which `govulncheck` found reachable; built with Go 1.27.4, fixing GO-2026-6859 (CVE-2026-97054).

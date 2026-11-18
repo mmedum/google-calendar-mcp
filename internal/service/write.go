@@ -250,8 +250,24 @@ func (s *Service) seriesReach(ctx context.Context, env *writeEnv, raw gcal.Event
 		if pe.Start.AllDay {
 			return set.ReachDates(pe.Start.Date, 0)
 		}
-		return set.Reach(pe.Start.At, 0)
+		return set.Reach(inSeriesZone(parent, pe.Start.At), 0)
 	}
+}
+
+// inSeriesZone places a point of a series in the series' own zone. A
+// series is read in the zone the call resolved, which need not be its
+// own, and the rule walks the series' wall clock: a rule whose local day
+// depends on the zone, such as BYMONTHDAY=31, counts other days from
+// another zone (#46). With no zone to read, the point stays as read.
+func inSeriesZone(series gcal.Event, z when.Zoned) when.Zoned {
+	if series.Start == nil || series.Start.TimeZone == "" {
+		return z
+	}
+	loc, err := when.LoadLocation(series.Start.TimeZone)
+	if err != nil {
+		return z
+	}
+	return z.In(loc)
 }
 
 // ifMatch decides what goes in the If-Match header (D-28).
@@ -1031,16 +1047,11 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	// and a COUNT counts what the rule generated.
 	split := scheduledStart(target)
 
-	// The parent is read in the zone this call resolved, which need not
-	// be the event's own, and the rule is expanded from that anchor. A
-	// weekly or a daily rule splits the same either way; one whose local
-	// day walk depends on the zone, such as BYMONTHDAY=31, may not.
-
 	var beforeRule, afterRule string
 	if parent.Start.AllDay {
 		beforeRule, afterRule, err = set.SplitDates(parent.Start.Date, split.Date)
 	} else {
-		beforeRule, afterRule, err = set.Split(parent.Start.At, split.At)
+		beforeRule, afterRule, err = set.Split(inSeriesZone(parentRaw, parent.Start.At), inSeriesZone(parentRaw, split.At))
 	}
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
@@ -1486,7 +1497,7 @@ func (s *Service) cancelFollowing(ctx context.Context, env *writeEnv, parentRaw 
 	if parent.Start.AllDay {
 		rule, _, err = set.SplitDates(parent.Start.Date, split.Date)
 	} else {
-		rule, _, err = set.Split(parent.Start.At, split.At)
+		rule, _, err = set.Split(inSeriesZone(parentRaw, parent.Start.At), inSeriesZone(parentRaw, split.At))
 	}
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
