@@ -92,6 +92,22 @@ func TestParseAudienceValidatesWhatTheTypeImplies(t *testing.T) {
 	}
 }
 
+// A group with a member outside the organization is refused, counting
+// them and naming widen_calendar_access; a room is a resource, not a
+// person outside (#44).
+func TestGroupAudienceRefusesAnOutsideMember(t *testing.T) {
+	const account = "me@example.test"
+	err := plan.GroupAudience("team@example.test", []string{"colleague@example.test", "partner@elsewhere.test"}, account, nil)
+	if !errors.Is(err, plan.ErrBlocked) || !strings.Contains(err.Error(), "1 of its 2 members") ||
+		!strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Errorf("a group with an outside member = %v, want [blocked] counting it", err)
+	}
+	if err := plan.GroupAudience("team@example.test",
+		[]string{"colleague@example.test", "room-sample@resource.calendar.google.com"}, account, nil); err != nil {
+		t.Errorf("a group of a colleague and a room = %v, want nil", err)
+	}
+}
+
 // An address is inside the organization only when its domain is the
 // account's own. A personal account has no organization, and an account
 // that could not be read leaves every address outside: both refuse a

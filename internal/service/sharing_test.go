@@ -336,6 +336,33 @@ func TestShareCalendarReadsAGroupsMembers(t *testing.T) {
 			t.Errorf("a group all inside: %v", err)
 		}
 	})
+	t.Run("a raised role on a group the calendar has", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+			gcal.AclRule{ID: "group:team@example.test", Role: gcal.RoleFreeBusyReader,
+				Scope: gcal.AclScope{Type: gcal.ScopeTypeGroup, Value: "team@example.test"}})
+		fake.Groups = map[string][]string{"team@example.test": {"partner@elsewhere.test"}}
+		if _, err := svc.ShareCalendar(context.Background(), share); classOf(t, err) != gapi.ClassBlocked {
+			t.Errorf("raising a group with an outside member to reader = %v, want [blocked]", err)
+		}
+	})
+	t.Run("asked in another case", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.Groups = map[string][]string{"team@example.test": {"partner@elsewhere.test"}}
+		o := share
+		o.Who = "Team@Example.test"
+		if _, err := svc.ShareCalendar(context.Background(), o); classOf(t, err) != gapi.ClassBlocked {
+			t.Errorf("a group named in another case with an outside member = %v, want [blocked]", err)
+		}
+	})
+	t.Run("no members", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.Groups = map[string][]string{"team@example.test": {}}
+		out, err := svc.ShareCalendar(context.Background(), share)
+		if err != nil || !strings.Contains(out.Text(), "Could not read who is in team@example.test") {
+			t.Errorf("a group answered with no members = %v, %q; want it shared, saying so", err, out.Text())
+		}
+	})
 	t.Run("unreadable", func(t *testing.T) {
 		svc, fake := calendarSeed(t)
 		fake.Groups = map[string][]string{"team@example.test": {"colleague@example.test"}}

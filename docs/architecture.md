@@ -1686,12 +1686,14 @@ many. A refusal names the tool that takes the share, so the cost of an
 error is a second call, while a share too many is access nobody meant
 to give.
 
-A group share reaches every member, so `share_calendar` reads a new
-group's members before it shares, through `freebusy.query`, the one
-place Calendar's scope shows them, and refuses a group with a member
-outside the organization, naming `widen_calendar_access` (#44). A group
-whose members cannot be read, one past the hundred Google expands or one
-Google answers with an error, is shared with a note saying so, since
+A group share reaches every member, so `share_calendar` reads a group's
+members whenever a share gives it more than it had, through
+`freebusy.query`, the one place Calendar's scope shows them, and refuses
+a group with a member outside the organization, naming
+`widen_calendar_access` (#44). A room among them is a resource, not a
+person. A group whose members cannot be read, one past what Google
+expands, one it answers with an error or with no members, is shared with
+a note saying so: the one place doubt does not count as outside, since
 refusing it would refuse every large group inside the organization.
 
 Rejected: asking Google whether the account is a Workspace account,

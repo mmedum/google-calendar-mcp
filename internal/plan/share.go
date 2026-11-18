@@ -171,9 +171,9 @@ func looksLikeDomain(v string) bool {
 // destructive flag, rather than a value an always-allowed share carries
 // unseen.
 
-// GatedTool names a wider tool and the flag it needs, which is the
+// gatedTool names a wider tool and the flag it needs, which is the
 // operator's to set, never the caller's.
-func GatedTool(name string) string {
+func gatedTool(name string) string {
 	return name + ", which is registered only when the server runs with " + config.EnvPrefix + "ENABLE_DESTRUCTIVE=true; that " +
 		"is for the person running it to decide"
 }
@@ -220,6 +220,25 @@ func ascii(s string) bool {
 	return true
 }
 
+// GroupAudience refuses, in share_calendar, a group with a member
+// outside the organization, since a group share reaches every member
+// (#44). members are the group's calendar ids as freebusy.query expands
+// it; a room among them is a resource, not a person outside.
+func GroupAudience(group string, members []string, account string, org []string) error {
+	var outside []string
+	for _, m := range members {
+		if !model.IsRoom(m) && Outside(m, account, org) {
+			outside = append(outside, m)
+		}
+	}
+	if len(outside) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s has %d of its %d members outside your organization, such as %s, and a group share "+
+		"reaches every member. share_calendar shares inside it; sharing with this group is %s",
+		ErrBlocked, group, len(outside), len(members), outside[0], gatedTool("widen_calendar_access"))
+}
+
 // OrdinaryAudience refuses, in share_calendar, an audience past named
 // people and groups inside the organization, naming the tool that takes
 // it. outside is Outside for the audience's address.
@@ -229,16 +248,16 @@ func OrdinaryAudience(a Audience, outside bool) error {
 		return fmt.Errorf("%w: share_calendar shares with named people and groups inside your organization. "+
 			"Sharing with anyone publishes the calendar to the whole internet, signed in or not, and "+
 			"removing the rule later takes nothing back from whoever already looked. That is %s. To take a "+
-			"public rule away, use unshare_calendar", ErrBlocked, GatedTool("publish_calendar"))
+			"public rule away, use unshare_calendar", ErrBlocked, gatedTool("publish_calendar"))
 	case a.Scope.Type == gcal.ScopeTypeDomain:
 		return fmt.Errorf("%w: share_calendar shares with named people and groups inside your organization. "+
 			"A domain rule opens the calendar to everybody in %s, which is %s. To take a domain rule away, "+
-			"use unshare_calendar", ErrBlocked, a.Scope.Value, GatedTool("publish_calendar"))
+			"use unshare_calendar", ErrBlocked, a.Scope.Value, gatedTool("publish_calendar"))
 	case outside:
 		return fmt.Errorf("%w: %s is outside your organization as far as this server can tell: an address "+
 			"is inside only when its domain is one %sORG_DOMAINS names, or with that unset your account's own, "+
 			"and a personal Google account has no organization. share_calendar shares inside it; sharing "+
-			"outside is %s", ErrBlocked, Describe(a), config.EnvPrefix, GatedTool("widen_calendar_access"))
+			"outside is %s", ErrBlocked, Describe(a), config.EnvPrefix, gatedTool("widen_calendar_access"))
 	}
 	return nil
 }
@@ -251,7 +270,7 @@ func OrdinaryRole(role string) error {
 	}
 	return fmt.Errorf("%w: owner access includes changing who else can see the calendar, and removing you. "+
 		"share_calendar grants access below owner; making somebody an owner is %s", ErrBlocked,
-		GatedTool("widen_calendar_access"))
+		gatedTool("widen_calendar_access"))
 }
 
 // WithinRule reports whether a share keeps or lowers the role of a rule

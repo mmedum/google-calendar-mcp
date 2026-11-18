@@ -168,16 +168,6 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 	if !had && wider != nil {
 		return render.SharingReport{}, classifyPlan(wider)
 	}
-	var notes []string
-	if !had && audience.Scope.Type == gcal.ScopeTypeGroup {
-		note, err := s.groupInside(ctx, audience.Scope.Value)
-		if err != nil {
-			return render.SharingReport{}, err
-		}
-		if note != "" {
-			notes = append(notes, note)
-		}
-	}
 	role, err := plan.ParseRole(o.Role)
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
@@ -193,6 +183,18 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 	notify, err := plan.ShareNotify(o.Notify)
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
+	}
+	// A group's members are read whenever the share gives the group more
+	// than it had, a raised role included, and after the cheap refusals.
+	var notes []string
+	if audience.Scope.Type == gcal.ScopeTypeGroup && !plan.WithinRule(before, audience, role) {
+		note, err := s.groupInside(ctx, audience.Scope.Value)
+		if err != nil {
+			return render.SharingReport{}, err
+		}
+		if note != "" {
+			notes = append(notes, note)
+		}
 	}
 	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, notes)
 }
@@ -211,30 +213,27 @@ func (s *Service) groupInside(ctx context.Context, group string) (string, error)
 	resp, err := s.API.QueryFreeBusy(ctx, &gcal.FreeBusyRequest{
 		TimeMin: now.UTC().Format(time.RFC3339), TimeMax: now.Add(time.Minute).UTC().Format(time.RFC3339),
 		TimeZone: "UTC", GroupExpansionMax: maxGroupMembers,
-		Items: []gcal.FreeBusyRequestItem{{ID: group}},
+		Items: []gcal.FreeBusyRequestItem{{ID: strings.ToLower(group)}},
 	})
 	if err != nil {
 		return "", err
 	}
-	g, ok := resp.Groups[group]
-	if !ok || len(g.Errors) > 0 {
-		return render.Sentence("Could not read who is in " + group + ", so this share did not check that every " +
-			"member is inside your organization. " + plan.GroupReach), nil
-	}
-	account := s.primaryID(ctx)
-	var outside []string
-	for _, member := range g.Calendars {
-		if plan.Outside(member, account, s.Cfg.OrgDomains) {
-			outside = append(outside, member)
+	var g gcal.FreeBusyGroup
+	ok := false
+	for key, answer := range resp.Groups {
+		if strings.EqualFold(key, group) {
+			g, ok = answer, true
 		}
 	}
-	if len(outside) == 0 {
-		return "", nil
+	// A group answered with no members is no reading of who is in it.
+	if !ok || len(g.Errors) > 0 || len(g.Calendars) == 0 {
+		return render.Sentence("Could not read who is in " + group + ", so this share did not check that every " +
+			"member is inside your organization."), nil
 	}
-	return "", gapi.Errf(gapi.ClassBlocked,
-		"%s has %d of its %d members outside your organization, such as %s, and a group share reaches every "+
-			"member. share_calendar shares inside it; sharing with this group is %s",
-		group, len(outside), len(g.Calendars), outside[0], plan.GatedTool("widen_calendar_access"))
+	if err := plan.GroupAudience(group, g.Calendars, s.primaryID(ctx), s.Cfg.OrgDomains); err != nil {
+		return "", classifyPlan(err)
+	}
+	return "", nil
 }
 
 // PublishOptions is what publish_calendar takes.
