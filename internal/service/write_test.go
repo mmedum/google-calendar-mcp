@@ -2715,38 +2715,24 @@ func statusSeries(t *testing.T, fake *caltest.Server, id, eventType string, bloc
 	return occID
 }
 
-// A split of an out-of-office series that declines every meeting makes
-// a new series that declines them too, and the result says so. A dry
-// run says it and writes nothing. The split keeps the times, since one
-// that covers more is refused (#41).
-func TestASplitThatDeclinesEveryMeetingSaysSo(t *testing.T) {
+// A this_and_following split of a series that declines every meeting is
+// refused, even one that keeps the times: Google resets the exceptions
+// after it, so a canceled later occurrence would come back declining
+// (#41). A dry run is refused too, and neither writes.
+func TestASplitOfASeriesThatDeclinesEveryMeetingIsRefused(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ := statusSeries(t, fake, "evaway00001", gcal.EventTypeOutOfOffice,
 		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll}, false)
-	o := service.UpdateOptions{
-		Calendar: "primary", EventID: occ, Scope: "this_and_following", Title: ptr("Away from here on"),
+	for _, dry := range []bool{true, false} {
+		_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+			Calendar: "primary", EventID: occ, Scope: "this_and_following", Title: ptr("Away from here on"), DryRun: dry,
+		})
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "scope:series") {
+			t.Errorf("dry_run=%v: a split of a decline-all series = %v, want [blocked] naming scope:series", dry, err)
+		}
 	}
-	const declines = "Google declines every meeting this overlaps, including the ones you already accepted"
-
-	dry := o
-	dry.DryRun = true
-	out, err := svc.UpdateEvent(context.Background(), dry)
-	if err != nil {
-		t.Fatalf("dry run: %v", err)
-	}
-	if !strings.Contains(out.Text(), declines) || len(fake.Wrote()) != 0 {
-		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
-	}
-
-	out, err = svc.UpdateEvent(context.Background(), o)
-	if err != nil {
-		t.Fatalf("UpdateEvent: %v", err)
-	}
-	if !strings.Contains(out.Text(), declines) {
-		t.Errorf("the result does not say what the new series declines:\n%s", out.Text())
-	}
-	if w := fake.Wrote(); len(w) != 2 || w[0].Method != "patch" || w[1].Method != "insert" {
-		t.Fatalf("got writes %+v, want a truncate and an insert", w)
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Errorf("a refused split wrote %+v", w)
 	}
 }
 
@@ -2942,7 +2928,7 @@ func TestACoverThatGrowsIsRefused(t *testing.T) {
 const coversMore = "cover time it did not"
 
 // Every way a change can make such an event cover more is refused: moved,
-// made longer, repeated more, made to repeat at all, or split later.
+// made longer, repeated more, or made to repeat at all.
 func TestEveryCoverThatGrowsIsRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name, eventType, rule, scope string
@@ -2968,8 +2954,6 @@ func TestEveryCoverThatGrowsIsRefused(t *testing.T) {
 			func(o *service.UpdateOptions) { o.Recurrence = &[]string{"RRULE:FREQ=DAILY"} }},
 		{"focus time made longer", gcal.EventTypeFocusTime, weeklyFour, "instance",
 			func(o *service.UpdateOptions) { o.End = "2026-03-31T18:00:00+02:00" }},
-		{"a split made longer", gcal.EventTypeOutOfOffice, weeklyFour, "this_and_following",
-			func(o *service.UpdateOptions) { o.End = "2026-03-31T19:00:00+02:00" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, fake := writeSeed(t)
@@ -3041,12 +3025,9 @@ func TestACoverThatOnlyShrinksSaysNothingOfDeclines(t *testing.T) {
 			}
 			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
 			tc.change(&o)
-			out, err := svc.UpdateEvent(context.Background(), o)
+			_, err := svc.UpdateEvent(context.Background(), o)
 			if err != nil {
 				t.Fatalf("UpdateEvent: %v", err)
-			}
-			if strings.Contains(out.Text(), coversMore) {
-				t.Fatalf("the result says the event covers more:\n%s", out.Text())
 			}
 			if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" {
 				t.Fatalf("got writes %+v, want one patch", w)

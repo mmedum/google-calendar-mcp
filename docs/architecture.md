@@ -1508,12 +1508,14 @@ one: a flag people set to get out-of-office must not arm
 `clear_calendar` too.
 
 `update_event` can make such an event cover time it did not cover:
-moved, made longer, repeated more, or split into a series that does.
-Google may then decline the meetings in that time, which is what only
-the flagged tool may do, so such an update is refused `[blocked]`, a dry
-run included, naming `create_event_declining_all` (#41). A change that
-only shrinks the time goes through, and so does one that sets
-`auto_decline` to `new` or `none` in the same call.
+moved, made longer or repeated more. Google may then decline the
+meetings in that time, which is what only the flagged tool may do, so
+such an update is refused `[blocked]`, a dry run included, naming
+`create_event_declining_all` (#41). A change that only shrinks the time
+goes through. A `this_and_following` split of such a series is refused
+whatever it changes: Google resets the exceptions after the target, so
+a canceled later occurrence comes back declining, and the split cannot
+show it covers no more.
 
 Rejected: `all` as a value of `create_event`'s argument, guarded by a
 question or by typing it; the destructive flag; a note on a widening

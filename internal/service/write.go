@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmedum/google-calendar-mcp/v5/internal/config"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/model"
@@ -896,7 +895,7 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 	afterRaw := target
 	patch.ApplyTo(&afterRaw)
 	if plan.DeclinesMore(target, afterRaw) {
-		return render.WriteReport{}, declinesMoreError()
+		return render.WriteReport{}, classifyPlan(plan.ErrDeclinesMore())
 	}
 	if o.DryRun {
 		shown, err := model.FromEvent(env.cal.ID, afterRaw, &env.zone)
@@ -948,22 +947,6 @@ func alreadyOnNote(d plan.Draft, attendees []gcal.EventAttendee) string {
 	}
 	return "Already on the event, so left as they were: " + strings.Join(on, ", ") + ". Adding an " +
 		"address does not change how it is invited: this server does not make a guest optional or required."
-}
-
-// declinesMoreError refuses a change that makes an event declining every
-// meeting it overlaps cover time it did not (#41). Google may decline the
-// meetings already in that time, the accepted ones too, which is what
-// only create_event_declining_all may do, behind its own flag (D-44): a
-// change that widens such an event would do it through a tool that is
-// always on. A dry run is refused too, as every refusal here is.
-func declinesMoreError() error {
-	return gapi.Errf(gapi.ClassBlocked,
-		"this change makes an event that declines every meeting it overlaps cover time it did not, and Google may "+
-			"decline the meetings there, the ones already accepted too, with each organizer seeing a decline. "+
-			"Nothing was changed. To decline meetings in a new time, make that event with "+
-			"create_event_declining_all, which is registered only when the server runs with "+
-			"%sENABLE_DECLINE_ALL=true, and cancel this one; or set auto_decline to new or none in this change",
-		config.EnvPrefix)
 }
 
 // remindersOnlyNote says why a write that changed only reminders asked
@@ -1085,8 +1068,8 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
 	}
-	if plan.DeclinesMore(parentRaw, newBody) {
-		return render.WriteReport{}, declinesMoreError()
+	if plan.DeclinesAll(parentRaw) {
+		return render.WriteReport{}, classifyPlan(plan.ErrSplitDeclinesAll())
 	}
 	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, parent, draft.Invites()...))
 	if err != nil {

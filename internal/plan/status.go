@@ -243,13 +243,13 @@ func statusPatch(before gcal.Event, p gcal.EventPatch) error {
 
 // DeclinesMore reports whether a write leaves an out-of-office or
 // focus-time event declining every meeting it overlaps over time it did
-// not before: moved, made longer, repeated more, or newly set to decline
-// all. Google may decline the meetings in that time, the accepted ones
-// too: the reference says such an event declines "all conflicting
-// meeting invitations" and is silent on whether a change declines again,
-// so the write is refused, since only create_event_declining_all may do
-// that (D-44, #41). A write that only shrinks the time counts as no
-// more. A change this cannot show to shrink counts as more.
+// not before: moved, made longer or repeated more. Google may decline the
+// meetings in that time, the accepted ones too: the reference says such
+// an event declines "all conflicting meeting invitations" and is silent
+// on whether a change declines again, so the write is refused, since only
+// create_event_declining_all may do that (D-44, #41). A write that only
+// shrinks the time counts as no more. A change this cannot show to shrink
+// counts as more.
 // https://developers.google.com/workspace/calendar/api/v3/reference/events
 func DeclinesMore(before, after gcal.Event) bool {
 	switch {
@@ -263,6 +263,30 @@ func DeclinesMore(before, after gcal.Event) bool {
 	}
 	return !within(before, after)
 }
+
+// ErrDeclinesMore refuses a change that DeclinesMore reports.
+func ErrDeclinesMore() error {
+	return fmt.Errorf("%w: this change makes an event that declines every meeting it overlaps cover time it did "+
+		"not, and Google may decline the meetings there, the ones already accepted too, with each organizer "+
+		"seeing a decline. Nothing was changed. To decline meetings in a new time, make that event with %s, "+
+		"and cancel this one", ErrBlocked, decliningTool)
+}
+
+// ErrSplitDeclinesAll refuses a this_and_following split of a series
+// that declines every meeting it overlaps. Google resets the exceptions
+// after the target, so a canceled later occurrence comes back and may
+// decline that day's meetings; the split cannot show that it covers no
+// more, and so counts as covering more.
+func ErrSplitDeclinesAll() error {
+	return fmt.Errorf("%w: this series declines every meeting it overlaps, and a this_and_following split "+
+		"resets the exceptions after it, so a canceled later occurrence comes back and Google may decline that "+
+		"day's meetings. Nothing was changed. Change the whole series with scope:series, or one occurrence "+
+		"with scope:instance; a new series that declines all is made with %s", ErrBlocked, decliningTool)
+}
+
+// DeclinesAll reports whether an event, as it stands, declines every
+// meeting it overlaps.
+func DeclinesAll(e gcal.Event) bool { return declinesAll(e) }
 
 // declinesAll reports whether an event, as it stands, declines every
 // meeting it overlaps.
