@@ -1603,33 +1603,46 @@ func (s *Service) MoveEvent(ctx context.Context, o MoveOptions) (render.WriteRep
 }
 
 // moveReach refuses a move that would show the event's details to an
-// audience past the source's, in the tiers the wider sharing tools take
-// (#43), and returns a note when the destination's sharing cannot be
-// read. That is a note, not a refusal: writing to a calendar does not
-// need its sharing rules, and refusing every move into a calendar this
-// account writes but does not own would refuse the ordinary move. A
-// source whose rules cannot be read counts as shared with nobody.
+// audience past the source's, in the tiers the wider sharing tools take,
+// and returns a note when the destination's sharing cannot be read for
+// want of a scope or of owner access (D-91). Any other failure to read it
+// fails the move rather than skipping the check. The source is read only
+// when the destination has a wide rule, and one that cannot be read
+// counts as shared with nobody.
 func (s *Service) moveReach(ctx context.Context, env *writeEnv, dest model.Calendar, e model.Event) (string, error) {
 	destRules, err := s.sharingRules(ctx, dest.ID)
 	if err != nil {
+		if _, ok := unreadableSharing(err); !ok {
+			return "", err
+		}
 		note := fmt.Sprintf("Could not read who can see %q, so this move did not compare it with who can see %q: "+
 			"anyone who can read %q sees this event there.", dest.Title, env.cal.Title, dest.Title)
-		return note, nil //nolint:nilerr // an unreadable destination is a note, not a refusal (D-91)
+		return note, nil //nolint:nilerr // a destination this account may not read is a note, not a refusal (D-91)
+	}
+	account, role := s.primaryID(ctx), plan.DetailsRole(e.Visibility)
+	if len(plan.WiderReaders(nil, destRules, dest.ID, account, role)) == 0 {
+		return "", nil
 	}
 	sourceRules, err := s.sharingRules(ctx, env.cal.ID)
+	known := err == nil
 	if err != nil {
-		sourceRules = nil
+		if _, ok := unreadableSharing(err); !ok {
+			return "", err
+		}
 	}
-	wider := plan.WiderReaders(sourceRules, destRules, dest.ID, s.primaryID(ctx), plan.DetailsRole(e.Visibility))
+	wider := plan.WiderReaders(sourceRules, destRules, dest.ID, account, role)
 	if len(wider) == 0 {
 		return "", nil
 	}
+	compared := fmt.Sprintf("who cannot read it on %q", env.cal.Title)
+	if !known {
+		compared = fmt.Sprintf("and who can read it on %q could not be read to compare, so this counts it as "+
+			"shared with nobody", env.cal.Title)
+	}
 	return "", gapi.Errf(gapi.ClassBlocked,
-		"moving this event to %q would show its details to %s, who cannot read it on %q. Nothing was moved. "+
-			"To move it anyway, first narrow who can read %q with unshare_calendar, or make the event private "+
-			"with update_event, which hides it from readers there; a deliberate move to a wider calendar is "+
-			"Google Calendar's to make",
-		dest.Title, strings.Join(wider, ", "), env.cal.Title, dest.Title)
+		"moving this event to %q would show its details to %s, %s. Nothing was moved. To move it, an owner of "+
+			"%q can first narrow who reads it with unshare_calendar, or you can move it in Google Calendar, "+
+			"where showing it to them is your decision to make", dest.Title, strings.Join(wider, ", "), compared, dest.Title)
 }
 
 // moveEvent is one try at MoveEvent.

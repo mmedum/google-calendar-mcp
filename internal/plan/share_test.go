@@ -93,14 +93,10 @@ func TestParseAudienceValidatesWhatTheTypeImplies(t *testing.T) {
 	}
 }
 
-// An address is inside the organization only when its domain is the
-// account's own. A personal account has no organization, and an account
-// that could not be read leaves every address outside: both refuse a
-// share too many rather than one too few.
 // A move is refused only when the destination shows the event's details
 // to a wider tier than the source: anyone, a whole domain, or a person or
 // group outside the organization, with a role that shows details for the
-// event's visibility (#43).
+// event's visibility (D-91).
 func TestWiderReadersAreTheTiersTheSourceDoesNotCover(t *testing.T) {
 	rule := func(typ, value, role string) model.Sharing {
 		return model.Sharing{ScopeType: typ, Value: value, Role: role}
@@ -109,35 +105,43 @@ func TestWiderReadersAreTheTiersTheSourceDoesNotCover(t *testing.T) {
 	domain := rule(gcal.ScopeTypeDomain, "example.test", gcal.RoleReader)
 	outsider := rule(gcal.ScopeTypeUser, "partner@elsewhere.test", gcal.RoleReader)
 	colleague := rule(gcal.ScopeTypeUser, "colleague@example.test", gcal.RoleReader)
-	const dest, account = "team@group.calendar.example.test", "me@example.test"
+	const dest = "team@group.calendar.example.test"
+	gmail := "@" + "gmail.com"
 	for _, c := range []struct {
 		name         string
+		account      string
 		source, rule []model.Sharing
 		visibility   string
 		want         []string
 	}{
-		{"anyone", nil, []model.Sharing{public}, "", []string{"ANYONE, signed in or not"}},
-		{"a whole domain", nil, []model.Sharing{domain}, "", []string{"everybody in example.test"}},
-		{"someone outside", nil, []model.Sharing{outsider}, "", []string{"partner@elsewhere.test"}},
-		{"a colleague is ordinary", nil, []model.Sharing{colleague}, "", nil},
-		{"the calendar's own owner rule", nil, []model.Sharing{rule(gcal.ScopeTypeUser, dest, gcal.RoleOwner)}, "", nil},
-		{"anyone, free/busy only", nil, []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)}, "", nil},
-		{"anyone, free/busy only, a public event", nil,
+		// With no organization to be outside of, a person is the
+		// ordinary reach of a family or a friend's calendar; anyone and
+		// a domain are still wide.
+		{"a person, on a personal account", "me" + gmail, nil, []model.Sharing{outsider}, "", nil},
+		{"anyone, on a personal account", "me" + gmail, nil, []model.Sharing{public}, "", []string{"ANYONE, signed in or not"}},
+		{"a person, on an unknown account", "", nil, []model.Sharing{outsider}, "", nil},
+		{"anyone", "me@example.test", nil, []model.Sharing{public}, "", []string{"ANYONE, signed in or not"}},
+		{"a whole domain", "me@example.test", nil, []model.Sharing{domain}, "", []string{"everybody in example.test"}},
+		{"someone outside", "me@example.test", nil, []model.Sharing{outsider}, "", []string{"partner@elsewhere.test"}},
+		{"a colleague is ordinary", "me@example.test", nil, []model.Sharing{colleague}, "", nil},
+		{"the calendar's own owner rule", "me@example.test", nil, []model.Sharing{rule(gcal.ScopeTypeUser, dest, gcal.RoleOwner)}, "", nil},
+		{"anyone, free/busy only", "me@example.test", nil, []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)}, "", nil},
+		{"anyone, free/busy only, a public event", "me@example.test", nil,
 			[]model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)}, gcal.VisibilityPublic,
 			[]string{"ANYONE, signed in or not"}},
-		{"anyone reading a private event", nil, []model.Sharing{public}, gcal.VisibilityPrivate, nil},
-		{"an outside writer of a private event", nil,
+		{"anyone reading a private event", "me@example.test", nil, []model.Sharing{public}, gcal.VisibilityPrivate, nil},
+		{"an outside writer of a private event", "me@example.test", nil,
 			[]model.Sharing{rule(gcal.ScopeTypeUser, "partner@elsewhere.test", gcal.RoleWriter)}, gcal.VisibilityPrivate,
 			[]string{"partner@elsewhere.test"}},
-		{"the source is public already", []model.Sharing{public}, []model.Sharing{domain, outsider}, "", nil},
-		{"the source shares the same domain", []model.Sharing{domain}, []model.Sharing{domain}, "", nil},
-		{"the source's domain covers a person in it", []model.Sharing{rule(gcal.ScopeTypeDomain, "elsewhere.test", gcal.RoleReader)},
+		{"the source is public already", "me@example.test", []model.Sharing{public}, []model.Sharing{domain, outsider}, "", nil},
+		{"the source shares the same domain", "me@example.test", []model.Sharing{domain}, []model.Sharing{domain}, "", nil},
+		{"the source's domain covers a person in it", "me@example.test", []model.Sharing{rule(gcal.ScopeTypeDomain, "elsewhere.test", gcal.RoleReader)},
 			[]model.Sharing{outsider}, "", nil},
-		{"the source's free/busy share does not cover a reader", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)},
+		{"the source's free/busy share does not cover a reader", "me@example.test", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)},
 			[]model.Sharing{public}, "", []string{"ANYONE, signed in or not"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got := plan.WiderReaders(c.source, c.rule, dest, account, plan.DetailsRole(c.visibility))
+			got := plan.WiderReaders(c.source, c.rule, dest, c.account, plan.DetailsRole(c.visibility))
 			if !slices.Equal(got, c.want) {
 				t.Errorf("WiderReaders = %q, want %q", got, c.want)
 			}
@@ -145,6 +149,10 @@ func TestWiderReadersAreTheTiersTheSourceDoesNotCover(t *testing.T) {
 	}
 }
 
+// An address is inside the organization only when its domain is the
+// account's own. A personal account has no organization, and an account
+// that could not be read leaves every address outside: both refuse a
+// share too many rather than one too few.
 func TestOutsideIsAnyDomainButTheAccountsOwn(t *testing.T) {
 	// The personal domains are assembled from pieces, so this file does
 	// not trip the leak gate, which takes an address in a real domain
