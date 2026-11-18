@@ -342,7 +342,11 @@ func (r *parityReport) checkFloors() {
 
 // parityMakeValueFlags are make's short options whose value can be the
 // next word.
-var parityMakeValueFlags = map[string]bool{"-C": true, "-f": true, "-I": true, "-j": true, "-l": true, "-o": true, "-W": true}
+// -j and -l take theirs only when it is a number.
+var parityMakeValueFlags = map[string]bool{"-C": true, "-f": true, "-I": true, "-o": true, "-W": true}
+
+// parityNumber is the optional value of make's -j and -l.
+var parityNumber = regexp.MustCompile(`^\d+(?:\.\d+)?$`)
 
 // parityMakeTargets are the targets the `make` commands of a command line
 // name.
@@ -361,7 +365,7 @@ func parityMakeTargets(line string) []string {
 			f := words[i]
 			// GNU make's options that take a value as the next word
 			// (https://www.gnu.org/software/make/manual/make.html#Options-Summary).
-			if parityMakeValueFlags[f] {
+			if parityMakeValueFlags[f] || (f == "-j" || f == "-l") && i+1 < len(words) && parityNumber.MatchString(words[i+1]) {
 				i++
 				continue
 			}
@@ -462,7 +466,7 @@ func shellSwallowed(words []shellWord) string {
 			return "! turns a failure into success"
 		case command[0] == "set" && (slices.ContainsFunc(command[1:], func(a string) bool {
 			return strings.HasPrefix(a, "+") && !strings.HasPrefix(a, "+o") && strings.Contains(a, "e")
-		}) || slices.Contains(command[1:], "errexit") && slices.Contains(command[1:], "+o")):
+		}) || setTurnsOff(command[1:], "errexit")):
 			return "set +e lets the commands after it fail"
 		}
 		i = end
@@ -755,4 +759,15 @@ func gitFiles(root string) ([]string, error) {
 		files = append(files, name)
 	}
 	return files, nil
+}
+
+// setTurnsOff reports whether set's arguments turn option off: `+o
+// option`, the pair and not the two words anywhere.
+func setTurnsOff(args []string, option string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "+o" && args[i+1] == option {
+			return true
+		}
+	}
+	return false
 }

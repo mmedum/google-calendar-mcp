@@ -6,6 +6,7 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -333,8 +334,7 @@ func releaseWorkflowProblems(cfg releaseConfig, flow workflow, mcpbOut string) [
 		if strings.Contains(lines, "scripts/gates release-notes") {
 			writesNotes = true
 		}
-		if len(reproOut) == 2 && reproOut[0] != reproOut[1] &&
-			strings.Contains(lines, path.Base(reproOut[0])) && strings.Contains(lines, path.Base(reproOut[1])) {
+		if len(reproOut) == 2 && releaseCompares(lines, reproOut[0], reproOut[1]) {
 			compared = true
 		}
 		// Before goreleaser, or the refusal comes after the publish.
@@ -354,7 +354,7 @@ func releaseWorkflowProblems(cfg releaseConfig, flow workflow, mcpbOut string) [
 			}
 			if strings.Contains(args, "--single-target") {
 				reproOut = append(reproOut, releaseFlagValue(args, "--output"))
-				reproCache = append(reproCache, s.Env["GOCACHE"])
+				reproCache = append(reproCache, flow.resolveEnv(s, "${{ env.GOCACHE }}"))
 			}
 		case a == "actions/attest-build-provenance":
 			attested, attestIn[s.job] = true, true
@@ -384,7 +384,7 @@ func releaseWorkflowProblems(cfg releaseConfig, flow workflow, mcpbOut string) [
 	case len(reproOut) < 2:
 		fail("%s builds one target %d time(s); the reproducible-build check needs two builds to compare",
 			flow.path, len(reproOut))
-	case reproOut[0] == "" || reproOut[0] == reproOut[1]:
+	case reproOut[0] == "" || reproOut[1] == "" || reproOut[0] == reproOut[1]:
 		fail("%s's two reproducible builds write one --output %q, so the second overwrites what it is compared with",
 			flow.path, reproOut[0])
 	case reproCache[0] == reproCache[1]:
@@ -642,6 +642,20 @@ func releaseGlobCount(files []staged) int {
 // {{ .Version }} to one spelling, so two paths can be compared.
 func releaseNormalVersion(s string) string {
 	return strings.NewReplacer("$(VERSION)", "<version>", "{{ .Version }}", "<version>", "{{.Version}}", "<version>").Replace(s)
+}
+
+// releaseCompares reports whether run lines hash or compare two build
+// outputs, each named by its file name as a whole word.
+func releaseCompares(lines, a, b string) bool {
+	if a == "" || b == "" || a == b {
+		return false
+	}
+	named := func(out string) bool {
+		re := regexp.MustCompile(`(?:^|[^A-Za-z0-9_.-])` + regexp.QuoteMeta(path.Base(out)) + `(?:$|[^A-Za-z0-9_.-])`)
+		return re.MatchString(lines)
+	}
+	compares := regexp.MustCompile(`\b(?:sha256sum|shasum|cmp|diff)\b`)
+	return compares.MatchString(lines) && named(a) && named(b)
 }
 
 // releaseFlagValue is the value of a goreleaser flag in args, given as

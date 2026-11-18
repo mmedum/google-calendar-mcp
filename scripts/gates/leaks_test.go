@@ -101,14 +101,13 @@ func TestLeakGateRefusesATreeBelowTheFloor(t *testing.T) {
 		files int
 		ok    bool
 	}{{19, false}, {20, true}} {
-		dir := t.TempDir()
+		dir, _ := isolatedRepo(t)
 		for i := range tc.files {
 			name := filepath.Join(dir, fmt.Sprintf("f%02d.txt", i))
 			if err := os.WriteFile(name, []byte("nothing here\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
-		t.Chdir(dir)
 		err := leakGate(false)
 		if (err == nil) != tc.ok {
 			t.Errorf("%d files: err = %v, want ok=%v", tc.files, err, tc.ok)
@@ -118,7 +117,7 @@ func TestLeakGateRefusesATreeBelowTheFloor(t *testing.T) {
 
 // A finding anywhere in the tree fails the gate.
 func TestLeakGateFailsOnAFinding(t *testing.T) {
-	dir := t.TempDir()
+	dir, _ := isolatedRepo(t)
 	for i := range 20 {
 		body := "nothing here\n"
 		if i == 7 {
@@ -128,9 +127,8 @@ func TestLeakGateFailsOnAFinding(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Chdir(dir)
-	if err := leakGate(false); err == nil {
-		t.Fatal("a tree with a real-looking address passed")
+	if err := leakGate(false); err == nil || !strings.Contains(err.Error(), "f07.txt: email address") {
+		t.Fatalf("a tree with a real-looking address gave %v, want its finding", err)
 	}
 }
 
@@ -310,5 +308,50 @@ func TestIsolatedRepoTurnsAutomaticMaintenanceOff(t *testing.T) {
 		if got := strings.TrimSpace(string(out)); err != nil || got != want {
 			t.Errorf("git config --get %s under isolatedRepo = %q, %v; want %q", key, got, err, want)
 		}
+	}
+}
+
+// A file git would commit is refused when it is a compiled executable or
+// binary past the limit, whatever its size, and so is such a blob in the
+// history; an ignored build output on disk is not.
+func TestABuiltBinaryIsAFindingWhereverGitWouldCommitIt(t *testing.T) {
+	elf := append([]byte("\x7fELF\x02\x01\x01\x00"), make([]byte, 3<<20)...)
+	big := append([]byte("PNG\x00"), make([]byte, maxBinary+1)...)
+	setup := func(t *testing.T) func(args ...string) {
+		t.Helper()
+		_, git := isolatedRepo(t)
+		for i := range 20 {
+			put(t, ".", fmt.Sprintf("f%02d.txt", i), "nothing here\n")
+		}
+		git("add", ".")
+		git("commit", "-q", "-m", "first")
+		return git
+	}
+
+	t.Run("ignored", func(t *testing.T) {
+		setup(t)
+		put(t, ".", ".gitignore", "/gates\n")
+		put(t, ".", "gates", string(elf))
+		if err := leakGate(false); err != nil {
+			t.Errorf("an ignored build output failed the tree scan: %v", err)
+		}
+	})
+	for name, data := range map[string][]byte{"an executable past 2 MiB": elf, "binary past the limit": big} {
+		t.Run(name, func(t *testing.T) {
+			git := setup(t)
+			put(t, ".", "scripts/gates/gates", string(data))
+			if err := leakGate(false); err == nil || !strings.Contains(err.Error(), "scripts/gates/gates: ") {
+				t.Errorf("an untracked artifact passed the tree scan: %v", err)
+			}
+			git("add", "scripts/gates/gates")
+			git("commit", "-q", "-m", "built")
+			if err := os.Remove(filepath.FromSlash("scripts/gates/gates")); err != nil {
+				t.Fatal(err)
+			}
+			got, _, err := scanHistory(leakRules())
+			if err != nil || !slices.ContainsFunc(got, func(f string) bool { return strings.HasPrefix(f, "blob scripts/gates/gates: ") }) {
+				t.Errorf("a committed artifact passed the history scan: %q, %v", got, err)
+			}
+		})
 	}
 }

@@ -296,17 +296,21 @@ func matrixFilterRuns(cond string, matrix *yaml.Node) bool {
 	return slices.ContainsFunc(values, func(v string) bool { return v != m[3] })
 }
 
-// onPush reports whether a step runs on every push to main: it and its
-// job carry no condition but a matrix filter that picks a leg the job's
-// matrix has, and neither lets its failure pass (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error).
+// onPush reports whether a step runs on every push to main: its job
+// carries no condition, the step none but a matrix filter that picks a
+// leg the job's matrix has, and neither lets its failure pass (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error).
 // Any other condition, a pull request's or `false`, can keep it from
 // running, so it does not count.
 func (w workflow) onPush(s workflowStep) bool {
 	job := w.Jobs[s.job]
-	for _, cond := range []string{job.If, s.If} {
-		if c := strings.TrimSpace(cond); c != "" && !matrixFilterRuns(c, &job.Strategy.Matrix) {
-			return false
-		}
+	// A job's if cannot read the matrix context, which exists only once
+	// the job's legs do
+	// (https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability).
+	if strings.TrimSpace(job.If) != "" {
+		return false
+	}
+	if c := strings.TrimSpace(s.If); c != "" && !matrixFilterRuns(c, &job.Strategy.Matrix) {
+		return false
 	}
 	for _, c := range []*yaml.Node{&job.ContinueOnError, &s.ContinueOnError} {
 		if c.Kind != 0 && c.Value != "false" {

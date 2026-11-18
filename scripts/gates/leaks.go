@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,6 +41,22 @@ func leakGate(history bool) error {
 	}
 
 	var findings []string
+	// What git would commit is held to the artifact rule whatever its
+	// size; the walk above reads ignored build output too, which belongs
+	// on disk and never in a commit.
+	committable, err := gitFiles(".")
+	if err != nil {
+		return couldNotRun{err}
+	}
+	for _, path := range committable {
+		data, err := os.ReadFile(filepath.FromSlash(path)) //nolint:gosec // a path git lists
+		if err != nil {
+			continue
+		}
+		if why := leakArtifact(data); why != "" {
+			findings = append(findings, path+": "+why)
+		}
+	}
 	trailers := 0
 	for _, path := range files {
 		data, err := os.ReadFile(path)
@@ -229,6 +246,38 @@ func scannableFiles() ([]string, error) {
 
 func isExecutable(info os.FileInfo) bool { return info.Mode().Perm()&0o111 != 0 }
 
+// executableMagic starts a linked executable. A binary built beside the
+// source and swept in by `git add -A` is the finding itself.
+var executableMagic = [][]byte{
+	[]byte("\x7fELF"),                                  // Linux, BSD
+	[]byte("MZ"),                                       // Windows PE
+	{0xfe, 0xed, 0xfa, 0xce}, {0xce, 0xfa, 0xed, 0xfe}, // Mach-O, 32-bit
+	{0xfe, 0xed, 0xfa, 0xcf}, {0xcf, 0xfa, 0xed, 0xfe}, // Mach-O, 64-bit
+	{0xca, 0xfe, 0xba, 0xbe}, // Mach-O universal
+}
+
+// maxBinary is what an ordinary binary file may weigh. None is tracked;
+// a fixture that needs to be binary is far under this.
+const maxBinary = 1 << 20
+
+// leakArtifact reports why a file git would commit does not belong, or
+// "": a compiled executable, or binary past maxBinary, which no rule here
+// can read. Binary is a NUL in the first 8000 bytes, git's own rule.
+func leakArtifact(data []byte) string {
+	if bytes.IndexByte(data[:min(len(data), 8000)], 0) < 0 {
+		return ""
+	}
+	for _, magic := range executableMagic {
+		if bytes.HasPrefix(data, magic) {
+			return fmt.Sprintf("a compiled executable (%d bytes); nothing built belongs in the tree", len(data))
+		}
+	}
+	if len(data) > maxBinary {
+		return fmt.Sprintf("%d bytes of binary, past the %d-byte limit; no rule here can read it", len(data), maxBinary)
+	}
+	return ""
+}
+
 // scanHistory returns its findings and how many co-author trailers it
 // passed for naming an author of HEAD's history.
 func scanHistory(rules []leakRule) ([]string, int, error) {
@@ -279,7 +328,14 @@ func scanHistory(rules []leakRule) ([]string, int, error) {
 			continue
 		}
 		content, err := exec.Command("git", "cat-file", "-p", fields[0]).Output()
-		if err != nil || len(content) > 2<<20 {
+		if err != nil {
+			continue
+		}
+		if why := leakArtifact(content); why != "" {
+			out = append(out, "blob "+fields[1]+": "+why)
+			continue
+		}
+		if len(content) > 2<<20 {
 			continue
 		}
 		seen++

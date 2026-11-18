@@ -315,26 +315,28 @@ func TestParityHoldsCheckToWhatAPushRuns(t *testing.T) {
 
 func TestShellSwallowed(t *testing.T) {
 	for line, want := range map[string]string{
-		"make leaks":                 "",
-		"make leaks && make pins":    "",
-		"make leaks || true":         "`|| true` passes whatever came before",
-		"make leaks || :":            "`|| :` passes whatever came before",
-		"make leaks || exit 0":       "`|| exit 0` passes whatever came before",
-		"make leaks || exit 1":       "",
-		"make leaks || exit":         "",
-		"make leaks || false":        "",
-		"make leaks || echo failed":  "`|| echo failed` passes whatever came before",
-		"set +o errexit; make leaks": "set +e lets the commands after it fail",
-		"set -o errexit; make leaks": "",
-		"set +x; make leaks":         "",
-		"make leaks; true":           "`; true` ends it with success whatever came before",
-		"make leaks; make pins":      "",
-		"make leaks &":               "& runs a command in the background, where its failure is never seen",
-		"! make leaks":               "! turns a failure into success",
-		"set +e; make leaks":         "set +e lets the commands after it fail",
-		"make leaks 2>&1 | tee log":  "",
-		"out=$(gofmt -l .); exit 1":  "",
-		"echo 'make x || true'":      "",
+		"make leaks":                            "",
+		"make leaks && make pins":               "",
+		"make leaks || true":                    "`|| true` passes whatever came before",
+		"make leaks || :":                       "`|| :` passes whatever came before",
+		"make leaks || exit 0":                  "`|| exit 0` passes whatever came before",
+		"make leaks || exit 1":                  "",
+		"make leaks || exit":                    "",
+		"make leaks || false":                   "",
+		"make leaks || echo failed":             "`|| echo failed` passes whatever came before",
+		"set +o errexit; make leaks":            "set +e lets the commands after it fail",
+		"set -o errexit; make leaks":            "",
+		"set -o errexit +o nounset; make leaks": "",
+		"set +o nounset -o errexit; make leaks": "",
+		"set +x; make leaks":                    "",
+		"make leaks; true":                      "`; true` ends it with success whatever came before",
+		"make leaks; make pins":                 "",
+		"make leaks &":                          "& runs a command in the background, where its failure is never seen",
+		"! make leaks":                          "! turns a failure into success",
+		"set +e; make leaks":                    "set +e lets the commands after it fail",
+		"make leaks 2>&1 | tee log":             "",
+		"out=$(gofmt -l .); exit 1":             "",
+		"echo 'make x || true'":                 "",
 	} {
 		if got := shellSwallowed(shellSplit(line)); got != want {
 			t.Errorf("shellSwallowed(%q) = %q, want %q", line, got, want)
@@ -509,9 +511,15 @@ func TestParityMakeTargets(t *testing.T) {
 	if !slices.Equal(got, []string{"changelog", "cover"}) {
 		t.Errorf("parityMakeTargets = %v", got)
 	}
-	got = parityMakeTargets("make -C dir -f other.mk -j 4 -k lint")
-	if !slices.Equal(got, []string{"lint"}) {
-		t.Errorf("parityMakeTargets read a flag's value as a target: %v", got)
+	for line, want := range map[string][]string{
+		"make -C dir -f other.mk -j 4 -k lint": {"lint"},
+		// -j and -l take a value only when it is a number.
+		"make -j check":    {"check"},
+		"make -l 2.5 lint": {"lint"},
+	} {
+		if got := parityMakeTargets(line); !slices.Equal(got, want) {
+			t.Errorf("parityMakeTargets(%q) = %v, want %v", line, got, want)
+		}
 	}
 	if parityMakeTargets("go test ./...") != nil {
 		t.Error("a go command was read as make")
@@ -640,4 +648,17 @@ func TestParityReadsTheGatesBinary(t *testing.T) {
 				"the g00 gate runs in check by the registry, and no job of ci.yml a push to main runs calls it",
 			}},
 	})
+}
+
+// A job's if cannot read the matrix, so a job filtered on it does not
+// count as run by a push, and none of the gates in it is either.
+func TestParityRefusesAJobFilteredOnTheMatrix(t *testing.T) {
+	files, registry := parityFixture()
+	applyEdits(t, files, replace(".github/workflows/ci.yml", "  gates:\n    steps:\n",
+		"  gates:\n    if: matrix.os == 'ubuntu-latest'\n    strategy:\n      matrix:\n"+
+			"        os: [ubuntu-latest, macos-latest]\n    steps:\n"))
+	got := parityIn(t, files, registry).problems
+	if !slices.Contains(got, "`make check` runs g00 and ci.yml never does") {
+		t.Errorf("a job filtered on the matrix counted as a push; problems: %q", got)
+	}
 }
