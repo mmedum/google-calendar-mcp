@@ -167,15 +167,22 @@ func newCalendarResult(c model.Calendar) CalendarResult {
 	if r := c.DefaultReminders; r != nil {
 		fmt.Fprintf(&b, "  default reminders: %s\n", render.Reminders(*r))
 	}
-	if h := c.WorkingHours; h != nil {
-		fmt.Fprintf(&b, "  working hours: %s\n", render.WorkingHours(*h))
+	hours := newWorkingHoursOut(c.WorkingHours)
+	if hours != nil {
+		fmt.Fprintf(&b, "  working hours: %s\n", hours.line())
 	}
 	b.WriteString("\n")
 	return CalendarResult{
 		Calendar: newCalendarOut(c), Description: c.Description,
 		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders),
-		WorkingHours:     newWorkingHoursOut(c.WorkingHours), text: b.String(),
+		WorkingHours:     hours, text: b.String(),
 	}
+}
+
+// addNote appends a note to the reply, in both halves.
+func (r *CalendarResult) addNote(note string) {
+	r.Note = strings.TrimSpace(r.Note + " " + note)
+	r.text += note + "\n"
 }
 
 // WorkingHoursOut is a calendar's working hours. Each period's start and
@@ -191,6 +198,24 @@ type WorkingPeriodOut struct {
 	Day   string `json:"day"`
 	Start string `json:"start"`
 	End   string `json:"end"`
+}
+
+// line is the text's reading of the hours, from the same periods the
+// structured half carries; hours turned off still show what Google kept.
+func (h WorkingHoursOut) line() string {
+	parts := make([]string, 0, len(h.Periods))
+	for _, p := range h.Periods {
+		parts = append(parts, p.Day+" "+p.Start+"-"+p.End)
+	}
+	switch {
+	case !h.Enabled && len(parts) == 0:
+		return "off"
+	case !h.Enabled:
+		return "off (kept: " + strings.Join(parts, ", ") + ")"
+	case len(parts) == 0:
+		return "on, with no hours set"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func newWorkingHoursOut(h *gcal.WorkingHours) *WorkingHoursOut {

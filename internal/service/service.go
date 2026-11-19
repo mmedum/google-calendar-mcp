@@ -876,15 +876,40 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 	if err != nil {
 		return CalendarResult{}, err
 	}
-	// Working hours are on the calendar resource, not the list entry
-	// ResolveCalendar reads, and only ever on a primary calendar.
-	if c.Primary && c.WorkingHours == nil {
-		resource, err := s.API.GetCalendar(ctx, c.ID)
-		if err != nil {
-			return CalendarResult{}, err
-		}
-		c.WorkingHours = resource.WorkingHours
+	note := s.readWorkingHours(ctx, &c)
+	res, err := s.calendarCard(ctx, c)
+	if err != nil {
+		return CalendarResult{}, err
 	}
+	if note != "" {
+		res.addNote(note)
+	}
+	return res, nil
+}
+
+// readWorkingHours fills a primary calendar's working hours, which only
+// the calendar resource carries, and returns a note when they could not
+// be read: they are one line of the card, not a reason to fail it.
+// Google documents them as "only available for primary calendars of
+// Google Workspace users" (Calendar.workingHours, revision 20261115,
+// https://calendar-json.googleapis.com/$discovery/rest?version=v3), so a
+// consumer account is not asked; docs/release.md checks them by hand.
+func (s *Service) readWorkingHours(ctx context.Context, c *model.Calendar) string {
+	_, domain, _ := strings.Cut(strings.ToLower(c.ID), "@")
+	if !c.Primary || config.ConsumerDomains[domain] {
+		return ""
+	}
+	resource, err := s.API.GetCalendar(ctx, c.ID)
+	if err != nil {
+		cls, _ := gapi.ClassOf(err)
+		return fmt.Sprintf("Could not read this calendar's working hours [%s], so they are not shown.", cls)
+	}
+	c.WorkingHours = resource.WorkingHours
+	return ""
+}
+
+// calendarCard is the card and its sharing list.
+func (s *Service) calendarCard(ctx context.Context, c model.Calendar) (CalendarResult, error) {
 	if !s.Cfg.Sharing {
 		return NewCalendarResultUnshared(c, "Sharing tools are off in this server ("+config.EnvPrefix+
 			"SHARING=off), so the sharing list was not read."), nil

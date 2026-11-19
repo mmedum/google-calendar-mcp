@@ -2695,7 +2695,9 @@ resource (`Calendar.workingHours`, revision 20261115), which the
 calendar list does not carry. `get_calendar` reads that resource for a
 primary calendar and shows the hours as Google keeps them: minutes from
 the start of each weekday. The discovery document names no zone for
-them, so the result names none.
+them, so the result names none. A consumer account is not asked, since
+Google documents the hours for Workspace users only, and a failed read
+is a note on the card rather than a failure of it.
 
 `check_availability` takes its mask only from the caller. A mask read
 from the calendar would change what an existing call returns, hiding
@@ -2705,6 +2707,6 @@ caller that wants them reads them here and passes them.
 Rejected: masking by the calendar's hours when the caller passes none,
 which changes results with no input asking for it; an input that opts
 into them, until the manual check in `docs/release.md` settles the zone.
-Cost: one calendar read per `get_calendar` on a primary calendar.
+Cost: one calendar read per `get_calendar` on a Workspace primary calendar.
 
 Next ID: D-94

@@ -1008,6 +1008,10 @@ func TestCalendarDetailShowsAPrimaryCalendarsWorkingHours(t *testing.T) {
 		}},
 		{"off", &gcal.WorkingHours{}, "  working hours: off\n",
 			&service.WorkingHoursOut{Enabled: false, Periods: []service.WorkingPeriodOut{}}},
+		{"off, with the periods Google kept", &gcal.WorkingHours{AvailableTimes: week.AvailableTimes[:1]},
+			"  working hours: off (kept: monday 09:00-17:00)\n", &service.WorkingHoursOut{
+				Enabled: false, Periods: []service.WorkingPeriodOut{{Day: "monday", Start: "09:00", End: "17:00"}},
+			}},
 		{"none kept", nil, "", nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1043,4 +1047,45 @@ func TestCalendarDetailShowsAPrimaryCalendarsWorkingHours(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The working hours are one line of the card: a failed read of them is a
+// note, and the card is still answered. A consumer account is not asked,
+// since Google keeps working hours only for Workspace users (D-93).
+func TestCalendarDetailWorkingHoursNeverCostTheCard(t *testing.T) {
+	t.Run("a failed read is a note", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		// The fake fails by prefix, which takes in the ACL read too; with
+		// sharing off, the resource read is the only one it reaches.
+		svc.Cfg.Sharing = false
+		fake.Fail = map[string]int{"GET /calendars/me@example.test": 503}
+		got, err := svc.CalendarDetail(context.Background(), "primary")
+		if err != nil {
+			t.Fatalf("get_calendar primary with its resource unreadable = %v, want the card with a note", err)
+		}
+		const want = "Could not read this calendar's working hours [unavailable], so they are not shown."
+		if got.WorkingHours != nil || !strings.Contains(got.Note, want) || !strings.Contains(got.Render(), want) {
+			t.Errorf("get_calendar primary gave working_hours %+v, note %q, text\n%s\nwant no hours and the note %q",
+				got.WorkingHours, got.Note, got.Render(), want)
+		}
+	})
+	t.Run("a consumer account is not asked", func(t *testing.T) {
+		account := "me" + "@gmail.com"
+		fake := caltest.New()
+		fake.AddCalendar(account, "Sample Primary", "UTC", gcal.RoleOwner, true)
+		fake.Calendars[account].WorkingHours = &gcal.WorkingHours{Enabled: true}
+		svc := newService(t, fake)
+		got, err := svc.CalendarDetail(context.Background(), "primary")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range fake.Served() {
+			if p == "GET /calendars/"+account {
+				t.Errorf("get_calendar on a consumer primary read its calendar resource: %v", fake.Served())
+			}
+		}
+		if got.WorkingHours != nil {
+			t.Errorf("get_calendar on a consumer primary gave working_hours %+v, want none", got.WorkingHours)
+		}
+	})
 }

@@ -268,23 +268,6 @@ func Reminders(r model.Reminders) string {
 	return strings.Join(parts, ", ")
 }
 
-// WorkingHours lists a calendar's working hours by weekday, or says they
-// are off. The times are as Google keeps them, with no zone named,
-// because the discovery document names none (D-93).
-func WorkingHours(h gcal.WorkingHours) string {
-	if !h.Enabled {
-		return "off"
-	}
-	parts := make([]string, 0, len(h.AvailableTimes))
-	for _, p := range h.AvailableTimes {
-		parts = append(parts, fmt.Sprintf("%s %s-%s", p.DayOfWeek, Clock(p.PeriodStart), Clock(p.PeriodEnd)))
-	}
-	if len(parts) == 0 {
-		return "on, with no hours set"
-	}
-	return strings.Join(parts, ", ")
-}
-
 // Clock renders minutes from the start of a day as "09:00"; the end of
 // the day is "24:00".
 func Clock(minutes int) string {

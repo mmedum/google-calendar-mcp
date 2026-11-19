@@ -466,8 +466,11 @@ type Calendar struct {
 }
 
 // WorkingHours is a user's weekly working hours. Each period is in
-// minutes from the start of its day, end exclusive; the discovery
-// document names no zone for them. An absent Enabled is false.
+// minutes "from the start of the day", its end "exclusive"
+// (WorkingHours.availableTimes, revision 20261115,
+// https://calendar-json.googleapis.com/$discovery/rest?version=v3), which
+// names no zone. An absent Enabled reads as false, as JSON omits a false
+// boolean; the working-hours check in docs/release.md verifies both.
 type WorkingHours struct {
 	Enabled        bool            `json:"workingHoursEnabled,omitempty"`
 	AvailableTimes []WorkingPeriod `json:"availableTimes,omitempty"`

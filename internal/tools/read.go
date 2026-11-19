@@ -41,8 +41,8 @@ func registerRead(s *mcp.Server, d Deps) {
 	add(s, d, Def[getCalendarIn, service.CalendarResult]{
 		Name: "get_calendar",
 		Description: "One calendar in full: its description, time zone, your access level, and who else it is " +
-			"shared with. A Workspace primary calendar also shows its owner's working hours, which " +
-			"check_availability takes only as working_from, working_to and working_days. Use list_calendars to see every calendar; use this when you need the sharing list or " +
+			"shared with. A Workspace primary calendar also shows its owner's working hours; " +
+			"check_availability does not apply them, so pass a mask there yourself. Use list_calendars to see every calendar; use this when you need the sharing list or " +
 			"are checking whether you may write somewhere.",
 		Kind: Read,
 		Handle: func(ctx context.Context, in getCalendarIn) (service.CalendarResult, error) {
