@@ -13,6 +13,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Every run step goes to a shell, Windows included, so bash is named
+# once here rather than per job: a job added later inherits it.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
     name: test (${{ matrix.os }})
@@ -134,5 +140,16 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # A cache of its own, keyed by the Makefile that pins gitleaks too.
+          # The other jobs share go.sum's key and save a cache without
+          # gitleaks, and setup-go saves nothing over a hit on its key, so on
+          # that key gitleaks is built from source on every run.
+          # https://github.com/actions/setup-go/blob/b7ad1dad31e06c5925ef5d2fc7ad053ef454303e/src/cache-save.ts#L75-L80
+          cache-dependency-path: |
+            go.sum
+            Makefile
       - name: gitleaks
         run: make secrets

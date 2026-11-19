@@ -2,6 +2,7 @@ package plan_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -89,6 +90,126 @@ func TestParseAudienceValidatesWhatTheTypeImplies(t *testing.T) {
 	}
 	if _, err := plan.ParseAudience("somebody@example.test", "clique", nil); !errors.Is(err, plan.ErrInvalid) {
 		t.Fatal("an unknown scope type was accepted")
+	}
+}
+
+// A group with a member outside the organization is refused, counting
+// them and naming widen_calendar_access; a room is a resource, not a
+// person outside (#44).
+func TestGroupAudienceRefusesAnOutsideMember(t *testing.T) {
+	const account = "me@example.test"
+	err := plan.GroupAudience("team@example.test", []string{"colleague@example.test", "partner@elsewhere.test"}, account, nil)
+	if !errors.Is(err, plan.ErrBlocked) || !strings.Contains(err.Error(), "1 of its 2 members") ||
+		!strings.Contains(err.Error(), "widen_calendar_access") {
+		t.Errorf("a group with an outside member = %v, want [blocked] counting it", err)
+	}
+	if err := plan.GroupAudience("team@example.test",
+		[]string{"colleague@example.test", "room-sample@resource.calendar.google.com"}, account, nil); err != nil {
+		t.Errorf("a group of a colleague and a room = %v, want nil", err)
+	}
+}
+
+// A move is refused only when the destination shows the event's details
+// to a wider tier than the source: anyone, a whole domain, or a person or
+// group outside the organization, with a role that shows details for the
+// event's visibility (D-91).
+func TestWiderReadersAreTheTiersTheSourceDoesNotCover(t *testing.T) {
+	rule := func(typ, value, role string) model.Sharing {
+		return model.Sharing{ScopeType: typ, Value: value, Role: role}
+	}
+	public := rule(gcal.ScopeTypeDefault, "", gcal.RoleReader)
+	domain := rule(gcal.ScopeTypeDomain, "example.test", gcal.RoleReader)
+	outsider := rule(gcal.ScopeTypeUser, "partner@elsewhere.test", gcal.RoleReader)
+	colleague := rule(gcal.ScopeTypeUser, "colleague@example.test", gcal.RoleReader)
+	const dest = "team@group.calendar.example.test"
+	gmail := "@" + "gmail.com"
+	for _, c := range []struct {
+		name         string
+		account      string
+		source, rule []model.Sharing
+		visibility   string
+		want         []string
+	}{
+		// With no organization to be outside of, a person is the
+		// ordinary reach of a family or a friend's calendar; anyone and
+		// a domain are still wide.
+		{"a person, on a personal account", "me" + gmail, nil, []model.Sharing{outsider}, "", nil},
+		{"anyone, on a personal account", "me" + gmail, nil, []model.Sharing{public}, "", []string{"ANYONE, signed in or not"}},
+		{"a person, on an unknown account", "", nil, []model.Sharing{outsider}, "", nil},
+		{"anyone", "me@example.test", nil, []model.Sharing{public}, "", []string{"ANYONE, signed in or not"}},
+		{"a whole domain", "me@example.test", nil, []model.Sharing{domain}, "", []string{"everybody in example.test"}},
+		{"someone outside", "me@example.test", nil, []model.Sharing{outsider}, "", []string{"partner@elsewhere.test"}},
+		{"a colleague is ordinary", "me@example.test", nil, []model.Sharing{colleague}, "", nil},
+		{"the calendar's own owner rule", "me@example.test", nil, []model.Sharing{rule(gcal.ScopeTypeUser, dest, gcal.RoleOwner)}, "", nil},
+		{"anyone, free/busy only", "me@example.test", nil, []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)}, "", nil},
+		{"anyone, free/busy only, a public event", "me@example.test", nil,
+			[]model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)}, gcal.VisibilityPublic,
+			[]string{"ANYONE, signed in or not"}},
+		{"anyone reading a private event", "me@example.test", nil, []model.Sharing{public}, gcal.VisibilityPrivate, nil},
+		{"an outside writer of a private event", "me@example.test", nil,
+			[]model.Sharing{rule(gcal.ScopeTypeUser, "partner@elsewhere.test", gcal.RoleWriter)}, gcal.VisibilityPrivate,
+			[]string{"partner@elsewhere.test"}},
+		{"the source is public already", "me@example.test", []model.Sharing{public}, []model.Sharing{domain, outsider}, "", nil},
+		{"the source shares the same domain", "me@example.test", []model.Sharing{domain}, []model.Sharing{domain}, "", nil},
+		{"the source's domain covers a person in it", "me@example.test", []model.Sharing{rule(gcal.ScopeTypeDomain, "elsewhere.test", gcal.RoleReader)},
+			[]model.Sharing{outsider}, "", nil},
+		{"the source's free/busy share does not cover a reader", "me@example.test", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)},
+			[]model.Sharing{public}, "", []string{"ANYONE, signed in or not"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := plan.WiderReaders(c.source, c.rule, dest, c.account, nil, plan.DetailsRole(c.visibility))
+			if !slices.Equal(got, c.want) {
+				t.Errorf("WiderReaders = %q, want %q", got, c.want)
+			}
+		})
+	}
+	// The named domains decide who is outside, even on a personal account:
+	// a colleague past them is wide, and one in them is not (#45).
+	org := []string{"second.test"}
+	if got := plan.WiderReaders(nil, []model.Sharing{colleague}, dest, "me"+gmail, org, gcal.RoleReader); !slices.Equal(got, []string{"colleague@example.test"}) {
+		t.Errorf("a person past the named domains gave %q, want them named", got)
+	}
+	inside := rule(gcal.ScopeTypeUser, "colleague@second.test", gcal.RoleReader)
+	if got := plan.WiderReaders(nil, []model.Sharing{inside}, dest, "me"+gmail, org, gcal.RoleReader); got != nil {
+		t.Errorf("a person in the named domains gave %q, want nobody", got)
+	}
+}
+
+// A public event shows its details to whoever sees only free/busy on its
+// calendar; that matters only for a wide tier, and a reader already sees
+// a default event (#42).
+func TestPublicReadersAreTheWideFreeBusyRules(t *testing.T) {
+	rule := func(typ, value, role string) model.Sharing {
+		return model.Sharing{ScopeType: typ, Value: value, Role: role}
+	}
+	const cal, account = "team@group.calendar.example.test", "me@example.test"
+	for _, c := range []struct {
+		name  string
+		rules []model.Sharing
+		want  []string
+	}{
+		{"anyone, free/busy", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleFreeBusyReader)},
+			[]string{"ANYONE, signed in or not"}},
+		{"a domain, free/busy", []model.Sharing{rule(gcal.ScopeTypeDomain, "example.test", gcal.RoleFreeBusyReader)},
+			[]string{"everybody in example.test"}},
+		{"an outsider, free/busy", []model.Sharing{rule(gcal.ScopeTypeUser, "partner@elsewhere.test", gcal.RoleFreeBusyReader)},
+			[]string{"partner@elsewhere.test"}},
+		{"anyone, reading already", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleReader)}, nil},
+		{"a colleague, free/busy", []model.Sharing{rule(gcal.ScopeTypeUser, "colleague@example.test", gcal.RoleFreeBusyReader)}, nil},
+		{"nobody", nil, nil},
+		// A reader rule that covers the free/busy one already shows the
+		// details, so public adds nobody.
+		{"a domain, free/busy, under anyone reading", []model.Sharing{rule(gcal.ScopeTypeDefault, "", gcal.RoleReader),
+			rule(gcal.ScopeTypeDomain, "example.test", gcal.RoleFreeBusyReader)}, nil},
+		{"an outsider, free/busy, under their domain reading", []model.Sharing{
+			rule(gcal.ScopeTypeDomain, "elsewhere.test", gcal.RoleReader),
+			rule(gcal.ScopeTypeUser, "partner@elsewhere.test", gcal.RoleFreeBusyReader)}, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := plan.PublicReaders(c.rules, cal, account, nil); !slices.Equal(got, c.want) {
+				t.Errorf("PublicReaders = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 

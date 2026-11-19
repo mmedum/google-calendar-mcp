@@ -1,391 +1,664 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 )
 
-// Only a `run:` step runs a target, a one-line step or a block; a
-// comment that names one does not, and neither does a vet tag in one.
-func TestRunTextReadsOnlyRunSteps(t *testing.T) {
-	ci := `jobs:
-  pr:
-    steps:
-      - name: schema change acknowledged
-        run: make schema-ack
-      # make smoke and go vet -tags=live run in the test job
-      - run: |
-          make cover
-          # make lint is its own job
-          go vet -tags=integration ./...
-      - name: after the block
-        run: make fmt`
-	run := runText(ci)
-	for _, want := range []string{"make schema-ack", "make cover", "go vet -tags=integration ./...", "make fmt"} {
-		if !strings.Contains(run, want) {
-			t.Errorf("runText missed %q:\n%s", want, run)
-		}
+// parityTestGates is how many gates the fixture's check runs: enough to
+// clear every floor.
+const parityTestGates = 20
+
+// parityFixture is a repository and registry that agree. A test edits
+// one of them to break one thing.
+func parityFixture() (map[string]string, map[string]command) {
+	noop := func([]string) {}
+	registry := map[string]command{
+		"schema-ack":    {run: noop, runsIn: inPR},
+		"release-notes": {run: noop, runsIn: inRelease},
+		"release-tag":   {run: noop, runsIn: inRelease},
+		"mcpb-pack":     {run: noop, runsIn: inRelease},
+		"server-json":   {run: noop, runsIn: inRelease},
+		"api-diff":      {run: noop, runsIn: manual},
 	}
-	for _, not := range []string{"make smoke", "-tags=live", "make lint"} {
-		if strings.Contains(run, not) {
-			t.Errorf("runText read %q from a comment:\n%s", not, run)
-		}
+	var mk strings.Builder
+	mk.WriteString("GO ?= go\nGATES ?= $(GO) run ./scripts/gates\n\n")
+	var prereqs, steps []string
+	for i := range parityTestGates {
+		name := fmt.Sprintf("g%02d", i)
+		registry[name] = command{run: noop, runsIn: inCheck}
+		prereqs = append(prereqs, name)
+		fmt.Fprintf(&mk, ".PHONY: %s\n%s: ## a gate\n\t$(GATES) %s\n\n", name, name, name)
+		steps = append(steps, fmt.Sprintf("      - name: %s\n        run: make %s\n", name, name))
 	}
+	mk.WriteString("vet:\n\t$(GO) vet ./...\n\t$(GO) vet -tags=live ./...\n\t$(GO) vet -tags=evals ./...\n\n")
+	mk.WriteString("test:\n\t$(GO) test ./...\n\ncover: test\n\t@echo floors\n\n")
+	mk.WriteString("schema-ack:\n\t$(GATES) schema-ack $(BASE) $(HEAD)\n\n")
+	mk.WriteString("api-diff:\n\t$(GATES) api-diff\n\n")
+	mk.WriteString("check: " + strings.Join(prereqs, " ") + " vet cover\n")
+
+	ci := "on: [push]\njobs:\n  gates:\n    steps:\n" + strings.Join(steps, "") +
+		// Recipe-mapped rather than by make: the same command, verbatim.
+		"      - name: vet\n        run: |\n          # the tagged code too\n          go vet ./...\n" +
+		"          go vet -tags=live ./...\n          go vet -tags=evals ./...\n" +
+		"      - name: cover\n        run: make cover\n" +
+		"      - name: schema-ack\n        run: make schema-ack BASE=origin/main\n"
+	return map[string]string{
+		"Makefile":                 mk.String(),
+		".github/workflows/ci.yml": ci,
+		".github/workflows/release.yml": "on: [push]\njobs:\n  r:\n    steps:\n      - run: go run ./scripts/gates release-tag v1\n" +
+			"      - run: go run ./scripts/gates release-notes v1\n",
+		".github/workflows/publish-mcp.yml": "on: [workflow_call]\njobs:\n  p:\n    steps:\n" +
+			"      - run: go run ./scripts/gates server-json v1 dist/checksums.txt\n",
+		".goreleaser.yaml": "post: go run ./scripts/gates mcpb-pack dist 1 out\n",
+		// The tags the tree needs, and files that need none: an OS is the
+		// go command's to set, and testdata is not built.
+		"scripts/livecal/main.go":           "//go:build live\n\npackage main\n",
+		"scripts/evals/main.go":             "//go:build evals && unix\n\npackage main\n",
+		"internal/keyring/keyring_other.go": "//go:build !windows\n\npackage keyring\n",
+		"internal/gapi/testdata/x.go":       "//go:build fixture\n\npackage x\n",
+	}, registry
 }
 
-// parityMakefile, parityCI and parityRelease agree, and each command in
-// parityRegistry runs where it says. The tagged vet passes sit under a
-// prerequisite of vet, and CI runs one tool itself at the version vuln
-// runs it.
-const parityMakefile = `GO ?= go
-GATES ?= ./.gates
-GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
-
-check: fmt vet tidy lint cover vuln docs pins ## Everything CI runs
-
-fmt:
-	gofmt -l .
-vet: vet-tagged
-	$(GO) vet ./...
-vet-tagged:
-	$(GO) vet -tags=live ./...
-	$(GO) vet -tags=evals,e2e ./...
-tidy:
-	$(GO) mod tidy -diff
-lint:
-	golangci-lint run
-cover: test
-	@echo cover
-test:
-	$(GO) test ./...
-vuln:
-	$(GO) run $(GOVULNCHECK) ./...
-docs:
-	@$(GATES) docs
-pins:
-	@$(GATES) pins
-schema-ack:
-	@$(GATES) schema-ack $(PR_BASE_REF) $(PR_HEAD)
-`
-
-const parityCI = `jobs:
-  test:
-    steps:
-      - run: make fmt
-      - run: make vet
-      - run: make tidy
-      - run: make lint
-      - run: make cover
-      - run: |
-          make vuln
-          make docs
-      - run: make pins
-      - run: make schema-ack
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -mode=binary ./bin
-`
-
-const parityRelease = `go run ./scripts/gates release-notes "${REF_NAME}" > notes.md`
-
-var (
-	parityRegistry = map[string]command{
-		"docs": {runsIn: inCheck}, "pins": {runsIn: inCheck}, "schema-ack": {runsIn: inPR},
-		"release-notes": {runsIn: inRelease}, "api-diff": {runsIn: manual},
-	}
-	parityTags = []string{"evals", "live"}
-)
-
-func TestParityAcceptsAMatchedPair(t *testing.T) {
-	problems, summary, err := parityProblems(parityMakefile, parityCI, parityRelease, parityRegistry, parityTags)
-	if err != nil || problems != nil {
-		t.Fatalf("a matched pair gave %q, %v", problems, err)
-	}
-	const want = "8 targets in `make check`, all run by CI; 4 commands run where scripts/gates says; " +
-		"a vet pass for -tags=evals, -tags=live on both sides"
-	if summary != want {
-		t.Errorf("summary = %q, want %q", summary, want)
-	}
-}
-
-// Each tag the tree requires is vetted on both sides, each tool CI runs
-// itself at a version is one `make check` runs at that version, and each
-// command runs in the pipeline it declares.
-func TestParityCatchesDivergence(t *testing.T) {
-	const (
-		localLive = "a file builds only with -tags=live and `make check` vets no such pass; a contributor cannot see it break"
-		ciLive    = "a file builds only with -tags=live and ci.yml vets no such pass; it compiles only on a maintainer's machine"
-		ciEvals   = "a file builds only with -tags=evals and ci.yml vets no such pass; it compiles only on a maintainer's machine"
-		noDocs    = "\"docs\" runs in make check and no `make check` prerequisite runs it"
-	)
-	for _, tc := range []struct {
-		name                  string
-		makefile, ci, release [2]string // old and new text, when the row edits that file
-		registry              map[string]command
-		tags                  []string
-		want                  []string
-	}{
-		{name: "a tag the tree requires and no vet pass names", tags: []string{"evals", "integration", "live"}, want: []string{
-			"a file builds only with -tags=integration and `make check` vets no such pass; a contributor cannot see it break",
-			"a file builds only with -tags=integration and ci.yml vets no such pass; it compiles only on a maintainer's machine",
-		}},
-		{
-			name: "a constraint needing two tags, set by one pass",
-			tags: []string{"e2e,evals", "evals", "live"},
-		},
-		{
-			name: "a constraint needing two tags, set by two passes",
-			tags: []string{"e2e,live", "evals", "live"},
-			want: []string{
-				"a file builds only with -tags=e2e,live and `make check` vets no such pass; a contributor cannot see it break",
-				"a file builds only with -tags=e2e,live and ci.yml vets no such pass; it compiles only on a maintainer's machine",
-			},
-		},
-		{
-			name:     "a tag vetted in check's own recipe, which CI does not run",
-			makefile: [2]string{"## Everything CI runs\n", "## Everything CI runs\n\t$(GO) vet -tags=soak ./...\n"},
-			tags:     []string{"evals", "live", "soak"},
-			want: []string{
-				"a file builds only with -tags=soak and ci.yml vets no such pass; it compiles only on a maintainer's machine",
-			},
-		},
-		{
-			name:     "a tagged vet commented out of its recipe",
-			makefile: [2]string{"\t$(GO) vet -tags=live", "\t# $(GO) vet -tags=live"},
-			want:     []string{localLive, ciLive},
-		},
-		{
-			name:     "a tag only CI vets, itself",
-			makefile: [2]string{"\t$(GO) vet -tags=live ./...\n", ""},
-			ci:       [2]string{"      - run: make tidy\n", "      - run: make tidy\n      - run: go vet -tags=live ./...\n"},
-			want:     []string{localLive},
-		},
-		{
-			name: "CI not running the target that vets",
-			ci:   [2]string{"      - run: make vet\n", ""},
-			want: []string{"`make check` runs \"vet\" and CI does not", ciEvals, ciLive},
-		},
-		{
-			// The commented-out run is not one CI makes.
-			name: "a tool CI runs itself and make check does not",
-			ci: [2]string{"      - run: make pins\n", "      - run: make pins\n" +
-				"      - run: go run github.com/zricethezav/gitleaks/v8@v8.30.1 dir .\n" +
-				"      - run: |\n          # go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 ./...\n          make pins\n"},
-			want: []string{"ci.yml runs `go run github.com/zricethezav/gitleaks/v8@v8.30.1` and no `make check` " +
-				"prerequisite runs it; a contributor cannot reproduce it"},
-		},
-		{
-			name: "a tool CI runs itself at another version",
-			ci:   [2]string{"govulncheck@v1.8.0", "govulncheck@v1.7.0"},
-			want: []string{"ci.yml runs `go run golang.org/x/vuln/cmd/govulncheck@v1.7.0` and no `make check` " +
-				"prerequisite runs it; a contributor cannot reproduce it"},
-		},
-		{
-			name:     "a prerequisite a second check rule adds, which CI does not run",
-			makefile: [2]string{"schema-ack:\n", "check: extra\nextra:\n\t@echo extra\nschema-ack:\n"},
-			want:     []string{"`make check` runs \"extra\" and CI does not"},
-		},
-		{
-			name:     "a target CI runs that make check does not, and that runs no pull-request gate",
-			makefile: [2]string{"schema-ack:\n", "extra:\n\t@echo extra\nschema-ack:\n"},
-			ci:       [2]string{"      - run: make pins\n", "      - run: make pins\n      - run: make extra\n"},
-			want:     []string{"CI runs `make extra` and `make check` does not"},
-		},
-		{
-			name:     "a check gate neither side runs",
-			makefile: [2]string{"\t@$(GATES) docs", "\t@echo docs"},
-			want:     []string{noDocs, "\"docs\" runs in make check and ci.yml does not run it"},
-		},
-		{
-			name:     "a check gate CI runs itself and make check does not",
-			makefile: [2]string{"\t@$(GATES) docs", "\t@echo docs"},
-			ci:       [2]string{"      - run: make pins\n", "      - run: make pins\n      - run: go run ./scripts/gates docs\n"},
-			want:     []string{noDocs},
-		},
-		{
-			name: "a pull-request gate CI does not run",
-			ci:   [2]string{"      - run: make schema-ack\n", ""},
-			want: []string{"\"schema-ack\" runs on a pull request and ci.yml does not run it"},
-		},
-		{
-			name:     "a pull-request gate in make check",
-			makefile: [2]string{"docs pins ##", "docs pins schema-ack ##"},
-			want: []string{"\"schema-ack\" runs on a pull request and `make check` runs it, " +
-				"where there is no merge-base to measure from"},
-		},
-		{
-			name:    "a release step no release file runs",
-			release: [2]string{"release-notes", "release-tag"},
-			want: []string{"\"release-notes\" runs in the release and none of .github/workflows/release.yml, " +
-				".github/workflows/publish-mcp.yml and .goreleaser.yaml runs it; a step dropped from them fails at a tag, in public"},
-		},
-		{
-			name:     "a command that declares no pipeline",
-			registry: map[string]command{"classes": {}},
-			want:     []string{"\"classes\" declares no pipeline in scripts/gates/main.go"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			makefile, ci, release, tags := parityMakefile, parityCI, parityRelease, parityTags
-			if tc.makefile[0] != "" {
-				makefile = replaceOnce(t, makefile, tc.makefile[0], tc.makefile[1])
-			}
-			if tc.ci[0] != "" {
-				ci = replaceOnce(t, ci, tc.ci[0], tc.ci[1])
-			}
-			if tc.release[0] != "" {
-				release = replaceOnce(t, release, tc.release[0], tc.release[1])
-			}
-			registry := maps.Clone(parityRegistry)
-			maps.Copy(registry, tc.registry)
-			if tc.tags != nil {
-				tags = tc.tags
-			}
-			problems, _, err := parityProblems(makefile, ci, release, registry, tags)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !slices.Equal(problems, tc.want) {
-				t.Errorf("problems\n got %q\nwant %q", problems, tc.want)
-			}
-		})
-	}
-}
-
-// replaceOnce is s with old replaced by new, failing the test when old is
-// not there, so an edit cannot quietly leave the fixture unbroken.
-func replaceOnce(t *testing.T, s, old, new string) string {
+// parityIn runs the gate over files in a git checkout of their own.
+func parityIn(t *testing.T, files map[string]string, registry map[string]command) *parityReport {
 	t.Helper()
-	if !strings.Contains(s, old) {
-		t.Fatalf("the fixture does not contain %q", old)
+	docsCheckout(t, files)
+	r, err := parityCheck(".", registry)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return strings.Replace(s, old, new, 1)
+	return r
 }
 
-// A gate that read nothing would find nothing wrong.
-func TestParityRefusesToRunOnTooLittle(t *testing.T) {
-	for _, tc := range []struct {
-		name, makefile string
-		tags           []string
-		want           string
+func TestParityPassesWhenTheyAgree(t *testing.T) {
+	files, registry := parityFixture()
+	r := parityIn(t, files, registry)
+	if len(r.problems) > 0 {
+		t.Fatalf("problems on an agreeing fixture:\n%s", strings.Join(r.problems, "\n"))
+	}
+	if r.prereqs != parityTestGates+2 || r.checkGates != parityTestGates || r.vetTags != 2 {
+		t.Errorf("read %d prerequisites, %d gates, %d vet tags", r.prereqs, r.checkGates, r.vetTags)
+	}
+}
+
+func TestParityRefuses(t *testing.T) {
+	cases := []struct {
+		name     string
+		file     string
+		old, new string
+		registry func(map[string]command)
+		want     string
 	}{
-		{"no check target", strings.Replace(parityMakefile, "check:", "verify:", 1), parityTags, "no `check:` target in the Makefile"},
-		{"no tag in the tree", parityMakefile, nil, "no //go:build line requires a tag; the tree is not being read"},
-	} {
+		{name: "a check target CI does not run", file: ".github/workflows/ci.yml",
+			old: "run: make g03\n", new: "run: echo g03\n", want: "`make check` runs g03 and ci.yml never does"},
+		{name: "a step's name is not a command", file: ".github/workflows/ci.yml",
+			old: "      - name: g04\n        run: make g04\n", new: "      - name: make g04\n        run: echo hi\n",
+			want: "`make check` runs g04 and ci.yml never does"},
+		{name: "a comment is not a command", file: ".github/workflows/ci.yml",
+			old: "run: make g05\n", new: "run: |\n          # make g05\n          true\n",
+			want: "`make check` runs g05 and ci.yml never does"},
+		{name: "a CI target check does not run", file: ".github/workflows/ci.yml",
+			old: "run: make cover\n", new: "run: make cover api-diff\n",
+			want: "ci.yml runs `make api-diff` and `make check` does not"},
+		{name: "a stale CI-only excuse", file: ".github/workflows/ci.yml",
+			old: "run: make schema-ack BASE=origin/main\n", new: "run: echo\n", want: "schema-ack is excused as CI-only"},
+		{name: "an inCheck gate no target calls", registry: func(r map[string]command) {
+			r["ghost"] = command{runsIn: inCheck}
+		}, want: "the ghost gate runs in check by the registry, and no target"},
+		{name: "a manual gate that check runs", registry: func(r map[string]command) {
+			r["g07"] = command{runsIn: manual}
+		}, want: "the g07 gate is manual by the registry, and `make check` runs it"},
+		{name: "a CI gate CI does not run", file: ".github/workflows/ci.yml",
+			old: "run: make schema-ack BASE=origin/main\n", new: "run: echo\n",
+			want: "the schema-ack gate runs in CI by the registry, and ci.yml never calls it"},
+		{name: "a release gate nothing calls", file: ".goreleaser.yaml",
+			old: "mcpb-pack", new: "mcpb-packer", want: "the mcpb-pack gate runs in release"},
+		{name: "a release gate with no reason", registry: func(r map[string]command) {
+			r["sign"] = command{runsIn: inRelease}
+		}, want: "the sign gate runs in release and parityReleaseOnly gives no reason"},
+		{name: "a vet tag only check uses", file: ".github/workflows/ci.yml",
+			old: "          go vet -tags=evals ./...\n", new: "",
+			want: "scripts/evals/main.go builds only with -tags=evals and ci.yml vets no such pass"},
+		{name: "a vet tag only CI uses", file: "Makefile",
+			old: "\t$(GO) vet -tags=live ./...\n", new: "",
+			want: "scripts/livecal/main.go builds only with -tags=live and `make check` vets no such pass"},
+		{name: "a vet commented out of its recipe", file: "Makefile",
+			old: "\t$(GO) vet -tags=live ./...\n", new: "\t# $(GO) vet -tags=live ./...\n",
+			want: "scripts/livecal/main.go builds only with -tags=live and `make check` vets no such pass"},
+		{name: "a test that turns vet off is not a vet pass", file: ".github/workflows/ci.yml",
+			old: "          go vet -tags=evals ./...\n", new: "          go test -vet=off -tags=evals ./...\n",
+			want: "scripts/evals/main.go builds only with -tags=evals and ci.yml vets no such pass"},
+		{name: "a test on the vet's line is not a vet pass", file: ".github/workflows/ci.yml",
+			old: "          go vet -tags=evals ./...\n", new: "          go vet ./... && go test -tags=evals ./...\n",
+			want: "scripts/evals/main.go builds only with -tags=evals and ci.yml vets no such pass"},
+		{name: "the zero pipeline", registry: func(r map[string]command) {
+			r["g01"] = command{}
+		}, want: "the g01 gate declares no pipeline"},
+		{name: "a floor on prerequisites", file: "Makefile",
+			old: "check: g00 g01 g02 g03", new: "check:", want: "check: has 18 prerequisites, want at least 20"},
+		{name: "a floor on the tree's tags", file: "scripts/livecal/main.go",
+			old: "//go:build live\n", new: "",
+			want: "the tree's //go:build lines need 1 -tags lists, want at least 2 (live and evals)"},
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, _, err := parityProblems(tc.makefile, parityCI, parityRelease, parityRegistry, tc.tags); err == nil || err.Error() != tc.want {
-				t.Errorf("err = %v, want %q", err, tc.want)
+			files, registry := parityFixture()
+			if tc.file != "" {
+				applyEdits(t, files, replace(tc.file, tc.old, tc.new))
+			}
+			if tc.registry != nil {
+				tc.registry(registry)
+			}
+			r := parityIn(t, files, registry)
+			if joined := strings.Join(r.problems, "\n"); !strings.Contains(joined, tc.want) {
+				t.Errorf("want %q among the problems, got:\n%s", tc.want, joined)
 			}
 		})
 	}
 }
 
-// make reads a # in an assignment as a comment, lets a later = or :=
-// replace a value, lets ?= set only a variable not yet set, and appends
-// with += after a space. export and override still assign.
-func TestMakeVarsReadsAssignmentsAsMakeDoes(t *testing.T) {
-	got := makeVars("GO ?= go\n" +
-		"GORELEASER := github.com/goreleaser/goreleaser/v2@v2.18.1 # the release's own\n" +
-		"LINT = v1\nLINT := v2\n" +
-		"BIN = ./bin\nBIN ?= ./other\n" +
-		"FLAGS = -s\nFLAGS += -w\nFRESH += -v\n" +
-		"export GOFLAGS := -mod=mod\noverride PKG = example.com/x\n" +
-		"# NOTE = a comment\n" +
-		"vet:\n\tTAGS=live go vet ./...\n")
-	want := map[string]string{
-		"GO": "go", "GORELEASER": "github.com/goreleaser/goreleaser/v2@v2.18.1", "LINT": "v2", "BIN": "./bin",
-		"FLAGS": "-s -w", "FRESH": "-v", "GOFLAGS": "-mod=mod", "PKG": "example.com/x",
-	}
-	if !maps.Equal(got, want) {
-		t.Errorf("makeVars = %q, want %q", got, want)
+// parityCase edits the agreeing fixture and wants exactly these problems,
+// or none when want is nil.
+type parityCase struct {
+	name  string
+	edits []docsEdit
+	want  []string
+}
+
+func checkParityCases(t *testing.T, cases []parityCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			files, registry := parityFixture()
+			applyEdits(t, files, tc.edits...)
+			if got := parityIn(t, files, registry).problems; !slices.Equal(got, tc.want) {
+				t.Errorf("problems\n got %q\nwant %q", got, tc.want)
+			}
+		})
 	}
 }
 
-// A vet pass's tags are read from its -tags flag wherever it sits among
-// the arguments, in either spelling, and a shell separator ends the
-// command.
-func TestVetPassesReadTheTagsFlagAnywhere(t *testing.T) {
-	for _, tc := range []struct {
-		text string
-		want [][]string
-	}{
-		{"go vet -tags=live ./...", [][]string{{"live"}}},
-		{"go vet -v -tags=live ./...", [][]string{{"live"}}},
-		{"go vet -tags live,evals ./...", [][]string{{"live", "evals"}}},
-		{"go vet --tags=e2e -v ./... && go vet ./...", [][]string{{"e2e"}}},
-		{"make vet", nil},
-		{"go vet ./... ; echo -tags=live", nil},
+// Each -tags list the tree's files need has a vet pass on both sides that
+// sets all of it.
+func TestParityHoldsTheTreesTagsToAVetPass(t *testing.T) {
+	const ci = ".github/workflows/ci.yml"
+	checkParityCases(t, []parityCase{
+		{"a file an OS tag and a custom tag build, which no pass vets", []docsEdit{
+			add("internal/e2e/e2e_test.go", "//go:build e2e && linux\n\npackage e2e\n"),
+		}, []string{
+			"internal/e2e/e2e_test.go builds only with -tags=e2e and `make check` vets no such pass; a contributor cannot see it break",
+			"internal/e2e/e2e_test.go builds only with -tags=e2e and ci.yml vets no such pass; it compiles only on a maintainer's machine",
+		}},
+		{"two tags, set by one pass on each side, the flag anywhere among vet's arguments", []docsEdit{
+			add("internal/soak/soak_test.go", "//go:build integration && slow\n\npackage soak\n"),
+			replace("Makefile", "\t$(GO) vet -tags=evals ./...\n", "\t$(GO) vet -tags=evals ./...\n\t$(GO) vet -v -tags=integration,slow ./...\n"),
+			replace(ci, "          go vet -tags=evals ./...\n", "          go vet -tags=evals ./...\n          go vet -v -tags=integration,slow ./...\n"),
+		}, nil},
+		{"two tags set by two passes", []docsEdit{
+			add("internal/soak/soak_test.go", "//go:build integration && slow\n\npackage soak\n"),
+			replace("Makefile", "\t$(GO) vet -tags=evals ./...\n", "\t$(GO) vet -tags=evals ./...\n\t$(GO) vet -tags=integration ./...\n\t$(GO) vet -tags=slow ./...\n"),
+			replace(ci, "          go vet -tags=evals ./...\n", "          go vet -tags=evals ./...\n          go vet -tags=integration ./...\n"+
+				"          go vet -tags=slow ./...\n          go vet -tags=integration,slow ./...\n"),
+		}, []string{
+			"internal/soak/soak_test.go builds only with -tags=integration,slow and `make check` vets no such pass; a contributor cannot see it break",
+		}},
+		{"a file either of two tags builds, with one of them vetted", []docsEdit{
+			replace("scripts/evals/main.go", "//go:build evals && unix\n", "//go:build live || evals\n"),
+			replace("Makefile", "\t$(GO) vet -tags=evals ./...\n", ""),
+			replace(ci, "          go vet -tags=evals ./...\n", ""),
+		}, nil},
+		{"a file either of two tags builds, with neither vetted", []docsEdit{
+			replace("scripts/evals/main.go", "//go:build evals && unix\n", "//go:build live || evals\n"),
+			replace("Makefile", "\t$(GO) vet -tags=live ./...\n\t$(GO) vet -tags=evals ./...\n", ""),
+			replace(ci, "          go vet -tags=live ./...\n          go vet -tags=evals ./...\n", ""),
+		}, []string{
+			"scripts/evals/main.go builds only with -tags=evals or -tags=live and `make check` vets no such pass; a contributor cannot see it break",
+			"scripts/evals/main.go builds only with -tags=evals or -tags=live and ci.yml vets no such pass; it compiles only on a maintainer's machine",
+			"scripts/livecal/main.go builds only with -tags=live and `make check` vets no such pass; a contributor cannot see it break",
+			"scripts/livecal/main.go builds only with -tags=live and ci.yml vets no such pass; it compiles only on a maintainer's machine",
+		}},
+		{"a vet in check's own recipe, which CI does not run", []docsEdit{
+			add("internal/soak/soak_test.go", "//go:build soak\n\npackage soak\n"),
+			replace("Makefile", " vet cover\n", " vet cover\n\t$(GO) vet -tags=soak ./...\n"),
+		}, []string{
+			"internal/soak/soak_test.go builds only with -tags=soak and ci.yml vets no such pass; it compiles only on a maintainer's machine",
+		}},
+	})
+}
+
+// The Makefile is read as make reads it: a target's rules merge their
+// prerequisites, and a recipe line's @, - and + are not part of the
+// command CI runs.
+func TestParityReadsEveryRuleOfATarget(t *testing.T) {
+	checkParityCases(t, []parityCase{
+		{"a prerequisite a second check rule adds", []docsEdit{
+			replace("Makefile", "api-diff:\n", "check: api-diff\n\napi-diff:\n"),
+		}, []string{
+			"`make check` runs api-diff and ci.yml never does",
+			"the api-diff gate is manual by the registry, and `make check` runs it; declare it inCheck",
+		}},
+		{"a recipe line's prefixes", []docsEdit{
+			replace("Makefile", "\t$(GO) vet ./...\n", "\t@+$(GO) vet ./...\n"),
+		}, nil},
+		{"a recipe line make goes on past", []docsEdit{
+			replace("Makefile", "\t$(GO) vet ./...\n", "\t-$(GO) vet ./...\n"),
+		}, []string{"Makefile:85: vet's recipe line starts with -, so make goes on when it fails"}},
+		{".IGNORE", []docsEdit{
+			replace("Makefile", "vet:\n", ".IGNORE: g00\nvet:\n"),
+		}, []string{"Makefile: .IGNORE makes make ignore a failing command; drop it"}},
+		{"a line the Makefile reader does not read", []docsEdit{
+			replace("Makefile", "vet:\n", "include other.mk\nvet:\n"),
+		}, []string{`Makefile:84: "include other.mk" is a directive or an assignment, which this reader does not read`}},
+		{"a recipe that passes whatever it ran", []docsEdit{
+			replace("Makefile", "\t$(GATES) g00\n", "\t$(GATES) g00 || true\n"),
+		}, []string{"Makefile:6: g00's recipe line is one where `|| true` passes whatever came before, so a failing check passes"}},
+		{"a recipe that pipes", []docsEdit{
+			replace("Makefile", "\t$(GATES) g00\n", "\t$(GATES) g00 | tee log\n"),
+		}, []string{"Makefile:6: g00's recipe line pipes, and make's /bin/sh reports only the last command's status, " +
+			"so a failing check passes"}},
+	})
+}
+
+// What a push to main runs is what `make check` is held to, and CI runs a
+// check through make, failing when it fails.
+func TestParityHoldsCheckToWhatAPushRuns(t *testing.T) {
+	const ci = ".github/workflows/ci.yml"
+	notRun := []string{
+		"`make check` runs g00 and ci.yml never does",
+		"the g00 gate runs in check by the registry, and no job of ci.yml a push to main runs calls it",
+	}
+	matrix := replace(ci, "  gates:\n    steps:\n", "  gates:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest]\n    steps:\n")
+	checkParityCases(t, []parityCase{
+		{"a step a pull request alone runs", []docsEdit{
+			replace(ci, "      - name: g00\n", "      - name: g00\n        if: github.event_name == 'pull_request'\n"),
+		}, notRun},
+		{"a step whose failure passes", []docsEdit{
+			replace(ci, "      - name: g00\n", "      - name: g00\n        continue-on-error: true\n"),
+		}, notRun},
+		{"a step a matrix filter runs", []docsEdit{
+			matrix, replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'ubuntu-latest'\n"),
+		}, nil},
+		{"a step a matrix filter runs on every leg but one", []docsEdit{
+			matrix, replace(ci, "      - name: g00\n", "      - name: g00\n        if: ${{ matrix.os != 'macos-latest' }}\n"),
+		}, nil},
+		{"a step whose matrix filter names an include entry", []docsEdit{
+			replace(ci, "  gates:\n    steps:\n", "  gates:\n    strategy:\n      matrix:\n        include:\n          - os: arm\n    steps:\n"),
+			replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'arm'\n"),
+		}, nil},
+		{"a step whose matrix filter names a leg the matrix lacks", []docsEdit{
+			matrix, replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'ubuntu-latst'\n"),
+		}, notRun},
+		{"a step whose matrix filter names a job with no matrix", []docsEdit{
+			replace(ci, "      - name: g00\n", "      - name: g00\n        if: matrix.os == 'ubuntu-latest'\n"),
+		}, notRun},
+		{"a step that never runs", []docsEdit{
+			replace(ci, "      - name: g00\n", "      - name: g00\n        if: false\n"),
+		}, notRun},
+		{"a step under a condition other than a matrix filter", []docsEdit{
+			replace(ci, "      - name: g00\n", "      - name: g00\n        if: github.event_name != 'push'\n"),
+		}, notRun},
+		{"a CI line that passes whatever it ran", []docsEdit{
+			replace(ci, "        run: make g00\n", "        run: make g00 || true\n"),
+		}, []string{"ci.yml runs `make g00 || true`, where `|| true` passes whatever came before, so a failing check passes"}},
+		{"a gate CI calls outside make", []docsEdit{
+			replace(ci, "        run: make g00\n", "        run: go run ./scripts/gates g00\n"),
+		}, []string{"ci.yml runs `go run ./scripts/gates g00`, a gate called outside make; call its make target, " +
+			"so CI and `make check` run one recipe"}},
+	})
+}
+
+func TestShellSwallowed(t *testing.T) {
+	for line, want := range map[string]string{
+		"make leaks":                            "",
+		"make leaks && make pins":               "",
+		"make leaks || true":                    "`|| true` passes whatever came before",
+		"make leaks || :":                       "`|| :` passes whatever came before",
+		"make leaks || exit 0":                  "`|| exit 0` passes whatever came before",
+		"make leaks || exit 1":                  "",
+		"make leaks || exit":                    "",
+		"make leaks || false":                   "",
+		"make leaks || echo failed":             "`|| echo failed` passes whatever came before",
+		"set +o errexit; make leaks":            "set +e lets the commands after it fail",
+		"set -o errexit; make leaks":            "",
+		"set -o errexit +o nounset; make leaks": "",
+		"set +o nounset -o errexit; make leaks": "",
+		"set +x; make leaks":                    "",
+		"make leaks; true":                      "`; true` ends it with success whatever came before",
+		"make leaks; make pins":                 "",
+		"make leaks &":                          "& runs a command in the background, where its failure is never seen",
+		"! make leaks":                          "! turns a failure into success",
+		"set +e; make leaks":                    "set +e lets the commands after it fail",
+		"make leaks 2>&1 | tee log":             "",
+		"out=$(gofmt -l .); exit 1":             "",
+		"echo 'make x || true'":                 "",
 	} {
-		if got := vetPasses(tc.text); !slices.EqualFunc(got, tc.want, slices.Equal) {
-			t.Errorf("vetPasses(%q) = %q, want %q", tc.text, got, tc.want)
+		if got := shellSwallowed(shellSplit(line)); got != want {
+			t.Errorf("shellSwallowed(%q) = %q, want %q", line, got, want)
 		}
 	}
 }
 
-// As in make, a target's rules merge their prerequisites, and its last
-// recipe is the one that runs: a later rule with none leaves it.
-func TestParseMakefileMergesATargetsRules(t *testing.T) {
-	rules := parseMakefile("check: fmt\ncheck: vet fmt\nlint:\n\told\nlint:\n\tnew\nlint: fmt\n")
-	if got := rules["check"].prereqs; !slices.Equal(got, []string{"fmt", "vet"}) {
-		t.Errorf("check's prerequisites = %q, want fmt and vet", got)
+// A tool CI runs with go run is one `make check` runs at the same version.
+func TestParityHoldsCIsOwnGoRunsToMakeCheck(t *testing.T) {
+	const (
+		ci   = ".github/workflows/ci.yml"
+		tool = "honnef.co/go/tools/cmd/staticcheck"
+	)
+	ciRuns := func(version string) docsEdit {
+		return replace(ci, "run: make cover\n", "run: |\n          make cover\n          # go run "+tool+"@v0.1.0\n"+
+			"          go run "+tool+"@"+version+" ./...\n")
 	}
-	if got := rules["lint"]; !slices.Equal(got.prereqs, []string{"fmt"}) ||
-		!slices.Equal(got.recipe, []makeCommand{{line: 6, text: "new"}}) {
-		t.Errorf("lint = %+v, want the prerequisite fmt and the recipe on line 6", got)
-	}
+	checkRuns := replace("Makefile", "cover: test\n\t@echo floors\n", "cover: test\n\t@echo floors\n\t$(GO) run "+tool+"@v0.6.1 ./...\n")
+	checkParityCases(t, []parityCase{
+		{"one make check runs, at its version", []docsEdit{ciRuns("v0.6.1"), checkRuns}, nil},
+		{"one make check does not run, beside a commented one", []docsEdit{ciRuns("v0.6.1")}, []string{
+			"ci.yml runs `go run " + tool + "@v0.6.1` and no target `make check` runs does; a contributor cannot reproduce it",
+		}},
+		{"one make check runs at another version", []docsEdit{ciRuns("v0.6.0"), checkRuns}, []string{
+			"ci.yml runs `go run " + tool + "@v0.6.0` and no target `make check` runs does; a contributor cannot reproduce it",
+		}},
+		{"a package of this module, which has no version to hold", []docsEdit{
+			replace(ci, "run: make cover\n", "run: |\n          make cover\n          go run ./cmd/tool\n"),
+		}, nil},
+	})
 }
 
-// A tag the toolchain sets is never named by -tags, and is free to be
-// either value beside the tag a pass must set. A file that also builds
-// with no tag at all needs no tagged pass, and one that needs two tags
-// together needs a pass that sets both.
-func TestTreeBuildTags(t *testing.T) {
-	t.Chdir(t.TempDir())
+// A `go run` names its package after its build flags, on every side.
+func TestParityReadsAGoRunPastItsFlags(t *testing.T) {
+	const (
+		ci   = ".github/workflows/ci.yml"
+		tool = "honnef.co/go/tools/cmd/staticcheck@v0.6.1"
+	)
+	ciRuns := replace(ci, "run: make cover\n", "run: |\n          make cover\n          go run -mod=mod "+tool+" ./...\n")
+	checkParityCases(t, []parityCase{
+		{"the gates, run after build flags in make, CI and the release", []docsEdit{
+			replace("Makefile", "GATES ?= $(GO) run ./scripts/gates", "GATES ?= $(GO) run -tags gates -trimpath ./scripts/gates"),
+			replace(".goreleaser.yaml", "go run ./scripts/gates", "go run -trimpath ./scripts/gates"),
+		}, nil},
+		{"a flagged tool CI runs and make check does not", []docsEdit{ciRuns}, []string{
+			"ci.yml runs `go run " + tool + "` and no target `make check` runs does; a contributor cannot reproduce it",
+		}},
+		{"a flagged tool both run", []docsEdit{
+			ciRuns,
+			replace("Makefile", "cover: test\n\t@echo floors\n", "cover: test\n\t@echo floors\n\t$(GO) run -modfile tools.mod "+tool+" ./...\n"),
+		}, nil},
+	})
+}
+
+// The tags each file needs: none where the go command sets them, and the
+// smallest custom set otherwise.
+func TestParityTreeTags(t *testing.T) {
 	files := map[string]string{
-		"live.go":       "//go:build live\n\npackage x\n",
-		"linux.go":      "//go:build e2e && linux\n\npackage x\n",
-		"unix.go":       "//go:build stress && unix\n\npackage x\n",
-		"release.go":    "//go:build soak && go1.22\n\npackage x\n",
-		"notwin.go":     "//go:build !windows\n\npackage x\n",
-		"win.go":        "//go:build windows\n\npackage x\n",
-		"bench.go":      "//go:build bench && !experimental\n\npackage x\n",
-		"pair.go":       "//go:build integration && slow\n\npackage x\n",
-		"either.go":     "//go:build evals || !race\n\npackage x\n",
-		"feature.go":    "//go:build amd64.v2 && go1.22\n\npackage x\n",
-		"ignored.go":    "//go:build ignore\n\npackage x\n",
-		"plain.go":      "package x\n",
-		"notes.txt":     "//go:build notes\n",
-		"testdata/x.go": "//go:build fixture\n\npackage x\n",
+		"a/live.go":         "//go:build live && unix\n\npackage a\n",
+		"a/other.go":        "//go:build !windows\n\npackage a\n",
+		"a/windows.go":      "//go:build windows\n\npackage a\n",
+		"a/e2e.go":          "//go:build e2e && !experimental\n\npackage a\n",
+		"a/race.go":         "//go:build evals || !race\n\npackage a\n",
+		"a/arch.go":         "//go:build amd64.v2 && go1.22\n\npackage a\n",
+		"a/exp.go":          "//go:build goexperiment.synctest\n\npackage a\n",
+		"a/instrumented.go": "//go:build msan && asan\n\npackage a\n",
+		"a/racy.go":         "//go:build race\n\npackage a\n",
+		"a/mixed.go":        "//go:build (a && b) || c\n\npackage a\n",
+		"a/live2.go":        "//go:build live\n\npackage a\n",
+		"a/ignored.go":      "//go:build ignore\n\npackage a\n",
+		"a/both.go":         "//go:build integration && slow\n\npackage a\n",
+		"a/either.go":       "//go:build alpha || beta\n\npackage a\n",
+		"a/never.go":        "//go:build stress && linux && windows\n\npackage a\n",
+		"a/plain.go":        "package a\n",
+		"a/notes.txt":       "//go:build prose\n",
+		"a/testdata/x.go":   "//go:build fixture\n\npackage x\n",
 	}
-	var names []string
-	for rel, body := range files {
-		put(t, ".", rel, body)
-		names = append(names, rel)
-	}
-	got, err := treeBuildTags(names)
+	needs, err := parityTreeTags(writeTree(t, files), slices.Sorted(maps.Keys(files)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"bench", "e2e", "integration,slow", "live", "soak", "stress"}; !slices.Equal(got, want) {
-		t.Errorf("treeBuildTags = %q, want %q", got, want)
+	var got []string
+	for _, n := range needs {
+		got = append(got, n.file+": "+n.String())
+	}
+	want := []string{
+		"a/both.go: -tags=integration,slow",
+		"a/e2e.go: -tags=e2e",
+		"a/either.go: -tags=alpha or -tags=beta",
+		"a/live.go: -tags=live",
+		"a/mixed.go: -tags=c or -tags=a,b",
+		"a/never.go: -tags=stress",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("parityTreeTags = %q, want %q", got, want)
 	}
 }
 
-// The repository's own files agree, with every tag its tree requires.
-func TestParityGate(t *testing.T) {
-	root, err := repoRoot()
-	if err != nil {
-		t.Fatal(err)
+func TestParityVetPassesReadTheTagsFlagAnywhere(t *testing.T) {
+	got := parityVetPasses([]string{
+		"go vet -tags=live ./...",
+		"go vet -v -tags a,b ./... && go test -tags=evals ./...",
+		`go vet --tags="x" ./...; go vet ./...`,
+		"go vet --tags y ./...",
+		"make vet",
+		"go test -vet=off -tags=live ./...",
+	})
+	want := [][]string{{"live"}, {"a", "b"}, {"x"}, {"y"}}
+	if !slices.EqualFunc(got, want, slices.Equal[[]string]) {
+		t.Errorf("parityVetPasses = %q, want %q", got, want)
 	}
-	t.Chdir(root)
-	files, err := checkoutFiles()
-	if err != nil {
-		t.Fatal(err)
+}
+
+func TestGoRunsInSkipsTheFlags(t *testing.T) {
+	for line, want := range map[string][]goRun{
+		"go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...": {
+			{pkg: "golang.org/x/vuln/cmd/govulncheck@v1.8.0", args: []string{"./..."}}},
+		"go run -mod=mod -modfile tools.mod -trimpath ./scripts/gates pins": {
+			{pkg: "./scripts/gates", args: []string{"pins"}}},
+		`CGO_ENABLED=0 go run "x.org/y@v1" && go run -C dir ./z a`: {
+			{pkg: "x.org/y@v1", args: []string{}},
+			{pkg: "./z", args: []string{"a"}}},
+		`go run -ldflags "-s -w" ./scripts/gates docs`: {
+			{pkg: "./scripts/gates", args: []string{"docs"}}},
+		`go run -ldflags="-X a=b -s" tool.org/x@v1 x`: {
+			{pkg: "tool.org/x@v1", args: []string{"x"}}},
+		`go run -ldflags=-X\ a=b ./scripts/gates pins`: {
+			{pkg: "./scripts/gates", args: []string{"pins"}}},
+		`go run -ldflags '-X a=b c' ./scripts/gates pins`: {
+			{pkg: "./scripts/gates", args: []string{"pins"}}},
+		`go run -gcflags 'all=-N -l' ./cmd/x; echo done`: {
+			{pkg: "./cmd/x", args: []string{}}},
+		`$GOROOT/bin/go run x.org/y@main`: {
+			{pkg: "x.org/y@main", args: []string{}}},
+		"cargo run x":              nil,
+		`echo "go run x.org/y@v1"`: nil,
+		"echo go run":              nil,
+		"go vet ./...":             nil,
+	} {
+		got := goRunsIn(line)
+		if !slices.EqualFunc(got, want, func(a, b goRun) bool { return a.pkg == b.pkg && slices.Equal(a.args, b.args) }) {
+			t.Errorf("goRunsIn(%q) = %q, want %q", line, got, want)
+		}
 	}
-	if tags, err := treeBuildTags(files); err != nil || !slices.Equal(tags, []string{"evals", "live"}) {
-		t.Errorf("treeBuildTags = %q, %v; want evals and live", tags, err)
+}
+
+// Every release command in the real registry names where it runs.
+func TestParityExcusesEveryReleaseCommand(t *testing.T) {
+	release := commandsRunningIn(inRelease)
+	if len(release) == 0 {
+		t.Fatal("the registry has no release commands; this test would hold nothing")
 	}
-	if err := parityGate(); err != nil {
-		t.Error(err)
+	for _, name := range release {
+		if strings.TrimSpace(parityReleaseOnly[name]) == "" {
+			t.Errorf("%s runs in release and parityReleaseOnly gives no reason", name)
+		}
+	}
+	for name := range parityReleaseOnly {
+		if !slices.Contains(release, name) {
+			t.Errorf("parityReleaseOnly excuses %s, which is not a release command", name)
+		}
+	}
+	for name, reason := range parityCIOnly {
+		if strings.TrimSpace(reason) == "" {
+			t.Errorf("%s is excused as CI-only with no reason", name)
+		}
+	}
+}
+
+func TestParityMakeTargets(t *testing.T) {
+	got := parityMakeTargets(`make changelog CHANGELOG_BASE="origin/${BASE_REF}" -j2 cover`)
+	if !slices.Equal(got, []string{"changelog", "cover"}) {
+		t.Errorf("parityMakeTargets = %v", got)
+	}
+	for line, want := range map[string][]string{
+		"make -C dir -f other.mk -j 4 -k lint": {"lint"},
+		// -j and -l take a value only when it is a number.
+		"make -j check":    {"check"},
+		"make -l 2.5 lint": {"lint"},
+	} {
+		if got := parityMakeTargets(line); !slices.Equal(got, want) {
+			t.Errorf("parityMakeTargets(%q) = %v, want %v", line, got, want)
+		}
+	}
+	if parityMakeTargets("go test ./...") != nil {
+		t.Error("a go command was read as make")
+	}
+}
+
+func TestMakefileParse(t *testing.T) {
+	mk := parseMakefile("A ?= x\nB = $(A)/y # note\nC := $(B) \\\n  z\n.PHONY: t\nt: u v ## help\n\t$(C) run\n\t# comment\nu:\n\techo\n")
+	if got := mk.expand("$(B)"); got != "x/y" {
+		t.Errorf("expand = %q", got)
+	}
+	if got := mk.recipe("t"); !slices.Equal(got, []string{"x/y z run"}) {
+		t.Errorf("recipe = %q", got)
+	}
+	if got := mk.closure("t"); !slices.Equal(got, []string{"t", "u", "v"}) {
+		t.Errorf("closure = %v", got)
+	}
+	if _, err := mk.variable("NONE"); err == nil {
+		t.Error("a missing variable was found")
+	}
+}
+
+func TestMakefileReadsAsMakeDoes(t *testing.T) {
+	mk := parseMakefile(textLines(
+		"A ?= one",
+		"A ?= two",
+		"B = x#comment",
+		"B += y",
+		"C += z",
+		"export D := d",
+		"override E = e",
+		"F := first",
+		"F = second",
+		"check: a",
+		"\techo one",
+		"check: b a",
+		"check:",
+		"lint:",
+		"\techo old",
+		"lint:",
+		"\techo new",
+		"quiet:",
+		"\t@-echo one",
+		"\t+ echo two",
+	))
+	wantVars := map[string]string{"A": "one", "B": "x y", "C": "z", "D": "d", "E": "e", "F": "second"}
+	if !maps.Equal(mk.vars, wantVars) {
+		t.Errorf("vars = %q, want %q", mk.vars, wantVars)
+	}
+	if got := mk.targets["check"].prereqs; !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("check's prerequisites = %q, want [a b]: a target's rules merge them, each once", got)
+	}
+	if got := mk.recipe("check"); !slices.Equal(got, []string{"echo one"}) {
+		t.Errorf("check's recipe = %q, want [echo one]: a rule with no recipe leaves the one before", got)
+	}
+	if got := mk.recipe("lint"); !slices.Equal(got, []string{"echo new"}) {
+		t.Errorf("lint's recipe = %q, want [echo new]: the last recipe is the one that runs", got)
+	}
+	if got := mk.recipe("quiet"); !slices.Equal(got, []string{"echo one", "echo two"}) {
+		t.Errorf("quiet's recipe = %q, want [echo one echo two]: @, - and + are not part of a command", got)
+	}
+}
+
+// Outside a git checkout the tree's files cannot be listed, so the gate
+// could not run, which exits 2 rather than a finding's 1.
+func TestParityNeedsAGitCheckout(t *testing.T) {
+	files, registry := parityFixture()
+	root := writeTree(t, files)
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(root))
+	_, err := parityCheck(root, registry)
+	if !errors.As(err, new(couldNotRun)) || !strings.HasPrefix(err.Error(), "could not run: git ls-files") {
+		t.Errorf("parityCheck outside a checkout = %v, want a git ls-files failure it could not run past", err)
+	}
+}
+
+// writeTree writes files (slash-separated path → content) under a fresh
+// temporary directory and returns it.
+func writeTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for rel, body := range files {
+		put(t, root, rel, body)
+	}
+	return root
+}
+
+// applyEdits applies docs edits to a fixture's files in place.
+func applyEdits(t *testing.T, files map[string]string, edits ...docsEdit) {
+	t.Helper()
+	for _, e := range edits {
+		switch body := files[e.file]; {
+		case e.old == "" && e.new == "":
+			delete(files, e.file)
+		case e.old == "":
+			files[e.file] = e.new
+		case !strings.Contains(body, e.old):
+			t.Fatalf("the fixture's %s does not contain %q", e.file, e.old)
+		default:
+			files[e.file] = strings.Replace(body, e.old, e.new, 1)
+		}
+	}
+}
+
+// commandsRunningIn are the registry's commands that run in p, sorted.
+func commandsRunningIn(p pipeline) []string {
+	var out []string
+	for name, c := range commands {
+		if c.runsIn == p {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// A recipe runs the gates as the binary the Makefile builds, $(GATES),
+// and that is the same gate as `go run ./scripts/gates`; another binary
+// given the gate's name is not.
+func TestParityReadsTheGatesBinary(t *testing.T) {
+	binary := replace("Makefile", "GATES ?= $(GO) run ./scripts/gates\n", "GATES ?= ./.gates\n")
+	checkParityCases(t, []parityCase{
+		{name: "the binary", edits: []docsEdit{binary}},
+		{name: "another binary", edits: []docsEdit{binary, replace("Makefile", "\t$(GATES) g00\n", "\t./.other g00\n")},
+			want: []string{
+				"the g00 gate runs in check by the registry, and no target `make check` runs calls it",
+				"the g00 gate runs in check by the registry, and no job of ci.yml a push to main runs calls it",
+			}},
+	})
+}
+
+// A job's if cannot read the matrix, so a job filtered on it does not
+// count as run by a push, and none of the gates in it is either.
+func TestParityRefusesAJobFilteredOnTheMatrix(t *testing.T) {
+	files, registry := parityFixture()
+	applyEdits(t, files, replace(".github/workflows/ci.yml", "  gates:\n    steps:\n",
+		"  gates:\n    if: matrix.os == 'ubuntu-latest'\n    strategy:\n      matrix:\n"+
+			"        os: [ubuntu-latest, macos-latest]\n    steps:\n"))
+	got := parityIn(t, files, registry).problems
+	if !slices.Contains(got, "`make check` runs g00 and ci.yml never does") {
+		t.Errorf("a job filtered on the matrix counted as a push; problems: %q", got)
 	}
 }

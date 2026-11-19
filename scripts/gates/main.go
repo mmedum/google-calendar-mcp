@@ -15,9 +15,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -123,11 +124,11 @@ func init() {
 			doc: "every published tool has a step in the live driver", runsIn: inCheck,
 		},
 		"pins": {
-			run: func([]string) { check(pinGate(), "workflow pins") },
+			run: func(a []string) { check(pins(os.Stdout, a), "workflow pins") },
 			doc: "actions pinned by SHA, tool versions exact", runsIn: inCheck,
 		},
 		"parity": {
-			run: func([]string) { check(parityGate(), "make/CI parity") },
+			run: func(a []string) { check(parity(os.Stdout, a), "make/CI parity") },
 			doc: "`make check` and ci.yml run the same things, and each command runs where it says", runsIn: inCheck,
 		},
 		"smoke": {
@@ -159,7 +160,7 @@ func init() {
 			doc: "the bundle manifest describes the bundle the packer builds", runsIn: inCheck,
 		},
 		"release": {
-			run: func([]string) { check(releaseGate(), "release wiring") },
+			run: func(a []string) { check(releaseGate(os.Stdout, a), "release wiring") },
 			doc: "the release config builds what the packer stages, and signs and uploads it", runsIn: inCheck,
 		},
 		"release-tag": {
@@ -275,6 +276,18 @@ func exitCode(err error) int {
 	return 1
 }
 
+// problemsError prints each problem to out, one to a line, and returns
+// an error counting them, or nil when there are none.
+func problemsError(out io.Writer, what string, problems []string) error {
+	if len(problems) == 0 {
+		return nil
+	}
+	for _, p := range problems {
+		_, _ = fmt.Fprintln(out, "  "+p)
+	}
+	return fmt.Errorf("%d problem(s) in %s", len(problems), what)
+}
+
 func check(err error, what string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: FAIL\n%v\n", what, err)
@@ -288,14 +301,22 @@ func fail(format string, args ...any) {
 	os.Exit(2)
 }
 
+// repoRoot walks up from the working directory to the directory holding
+// go.mod, so every command reads the repository from its root, run from
+// any directory under it. The gates that list files still need git.
 func repoRoot() (string, error) {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	cwd, err := os.Getwd()
 	if err != nil {
-		// Not a git checkout: fall back to the working directory, so the
-		// gates still run from a source archive.
-		return os.Getwd()
+		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	for dir := cwd; ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		if filepath.Dir(dir) == dir {
+			return "", fmt.Errorf("no go.mod in %s or above it", cwd)
+		}
+	}
 }
 
 func coverageCmd(args []string) {

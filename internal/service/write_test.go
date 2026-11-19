@@ -630,6 +630,67 @@ func TestAnOccurrenceIsAddressableByItsScheduledStart(t *testing.T) {
 	}
 }
 
+// A move into a calendar that shows the event to someone outside the
+// organization is refused, and writes nothing; one whose sharing cannot
+// be read goes through, saying so (#43).
+func TestMoveEventComparesWhoCanSeeTheTwoCalendars(t *testing.T) {
+	t.Run("wider", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+			gcal.AclRule{ID: "user:partner@elsewhere.test", Role: gcal.RoleReader,
+				Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "partner@elsewhere.test"}})
+		for _, dry := range []bool{true, false} {
+			_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team", DryRun: dry,
+			})
+			if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "partner@elsewhere.test") {
+				t.Errorf("dry_run=%v: a move into a calendar an outsider reads = %v, want [blocked] naming them", dry, err)
+			}
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("a refused move wrote %+v", w)
+		}
+	})
+	t.Run("the source unreadable", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+			gcal.AclRule{ID: "default", Role: gcal.RoleReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}})
+		fake.Fail["GET /calendars/me@example.test/acl"] = 403
+		_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "could not be read to compare") {
+			t.Errorf("a wider move from a calendar whose sharing cannot be read = %v, want [blocked] saying so", err)
+		}
+	})
+	t.Run("a transient failure", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.Fail["GET /calendars/team@group.calendar.example.test/acl"] = 503
+		_, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if classOf(t, err) != gapi.ClassUnavailable {
+			t.Errorf("a move whose sharing read failed transiently = %v, want [unavailable], not a skipped check", err)
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("the move went through: %+v", w)
+		}
+	})
+	t.Run("unreadable", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.Fail["GET /calendars/team@group.calendar.example.test/acl"] = 403
+		out, err := svc.MoveEvent(context.Background(), service.MoveOptions{
+			Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
+		})
+		if err != nil {
+			t.Fatalf("a move into a calendar whose sharing cannot be read: %v", err)
+		}
+		if !strings.Contains(strings.Join(out.Notes, "\n"), "Could not read who can see \"Sample Team\"") {
+			t.Errorf("the move does not say it could not compare: %v", out.Notes)
+		}
+	})
+}
+
 // A rule whose occurrences fall by the local date, BYMONTHDAY=31, is
 // counted in the series' own zone however the call reads it: from Tokyo,
 // 20:00 in Los Angeles is already the next day, and a count walked there
@@ -754,6 +815,68 @@ func TestCancelThisAndFollowingCountsInTheSeriesZone(t *testing.T) {
 	if want := "RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=6 → RRULE:FREQ=MONTHLY;BYMONTHDAY=31;COUNT=2"; !strings.Contains(out.Text(), want) {
 		t.Errorf("the cancel does not truncate to the two occurrences before 31 May in Los Angeles, %q:\n%s", want, out.Text())
 	}
+}
+
+// visibility:public is refused on a calendar whose free/busy is shared
+// with anyone, on create and on an update that makes an event public; on
+// a calendar shared only with readers it goes through (#42).
+func TestPublicVisibilityIsRefusedWhereOnlyFreeBusyWasShared(t *testing.T) {
+	freeBusy := gcal.AclRule{ID: "default", Role: gcal.RoleFreeBusyReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}}
+	public := gcal.VisibilityPublic
+	create := service.CreateOptions{Calendar: "primary", Title: "Planning",
+		Start: "2026-03-19T10:00:00+01:00", End: "2026-03-19T11:00:00+01:00", Visibility: public}
+	t.Run("create", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"], freeBusy)
+		_, err := svc.CreateEvent(context.Background(), create)
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "ANYONE") {
+			t.Errorf("a public event where anyone sees free/busy = %v, want [blocked] naming them", err)
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("the refused create wrote %+v", w)
+		}
+	})
+	t.Run("create, in another case", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"], freeBusy)
+		o := create
+		o.Visibility = " Public "
+		if _, err := svc.CreateEvent(context.Background(), o); classOf(t, err) != gapi.ClassBlocked {
+			t.Errorf("visibility %q where anyone sees free/busy = %v, want [blocked]", o.Visibility, err)
+		}
+	})
+	for name, o := range map[string]service.UpdateOptions{
+		"update": {Calendar: "primary", EventID: "evsolo00001", Visibility: ptr("PUBLIC")},
+		"this and following": {Calendar: "primary", EventID: "evseries001", OriginalStart: "2026-03-31T14:00:00+02:00",
+			Scope: "this_and_following", Visibility: &public},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, fake := writeSeed(t)
+			fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"], freeBusy)
+			if _, err := svc.UpdateEvent(context.Background(), o); classOf(t, err) != gapi.ClassBlocked {
+				t.Errorf("making an event public where anyone sees free/busy = %v, want [blocked]", err)
+			}
+			if w := fake.Wrote(); len(w) != 0 {
+				t.Errorf("the refused update wrote %+v", w)
+			}
+		})
+	}
+	t.Run("unreadable", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.Fail["GET /calendars/me@example.test/acl"] = 403
+		out, err := svc.CreateEvent(context.Background(), create)
+		if err != nil || !strings.Contains(strings.Join(out.Notes, "\n"), "did not check whether a public event") {
+			t.Errorf("a public event where the sharing cannot be read = %v, %v; want it made, saying so", err, out.Notes)
+		}
+	})
+	t.Run("readers only", func(t *testing.T) {
+		svc, fake := writeSeed(t)
+		fake.ACL["me@example.test"] = append(fake.ACL["me@example.test"],
+			gcal.AclRule{ID: "default", Role: gcal.RoleReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}})
+		if _, err := svc.CreateEvent(context.Background(), create); err != nil {
+			t.Errorf("a public event where anyone reads already: %v", err)
+		}
+	})
 }
 
 func TestAnOriginalStartThatNamesNoOccurrenceSaysWhy(t *testing.T) {
@@ -1094,16 +1217,17 @@ func TestAWriteSpendsTheRequestsItShould(t *testing.T) {
 			})
 			return err
 		}, "list, settings, read, delete"},
-		// Five, not four: the event is read back from the destination,
-		// because a successful move answers with status:cancelled and
-		// the result would otherwise report a moved meeting as a
-		// canceled one.
-		{"move", 5, func(s *service.Service) error {
+		// The event is read back from the destination, because a
+		// successful move answers with status:cancelled, and the
+		// destination's sharing is read to compare who can see it; the
+		// source's is read only when the destination has a wide rule
+		// (D-91).
+		{"move", 6, func(s *service.Service) error {
 			_, err := s.MoveEvent(context.Background(), service.MoveOptions{
 				Calendar: "primary", EventID: "evsolo00001", ToCalendar: "Sample Team",
 			})
 			return err
-		}, "list, settings, read, move, read back"},
+		}, "list, settings, read, the destination's sharing, move, read back"},
 		{"respond", 4, func(s *service.Service) error {
 			_, err := s.RespondToEvent(context.Background(), service.RespondOptions{
 				Calendar: "primary", EventID: "evinvite001", Response: "accepted", Notify: "all",
@@ -1742,9 +1866,10 @@ func TestAMoveStraightBackIsMadeAfterOneFreshRead(t *testing.T) {
 		"server read it") {
 		t.Fatalf("the result does not say the move was made on its second try:\n%s", out.Text())
 	}
-	// Read, refused move, read, move, read back: both tries are counted.
-	if out.Requests != 5 {
-		t.Fatalf("api_requests = %d, want 5", out.Requests)
+	// Read, the destination's sharing, refused move, the same again, move,
+	// read back: both tries are counted.
+	if out.Requests != 7 {
+		t.Fatalf("api_requests = %d, want 7", out.Requests)
 	}
 }
 
@@ -2715,37 +2840,24 @@ func statusSeries(t *testing.T, fake *caltest.Server, id, eventType string, bloc
 	return occID
 }
 
-// A split of an out-of-office series that declines every meeting makes
-// a new series that declines them too, and the result says so. A dry
-// run says it and writes nothing.
-func TestASplitThatDeclinesEveryMeetingSaysSo(t *testing.T) {
+// A this_and_following split of a series that declines every meeting is
+// refused, even one that keeps the times: Google resets the exceptions
+// after it, so a canceled later occurrence would come back declining
+// (#41). A dry run is refused too, and neither writes.
+func TestASplitOfASeriesThatDeclinesEveryMeetingIsRefused(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ := statusSeries(t, fake, "evaway00001", gcal.EventTypeOutOfOffice,
 		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll}, false)
-	o := service.UpdateOptions{
-		Calendar: "primary", EventID: occ, Scope: "this_and_following", End: "2026-03-31T19:00:00+02:00",
+	for _, dry := range []bool{true, false} {
+		_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+			Calendar: "primary", EventID: occ, Scope: "this_and_following", Title: ptr("Away from here on"), DryRun: dry,
+		})
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "scope:series") {
+			t.Errorf("dry_run=%v: a split of a decline-all series = %v, want [blocked] naming scope:series", dry, err)
+		}
 	}
-	const declines = "Google declines every meeting this overlaps, including the ones you already accepted"
-
-	dry := o
-	dry.DryRun = true
-	out, err := svc.UpdateEvent(context.Background(), dry)
-	if err != nil {
-		t.Fatalf("dry run: %v", err)
-	}
-	if !strings.Contains(out.Text(), declines) || len(fake.Wrote()) != 0 {
-		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
-	}
-
-	out, err = svc.UpdateEvent(context.Background(), o)
-	if err != nil {
-		t.Fatalf("UpdateEvent: %v", err)
-	}
-	if !strings.Contains(out.Text(), declines) {
-		t.Errorf("the result does not say what the new series declines:\n%s", out.Text())
-	}
-	if w := fake.Wrote(); len(w) != 2 || w[0].Method != "patch" || w[1].Method != "insert" {
-		t.Fatalf("got writes %+v, want a truncate and an insert", w)
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Errorf("a refused split wrote %+v", w)
 	}
 }
 
@@ -2917,42 +3029,32 @@ func declining(t *testing.T, fake *caltest.Server, id, eventType, rule string) s
 const weeklyFour = "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"
 
 // A change that leaves an out-of-office event declining every meeting
-// over time it did not cover says Google may decline the meetings in
-// that time. A dry run says it and writes nothing.
-func TestACoverThatGrowsIsSaid(t *testing.T) {
+// over time it did not cover is refused, naming create_event_declining_all,
+// which alone may decline the meetings already in a time (#41). A dry
+// run is refused too, and neither writes.
+func TestACoverThatGrowsIsRefused(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ := declining(t, fake, "evaway00005", gcal.EventTypeOutOfOffice, weeklyFour)
 	o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: "instance", End: "2026-03-31T19:00:00+02:00"}
-
-	dry := o
-	dry.DryRun = true
-	out, err := svc.UpdateEvent(context.Background(), dry)
-	if err != nil {
-		t.Fatalf("dry run: %v", err)
+	for _, dry := range []bool{true, false} {
+		o.DryRun = dry
+		_, err := svc.UpdateEvent(context.Background(), o)
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "create_event_declining_all") {
+			t.Errorf("dry_run=%v: a cover that grows = %v, want [blocked] naming create_event_declining_all", dry, err)
+		}
 	}
-	if !strings.Contains(out.Text(), coversMore) || len(fake.Wrote()) != 0 {
-		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
-	}
-
-	out, err = svc.UpdateEvent(context.Background(), o)
-	if err != nil {
-		t.Fatalf("UpdateEvent: %v", err)
-	}
-	if !strings.Contains(out.Text(), coversMore) {
-		t.Errorf("the result does not say the event covers more:\n%s", out.Text())
-	}
-	if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" || w[0].EventID != occ {
-		t.Fatalf("got writes %+v, want one patch of the occurrence", w)
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Errorf("a refused change wrote %+v", w)
 	}
 }
 
-// coversMore is what a result says of a change that makes an event that
-// declines every meeting cover more time.
-const coversMore = "This change covers time the event did not, and the event declines every meeting it overlaps."
+// coversMore is what the refusal says of a change that makes an event
+// that declines every meeting cover more time.
+const coversMore = "cover time it did not"
 
-// Every way a change can make such an event cover more is said: moved,
+// Every way a change can make such an event cover more is refused: moved,
 // made longer, repeated more, or made to repeat at all.
-func TestEveryCoverThatGrowsIsSaid(t *testing.T) {
+func TestEveryCoverThatGrowsIsRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name, eventType, rule, scope string
 		change                       func(*service.UpdateOptions)
@@ -2983,12 +3085,12 @@ func TestEveryCoverThatGrowsIsSaid(t *testing.T) {
 			occ := declining(t, fake, "evaway00006", tc.eventType, tc.rule)
 			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
 			tc.change(&o)
-			out, err := svc.UpdateEvent(context.Background(), o)
-			if err != nil {
-				t.Fatalf("UpdateEvent: %v", err)
+			_, err := svc.UpdateEvent(context.Background(), o)
+			if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), coversMore) {
+				t.Fatalf("UpdateEvent = %v, want [blocked] saying the event would cover more", err)
 			}
-			if !strings.Contains(out.Text(), coversMore) {
-				t.Fatalf("the result does not say the event covers more:\n%s", out.Text())
+			if w := fake.Wrote(); len(w) != 0 {
+				t.Errorf("a refused change wrote %+v", w)
 			}
 		})
 	}
@@ -2999,14 +3101,11 @@ func TestEveryCoverThatGrowsIsSaid(t *testing.T) {
 	one.EventType, one.Transparency = gcal.EventTypeOutOfOffice, gcal.TransparencyOpaque
 	one.OutOfOfficeProperties = gcal.Raw(gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll})
 	fake.AddEvent("me@example.test", one)
-	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: one.ID, Recurrence: &[]string{"RRULE:FREQ=WEEKLY;COUNT=2"},
 	})
-	if err != nil {
-		t.Fatalf("made to repeat: %v", err)
-	}
-	if !strings.Contains(out.Text(), coversMore) {
-		t.Fatalf("made to repeat: the result does not say the event covers more:\n%s", out.Text())
+	if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), coversMore) {
+		t.Fatalf("made to repeat = %v, want [blocked] saying the event would cover more", err)
 	}
 }
 
@@ -3051,12 +3150,9 @@ func TestACoverThatOnlyShrinksSaysNothingOfDeclines(t *testing.T) {
 			}
 			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
 			tc.change(&o)
-			out, err := svc.UpdateEvent(context.Background(), o)
+			_, err := svc.UpdateEvent(context.Background(), o)
 			if err != nil {
 				t.Fatalf("UpdateEvent: %v", err)
-			}
-			if strings.Contains(out.Text(), coversMore) {
-				t.Fatalf("the result says the event covers more:\n%s", out.Text())
 			}
 			if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" {
 				t.Fatalf("got writes %+v, want one patch", w)

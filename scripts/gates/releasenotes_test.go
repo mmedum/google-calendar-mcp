@@ -191,3 +191,29 @@ func TestAFencedExampleDoesNotEndTheSection(t *testing.T) {
 		t.Fatalf("the fenced example was rewritten:\n%s", body)
 	}
 }
+
+// A section is notes only when it holds an entry, a bullet at the margin
+// outside fenced code, and only a semver version has a section.
+func TestASectionWithNoEntryOrAVersionNotSemverIsRefused(t *testing.T) {
+	for _, c := range []struct {
+		name, version, changelog, want string
+	}{
+		{"headings only", "1.2.0", "## [1.2.0] - 2026-11-18\n\n### Fixed\n\n", "holds no entry"},
+		{"prose only", "1.2.0", "## [1.2.0] - 2026-11-18\n\nNothing much.\n", "holds no entry"},
+		{"an indented bullet", "1.2.0", "## [1.2.0] - 2026-11-18\n\n  - nested\n", "holds no entry"},
+		{"a bullet in a fence", "1.2.0", "## [1.2.0] - 2026-11-18\n\n```\n- not an entry\n```\n", "holds no entry"},
+		{"a leading zero", "01.2.0", "## [01.2.0] - 2026-11-18\n\n- An entry.\n", "not a semver version"},
+		{"two parts", "1.2", "## [1.2] - 2026-11-18\n\n- An entry.\n", "not a semver version"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := releaseNotes(c.version, write(t, c.changelog), &out)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("releaseNotes(%s) = %v, want an error saying %q", c.version, err, c.want)
+			}
+		})
+	}
+	if got := notes(t, "v1.2.0-rc.1", write(t, "## [1.2.0-rc.1] - 2026-11-18\n\n* An entry.\n")); !strings.Contains(got, "An entry.") {
+		t.Errorf("a prerelease with a * entry gave %q", got)
+	}
+}

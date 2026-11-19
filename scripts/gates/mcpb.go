@@ -73,6 +73,10 @@ type staged struct {
 	// names appear in a shell script no manifest mentions, so nothing
 	// else can check them.
 	launched bool
+	// goos and goarch are the build a launched binary must come from:
+	// the launcher picks it by machine, so a glob that resolves to the
+	// other architecture ships a binary that cannot start.
+	goos, goarch string
 }
 
 // program reports whether the bundle runs the file: an entry point or a
@@ -104,8 +108,10 @@ var bundleFiles = []staged{
 	{path: "server/google-calendar-mcp-darwin", glob: "dist/*universal*darwin*/google-calendar-mcp", platform: "darwin"},
 	{path: "server/google-calendar-mcp.exe", glob: "dist/*windows_amd64*/google-calendar-mcp.exe", platform: "win32"},
 	{path: "server/launch-linux.sh", source: launcherPath, platform: "linux"},
-	{path: "server/google-calendar-mcp-linux-amd64", glob: "dist/*linux_amd64*/google-calendar-mcp", launched: true},
-	{path: "server/google-calendar-mcp-linux-arm64", glob: "dist/*linux_arm64*/google-calendar-mcp", launched: true},
+	{path: "server/google-calendar-mcp-linux-amd64", glob: "dist/*linux_amd64*/google-calendar-mcp", launched: true,
+		goos: "linux", goarch: "amd64"},
+	{path: "server/google-calendar-mcp-linux-arm64", glob: "dist/*linux_arm64*/google-calendar-mcp", launched: true,
+		goos: "linux", goarch: "arm64"},
 	// The license, because the bundle redistributes the binaries as the
 	// archives do, and the README, as in the archives.
 	{path: "LICENSE", source: "LICENSE"},
