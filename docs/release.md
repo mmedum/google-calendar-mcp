@@ -53,6 +53,9 @@ a change touches what it checks:
   all beside it with `create_event_declining_all`, then call
   `update_event` to lengthen it over the meeting. Check the refusal, and
   that the meeting is still accepted.
+- **Working hours (D-93).** On a Workspace account, call `get_calendar`
+  on the primary calendar, check its working hours match Calendar's
+  settings, and note the zone they read in.
 - **A home working location.** Call `create_event` with event_type
   `workingLocation` and a home location on the primary calendar of the
   second account, then `get_event`, and check the body Google kept.

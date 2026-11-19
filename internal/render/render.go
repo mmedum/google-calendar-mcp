@@ -268,6 +268,12 @@ func Reminders(r model.Reminders) string {
 	return strings.Join(parts, ", ")
 }
 
+// Clock renders minutes from the start of a day as "09:00"; the end of
+// the day is "24:00".
+func Clock(minutes int) string {
+	return when.TimeOfDay{Hour: minutes / 60, Minute: minutes % 60}.String()
+}
+
 // before is a reminder's lead time in the largest whole unit.
 func before(minutes int) string {
 	unit := func(n int, word string) string {

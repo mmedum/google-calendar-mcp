@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -983,4 +984,108 @@ func TestADryRunDoesNotPrintTheOldPrivateName(t *testing.T) {
 	if !strings.Contains(text, "My new private name") {
 		t.Fatalf("the dry run does not show the new private name:\n%s", text)
 	}
+}
+
+// get_calendar shows a primary calendar's working hours, which only the
+// calendar resource carries, and says when they are off; a secondary
+// calendar has none, so its resource is not read for them (D-93).
+func TestCalendarDetailShowsAPrimaryCalendarsWorkingHours(t *testing.T) {
+	const team = "team@group.calendar.example.test"
+	week := &gcal.WorkingHours{Enabled: true, AvailableTimes: []gcal.WorkingPeriod{
+		{DayOfWeek: "monday", PeriodStart: 540, PeriodEnd: 1020},
+		{DayOfWeek: "friday", PeriodStart: 480, PeriodEnd: 1440},
+	}}
+	for _, c := range []struct {
+		name  string
+		hours *gcal.WorkingHours
+		line  string
+		want  *service.WorkingHoursOut
+	}{
+		{"set", week, "  working hours: monday 09:00-17:00, friday 08:00-24:00\n", &service.WorkingHoursOut{
+			Enabled: true, Periods: []service.WorkingPeriodOut{
+				{Day: "monday", Start: "09:00", End: "17:00"}, {Day: "friday", Start: "08:00", End: "24:00"},
+			},
+		}},
+		{"off", &gcal.WorkingHours{}, "  working hours: off\n",
+			&service.WorkingHoursOut{Enabled: false, Periods: []service.WorkingPeriodOut{}}},
+		{"off, with the periods Google kept", &gcal.WorkingHours{AvailableTimes: week.AvailableTimes[:1]},
+			"  working hours: off (kept: monday 09:00-17:00)\n", &service.WorkingHoursOut{
+				Enabled: false, Periods: []service.WorkingPeriodOut{{Day: "monday", Start: "09:00", End: "17:00"}},
+			}},
+		{"none kept", nil, "", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			fake.Calendars["me@example.test"].WorkingHours = c.hours
+			fake.Calendars[team].WorkingHours = week
+			got, err := svc.CalendarDetail(context.Background(), "primary")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.WorkingHours, c.want) {
+				t.Errorf("get_calendar primary gave working_hours %+v, want %+v", got.WorkingHours, c.want)
+			}
+			if c.line != "" && !strings.Contains(got.Render(), c.line) {
+				t.Errorf("get_calendar primary renders\n%s\nwant a line %q", got.Render(), c.line)
+			}
+			if c.line == "" && strings.Contains(got.Render(), "working hours") {
+				t.Errorf("get_calendar primary with none kept renders\n%s\nwant no working hours line", got.Render())
+			}
+
+			before := len(fake.Served())
+			sec, err := svc.CalendarDetail(context.Background(), team)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sec.WorkingHours != nil || strings.Contains(sec.Render(), "working hours") {
+				t.Errorf("a secondary calendar reported working hours: %+v", sec.WorkingHours)
+			}
+			for _, p := range fake.Served()[before:] {
+				if p == "GET /calendars/"+team {
+					t.Errorf("get_calendar on a secondary read its calendar resource: %v", fake.Served()[before:])
+				}
+			}
+		})
+	}
+}
+
+// The working hours are one line of the card: a failed read of them is a
+// note, and the card is still answered. A consumer account is not asked,
+// since Google keeps working hours only for Workspace users (D-93).
+func TestCalendarDetailWorkingHoursNeverCostTheCard(t *testing.T) {
+	t.Run("a failed read is a note", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		// The fake fails by prefix, which takes in the ACL read too; with
+		// sharing off, the resource read is the only one it reaches.
+		svc.Cfg.Sharing = false
+		fake.Fail = map[string]int{"GET /calendars/me@example.test": 503}
+		got, err := svc.CalendarDetail(context.Background(), "primary")
+		if err != nil {
+			t.Fatalf("get_calendar primary with its resource unreadable = %v, want the card with a note", err)
+		}
+		const want = "Could not read this calendar's working hours [unavailable], so they are not shown."
+		if got.WorkingHours != nil || !strings.Contains(got.Note, want) || !strings.Contains(got.Render(), want) {
+			t.Errorf("get_calendar primary gave working_hours %+v, note %q, text\n%s\nwant no hours and the note %q",
+				got.WorkingHours, got.Note, got.Render(), want)
+		}
+	})
+	t.Run("a consumer account is not asked", func(t *testing.T) {
+		account := "me" + "@gmail.com"
+		fake := caltest.New()
+		fake.AddCalendar(account, "Sample Primary", "UTC", gcal.RoleOwner, true)
+		fake.Calendars[account].WorkingHours = &gcal.WorkingHours{Enabled: true}
+		svc := newService(t, fake)
+		got, err := svc.CalendarDetail(context.Background(), "primary")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range fake.Served() {
+			if p == "GET /calendars/"+account {
+				t.Errorf("get_calendar on a consumer primary read its calendar resource: %v", fake.Served())
+			}
+		}
+		if got.WorkingHours != nil {
+			t.Errorf("get_calendar on a consumer primary gave working_hours %+v, want none", got.WorkingHours)
+		}
+	})
 }

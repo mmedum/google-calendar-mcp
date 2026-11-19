@@ -100,6 +100,9 @@ type CalendarResult struct {
 	// uses the calendar's own. Absent when the calendar is not on this
 	// account's list, the only place Google keeps them.
 	DefaultReminders *DefaultRemindersOut `json:"default_reminders,omitempty"`
+	// WorkingHours is present only on a primary calendar Google keeps
+	// working hours on, which it does for a Workspace user.
+	WorkingHours *WorkingHoursOut `json:"working_hours,omitempty"`
 	// Sharing is empty when the ACL scope was not granted, and Note says
 	// so rather than letting an empty list read as "shared with nobody":
 	// the ACL read needs a scope of its own.
@@ -164,11 +167,68 @@ func newCalendarResult(c model.Calendar) CalendarResult {
 	if r := c.DefaultReminders; r != nil {
 		fmt.Fprintf(&b, "  default reminders: %s\n", render.Reminders(*r))
 	}
+	hours := newWorkingHoursOut(c.WorkingHours)
+	if hours != nil {
+		fmt.Fprintf(&b, "  working hours: %s\n", hours.line())
+	}
 	b.WriteString("\n")
 	return CalendarResult{
 		Calendar: newCalendarOut(c), Description: c.Description,
-		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders), text: b.String(),
+		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders),
+		WorkingHours:     hours, text: b.String(),
 	}
+}
+
+// addNote appends a note to the reply, in both halves.
+func (r *CalendarResult) addNote(note string) {
+	r.Note = strings.TrimSpace(r.Note + " " + note)
+	r.text += note + "\n"
+}
+
+// WorkingHoursOut is a calendar's working hours. Each period's start and
+// end are "hh:mm" from the start of its day, as Google keeps them, with
+// no zone named.
+type WorkingHoursOut struct {
+	Enabled bool               `json:"enabled"`
+	Periods []WorkingPeriodOut `json:"periods"`
+}
+
+// WorkingPeriodOut is one block of working hours on one weekday.
+type WorkingPeriodOut struct {
+	Day   string `json:"day"`
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+// line is the text's reading of the hours, from the same periods the
+// structured half carries; hours turned off still show what Google kept.
+func (h WorkingHoursOut) line() string {
+	parts := make([]string, 0, len(h.Periods))
+	for _, p := range h.Periods {
+		parts = append(parts, p.Day+" "+p.Start+"-"+p.End)
+	}
+	switch {
+	case !h.Enabled && len(parts) == 0:
+		return "off"
+	case !h.Enabled:
+		return "off (kept: " + strings.Join(parts, ", ") + ")"
+	case len(parts) == 0:
+		return "on, with no hours set"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func newWorkingHoursOut(h *gcal.WorkingHours) *WorkingHoursOut {
+	if h == nil {
+		return nil
+	}
+	out := &WorkingHoursOut{Enabled: h.Enabled, Periods: []WorkingPeriodOut{}}
+	for _, p := range h.AvailableTimes {
+		out.Periods = append(out.Periods, WorkingPeriodOut{
+			Day: p.DayOfWeek, Start: render.Clock(p.PeriodStart), End: render.Clock(p.PeriodEnd),
+		})
+	}
+	return out
 }
 
 // ScheduleResult is list_events and search_events.

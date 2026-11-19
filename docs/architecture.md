@@ -445,6 +445,7 @@ primary calendar beyond its one status event (D-72).
 | D-90 | A generic wrapper serves the write tools' handlers | rejected | — |
 | D-91 | A move that shows an event to a wider tier than its calendar did is refused | accepted | TestWiderReadersAreTheTiersTheSourceDoesNotCover, TestMoveEventComparesWhoCanSeeTheTwoCalendars |
 | D-92 | A public visibility is refused where it shows details to a tier that saw only free/busy | accepted | TestPublicReadersAreTheWideFreeBusyRules, TestPublicVisibilityIsRefusedWhereOnlyFreeBusyWasShared |
+| D-93 | Working hours are shown, not used as check_availability's mask | accepted | TestCalendarDetailShowsAPrimaryCalendarsWorkingHours |
 
 ### D-01 One stdio binary per person, on the deployer's own OAuth client
 
@@ -2687,4 +2688,25 @@ Rejected: a gated tool for a public event on such a calendar, for the
 reason D-91 gives for the wider move.
 Cost: one ACL read on a write that sets public.
 
-Next ID: D-93
+### D-93 Working hours are shown, not used as check_availability's mask
+
+Google keeps a Workspace user's working hours on their primary calendar
+resource (`Calendar.workingHours`, revision 20261115), which the
+calendar list does not carry. `get_calendar` reads that resource for a
+primary calendar and shows the hours as Google keeps them: minutes from
+the start of each weekday. The discovery document names no zone for
+them, so the result names none. A consumer account is not asked, since
+Google documents the hours for Workspace users only, and a failed read
+is a note on the card rather than a failure of it.
+
+`check_availability` takes its mask only from the caller. A mask read
+from the calendar would change what an existing call returns, hiding
+every gap outside the hours, and the hours' zone is unverified. A
+caller that wants them reads them here and passes them.
+
+Rejected: masking by the calendar's hours when the caller passes none,
+which changes results with no input asking for it; an input that opts
+into them, until the manual check in `docs/release.md` settles the zone.
+Cost: one calendar read per `get_calendar` on a Workspace primary calendar.
+
+Next ID: D-94

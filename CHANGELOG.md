@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - `GCAL_ORG_DOMAINS` names your organization's mail domains for `share_calendar`, so a personal account at another mail provider stops sharing with its customers as colleagues.
+- `get_calendar` shows a Workspace primary calendar's working hours, as text and as `working_hours`.
 
 ### Changed
 

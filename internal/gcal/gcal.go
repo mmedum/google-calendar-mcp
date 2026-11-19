@@ -458,7 +458,29 @@ type Calendar struct {
 	// accepts, which is what create_event checks before asking for a
 	// Meet link.
 	ConferenceProperties *ConferenceProperties `json:"conferenceProperties,omitempty"`
-	ETag                 string                `json:"etag,omitempty"`
+	// WorkingHours is set only on a Workspace user's primary calendar
+	// (Calendar.workingHours, revision 20261115). get_calendar shows it;
+	// check_availability takes its mask from the caller (D-93).
+	WorkingHours *WorkingHours `json:"workingHours,omitempty"`
+	ETag         string        `json:"etag,omitempty"`
+}
+
+// WorkingHours is a user's weekly working hours. Each period is in
+// minutes "from the start of the day", its end "exclusive"
+// (WorkingHours.availableTimes, revision 20261115,
+// https://calendar-json.googleapis.com/$discovery/rest?version=v3), which
+// names no zone. An absent Enabled reads as false, as JSON omits a false
+// boolean; the working-hours check in docs/release.md verifies both.
+type WorkingHours struct {
+	Enabled        bool            `json:"workingHoursEnabled,omitempty"`
+	AvailableTimes []WorkingPeriod `json:"availableTimes,omitempty"`
+}
+
+// WorkingPeriod is one block of working hours on one weekday.
+type WorkingPeriod struct {
+	DayOfWeek   string `json:"dayOfWeek"`
+	PeriodStart int    `json:"periodStart"`
+	PeriodEnd   int    `json:"periodEnd"`
 }
 
 // ConferenceProperties is a calendar's conference capability.
