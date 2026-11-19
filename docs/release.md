@@ -43,7 +43,8 @@ a change touches what it checks:
   second account, outside the organization, as a member, call
   `share_calendar` on a scratch calendar with that group, and check the
   refusal counts the member. Call `check_availability` on the group and
-  check its members are listed, which is what the check reads.
+  check it reports the group's calendar count, since the check reads the
+  same expansion.
 - **A group past 50 calendars (D-34).** With a group of more than 50
   members, call `check_availability` on it and check every member is
   answered or reported unknown.
