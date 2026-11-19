@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-11-19
+
 ### Added
 
 - `GCAL_ORG_DOMAINS` names your organization's mail domains for `share_calendar`, so a personal account at another mail provider stops sharing with its customers as colleagues.
@@ -1097,7 +1099,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to re-confirm what the discovery document states. §18 row 24 has the
   reasoning and why the consequence is contained.
 
-[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v5.1.1...HEAD
+[Unreleased]: https://github.com/mmedum/google-calendar-mcp/compare/v5.2.0...HEAD
+[5.2.0]: https://github.com/mmedum/google-calendar-mcp/compare/v5.1.1...v5.2.0
 [5.1.1]: https://github.com/mmedum/google-calendar-mcp/compare/v5.1.0...v5.1.1
 [5.1.0]: https://github.com/mmedum/google-calendar-mcp/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/mmedum/google-calendar-mcp/compare/v4.1.0...v5.0.0
