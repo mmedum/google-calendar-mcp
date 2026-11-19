@@ -147,9 +147,9 @@ func registerWrite(s *mcp.Server, d Deps) {
 			"whether the link came back or is still being made. It cannot go with `this_and_following`. " +
 			"A status event takes no guests, rooms or Meet link, and a change to one that Google's rules " +
 			"for it refuse is refused before anything is written. An out-of-office or focus-time event that " +
-			"declines every overlapping meeting declines in the time a change adds to it: moved, made longer or " +
-			"repeated more. A change that only shortens it adds no time. With `this_and_following`, such a " +
-			"series starts a new series that declines them too. " +
+			"declines every overlapping meeting is refused a change that adds time to it, moved, made longer or " +
+			"repeated more, and any `this_and_following` split, since Google may decline the meetings in the new " +
+			"time; create_event_declining_all makes one. A change that only shortens it adds no time. " +
 			"Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
 		Kind: IdempotentWrite,
 		Handle: func(ctx context.Context, in updateEventIn) (service.WriteResult, error) {

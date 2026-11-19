@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gapi"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/gcal"
@@ -163,7 +164,8 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 	// exception is a rule the calendar already has, which this tool may
 	// keep or lower whatever it reaches, since that widens nothing.
 	wider := plan.OrdinaryAudience(audience, s.outside(ctx, audience))
-	if _, had := plan.FindRule(before, audience); !had && wider != nil {
+	_, had := plan.FindRule(before, audience)
+	if !had && wider != nil {
 		return render.SharingReport{}, classifyPlan(wider)
 	}
 	role, err := plan.ParseRole(o.Role)
@@ -182,7 +184,56 @@ func (s *Service) ShareCalendar(ctx context.Context, o ShareOptions) (render.Sha
 	if err != nil {
 		return render.SharingReport{}, classifyPlan(err)
 	}
-	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, nil)
+	// A group's members are read whenever the share gives the group more
+	// than it had, a raised role included, and after the cheap refusals.
+	var notes []string
+	if audience.Scope.Type == gcal.ScopeTypeGroup && !plan.WithinRule(before, audience, role) {
+		note, err := s.groupInside(ctx, audience.Scope.Value)
+		if err != nil {
+			return render.SharingReport{}, err
+		}
+		if note != "" {
+			notes = append(notes, note)
+		}
+	}
+	return s.grant(ctx, cal, before, audience, role, notify, o.DryRun, notes)
+}
+
+// groupInside refuses a group share when one of the group's members is
+// outside the organization, since the share reaches every member (#44),
+// and returns a note when the members could not all be read. Calendar's
+// scope shows a group's members only through freebusy.query, which
+// answers a group with "calendars' identifiers within a group", or an
+// error for one past groupExpansionMax, at most 100 (discovery,
+// FreeBusyGroup and FreeBusyRequest, revision 20261113,
+// https://calendar-json.googleapis.com/$discovery/rest?version=v3). No
+// live step reaches a real group (#49).
+func (s *Service) groupInside(ctx context.Context, group string) (string, error) {
+	now := s.Clock()
+	resp, err := s.API.QueryFreeBusy(ctx, &gcal.FreeBusyRequest{
+		TimeMin: now.UTC().Format(time.RFC3339), TimeMax: now.Add(time.Minute).UTC().Format(time.RFC3339),
+		TimeZone: "UTC", GroupExpansionMax: maxGroupMembers,
+		Items: []gcal.FreeBusyRequestItem{{ID: strings.ToLower(group)}},
+	})
+	if err != nil {
+		return "", err
+	}
+	var g gcal.FreeBusyGroup
+	ok := false
+	for key, answer := range resp.Groups {
+		if strings.EqualFold(key, group) {
+			g, ok = answer, true
+		}
+	}
+	// A group answered with no members is no reading of who is in it.
+	if !ok || len(g.Errors) > 0 || len(g.Calendars) == 0 {
+		return render.Sentence("Could not read who is in " + group + ", so this share did not check that every " +
+			"member is inside your organization."), nil
+	}
+	if err := plan.GroupAudience(group, g.Calendars, s.primaryID(ctx), s.Cfg.OrgDomains); err != nil {
+		return "", classifyPlan(err)
+	}
+	return "", nil
 }
 
 // PublishOptions is what publish_calendar takes.

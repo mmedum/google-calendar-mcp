@@ -31,13 +31,23 @@ func TestLeakRulesCatchTheirShapeAndAllowTheReserved(t *testing.T) {
 		{"OAuth client id",
 			"1234567890-" + strings.Repeat("a1", 16) + ".apps.googleusercontent.com",
 			"1234567890-" + strings.Repeat("a1", 9) + ".apps.googleusercontent.com"},
+		// A host matches in any case, as DNS reads it.
+		{"OAuth client id",
+			"1234567890-" + strings.Repeat("a1", 16) + ".APPS.googleusercontent.com",
+			"1234567890-" + strings.Repeat("a1", 9) + ".APPS.googleusercontent.com"},
 		{"Google API key", "AIza" + strings.Repeat("x", 35), "AIza" + strings.Repeat("x", 34)},
 		{"Google group calendar id",
 			strings.Repeat("c0", 10) + at + "group.calendar.google.com",
 			strings.Repeat("c0", 9) + "c" + at + "group.calendar.google.com"},
+		{"Google group calendar id",
+			strings.Repeat("c0", 10) + at + "Group.Calendar.Google.com",
+			strings.Repeat("c0", 9) + "c" + at + "Group.Calendar.Google.com"},
 		{"Google Calendar event URL",
 			"https://www.google.com/calendar/" + "event?eid=" + "QUJD",
 			"https://www.google.com/calendar/" + "r"},
+		{"Google Calendar event URL",
+			"https://WWW.Google.com/calendar/" + "event?eid=" + "QUJD",
+			"https://WWW.Google.com/calendar/" + "r"},
 		{"OAuth refresh token", "1//" + strings.Repeat("t", 20), "1//" + strings.Repeat("t", 19)},
 		{"Google Drive file link",
 			"https://drive.google.com/file/d/" + strings.Repeat("f", 20) + "/view",
@@ -91,14 +101,13 @@ func TestLeakGateRefusesATreeBelowTheFloor(t *testing.T) {
 		files int
 		ok    bool
 	}{{19, false}, {20, true}} {
-		dir := t.TempDir()
+		dir, _ := isolatedRepo(t)
 		for i := range tc.files {
 			name := filepath.Join(dir, fmt.Sprintf("f%02d.txt", i))
 			if err := os.WriteFile(name, []byte("nothing here\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
-		t.Chdir(dir)
 		err := leakGate(false)
 		if (err == nil) != tc.ok {
 			t.Errorf("%d files: err = %v, want ok=%v", tc.files, err, tc.ok)
@@ -108,7 +117,7 @@ func TestLeakGateRefusesATreeBelowTheFloor(t *testing.T) {
 
 // A finding anywhere in the tree fails the gate.
 func TestLeakGateFailsOnAFinding(t *testing.T) {
-	dir := t.TempDir()
+	dir, _ := isolatedRepo(t)
 	for i := range 20 {
 		body := "nothing here\n"
 		if i == 7 {
@@ -118,11 +127,22 @@ func TestLeakGateFailsOnAFinding(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Chdir(dir)
-	if err := leakGate(false); err == nil {
-		t.Fatal("a tree with a real-looking address passed")
+	if err := leakGate(false); err == nil || !strings.Contains(err.Error(), "f07.txt: email address") {
+		t.Fatalf("a tree with a real-looking address gave %v, want its finding", err)
 	}
 }
+
+// gitQuiet is the command-scope config every git a test runs carries,
+// which every config file yields to
+// (https://git-scm.com/docs/git-config#Documentation/git-config.txt-GITCONFIGCOUNT):
+// no command starts `git maintenance run --auto` after a write
+// (https://git-scm.com/docs/git-maintenance#Documentation/git-maintenance.txt-maintenanceauto),
+// and a command that runs `git gc --auto` itself finds no work
+// (https://git-scm.com/docs/git-gc#Documentation/git-gc.txt-gcauto).
+// Automatic maintenance runs detached and can still hold a lock in the
+// repository when the test removes its temporary directory.
+var gitQuiet = []string{"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=maintenance.auto", "GIT_CONFIG_VALUE_0=false",
+	"GIT_CONFIG_KEY_1=gc.auto", "GIT_CONFIG_VALUE_1=0"}
 
 // gitIn runs git in dir as Pat, with no global or system configuration,
 // so a person's hooks, signing or default branch never reach a test.
@@ -133,7 +153,7 @@ func gitIn(t *testing.T, dir string) func(args ...string) {
 		cmd := exec.Command("git", append([]string{"-c", "user.name=Pat", "-c", "user.email=pat" + "@" + "acme-sample.com"},
 			args...)...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+		cmd.Env = append(append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1"), gitQuiet...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -159,6 +179,11 @@ func isolatedRepo(t *testing.T) (string, func(args ...string)) {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", config)
+	// The gate's own git calls run without automatic maintenance too.
+	for _, kv := range gitQuiet {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
 	dir := t.TempDir()
 	t.Chdir(dir)
 	git := gitIn(t, dir)
@@ -272,4 +297,61 @@ func TestTheHistoryScanPassesATrailerNamingAnAuthor(t *testing.T) {
 			t.Errorf("a trailer naming an author only side reaches gave %q, %v; want a finding", got, err)
 		}
 	})
+}
+
+// TestIsolatedRepoTurnsAutomaticMaintenanceOff holds that git reads the
+// command-scope config isolatedRepo sets, for the gate's own git calls.
+func TestIsolatedRepoTurnsAutomaticMaintenanceOff(t *testing.T) {
+	isolatedRepo(t)
+	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
+		out, err := exec.Command("git", "config", "--get", key).Output()
+		if got := strings.TrimSpace(string(out)); err != nil || got != want {
+			t.Errorf("git config --get %s under isolatedRepo = %q, %v; want %q", key, got, err, want)
+		}
+	}
+}
+
+// A file git would commit is refused when it is a compiled executable or
+// binary past the limit, whatever its size, and so is such a blob in the
+// history; an ignored build output on disk is not.
+func TestABuiltBinaryIsAFindingWhereverGitWouldCommitIt(t *testing.T) {
+	elf := append([]byte("\x7fELF\x02\x01\x01\x00"), make([]byte, 3<<20)...)
+	big := append([]byte("PNG\x00"), make([]byte, maxBinary+1)...)
+	setup := func(t *testing.T) func(args ...string) {
+		t.Helper()
+		_, git := isolatedRepo(t)
+		for i := range 20 {
+			put(t, ".", fmt.Sprintf("f%02d.txt", i), "nothing here\n")
+		}
+		git("add", ".")
+		git("commit", "-q", "-m", "first")
+		return git
+	}
+
+	t.Run("ignored", func(t *testing.T) {
+		setup(t)
+		put(t, ".", ".gitignore", "/gates\n")
+		put(t, ".", "gates", string(elf))
+		if err := leakGate(false); err != nil {
+			t.Errorf("an ignored build output failed the tree scan: %v", err)
+		}
+	})
+	for name, data := range map[string][]byte{"an executable past 2 MiB": elf, "binary past the limit": big} {
+		t.Run(name, func(t *testing.T) {
+			git := setup(t)
+			put(t, ".", "scripts/gates/gates", string(data))
+			if err := leakGate(false); err == nil || !strings.Contains(err.Error(), "scripts/gates/gates: ") {
+				t.Errorf("an untracked artifact passed the tree scan: %v", err)
+			}
+			git("add", "scripts/gates/gates")
+			git("commit", "-q", "-m", "built")
+			if err := os.Remove(filepath.FromSlash("scripts/gates/gates")); err != nil {
+				t.Fatal(err)
+			}
+			got, _, err := scanHistory(leakRules())
+			if err != nil || !slices.ContainsFunc(got, func(f string) bool { return strings.HasPrefix(f, "blob scripts/gates/gates: ") }) {
+				t.Errorf("a committed artifact passed the history scan: %q, %v", got, err)
+			}
+		})
+	}
 }
