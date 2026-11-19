@@ -28,6 +28,8 @@ type Rendered interface {
 type CalendarsResult struct {
 	Calendars []CalendarOut `json:"calendars"`
 	Count     int           `json:"count"`
+
+	text string
 }
 
 // CalendarOut is one calendar in a structured reply.
@@ -53,20 +55,11 @@ type CalendarOut struct {
 }
 
 // Render implements Rendered.
-func (r CalendarsResult) Render() string {
-	cals := make([]model.Calendar, 0, len(r.Calendars))
-	for _, c := range r.Calendars {
-		cals = append(cals, model.Calendar{
-			ID: c.ID, Title: c.Title, Original: c.Original, TimeZone: c.TimeZone,
-			Role: c.Role, Primary: c.Primary, Selected: c.Selected, Hidden: c.Hidden,
-		})
-	}
-	return render.CalendarList(cals)
-}
+func (r CalendarsResult) Render() string { return r.text }
 
-// NewCalendarsResult builds the reply.
+// NewCalendarsResult builds the reply, both halves from the calendars.
 func NewCalendarsResult(cals []model.Calendar) CalendarsResult {
-	out := CalendarsResult{Count: len(cals)}
+	out := CalendarsResult{Count: len(cals), text: render.CalendarList(cals)}
 	for _, c := range cals {
 		out.Calendars = append(out.Calendars, newCalendarOut(c))
 	}
@@ -112,6 +105,8 @@ type CalendarResult struct {
 	// the ACL read needs a scope of its own.
 	Sharing []SharingOut `json:"sharing,omitempty"`
 	Note    string       `json:"note,omitempty"`
+
+	text string
 }
 
 // SharingOut is one ACL rule.
@@ -135,42 +130,45 @@ type SharingOut struct {
 func (r CalendarResult) Rendered() string { return r.Render() }
 
 // Render implements Rendered.
-func (r CalendarResult) Render() string {
-	var b strings.Builder
-	c := r.Calendar
-	b.WriteString(render.CalendarLine(model.Calendar{
-		ID: c.ID, Title: c.Title, Original: c.Original, TimeZone: c.TimeZone,
-		Role: c.Role, Primary: c.Primary, Selected: c.Selected, Hidden: c.Hidden,
-	}))
-	if r.Description != "" {
-		fmt.Fprintf(&b, "  %s\n", r.Description)
-	}
-	if d := r.DefaultReminders; d != nil {
-		fmt.Fprintf(&b, "  default reminders: %s\n", render.Reminders(model.Reminders{Popup: d.Popup, Email: d.Email}))
-	}
-	b.WriteString("\n")
-	if r.Note != "" {
-		b.WriteString(r.Note + "\n")
-		return b.String()
-	}
-	b.WriteString("who can see it:\n")
+func (r CalendarResult) Render() string { return r.text }
+
+// NewCalendarResult builds get_calendar's reply from the calendar and
+// the rules read for it, both halves from them.
+func NewCalendarResult(c model.Calendar, rules []model.Sharing) CalendarResult {
+	out := newCalendarResult(c)
+	out.Sharing = sharingOut(rules)
 	// The same renderer list_sharing and a share result use. Three
 	// printings of "who can see this calendar" is how one result comes to
 	// contradict another.
-	b.WriteString(render.Exposure(sharingModel(r.Sharing)))
-	return b.String()
+	out.text += "who can see it:\n" + render.Exposure(rules)
+	return out
 }
 
-// sharingModel turns the structured rows back into the model the
-// renderer reads, as CalendarsResult.Render does for calendars.
-func sharingModel(rows []SharingOut) []model.Sharing {
-	out := make([]model.Sharing, 0, len(rows))
-	for _, s := range rows {
-		out = append(out, model.Sharing{
-			RuleID: s.RuleID, ScopeType: s.ScopeType, Value: s.Value, Role: s.Role,
-		})
-	}
+// NewCalendarResultUnshared builds get_calendar's reply when the rules
+// were not read; note says why, so an empty list cannot read as "shared
+// with nobody".
+func NewCalendarResultUnshared(c model.Calendar, note string) CalendarResult {
+	out := newCalendarResult(c)
+	out.Note = note
+	out.text += note + "\n"
 	return out
+}
+
+// newCalendarResult is the calendar's half of get_calendar's reply.
+func newCalendarResult(c model.Calendar) CalendarResult {
+	var b strings.Builder
+	b.WriteString(render.CalendarLine(c))
+	if c.Description != "" {
+		fmt.Fprintf(&b, "  %s\n", c.Description)
+	}
+	if r := c.DefaultReminders; r != nil {
+		fmt.Fprintf(&b, "  default reminders: %s\n", render.Reminders(*r))
+	}
+	b.WriteString("\n")
+	return CalendarResult{
+		Calendar: newCalendarOut(c), Description: c.Description,
+		DefaultReminders: newDefaultRemindersOut(c.DefaultReminders), text: b.String(),
+	}
 }
 
 // ScheduleResult is list_events and search_events.

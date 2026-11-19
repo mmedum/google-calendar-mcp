@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/mmedum/google-calendar-mcp/v5/internal/render"
 	"github.com/mmedum/google-calendar-mcp/v5/internal/service"
 )
 
@@ -50,7 +51,7 @@ func registerResources(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, err
 		}
-		return contents(req.Params.URI, service.NewCalendarsResult(cals).Render()), nil
+		return contents(req.Params.URI, render.CalendarList(cals)), nil
 	})
 
 	// One handler for both templates, because the SDK routes a read to
