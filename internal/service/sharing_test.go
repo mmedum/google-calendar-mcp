@@ -310,6 +310,70 @@ func TestShareCalendarFollowsTheNamedOrganizationDomains(t *testing.T) {
 	}
 }
 
+// A group share reaches every member, so share_calendar refuses a group
+// with a member outside the organization, naming widen_calendar_access;
+// a group all inside is shared, and one whose members cannot be read is
+// shared with a note saying so (#44).
+func TestShareCalendarReadsAGroupsMembers(t *testing.T) {
+	share := service.ShareOptions{Calendar: "team@group.calendar.example.test", Who: "team@example.test",
+		ScopeType: gcal.ScopeTypeGroup, Role: "reader", Notify: "none"}
+	t.Run("an outside member", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.Groups = map[string][]string{"team@example.test": {"colleague@example.test", "partner@elsewhere.test"}}
+		_, err := svc.ShareCalendar(context.Background(), share)
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "1 of its 2 members") ||
+			!strings.Contains(err.Error(), "widen_calendar_access") {
+			t.Errorf("a group with an outside member = %v, want [blocked] counting it and naming widen_calendar_access", err)
+		}
+		if w := fake.Wrote(); len(w) != 0 {
+			t.Errorf("the refused share wrote %+v", w)
+		}
+	})
+	t.Run("all inside", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.Groups = map[string][]string{"team@example.test": {"colleague@example.test", "lead@example.test"}}
+		if _, err := svc.ShareCalendar(context.Background(), share); err != nil {
+			t.Errorf("a group all inside: %v", err)
+		}
+	})
+	t.Run("a raised role on a group the calendar has", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+			gcal.AclRule{ID: "group:team@example.test", Role: gcal.RoleFreeBusyReader,
+				Scope: gcal.AclScope{Type: gcal.ScopeTypeGroup, Value: "team@example.test"}})
+		fake.Groups = map[string][]string{"team@example.test": {"partner@elsewhere.test"}}
+		if _, err := svc.ShareCalendar(context.Background(), share); classOf(t, err) != gapi.ClassBlocked {
+			t.Errorf("raising a group with an outside member to reader = %v, want [blocked]", err)
+		}
+	})
+	t.Run("asked in another case", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.Groups = map[string][]string{"team@example.test": {"partner@elsewhere.test"}}
+		o := share
+		o.Who = "Team@Example.test"
+		if _, err := svc.ShareCalendar(context.Background(), o); classOf(t, err) != gapi.ClassBlocked {
+			t.Errorf("a group named in another case with an outside member = %v, want [blocked]", err)
+		}
+	})
+	t.Run("no members", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.Groups = map[string][]string{"team@example.test": {}}
+		out, err := svc.ShareCalendar(context.Background(), share)
+		if err != nil || !strings.Contains(out.Text(), "Could not read who is in team@example.test") {
+			t.Errorf("a group answered with no members = %v, %q; want it shared, saying so", err, out.Text())
+		}
+	})
+	t.Run("unreadable", func(t *testing.T) {
+		svc, fake := calendarSeed(t)
+		fake.Groups = map[string][]string{"team@example.test": {"colleague@example.test"}}
+		fake.GroupErrors = map[string]string{"team@example.test": "groupTooBig"}
+		out, err := svc.ShareCalendar(context.Background(), share)
+		if err != nil || !strings.Contains(out.Text(), "Could not read who is in team@example.test") {
+			t.Errorf("a group whose members cannot be read = %v, %q; want it shared, saying so", err, out.Text())
+		}
+	})
+}
+
 // publish_calendar opens a calendar to the public, and says what that
 // cannot take back. Without confirm it writes nothing; a dry run needs
 // no confirm and writes nothing either.
