@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -158,9 +159,7 @@ func TestCalendarsResultRendersAndCarriesBothHalves(t *testing.T) {
 }
 
 func TestCalendarResultWithNoSharing(t *testing.T) {
-	res := service.CalendarResult{
-		Calendar: service.CalendarOut{ID: "primary", Title: "Mine", Role: gcal.RoleOwner},
-	}
+	res := service.NewCalendarResult(model.Calendar{ID: "primary", Title: "Mine", Role: gcal.RoleOwner}, nil)
 	if !strings.Contains(res.Render(), "nobody else") {
 		t.Fatalf("an unshared calendar does not say so:\n%s", res.Render())
 	}
@@ -170,15 +169,47 @@ func TestCalendarResultWithNoSharing(t *testing.T) {
 // internet, and it is the one ACL value that cannot be undone from the
 // other side.
 func TestPublicSharingIsShouted(t *testing.T) {
-	res := service.CalendarResult{
-		Calendar: service.CalendarOut{ID: "primary", Title: "Mine", Role: gcal.RoleOwner},
-		Sharing: []service.SharingOut{
-			{Who: "anyone", ScopeType: gcal.ScopeTypeDefault, Role: gcal.RoleReader,
-				RoleMeans: gcal.RoleMeans(gcal.RoleReader), Public: true},
-		},
-	}
+	res := service.NewCalendarResult(model.Calendar{ID: "primary", Title: "Mine", Role: gcal.RoleOwner},
+		[]model.Sharing{{ScopeType: gcal.ScopeTypeDefault, Role: gcal.RoleReader}})
 	got := res.Render()
 	if !strings.Contains(got, "ANYONE") {
 		t.Fatalf("a public calendar is not called out:\n%s", got)
+	}
+}
+
+// get_calendar's text, whole, for a shared calendar, an unshared one and
+// one whose sharing was not read: the text both halves are built for,
+// held line for line rather than by a phrase in it.
+func TestCalendarDetailTextIsWhole(t *testing.T) {
+	svc, fake := calendarSeed(t)
+	fake.ACL["team@group.calendar.example.test"] = append(fake.ACL["team@group.calendar.example.test"],
+		gcal.AclRule{ID: "default", Role: gcal.RoleFreeBusyReader, Scope: gcal.AclScope{Type: gcal.ScopeTypeDefault}},
+		gcal.AclRule{ID: "user:colleague@example.test", Role: gcal.RoleWriter,
+			Scope: gcal.AclScope{Type: gcal.ScopeTypeUser, Value: "colleague@example.test"}})
+	primary := "Sample Primary\n  id: me@example.test\n  time zone: Europe/Copenhagen\n" +
+		"  your access: owner — can see and change everything, including who else has access\n" +
+		"  your primary calendar\n  default reminders: none\n\n"
+	for _, c := range []struct {
+		ref, want string
+		off       bool
+	}{
+		{"team@group.calendar.example.test", "Sample Team\n  id: team@group.calendar.example.test\n" +
+			"  time zone: America/Chicago\n" +
+			"  your access: owner — can see and change everything, including who else has access\n" +
+			"  default reminders: none\n\nwho can see it:\n" +
+			"  ANYONE, signed in or not — freeBusyReader (can see only whether the time is busy, never what the event is)\n" +
+			"  me@example.test — owner (can see and change everything, including who else has access)\n" +
+			"  colleague@example.test — writer (can see and change events, including private ones)\n", false},
+		{"primary", primary + "who can see it:\n  nobody else.\n", false},
+		{"primary", primary + "Sharing tools are off in this server (GCAL_SHARING=off), so the sharing list was not read.\n", true},
+	} {
+		svc.Cfg.Sharing = !c.off
+		got, err := svc.CalendarDetail(context.Background(), c.ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Render() != c.want {
+			t.Errorf("get_calendar %s (sharing off: %v) renders\n%s\nwant\n%s", c.ref, c.off, got.Render(), c.want)
+		}
 	}
 }
