@@ -1,6 +1,6 @@
 {
   "server": "google-calendar-mcp",
-  "version": "v5.1.1",
+  "version": "v5.2.0",
   "sdk_version": "v1.8.0",
   "instructions": "Google Calendar tools. This server answers *when*: calendars, the events on them, and who is free. What a meeting produces — a recording, a notes document, an attachment — belongs to the Drive and Docs servers. get_event lists the files attached to an event with each one's Drive file id, which is what those servers take; this server never opens a file. Start with list_calendars: every other tool takes a calendar, the ids come from there, and it reports each calendar's time zone, which is what times are read against. Time is the thing to be careful about here. An all-day event is a DATE and has no time of day; it is never midnight, and reading it as an instant puts it on the wrong day for anyone west of UTC. A timed event always carries an IANA zone, not just an offset, because an offset cannot expand a repeating event across a daylight-saving change. Every read states the absolute window it used, the zone it used, and where that zone came from — check those rather than assuming, and resolve relative dates like \"next Tuesday\" yourself before calling. list_events with expand=true gives each occurrence of a repeating event; with no_expand it gives the series once with its rule. Ask for what you mean: they answer different questions. search_events matches free text against the fields Google documents, such as the title, location and guests, with no field syntax. How it matches words is not documented, so an empty result means the search found nothing, not that nothing exists — fall back to list_events when you need certainty. Never answer \"are they free\" from a list of events: events you cannot see the details of are still busy, and an event marked free is not. That is what check_availability is for, and it reports a calendar it could not read as unknown rather than as free. share_calendar shares with people and groups inside your organization, and lowers the access of any rule a calendar already has, a public one included. Publishing a calendar, sharing it outside the organization or with a new owner, and an out-of-office or focus-time event that declines every meeting it overlaps are tools of their own, present only when the person running this server turned them on; a refusal names the tool.",
   "tools": [
@@ -2172,7 +2172,7 @@
     },
     {
       "name": "get_calendar",
-      "description": "One calendar in full: its description, time zone, your access level, and who else it is shared with. Use list_calendars to see every calendar; use this when you need the sharing list or are checking whether you may write somewhere.",
+      "description": "One calendar in full: its description, time zone, your access level, and who else it is shared with. A Workspace primary calendar also shows its owner's working hours; check_availability does not apply them, so pass a mask there yourself. Use list_calendars to see every calendar; use this when you need the sharing list or are checking whether you may write somewhere.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
@@ -2311,6 +2311,48 @@
             "type": [
               "null",
               "array"
+            ]
+          },
+          "working_hours": {
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "periods": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "day": {
+                      "type": "string"
+                    },
+                    "end": {
+                      "type": "string"
+                    },
+                    "start": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "day",
+                    "start",
+                    "end"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "enabled",
+              "periods"
+            ],
+            "type": [
+              "null",
+              "object"
             ]
           }
         },
@@ -5705,7 +5747,7 @@
     },
     {
       "name": "update_event",
-      "description": "Change an event. Only the fields you pass are touched; everything else is left exactly as it is, so this can never drop a guest list or flatten a series the way a whole-resource write does. Guests are added and removed one at a time with `add_guests` and `remove_guests`, optional guests added with `add_optional_guests`, and rooms booked with `add_rooms`, applied to the list as it is read, so somebody else's RSVP arriving in between is reported rather than overwritten. An address already on the event keeps the role it has, and the result names it: this server does not make a guest optional or required, and a call that would add nothing else is refused as having nothing to change. An address may be bare or a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e, the way a mail server hands one over; only the address is used, and one entry holds one address. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is two calls: the original series is ended before this occurrence and a NEW series starts at it with a new id, and any exception after this occurrence is reset. The result says so. `popup_reminders` and `email_reminders` are minutes before the start, 0 to 40320, at most five in all. Either one replaces the whole set, so pass both to keep both kinds, and an empty list given alone means no reminders. `default_reminders: true` goes back to the calendar's own. Reminders are yours alone: Google keeps them per person, so they never notify a guest. A write that changes only reminders needs no `notify`, except with `this_and_following`, whose new series reaches the guests. `visibility` is default, public or private: private shows the details only to the guests, and public to everybody who can see the calendar. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do. On one occurrence, Google ignores a less restrictive visibility, so it is refused, and applies a more restrictive one to the whole series, which the result says. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. `add_conference: true` asks Google for a Meet link on an event that has no conference; one that has a conference is refused, because Google would replace it, and the result says whether the link came back or is still being made. It cannot go with `this_and_following`. A status event takes no guests, rooms or Meet link, and a change to one that Google's rules for it refuse is refused before anything is written. An out-of-office or focus-time event that declines every overlapping meeting declines in the time a change adds to it: moved, made longer or repeated more. A change that only shortens it adds no time. With `this_and_following`, such a series starts a new series that declines them too. Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
+      "description": "Change an event. Only the fields you pass are touched; everything else is left exactly as it is, so this can never drop a guest list or flatten a series the way a whole-resource write does. Guests are added and removed one at a time with `add_guests` and `remove_guests`, optional guests added with `add_optional_guests`, and rooms booked with `add_rooms`, applied to the list as it is read, so somebody else's RSVP arriving in between is reported rather than overwritten. An address already on the event keeps the role it has, and the result names it: this server does not make a guest optional or required, and a call that would add nothing else is refused as having nothing to change. An address may be bare or a mailbox such as \"Sample Person\" \u003cperson@example.com\u003e, the way a mail server hands one over; only the address is used, and one entry holds one address. `scope` is REQUIRED when the event repeats, and there is no default because the same words mean three different things: `instance` changes one occurrence, `series` changes all of them, and `this_and_following` changes this occurrence and every later one. Name the occurrence with the occurrence's own id, or with the series id plus `original_start` — the scheduled start, which list_instances reports, and which still identifies an occurrence somebody has moved. `this_and_following` is two calls: the original series is ended before this occurrence and a NEW series starts at it with a new id, and any exception after this occurrence is reset. The result says so. `popup_reminders` and `email_reminders` are minutes before the start, 0 to 40320, at most five in all. Either one replaces the whole set, so pass both to keep both kinds, and an empty list given alone means no reminders. `default_reminders: true` goes back to the calendar's own. Reminders are yours alone: Google keeps them per person, so they never notify a guest. A write that changes only reminders needs no `notify`, except with `this_and_following`, whose new series reaches the guests. `visibility` is default, public or private: private shows the details only to the guests, and public to everybody who can see the calendar. `guests_can_modify`, `guests_can_invite_others` and `guests_can_see_other_guests` say what a guest may do. On one occurrence, Google ignores a less restrictive visibility, so it is refused, and applies a more restrictive one to the whole series, which the result says. `notify` is REQUIRED whenever the write can reach another person, and this server has no default in either direction: `none` asks Google to email nobody, `external_only` emails the guests outside your own organization, `all` emails every guest. `none` is refused outright when a guest is outside your organization, because such a guest may have no Google Calendar for the event to appear in and email is then the only way they can learn of it. Whatever you pass, the result says what was ASKED FOR — Google reports nothing about what arrived, and `none` is not a promise of silence. Every write is a patch under If-Match, so it is refused as `[stale]` rather than overwriting somebody who changed this first. Pass `etag` from the get_event you decided on to be held to that exact version; pass `force: true` only when you genuinely mean \"whatever it says now\". Without `etag`, a write refused that way is read again and made once more if nothing it changes, reaches or asked about has changed, and the result says so. `dry_run: true` reports exactly what would change and how many guests would be emailed, without writing anything. Use it when you are not certain which event or which occurrence you have. `add_conference: true` asks Google for a Meet link on an event that has no conference; one that has a conference is refused, because Google would replace it, and the result says whether the link came back or is still being made. It cannot go with `this_and_following`. A status event takes no guests, rooms or Meet link, and a change to one that Google's rules for it refuse is refused before anything is written. An out-of-office or focus-time event that declines every overlapping meeting is refused a change that adds time to it, moved, made longer or repeated more, and any `this_and_following` split, since Google may decline the meetings in the new time; create_event_declining_all makes one. A change that only shortens it adds no time. Use respond_to_event to answer an invitation and move_event to change which calendar it is on.",
       "input_schema": {
         "additionalProperties": false,
         "properties": {
