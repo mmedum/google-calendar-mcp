@@ -28,6 +28,35 @@ provenance, and `publish-mcp.yml` then publishes the MCP registry entry.
 - When a change touches the driver's cleanup, stop one run with Ctrl-C
   and check the status event is gone.
 
+These need a second account, or a group, that you control. Run each when
+a change touches what it checks:
+
+- **A public event on a free/busy share (D-92).** Share a scratch
+  calendar for free/busy with the second account, make an event there in
+  Google Calendar with visibility public, and look at it from the second
+  account. If its details show, D-92's reading holds; if only busy shows,
+  free/busy readers do not count, and `PublicReaders` refuses too much.
+- **A move to a wider calendar (D-91).** With the second account outside
+  the organization reading a scratch calendar, `move_event` an event into
+  it from a calendar it cannot read, and check the refusal names it.
+- **A group with an outside member (D-51).** With a group that has the
+  second account, outside the organization, as a member, call
+  `share_calendar` on a scratch calendar with that group, and check the
+  refusal counts the member. Call `check_availability` on the group and
+  check it reports the group's calendar count, since the check reads the
+  same expansion.
+- **A group past 50 calendars (D-34).** With a group of more than 50
+  members, call `check_availability` on it and check every member is
+  answered or reported unknown.
+- **A widened decline-all event (D-44).** On the second account, with a
+  meeting accepted next week, make an out-of-office event that declines
+  all beside it with `create_event_declining_all`, then call
+  `update_event` to lengthen it over the meeting. Check the refusal, and
+  that the meeting is still accepted.
+- **A home working location.** Call `create_event` with event_type
+  `workingLocation` and a home location on the primary calendar of the
+  second account, then `get_event`, and check the body Google kept.
+
 ## Steps
 
 1. Land a `Release X.Y.Z` commit on `main`. It renames `[Unreleased]` to
