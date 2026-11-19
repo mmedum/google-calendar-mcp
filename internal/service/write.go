@@ -910,12 +910,8 @@ func (s *Service) updateEvent(ctx context.Context, o UpdateOptions, at *attempt)
 	}
 	afterRaw := target
 	patch.ApplyTo(&afterRaw)
-	// A status event that declines every meeting it overlaps, moved or
-	// made to cover more, declines in its new time too. Whether Google
-	// declines the meetings already there is not known, so the result
-	// says it may.
 	if plan.DeclinesMore(target, afterRaw) {
-		report.Notes = append(report.Notes, declinesMoreNote)
+		return render.WriteReport{}, classifyPlan(plan.ErrDeclinesMore())
 	}
 	if o.DryRun {
 		shown, err := model.FromEvent(env.cal.ID, afterRaw, &env.zone)
@@ -968,13 +964,6 @@ func alreadyOnNote(d plan.Draft, attendees []gcal.EventAttendee) string {
 	return "Already on the event, so left as they were: " + strings.Join(on, ", ") + ". Adding an " +
 		"address does not change how it is invited: this server does not make a guest optional or required."
 }
-
-// declinesMoreNote says what a change to a status event that declines
-// every meeting it overlaps does when it covers more time. Tense-neutral,
-// because a dry run prints it too.
-const declinesMoreNote = "This change covers time the event did not, and the event declines every meeting it " +
-	"overlaps. Google may decline the meetings in that time, including the ones you already accepted, and each " +
-	"organizer sees a decline."
 
 // remindersOnlyNote says why a write that changed only reminders asked
 // nobody to be notified.
@@ -1094,6 +1083,9 @@ func (s *Service) thisAndFollowing(ctx context.Context, env *writeEnv, target mo
 	newBody, changes, droppedConference, err := splitBody(parentRaw, target, draft, afterRule, seriesZone)
 	if err != nil {
 		return render.WriteReport{}, classifyPlan(err)
+	}
+	if plan.DeclinesAll(parentRaw) {
+		return render.WriteReport{}, classifyPlan(plan.ErrSplitDeclinesAll())
 	}
 	decision, err := plan.Notification(o.Notify, plan.ReachOfEvent(organizerOf(parent, env), env.organizer, parent, draft.Invites()...))
 	if err != nil {

@@ -2840,37 +2840,24 @@ func statusSeries(t *testing.T, fake *caltest.Server, id, eventType string, bloc
 	return occID
 }
 
-// A split of an out-of-office series that declines every meeting makes
-// a new series that declines them too, and the result says so. A dry
-// run says it and writes nothing.
-func TestASplitThatDeclinesEveryMeetingSaysSo(t *testing.T) {
+// A this_and_following split of a series that declines every meeting is
+// refused, even one that keeps the times: Google resets the exceptions
+// after it, so a canceled later occurrence would come back declining
+// (#41). A dry run is refused too, and neither writes.
+func TestASplitOfASeriesThatDeclinesEveryMeetingIsRefused(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ := statusSeries(t, fake, "evaway00001", gcal.EventTypeOutOfOffice,
 		gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll}, false)
-	o := service.UpdateOptions{
-		Calendar: "primary", EventID: occ, Scope: "this_and_following", End: "2026-03-31T19:00:00+02:00",
+	for _, dry := range []bool{true, false} {
+		_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+			Calendar: "primary", EventID: occ, Scope: "this_and_following", Title: ptr("Away from here on"), DryRun: dry,
+		})
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "scope:series") {
+			t.Errorf("dry_run=%v: a split of a decline-all series = %v, want [blocked] naming scope:series", dry, err)
+		}
 	}
-	const declines = "Google declines every meeting this overlaps, including the ones you already accepted"
-
-	dry := o
-	dry.DryRun = true
-	out, err := svc.UpdateEvent(context.Background(), dry)
-	if err != nil {
-		t.Fatalf("dry run: %v", err)
-	}
-	if !strings.Contains(out.Text(), declines) || len(fake.Wrote()) != 0 {
-		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
-	}
-
-	out, err = svc.UpdateEvent(context.Background(), o)
-	if err != nil {
-		t.Fatalf("UpdateEvent: %v", err)
-	}
-	if !strings.Contains(out.Text(), declines) {
-		t.Errorf("the result does not say what the new series declines:\n%s", out.Text())
-	}
-	if w := fake.Wrote(); len(w) != 2 || w[0].Method != "patch" || w[1].Method != "insert" {
-		t.Fatalf("got writes %+v, want a truncate and an insert", w)
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Errorf("a refused split wrote %+v", w)
 	}
 }
 
@@ -3042,42 +3029,32 @@ func declining(t *testing.T, fake *caltest.Server, id, eventType, rule string) s
 const weeklyFour = "RRULE:FREQ=WEEKLY;BYDAY=TU;COUNT=4"
 
 // A change that leaves an out-of-office event declining every meeting
-// over time it did not cover says Google may decline the meetings in
-// that time. A dry run says it and writes nothing.
-func TestACoverThatGrowsIsSaid(t *testing.T) {
+// over time it did not cover is refused, naming create_event_declining_all,
+// which alone may decline the meetings already in a time (#41). A dry
+// run is refused too, and neither writes.
+func TestACoverThatGrowsIsRefused(t *testing.T) {
 	svc, fake := writeSeed(t)
 	occ := declining(t, fake, "evaway00005", gcal.EventTypeOutOfOffice, weeklyFour)
 	o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: "instance", End: "2026-03-31T19:00:00+02:00"}
-
-	dry := o
-	dry.DryRun = true
-	out, err := svc.UpdateEvent(context.Background(), dry)
-	if err != nil {
-		t.Fatalf("dry run: %v", err)
+	for _, dry := range []bool{true, false} {
+		o.DryRun = dry
+		_, err := svc.UpdateEvent(context.Background(), o)
+		if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), "create_event_declining_all") {
+			t.Errorf("dry_run=%v: a cover that grows = %v, want [blocked] naming create_event_declining_all", dry, err)
+		}
 	}
-	if !strings.Contains(out.Text(), coversMore) || len(fake.Wrote()) != 0 {
-		t.Fatalf("the dry run wrote %d times or did not say what it declines:\n%s", len(fake.Wrote()), out.Text())
-	}
-
-	out, err = svc.UpdateEvent(context.Background(), o)
-	if err != nil {
-		t.Fatalf("UpdateEvent: %v", err)
-	}
-	if !strings.Contains(out.Text(), coversMore) {
-		t.Errorf("the result does not say the event covers more:\n%s", out.Text())
-	}
-	if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" || w[0].EventID != occ {
-		t.Fatalf("got writes %+v, want one patch of the occurrence", w)
+	if w := fake.Wrote(); len(w) != 0 {
+		t.Errorf("a refused change wrote %+v", w)
 	}
 }
 
-// coversMore is what a result says of a change that makes an event that
-// declines every meeting cover more time.
-const coversMore = "This change covers time the event did not, and the event declines every meeting it overlaps."
+// coversMore is what the refusal says of a change that makes an event
+// that declines every meeting cover more time.
+const coversMore = "cover time it did not"
 
-// Every way a change can make such an event cover more is said: moved,
+// Every way a change can make such an event cover more is refused: moved,
 // made longer, repeated more, or made to repeat at all.
-func TestEveryCoverThatGrowsIsSaid(t *testing.T) {
+func TestEveryCoverThatGrowsIsRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name, eventType, rule, scope string
 		change                       func(*service.UpdateOptions)
@@ -3108,12 +3085,12 @@ func TestEveryCoverThatGrowsIsSaid(t *testing.T) {
 			occ := declining(t, fake, "evaway00006", tc.eventType, tc.rule)
 			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
 			tc.change(&o)
-			out, err := svc.UpdateEvent(context.Background(), o)
-			if err != nil {
-				t.Fatalf("UpdateEvent: %v", err)
+			_, err := svc.UpdateEvent(context.Background(), o)
+			if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), coversMore) {
+				t.Fatalf("UpdateEvent = %v, want [blocked] saying the event would cover more", err)
 			}
-			if !strings.Contains(out.Text(), coversMore) {
-				t.Fatalf("the result does not say the event covers more:\n%s", out.Text())
+			if w := fake.Wrote(); len(w) != 0 {
+				t.Errorf("a refused change wrote %+v", w)
 			}
 		})
 	}
@@ -3124,14 +3101,11 @@ func TestEveryCoverThatGrowsIsSaid(t *testing.T) {
 	one.EventType, one.Transparency = gcal.EventTypeOutOfOffice, gcal.TransparencyOpaque
 	one.OutOfOfficeProperties = gcal.Raw(gcal.EventOutOfOfficeProperties{AutoDeclineMode: gcal.AutoDeclineAll})
 	fake.AddEvent("me@example.test", one)
-	out, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
+	_, err := svc.UpdateEvent(context.Background(), service.UpdateOptions{
 		Calendar: "primary", EventID: one.ID, Recurrence: &[]string{"RRULE:FREQ=WEEKLY;COUNT=2"},
 	})
-	if err != nil {
-		t.Fatalf("made to repeat: %v", err)
-	}
-	if !strings.Contains(out.Text(), coversMore) {
-		t.Fatalf("made to repeat: the result does not say the event covers more:\n%s", out.Text())
+	if classOf(t, err) != gapi.ClassBlocked || !strings.Contains(err.Error(), coversMore) {
+		t.Fatalf("made to repeat = %v, want [blocked] saying the event would cover more", err)
 	}
 }
 
@@ -3176,12 +3150,9 @@ func TestACoverThatOnlyShrinksSaysNothingOfDeclines(t *testing.T) {
 			}
 			o := service.UpdateOptions{Calendar: "primary", EventID: occ, Scope: tc.scope}
 			tc.change(&o)
-			out, err := svc.UpdateEvent(context.Background(), o)
+			_, err := svc.UpdateEvent(context.Background(), o)
 			if err != nil {
 				t.Fatalf("UpdateEvent: %v", err)
-			}
-			if strings.Contains(out.Text(), coversMore) {
-				t.Fatalf("the result says the event covers more:\n%s", out.Text())
 			}
 			if w := fake.Wrote(); len(w) != 1 || w[0].Method != "patch" {
 				t.Fatalf("got writes %+v, want one patch", w)

@@ -396,7 +396,7 @@ primary calendar beyond its one status event (D-72).
 | D-41 | An address arrives as one mailbox, and its display name goes nowhere | accepted | TestAMailboxIsTakenAsItsBareAddress, TestAGuestGivenAsAMailboxIsItsAddress, TestShareCalendarTakesAMailbox, TestAvailabilityTakesAMailbox, TestSomethingThatIsNotAnAddressIsRefused |
 | D-42 | A Meet link is asked for on create or by `add_conference`, never copied by a split | accepted | TestConferenceRequestAsksForMeetWithTheEventID, TestAddConferenceAsksForAMeetLink, TestAddConferenceRefusesAnEventThatHasOne, TestAddConferenceDoesNotGoWithASplit, TestAddConferenceAfterTheFirstLinkWasRemoved, TestCreateEventRefusesAConferenceTheCalendarForbids, TestConferenceDataIsIgnoredWithoutTheVersion, live |
 | D-43 | Status events are made by `create_event`, held to Google's guide before any request | accepted | TestAStatusEventIsBuiltAsGoogleRequires, TestAStatusEventGoogleWouldRefuseIsRefused, TestAStatusEventOnAnotherCalendarIsRefused, TestAStatusEventTakesNoGuestsOnAnyWrite, TestAStatusEventIsHeldToGooglesRulesOnEveryWrite, live |
-| D-44 | Declining every meeting is `create_event_declining_all`, behind a flag of its own | accepted | TestCreateEventRefusesDecliningEveryMeeting, TestDecliningAllNeedsItsOwnFlag, TestDecliningEveryMeetingIsItsOwnToolThroughTheProtocol, TestCreateDecliningEventTakesOnlyTheStatusEventsThatDecline, TestEveryCoverThatGrowsIsSaid |
+| D-44 | Declining every meeting is `create_event_declining_all`, behind a flag of its own | accepted | TestCreateEventRefusesDecliningEveryMeeting, TestDecliningAllNeedsItsOwnFlag, TestDecliningEveryMeetingIsItsOwnToolThroughTheProtocol, TestCreateDecliningEventTakesOnlyTheStatusEventsThatDecline, TestEveryCoverThatGrowsIsRefused |
 | D-45 | An event past Google's guest threshold says its answers are incomplete | accepted | TestACrowdedEventSaysItsRSVPsAreIncomplete, TestTheCrowdWarningCountsWhatGoogleCounts, TestACrowdedEventWarnsOnTheReadPathToo, TestAnOrdinaryEventDoesNotWarnAboutItsSize |
 | D-46 | `manage_calendar` is one tool over two resources, and takes no etag | accepted | TestManageSeparatesTheCalendarFromTheSubscription, TestCalendarPatchesCarryTheirOwnETag, TestAPartialManageCallSaysWhatAlreadyLanded, TestManageNotificationsReplaceTheWholeList |
 | D-47 | `delete_calendar` takes only a secondary calendar, and `clear_calendar` only the primary | accepted | TestDeleteCalendarRefusesThePrimary, TestClearCalendarRefusesASecondaryCalendar, TestClearCalendarEmptiesThePrimary, live |
@@ -1509,14 +1509,22 @@ guests and no `notify`. The flag is its own rather than the destructive
 one: a flag people set to get out-of-office must not arm
 `clear_calendar` too.
 
-`update_event` can make such an event cover time it did not cover.
-Whether Google then declines the meetings in that time is not known, so
-the result, a dry run included, says Google may.
+`update_event` can make such an event cover time it did not cover:
+moved, made longer or repeated more. Google may then decline the
+meetings in that time, which is what only the flagged tool may do, so
+such an update is refused `[blocked]`, a dry run included, naming
+`create_event_declining_all` (#41). A change that only shrinks the time
+goes through. A `this_and_following` split of such a series is refused
+whatever it changes: Google resets the exceptions after the target, so
+a canceled later occurrence comes back declining, and the split cannot
+show it covers no more.
 
 Rejected: `all` as a value of `create_event`'s argument, guarded by a
-question or by typing it; the destructive flag.
-Cost: nothing refuses an `update_event` that makes such an event cover
-more time; the result says what may follow (#41).
+question or by typing it; the destructive flag; a note on a widening
+update rather than a refusal, which would let an always-on tool do what
+the flag holds back.
+Cost: widening such an event takes a new one, made with the flagged
+tool.
 
 ### D-45 An event past Google's guest threshold says its answers are incomplete
 
