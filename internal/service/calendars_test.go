@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -982,5 +983,64 @@ func TestADryRunDoesNotPrintTheOldPrivateName(t *testing.T) {
 	}
 	if !strings.Contains(text, "My new private name") {
 		t.Fatalf("the dry run does not show the new private name:\n%s", text)
+	}
+}
+
+// get_calendar shows a primary calendar's working hours, which only the
+// calendar resource carries, and says when they are off; a secondary
+// calendar has none, so its resource is not read for them (D-93).
+func TestCalendarDetailShowsAPrimaryCalendarsWorkingHours(t *testing.T) {
+	const team = "team@group.calendar.example.test"
+	week := &gcal.WorkingHours{Enabled: true, AvailableTimes: []gcal.WorkingPeriod{
+		{DayOfWeek: "monday", PeriodStart: 540, PeriodEnd: 1020},
+		{DayOfWeek: "friday", PeriodStart: 480, PeriodEnd: 1440},
+	}}
+	for _, c := range []struct {
+		name  string
+		hours *gcal.WorkingHours
+		line  string
+		want  *service.WorkingHoursOut
+	}{
+		{"set", week, "  working hours: monday 09:00-17:00, friday 08:00-24:00\n", &service.WorkingHoursOut{
+			Enabled: true, Periods: []service.WorkingPeriodOut{
+				{Day: "monday", Start: "09:00", End: "17:00"}, {Day: "friday", Start: "08:00", End: "24:00"},
+			},
+		}},
+		{"off", &gcal.WorkingHours{}, "  working hours: off\n",
+			&service.WorkingHoursOut{Enabled: false, Periods: []service.WorkingPeriodOut{}}},
+		{"none kept", nil, "", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc, fake := calendarSeed(t)
+			fake.Calendars["me@example.test"].WorkingHours = c.hours
+			fake.Calendars[team].WorkingHours = week
+			got, err := svc.CalendarDetail(context.Background(), "primary")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got.WorkingHours, c.want) {
+				t.Errorf("get_calendar primary gave working_hours %+v, want %+v", got.WorkingHours, c.want)
+			}
+			if c.line != "" && !strings.Contains(got.Render(), c.line) {
+				t.Errorf("get_calendar primary renders\n%s\nwant a line %q", got.Render(), c.line)
+			}
+			if c.line == "" && strings.Contains(got.Render(), "working hours") {
+				t.Errorf("get_calendar primary with none kept renders\n%s\nwant no working hours line", got.Render())
+			}
+
+			before := len(fake.Served())
+			sec, err := svc.CalendarDetail(context.Background(), team)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sec.WorkingHours != nil || strings.Contains(sec.Render(), "working hours") {
+				t.Errorf("a secondary calendar reported working hours: %+v", sec.WorkingHours)
+			}
+			for _, p := range fake.Served()[before:] {
+				if p == "GET /calendars/"+team {
+					t.Errorf("get_calendar on a secondary read its calendar resource: %v", fake.Served()[before:])
+				}
+			}
+		})
 	}
 }

@@ -37,6 +37,10 @@ type Calendar struct {
 	// calendar was read as a resource rather than from this account's
 	// list, which is the only place Google keeps them.
 	DefaultReminders *Reminders
+	// WorkingHours is nil unless the calendar resource was read and
+	// Google keeps working hours on it, which it does only on a
+	// Workspace user's primary calendar.
+	WorkingHours *gcal.WorkingHours
 	// No etag, deliberately. A calendar is TWO resources — itself and
 	// this user's subscription to it — with an etag each, and a single
 	// field here carried whichever read had produced the value: the
@@ -79,6 +83,7 @@ func FromCalendar(c gcal.Calendar) Calendar {
 	return Calendar{
 		ID: c.ID, Title: c.Summary, TimeZone: c.TimeZone,
 		Description: c.Description, Conference: c.ConferenceProperties,
+		WorkingHours: c.WorkingHours,
 	}
 }
 

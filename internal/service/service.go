@@ -876,6 +876,15 @@ func (s *Service) CalendarDetail(ctx context.Context, ref string) (CalendarResul
 	if err != nil {
 		return CalendarResult{}, err
 	}
+	// Working hours are on the calendar resource, not the list entry
+	// ResolveCalendar reads, and only ever on a primary calendar.
+	if c.Primary && c.WorkingHours == nil {
+		resource, err := s.API.GetCalendar(ctx, c.ID)
+		if err != nil {
+			return CalendarResult{}, err
+		}
+		c.WorkingHours = resource.WorkingHours
+	}
 	if !s.Cfg.Sharing {
 		return NewCalendarResultUnshared(c, "Sharing tools are off in this server ("+config.EnvPrefix+
 			"SHARING=off), so the sharing list was not read."), nil

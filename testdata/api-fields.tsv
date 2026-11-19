@@ -68,6 +68,7 @@ Calendar	kind	out	a constant string naming the resource type
 Calendar	labelProperties	out	calendar-level label definitions, which Event.eventLabelId refers to. Managing label vocabularies is not a scheduling job
 Calendar	location	modeled	shown by get_calendar
 Calendar	summary	modeled	the title, and what a title resolution matches against
+Calendar	workingHours	modeled	read on a primary calendar and shown by get_calendar. Not written, and not check_availability's mask, which comes from the caller (D-93)
 Calendar	timeZone	modeled	the zone a read or write uses when the call names none, ahead of the account's settings, and the reason list_calendars carries it
 CalendarListEntry	accessRole	modeled	what this user may do here, which decides whether a write is refused before it is attempted
 CalendarListEntry	autoAcceptInvitations	out	read-only here, and only meaningful on a resource calendar
