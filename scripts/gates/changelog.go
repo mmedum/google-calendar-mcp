@@ -242,7 +242,10 @@ func goModBuildLines(text string) string {
 	var kept []string
 	inBlock := false
 	for _, line := range strings.Split(text, "\n") {
-		fields := strings.Fields(line)
+		// A comment may follow any token, so `require ( // direct` still
+		// opens a block (https://go.dev/ref/mod#go-mod-file-lexical).
+		code, _, _ := strings.Cut(line, "//")
+		fields := strings.Fields(code)
 		verb, paren := "", false
 		if len(fields) > 0 {
 			verb, _, paren = strings.Cut(fields[0], "(")
