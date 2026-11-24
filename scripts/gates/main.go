@@ -143,6 +143,10 @@ func init() {
 			run: func(a []string) { check(writeBaseline(a[0]), "schema baseline") }, args: "BIN",
 			doc: "record the release being cut as the baseline, in its release commit", runsIn: manual,
 		},
+		"changelog": {
+			run: func(a []string) { check(changelogGate(os.Stdout, a[0], a[1]), "changelog") }, args: "BASE HEAD",
+			doc: "a change to what users get adds an entry under [Unreleased]; a release cut, a bump of required modules other than the MCP SDK, and a Changelog: none footer need none", runsIn: inPR,
+		},
 		"schema-ack": {
 			run: func(a []string) { check(schemaAck(os.Stdout, a[0], a[1]), "schema ack") }, args: "BASE HEAD",
 			doc: "every tool-surface change since the merge-base is named in a commit footer", runsIn: inPR,

@@ -40,6 +40,7 @@ const (
 // outlive its reasons.
 var parityCIOnly = map[string]string{
 	"schema-ack": "measures a pull request against its merge-base, which only a pull request has",
+	"changelog":  "measures a pull request against its merge-base, which only a pull request has",
 }
 
 // parityReleaseOnly are the inRelease commands, each with where it runs.
