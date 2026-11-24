@@ -16,19 +16,17 @@ import (
 // installing it, so a change to it ships.
 const changelogManifest = "packaging/mcpb/manifest.json"
 
+// changelogBuild are the files outside the binary's packages that change
+// what is released: the bundle's launcher and the release build itself.
+var changelogBuild = []string{changelogManifest, launcherPath, ".goreleaser.yaml"}
+
 // changelogNotedModules need an entry whenever their version moves: the
 // MCP SDK decides what the protocol does, and a client sees that.
 var changelogNotedModules = []string{"github.com/modelcontextprotocol/go-sdk"}
 
 // changelogGate refuses a pull request that changes what users get
-// without adding an entry under [Unreleased]. What users get is a file of
-// a package the binary imports, a file one embeds, the bundle's manifest,
-// and go.mod outside its require lines; a bump of a module in
-// changelogNotedModules counts too. It measures from the merge-base, so a
-// base branch that moved on is not this pull request's change.
-// [Unreleased] has to hold more entries than at the merge-base, so an
-// edited entry adds nothing. A release cut passes, and so does a pull
-// request whose commit says why nothing a user sees changed.
+// without adding an entry under [Unreleased], measured from the merge-base
+// so a base branch that moved on is not this pull request's change.
 func changelogGate(w io.Writer, baseRef, head string) error {
 	base, err := gitOutput("merge-base", baseRef, head)
 	if err != nil {
@@ -45,7 +43,7 @@ func changelogGate(w io.Writer, baseRef, head string) error {
 	}
 	switch {
 	case len(watched) == 0 && bumpOnly:
-		_, _ = fmt.Fprintf(w, "%d files changed, go.mod only in the modules it requires; a dependency bump needs no entry\n", len(files))
+		_, _ = fmt.Fprintf(w, "%d files changed, none shipped, and go.mod only in its require lines; a dependency bump needs no entry\n", len(files))
 		return nil
 	case len(watched) == 0:
 		_, _ = fmt.Fprintf(w, "%d files changed, none of them shipped; no entry needed\n", len(files))
@@ -64,6 +62,7 @@ func changelogGate(w io.Writer, baseRef, head string) error {
 		_, _ = fmt.Fprintf(w, "a release cut, moving [Unreleased] under ## [%s]\n", cut)
 		return nil
 	}
+	// More entries than at the merge-base, so an edited entry adds nothing.
 	if n := changelogEntries(logs[1], "Unreleased") - changelogEntries(logs[0], "Unreleased"); n <= 0 {
 		log, err := gitOutput("log", "--format=%B%x00", base+".."+head)
 		if err != nil {
@@ -83,8 +82,9 @@ func changelogGate(w io.Writer, baseRef, head string) error {
 
 // changelogWatched are the changed files that change what users get.
 // bumpOnly says go.mod changed and was left out as a dependency bump. The
-// binary's packages are read from the checkout, so the checkout has to be
-// head or CI's merge commit of it.
+// binary's packages are read from the checkout, for the host's platform, so
+// the checkout has to be head or CI's merge commit of it, and a package
+// that only another platform imports is not counted.
 func changelogWatched(base, head string, files []string) (watched []string, bumpOnly bool, err error) {
 	var shipped *shippedSource
 	for _, f := range files {
@@ -118,16 +118,20 @@ func changelogWatched(base, head string, files []string) (watched []string, bump
 }
 
 // changelogWaiver is the reason a commit footer gives for needing no
-// entry: `Changelog: none, <why>`, the token in any case. A footer with
-// no reason after "none" waives nothing.
+// entry: `Changelog: none, <why>`, the token and the word in any case. A
+// footer with no reason after "none" waives nothing.
 func changelogWaiver(messages []string) string {
 	for _, message := range messages {
 		for _, f := range footers(message) {
 			if !strings.EqualFold(f.token, "Changelog") {
 				continue
 			}
-			rest, ok := strings.CutPrefix(strings.TrimSpace(f.text), "none")
-			if reason := strings.TrimSpace(strings.TrimLeft(rest, ",;:-— ")); ok && reason != "" {
+			text := strings.TrimSpace(f.text)
+			end := strings.IndexAny(text, ",;:-— \n")
+			if end < 0 {
+				continue
+			}
+			if reason := strings.TrimSpace(strings.TrimLeft(text[end:], ",;:-— ")); strings.EqualFold(text[:end], "none") && reason != "" {
 				return reason
 			}
 		}
@@ -136,9 +140,13 @@ func changelogWaiver(messages []string) string {
 }
 
 // releaseCut is the version heading head adds when it moves base's
-// [Unreleased] entries under it: the new section holds at least as many
-// entries as base's [Unreleased], and at least one.
+// [Unreleased] entries under it: base's [Unreleased] held some, head's
+// holds none, and the new section holds at least as many as base's did.
 func releaseCut(base, head []string) string {
+	had := changelogEntries(base, "Unreleased")
+	if had == 0 || changelogEntries(head, "Unreleased") > 0 {
+		return ""
+	}
 	for _, line := range head {
 		version, ok := strings.CutPrefix(line, "## [")
 		if !ok {
@@ -148,7 +156,7 @@ func releaseCut(base, head []string) string {
 		if version == "Unreleased" || slices.ContainsFunc(base, func(l string) bool { return strings.HasPrefix(l, "## ["+version+"]") }) {
 			continue
 		}
-		if n := changelogEntries(head, version); n > 0 && n >= changelogEntries(base, "Unreleased") {
+		if changelogEntries(head, version) >= had {
 			return version
 		}
 	}
@@ -179,7 +187,7 @@ type shippedSource struct{ dirs, embeds map[string]bool }
 // manifest. Every file of a package directory counts, since the go command
 // builds a package from more than Go (`go help filetype`).
 func (s *shippedSource) has(file string) bool {
-	return file == changelogManifest || s.embeds[file] ||
+	return slices.Contains(changelogBuild, file) || s.embeds[file] ||
 		!strings.HasSuffix(file, "_test.go") && s.dirs[path.Dir(file)]
 }
 
@@ -228,8 +236,8 @@ func listShipped() (*shippedSource, error) {
 // goModBuildLines is a go.mod's lines, each trimmed and the blank ones
 // dropped, without its require and tool directives, a block's included
 // (https://go.dev/ref/mod#go-mod-file-require). ( is a token of its own,
-// so `require(` opens a block as `require (` does
-// (https://go.dev/ref/mod#go-mod-file-lexical).
+// so `require(` opens a block as `require (` does, and `require ()` is an
+// empty block that opens nothing (https://go.dev/ref/mod#go-mod-file-lexical).
 func goModBuildLines(text string) string {
 	var kept []string
 	inBlock := false
@@ -244,7 +252,7 @@ func goModBuildLines(text string) string {
 			inBlock = len(fields) == 0 || !strings.HasPrefix(fields[0], ")")
 		case len(fields) == 0:
 		case verb == "require" || verb == "tool":
-			inBlock = paren || len(fields) > 1 && strings.HasPrefix(fields[1], "(")
+			inBlock = paren && fields[0] == verb+"(" || len(fields) == 2 && fields[1] == "("
 		default:
 			kept = append(kept, strings.Join(fields, " "))
 		}

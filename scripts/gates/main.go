@@ -145,7 +145,7 @@ func init() {
 		},
 		"changelog": {
 			run: func(a []string) { check(changelogGate(os.Stdout, a[0], a[1]), "changelog") }, args: "BASE HEAD",
-			doc: "a change to what users get adds an entry under [Unreleased], unless it cuts a release or only bumps required modules, the MCP SDK excepted", runsIn: inPR,
+			doc: "a change to what users get adds an entry under [Unreleased]; a release cut, a bump of required modules other than the MCP SDK, and a Changelog: none footer need none", runsIn: inPR,
 		},
 		"schema-ack": {
 			run: func(a []string) { check(schemaAck(os.Stdout, a[0], a[1]), "schema ack") }, args: "BASE HEAD",

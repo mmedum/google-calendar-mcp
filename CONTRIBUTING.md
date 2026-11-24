@@ -216,8 +216,9 @@ changes only contributors see, unless they must act on them.
 
 On a pull request, the `changelog` gate wants at least one entry more
 under `[Unreleased]` than the merge-base holds when the pull request
-changes what the binary is built from, the bundle manifest, go.mod's
-lines other than `require` and `tool`, or the MCP SDK's version. A bump
+changes what the binary is built from, the bundle's manifest or
+launcher, `.goreleaser.yaml`, go.mod's lines other than `require` and
+`tool`, or the MCP SDK's version. A bump
 of any other module needs none; one that fixes an advisory is found at
 release time (`docs/release.md`). A change nobody using the server can
 see, such as a refactor, ends a commit's message with a footer that says

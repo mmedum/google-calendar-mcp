@@ -72,6 +72,16 @@ func TestTheChangelogGateWantsAnEntryPerPullRequest(t *testing.T) {
 		{name: "a release cut", prep: map[string]string{"CHANGELOG.md": clOneEntry + clReleased},
 			files: map[string]string{"CHANGELOG.md": clHead + clNext + clReleased, "internal/a/b.go": "package a\n"}},
 		{name: "a version heading with no entries under it", files: with(code, clHead+clNextEmpty+clReleased), refused: true},
+		{name: "an entry under a new version heading, [Unreleased] empty before", files: with(code, clHead+clNext+clReleased), refused: true},
+		{name: "a new package the binary imports, with no entry", files: map[string]string{
+			"internal/b/b.go":     "package b\n",
+			"cmd/fixture/main.go": "package main\n\nimport (\n\t_ \"example.com/dep\"\n\t_ \"example.com/fixture/internal/a\"\n\t_ \"example.com/fixture/internal/b\"\n)\n\nfunc main() {}\n",
+		}, refused: true},
+		{name: "the bundle's launcher with no entry", files: map[string]string{launcherPath: "#!/bin/sh\n"}, refused: true},
+		{name: "the release build with no entry", files: map[string]string{".goreleaser.yaml": "version: 2\n"}, refused: true},
+		{name: "a Changelog: None footer in another case", files: code, message: "refactor\n\nChangelog: None, a rename"},
+		{name: "a Changelog footer whose word only starts with none", files: code,
+			message: "change\n\nChangelog: nonetheless user-visible", refused: true},
 		{name: "a refactor with a Changelog: none footer", files: code,
 			message: "refactor\n\nChangelog: none, the text is unchanged line for line"},
 		{name: "a Changelog: none footer with no reason", files: code, message: "refactor\n\nChangelog: none", refused: true},
@@ -108,6 +118,9 @@ func TestTheChangelogGateWantsAnEntryPerPullRequest(t *testing.T) {
 			git("checkout", "-q", "main")
 			commit(map[string]string{"internal/a/c.go": "package a\n",
 				"CHANGELOG.md": clHead + "- Main's own.\n\n" + clReleased}, "main moved")
+			// The gate reads the binary's packages from the checkout, which
+			// CI has at the head.
+			git("checkout", "-q", "topic")
 			err := changelogGate(io.Discard, "main", "topic")
 			switch {
 			case tc.refused && (err == nil || exitCode(err) != 1):
@@ -127,5 +140,20 @@ func TestGoModNotedRequires(t *testing.T) {
 	got := strings.Join(goModNotedRequires(gomod), "|")
 	if want := "github.com/modelcontextprotocol/go-sdk v1.8.0|github.com/modelcontextprotocol/go-sdk v1.9.0"; got != want {
 		t.Errorf("goModNotedRequires = %q, want %q", got, want)
+	}
+}
+
+// An empty `require ()` opens no block, so a replace after it is still
+// read; `require(` and `require (` each open one.
+func TestGoModBuildLinesReadsPastAnEmptyBlock(t *testing.T) {
+	const base = "module m\n\nrequire ()\n\nreplace example.com/a => ./a\n"
+	if goModBuildLines(base) == goModBuildLines(strings.Replace(base, "./a", "./b", 1)) {
+		t.Error("a replace after `require ()` was swallowed")
+	}
+	for _, opener := range []string{"require (", "require("} {
+		gomod := "module m\n\n" + opener + "\n\texample.com/a v1.0.0\n)\n"
+		if goModBuildLines(gomod) != goModBuildLines(strings.Replace(gomod, "v1.0.0", "v1.1.0", 1)) {
+			t.Errorf("a bump inside `%s` counted as a build change", opener)
+		}
 	}
 }
