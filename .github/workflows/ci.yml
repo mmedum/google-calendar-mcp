@@ -74,6 +74,8 @@ jobs:
           cache: true
       - name: schema change acknowledged
         run: make schema-ack
+      - name: CHANGELOG entry
+        run: make changelog
 
   gates:
     name: gates

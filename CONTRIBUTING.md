@@ -43,7 +43,7 @@ the `live` and `evals` tags, golangci-lint, and race tests with an 80%
 coverage floor per package. The others include govulncheck, a license
 allow-list, gitleaks, a stdio smoke test, the schema diff, the
 staleness gate and the docs gate. CI runs the unit tests on Linux, macOS
-and Windows, and on a pull request adds `schema-ack`.
+and Windows, and on a pull request adds `schema-ack` and `changelog`.
 
 Every gate also asserts a floor on how much it read, because "found
 nothing" and "read nothing" print the same line. Before you trust a gate
@@ -213,6 +213,15 @@ Google adds in as a gate failure that names it.
 Every user-visible change gets an entry under `## [Unreleased]` in
 `CHANGELOG.md`, in the same pull request that makes the change. Leave out
 changes only contributors see, unless they must act on them.
+
+On a pull request, the `changelog` gate wants at least one entry more
+under `[Unreleased]` than the merge-base holds when the pull request
+changes what the binary is built from, the bundle manifest, go.mod's
+lines other than `require` and `tool`, or the MCP SDK's version. A bump
+of any other module needs none; one that fixes an advisory is found at
+release time (`docs/release.md`). A change nobody using the server can
+see, such as a refactor, ends a commit's message with a footer that says
+why: `Changelog: none, the text is unchanged line for line`.
 
 - **Sections** are the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   set and nothing else: Added, Changed, Deprecated, Removed, Fixed and

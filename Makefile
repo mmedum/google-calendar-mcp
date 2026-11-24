@@ -143,6 +143,10 @@ schemas: build ## Dump the tool schemas
 schema-diff: build gates ## Diff the tool schemas against the newest release's recorded baseline
 	@$(GATES) schema-diff $(BIN)
 
+.PHONY: changelog
+changelog: gates ## Check a change to what users get adds an entry under [Unreleased] since the merge-base
+	@$(GATES) changelog $(PR_BASE_REF) $(PR_HEAD)
+
 .PHONY: schema-ack
 schema-ack: gates ## Check every tool-surface change since the merge-base is named in a commit footer
 	@$(GATES) schema-ack $(PR_BASE_REF) $(PR_HEAD)

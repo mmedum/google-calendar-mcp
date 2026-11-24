@@ -20,6 +20,7 @@ func parityFixture() (map[string]string, map[string]command) {
 	noop := func([]string) {}
 	registry := map[string]command{
 		"schema-ack":    {run: noop, runsIn: inPR},
+		"changelog":     {run: noop, runsIn: inPR},
 		"release-notes": {run: noop, runsIn: inRelease},
 		"release-tag":   {run: noop, runsIn: inRelease},
 		"mcpb-pack":     {run: noop, runsIn: inRelease},
@@ -39,6 +40,7 @@ func parityFixture() (map[string]string, map[string]command) {
 	mk.WriteString("vet:\n\t$(GO) vet ./...\n\t$(GO) vet -tags=live ./...\n\t$(GO) vet -tags=evals ./...\n\n")
 	mk.WriteString("test:\n\t$(GO) test ./...\n\ncover: test\n\t@echo floors\n\n")
 	mk.WriteString("schema-ack:\n\t$(GATES) schema-ack $(BASE) $(HEAD)\n\n")
+	mk.WriteString("changelog:\n\t$(GATES) changelog $(BASE) $(HEAD)\n\n")
 	mk.WriteString("api-diff:\n\t$(GATES) api-diff\n\n")
 	mk.WriteString("check: " + strings.Join(prereqs, " ") + " vet cover\n")
 
@@ -47,7 +49,8 @@ func parityFixture() (map[string]string, map[string]command) {
 		"      - name: vet\n        run: |\n          # the tagged code too\n          go vet ./...\n" +
 		"          go vet -tags=live ./...\n          go vet -tags=evals ./...\n" +
 		"      - name: cover\n        run: make cover\n" +
-		"      - name: schema-ack\n        run: make schema-ack BASE=origin/main\n"
+		"      - name: schema-ack\n        run: make schema-ack BASE=origin/main\n" +
+		"      - name: changelog\n        run: make changelog BASE=origin/main\n"
 	return map[string]string{
 		"Makefile":                 mk.String(),
 		".github/workflows/ci.yml": ci,

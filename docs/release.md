@@ -17,6 +17,17 @@ provenance, and `publish-mcp.yml` then publishes the MCP registry entry.
   against what upstream serves.
 - `make release-rehearse` builds the release unsigned under `dist/`, and
   `make release-notes VERSION=Unreleased` prints the release page.
+- Run `govulncheck` on the previous tag. A dependency bump other than
+  the MCP SDK carries no CHANGELOG entry of its own. For each advisory
+  reported there and not at `HEAD`, find the change that cleared it.
+  When that change is such a bump, the advisory gets its entry under
+  Security.
+
+  ```bash
+  git worktree add ../google-calendar-mcp-prev "$(git describe --tags --abbrev=0)"
+  make -C ../google-calendar-mcp-prev vuln
+  git worktree remove ../google-calendar-mcp-prev
+  ```
 
 ## Checks the live driver cannot make
 
