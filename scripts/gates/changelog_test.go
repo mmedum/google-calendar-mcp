@@ -59,6 +59,8 @@ func TestTheChangelogGateWantsAnEntryPerPullRequest(t *testing.T) {
 		prep, files map[string]string
 		message     string
 		refused     bool
+		// first, when set, is an earlier commit's message on the topic.
+		first string
 	}{
 		{name: "shipped code with an entry", files: with(code, clOneEntry+clReleased)},
 		{name: "shipped code with no entry", files: code, refused: true},
@@ -85,6 +87,16 @@ func TestTheChangelogGateWantsAnEntryPerPullRequest(t *testing.T) {
 		{name: "a refactor with a Changelog: none footer", files: code,
 			message: "refactor\n\nChangelog: none, the text is unchanged line for line"},
 		{name: "a Changelog: none footer with no reason", files: code, message: "refactor\n\nChangelog: none", refused: true},
+		{name: "a footer whose word ends with a period", files: code, message: "refactor\n\nChangelog: none. internal rename only"},
+		{name: "a footer whose word runs on with an underscore", files: code,
+			message: "change\n\nChangelog: none_yet, user-visible fix pending", refused: true},
+		{name: "a footer in the reference form", files: code, message: "refactor\n\nChangelog #none, a rename", refused: true},
+		{name: "a footer beside an entry under a released heading", message: "refactor\n\nChangelog: none, a rename",
+			files: with(code, clHead+strings.Replace(clReleased, "- The first tool.\n", "- The first tool.\n- Late.\n", 1)), refused: true},
+		{name: "a bump of the MCP SDK with a footer", prep: map[string]string{"go.mod": "SDK"}, message: "refactor\n\nChangelog: none, a rename",
+			files: map[string]string{"go.mod": "SDK-BUMP"}, refused: true},
+		{name: "a footer only in an earlier commit", files: code, message: "refactor, part two",
+			first: "refactor\n\nChangelog: none, a rename", refused: true},
 		{name: "a dependency bump", files: map[string]string{"go.mod": "BUMP"}},
 		{name: "a go line change", files: map[string]string{"go.mod": "GO"}, refused: true},
 		{name: "a bump of the MCP SDK", prep: map[string]string{"go.mod": "SDK"}, files: map[string]string{"go.mod": "SDK-BUMP"}, refused: true},
@@ -112,6 +124,9 @@ func TestTheChangelogGateWantsAnEntryPerPullRequest(t *testing.T) {
 				commit(tc.prep, "prep")
 			}
 			git("checkout", "-q", "-b", "topic")
+			if tc.first != "" {
+				git("commit", "-q", "--allow-empty", "-m", tc.first)
+			}
 			commit(tc.files, cmp.Or(tc.message, "change"))
 			// The base branch moves on with shipped code and its own entry;
 			// measured from the merge-base, neither is the topic's.

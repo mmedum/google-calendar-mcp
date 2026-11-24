@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // changelogManifest is the bundle's manifest, which a person reads when
@@ -51,12 +52,12 @@ func changelogGate(w io.Writer, baseRef, head string) error {
 	}
 
 	var logs [2][]string
+	var texts [2]string
 	for i, rev := range []string{base, head} {
-		text, err := gitOutput("show", rev+":CHANGELOG.md")
-		if err != nil {
+		if texts[i], err = gitOutput("show", rev+":CHANGELOG.md"); err != nil {
 			return couldNotRun{err}
 		}
-		logs[i] = strings.Split(text, "\n")
+		logs[i] = strings.Split(texts[i], "\n")
 	}
 	if cut := releaseCut(logs[0], logs[1]); cut != "" {
 		_, _ = fmt.Fprintf(w, "a release cut, moving [Unreleased] under ## [%s]\n", cut)
@@ -64,17 +65,28 @@ func changelogGate(w io.Writer, baseRef, head string) error {
 	}
 	// More entries than at the merge-base, so an edited entry adds nothing.
 	if n := changelogEntries(logs[1], "Unreleased") - changelogEntries(logs[0], "Unreleased"); n <= 0 {
-		log, err := gitOutput("log", "--format=%B%x00", base+".."+head)
-		if err != nil {
-			return couldNotRun{err}
+		goModCounted := slices.Contains(watched, "go.mod")
+		// The footer is read only while the CHANGELOG is untouched, so it
+		// cannot hide a misplaced entry, never for a go.mod change the gate
+		// counts, and only from the newest commit, whose footer ends the
+		// squashed commit's message.
+		if texts[0] == texts[1] && !goModCounted {
+			message, err := gitOutput("log", "-1", "--format=%B", head)
+			if err != nil {
+				return couldNotRun{err}
+			}
+			if reason := changelogWaiver(message); reason != "" {
+				_, _ = fmt.Fprintf(w, "%d shipped file(s) changed, and the newest commit says no entry is needed: %s\n", len(watched), reason)
+				return nil
+			}
 		}
-		if reason := changelogWaiver(strings.Split(log, "\x00")); reason != "" {
-			_, _ = fmt.Fprintf(w, "%d shipped file(s) changed, and a commit says no entry is needed: %s\n", len(watched), reason)
-			return nil
+		hint := "If nothing a user sees changed, leave the CHANGELOG as it is and end the newest commit's message " +
+			"with `Changelog: none, <why>`"
+		if goModCounted {
+			hint = "A go.mod change outside its require lines, or a bump of the MCP SDK, always needs one"
 		}
 		return fmt.Errorf("%d shipped file(s) changed (%s) and no entry was added under ## [Unreleased], "+
-			"which the next release's notes are cut from. If nothing a user sees changed, end a commit's message with "+
-			"`Changelog: none, <why>`", len(watched), strings.Join(watched[:min(3, len(watched))], ", "))
+			"which the next release's notes are cut from. %s", len(watched), strings.Join(watched[:min(3, len(watched))], ", "), hint)
 	}
 	_, _ = fmt.Fprintf(w, "%d shipped file(s) changed, and [Unreleased] gained an entry\n", len(watched))
 	return nil
@@ -117,23 +129,25 @@ func changelogWatched(base, head string, files []string) (watched []string, bump
 	return watched, bumpOnly, nil
 }
 
-// changelogWaiver is the reason a commit footer gives for needing no
-// entry: `Changelog: none, <why>`, the token and the word in any case. A
-// footer with no reason after "none" waives nothing.
-func changelogWaiver(messages []string) string {
-	for _, message := range messages {
-		for _, f := range footers(message) {
-			if !strings.EqualFold(f.token, "Changelog") {
-				continue
-			}
-			text := strings.TrimSpace(f.text)
-			end := strings.IndexAny(text, ",;:-— \n")
-			if end < 0 {
-				continue
-			}
-			if reason := strings.TrimSpace(strings.TrimLeft(text[end:], ",;:-— ")); strings.EqualFold(text[:end], "none") && reason != "" {
-				return reason
-			}
+// changelogWaiver is the reason a commit message's footer gives for
+// needing no entry: `Changelog: none, <why>`, the token and the word in any
+// case. The word ends at a character that cannot be part of a word, so
+// `none.` counts and `none_yet` does not. A footer with no reason, or in the
+// `Changelog #` reference form, waives nothing.
+func changelogWaiver(message string) string {
+	wordChar := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' }
+	for _, f := range footers(message) {
+		if f.ref || !strings.EqualFold(f.token, "Changelog") {
+			continue
+		}
+		text := strings.TrimSpace(f.text)
+		end := strings.IndexFunc(text, func(r rune) bool { return !wordChar(r) })
+		if end < 0 || !strings.EqualFold(text[:end], "none") {
+			continue
+		}
+		rest := strings.TrimLeftFunc(text[end:], func(r rune) bool { return !wordChar(r) })
+		if reason := strings.Join(strings.Fields(rest), " "); reason != "" {
+			return reason
 		}
 	}
 	return ""
