@@ -150,7 +150,7 @@ func TestGoModBuildLinesReadsPastAnEmptyBlock(t *testing.T) {
 	if goModBuildLines(base) == goModBuildLines(strings.Replace(base, "./a", "./b", 1)) {
 		t.Error("a replace after `require ()` was swallowed")
 	}
-	for _, opener := range []string{"require (", "require("} {
+	for _, opener := range []string{"require (", "require(", "require ( // direct"} {
 		gomod := "module m\n\n" + opener + "\n\texample.com/a v1.0.0\n)\n"
 		if goModBuildLines(gomod) != goModBuildLines(strings.Replace(gomod, "v1.0.0", "v1.1.0", 1)) {
 			t.Errorf("a bump inside `%s` counted as a build change", opener)

@@ -222,7 +222,9 @@ launcher, `.goreleaser.yaml`, go.mod's lines other than `require` and
 of any other module needs none; one that fixes an advisory is found at
 release time (`docs/release.md`). A change nobody using the server can
 see, such as a refactor, ends a commit's message with a footer that says
-why: `Changelog: none, the text is unchanged line for line`.
+why: `Changelog: none, the text is unchanged line for line`. It covers
+the whole pull request, which lands as one squashed commit, so split a
+user-visible change into its own pull request.
 
 - **Sections** are the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
   set and nothing else: Added, Changed, Deprecated, Removed, Fixed and
